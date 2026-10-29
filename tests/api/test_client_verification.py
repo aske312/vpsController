@@ -1,6 +1,7 @@
 """Policy fixtures prove selection mechanics, not application compatibility."""
 from copy import deepcopy
 import json
+import yaml
 from pathlib import Path
 import tempfile
 import unittest
@@ -77,7 +78,7 @@ class VerifiedSubscriptionTests(unittest.TestCase):
     fetch = subscription_tests.SubscriptionFormatTests.fetch
 
     def matrix(self, **changes):
-        record = check(manager.client_verification_scenario(self.store[0], "common"), **changes)
+        record = check(manager.client_verification_scenario(self.store[0], "common"), **{"format":"mihomo", **changes})
         self.enterContext(patch.object(policy, "verified_records", return_value=[record]))
         return record
 
@@ -90,8 +91,8 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         self.matrix()
         before = manager.normalize_profile(deepcopy(self.store[0]))["devices"]
         response = self.fetch("Happ/3.0", hwid=None, extra_headers=self.headers())
-        self.assertIn(".json", response.headers["content-disposition"])
-        self.assertEqual(json.loads(response.body)[0]["outbounds"][0]["protocol"], "shadowsocks")
+        self.assertIn(".yaml", response.headers["content-disposition"])
+        self.assertEqual(yaml.safe_load(response.body)["proxies"][0]["type"], "ss")
         self.assertEqual(self.store[0]["devices"], before)
         self.provision.assert_not_called()
 
@@ -99,7 +100,7 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         self.matrix()
         response = self.fetch("Happ/3.0 (Xray/25.1)", hwid=None,
                               extra_headers=[(b"x-device-os", b"Windows"), (b"x-ver-os", b"11")])
-        self.assertIn(".json", response.headers["content-disposition"])
+        self.assertIn(".yaml", response.headers["content-disposition"])
         response = self.fetch("Happ/3.0 like Xray", hwid=None,
                               extra_headers=[(b"x-device-os", b"Windows"), (b"x-ver-os", b"11")])
         self.assertIn(".yaml", response.headers["content-disposition"])
@@ -107,17 +108,17 @@ class VerifiedSubscriptionTests(unittest.TestCase):
     def test_registered_verified_client_keeps_credentials_and_configuration_on_repeat(self):
         self.matrix()
         response = self.fetch("Happ/3.0", extra_headers=self.headers())
-        self.assertIn(".json", response.headers["content-disposition"])
+        self.assertIn(".yaml", response.headers["content-disposition"])
         device = self.store[0]["devices"][1]
         device_id = device["id"]
-        self.assertEqual(device["routing"]["client_config_format"], "xray")
+        self.assertNotIn("client_config_format", device["routing"])
         credentials = deepcopy(self.store[0]["connections"])
         repeat = self.fetch("Happ/3.0", extra_headers=self.headers())
         self.assertEqual(repeat.body, response.body)
         self.assertEqual(self.store[0]["connections"], credentials)
         self.assertEqual(self.provision.call_count, 1)
         public = manager.profile_response(self.store[0])["devices"][1]
-        self.assertEqual(public["subscription_format"], "xray")
+        self.assertEqual(public["subscription_format"], "mihomo")
         self.assertEqual(public["verified_clients"][0]["core_version"], "25.1")
         # New app/core version is unverified: default YAML, no credential rotation
         # or rewriting the saved explicit exporter selection.
@@ -126,7 +127,7 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         self.assertIn(".yaml", unknown.headers["content-disposition"])
         self.assertEqual(self.store[0]["connections"], credentials)
         self.assertEqual(self.store[0]["devices"][1]["id"], device_id)
-        self.assertEqual(self.store[0]["devices"][1]["routing"]["client_config_format"], "xray")
+        self.assertNotIn("client_config_format", self.store[0]["devices"][1]["routing"])
 
     def test_profile_edit_cannot_remove_or_replace_observed_core_metadata(self):
         self.matrix()
@@ -228,13 +229,13 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         token = manager.device_subscription_token("test-token", device["id"])
         headers = [(b"user-agent", b"Happ/3.0"), (b"x-hwid", b"phone"), *self.headers()]
         request = manager.Request({"type": "http", "method": "GET", "path": "/s/" + token, "query_string": b"", "headers": headers})
-        self.assertIn(".json", manager.public_profile_subscription(token, request).headers["content-disposition"])
+        self.assertIn(".yaml", manager.public_profile_subscription(token, request).headers["content-disposition"])
         with patch.object(policy, "verified_records", return_value=[]):
             self.assertIn(".yaml", manager.public_profile_subscription(token, request).headers["content-disposition"])
         self.store[0]["devices"].append({"id": "manual", "name": "Legacy", "manual": True, "routing": {"client_config_format": "singbox"}})
         self.store[0]["connections"].append({**deepcopy(self.initial["connections"][0]), "id": "manual-ss", "device_id": "manual"})
         manual_token = manager.device_subscription_token("test-token", "manual")
-        self.assertIn(".json", manager.public_profile_subscription(manual_token, manager.Request({"type": "http", "method": "GET", "path": "/", "query_string": b"", "headers": []})).headers["content-disposition"])
+        self.assertIn(".yaml", manager.public_profile_subscription(manual_token, manager.Request({"type": "http", "method": "GET", "path": "/", "query_string": b"", "headers": []})).headers["content-disposition"])
 
     def test_scenario_excludes_secrets_but_detects_protocol_and_dns_changes(self):
         connection = self.store[0]["connections"][0]

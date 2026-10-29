@@ -182,7 +182,7 @@ function deviceRow(value: unknown) {
     || (value.manual !== undefined && typeof value.manual !== "boolean")
     || (value.routing !== undefined && !scalarRecord(value.routing))
     || (value.personal_rule_ids !== undefined && !stringList(value.personal_rule_ids))) return false;
-  const formats = ["mihomo", "singbox", "xray", "uri"];
+  const formats = ["mihomo"];
   if ((value.subscription_format !== undefined && !formats.includes(String(value.subscription_format)))
     || (value.supported_formats !== undefined && (!stringList(value.supported_formats) || value.supported_formats.some((format) => !formats.includes(format))))) return false;
   return value.verified_clients === undefined || (uniqueRows(value.verified_clients) && value.verified_clients.every((client) =>

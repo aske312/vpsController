@@ -64,7 +64,7 @@ class SubscriptionFormatTests(unittest.TestCase):
         response = self.fetch("RocketVPN/582994", query=b"client=happ")
         self.assertIn(".yaml", response.headers["content-disposition"])
         device = self.store[0]["devices"][1]
-        self.assertEqual(device["routing"]["client_config_format"], "mihomo")
+        self.assertEqual(device["routing"].get("client_config_format", "mihomo"), "mihomo")
         self.assertEqual(manager.client_formats(device), ("xray",))
         self.assertEqual(device["user_agent"], "RocketVPN/582994")
         manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**entry) for entry in self.store[0]["devices"]]))
@@ -204,7 +204,7 @@ class SubscriptionFormatTests(unittest.TestCase):
                     first = self.fetch('ClashMeta/1.19.32', 'new-' + platform, extra_headers=headers)
                     saved_connections = deepcopy(self.store[0]['connections'])
                     config = yaml.safe_load(first.body)
-                    self.assertEqual(len(config['rule-providers']), 3)
+                    self.assertEqual(len(config['rule-providers']), 2)
                     self.assertTrue(all(p['format'] == 'mrs' for p in config['rule-providers'].values()))
                     second = self.fetch('ClashMeta/1.19.32', 'new-' + platform, extra_headers=headers)
                     self.assertEqual(first.body, second.body)
@@ -226,7 +226,7 @@ class SubscriptionFormatTests(unittest.TestCase):
                 self.assertEqual(first.body, second.body)
                 self.assertEqual(len(self.store[0]["devices"]), 2)
                 self.assertEqual(connections, self.store[0]["connections"])
-                self.assertEqual(manager.profile_response(self.store[0])["devices"][1]["supported_formats"], supported)
+                self.assertEqual(manager.profile_response(self.store[0])["devices"][1]["supported_formats"], ["mihomo"])
 
     def test_application_signatures_precede_core_names_and_stale_client_name(self):
         cases = [
@@ -326,7 +326,7 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertNotEqual(first_device["id"], second_device["id"])
         self.assertEqual(first_device["client_name"], "Hiddify")
         self.assertEqual(second_device["client_name"], "sing-box for Android")
-        self.assertEqual(manager.profile_response(self.store[0])["devices"][1]["supported_formats"], ["mihomo", "singbox"])
+        self.assertEqual(manager.profile_response(self.store[0])["devices"][1]["supported_formats"], ["mihomo"])
         self.assertIn(second_device["id"].encode(), second.body)
 
     def test_unverified_happ_keeps_all_template_connections_and_protection_settings(self):
@@ -336,9 +336,9 @@ class SubscriptionFormatTests(unittest.TestCase):
             first = self.fetch("Happ/3.13.0", "desktop")
             self.assertEqual(self.fetch("Happ/3.13.0", "desktop").body, first.body)
         device = self.store[0]["devices"][1]
-        self.assertEqual(device["routing"]["client_config_format"], "mihomo")
+        self.assertEqual(device["routing"].get("client_config_format", "mihomo"), "mihomo")
         self.assertTrue(device["routing"]["tunnel_ech"])
-        self.assertTrue(device["routing"]["tunnel_fragment"])
+        self.assertNotIn("tunnel_fragment", device["routing"])
         self.assertTrue(device["routing"]["direct_games_enabled"])
         self.assertIn(".yaml", first.headers["content-disposition"])
         self.assertEqual(len(self.provision.call_args.args[1]), 2)
@@ -382,56 +382,8 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(len(self.store[0]["devices"]), 2)
         self.assertEqual(self.provision.call_args.args[1][0]["component"], "transport-awg")
 
-    def test_api_rejects_unsupported_happ_features_and_connections_before_provisioning(self):
-        self.fetch("Happ/3.13.0")
-        # Explicit legacy Xray export stays supported and keeps its validation;
-        # automatic standard YAML is a separate selection policy.
-        self.store[0]["devices"][1]["routing"]["client_config_format"] = "xray"
-        self.provision.reset_mock()
-        for routing in ({"tunnel_ech": True}, {"tunnel_fragment": True}, {"direct_games_enabled": True}, {"strategy": "fallback"}, {"client_config_format": "singbox"}):
-            devices = deepcopy(self.store[0]["devices"])
-            devices[1]["routing"].update(routing)
-            with self.subTest(routing=routing), self.assertRaises(manager.HTTPException) as error:
-                manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**d) for d in devices]))
-            self.assertEqual(error.exception.status_code, 422)
-        candidate = deepcopy(self.store[0])
-        candidate["connections"][1]["component"] = "transport-tuic"
-        with self.assertRaises(manager.HTTPException):
-            manager.validate_client_capabilities(candidate)
-        self.provision.assert_not_called()
 
-    def test_karing_explicit_export_changes_without_changing_unverified_subscription(self):
-        self.fetch("Karing/1.2")
-        credentials = deepcopy(self.store[0]["connections"])
-        original_id = self.store[0]["devices"][1]["id"]
-        self.provision.reset_mock()
-        for format, extension in [("singbox", "json"), ("mihomo", "yaml")]:
-            devices = deepcopy(self.store[0]["devices"])
-            devices[1]["routing"]["client_config_format"] = format
-            # A stale editor cannot replace metadata captured from the client.
-            devices[1]["user_agent"] = "stale"
-            manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**item) for item in devices]))
-            response = self.fetch("Karing/1.2", query=b"format=wrong")
-            self.assertIn(".yaml", response.headers["content-disposition"])
-            self.assertEqual(self.store[0]["connections"], credentials)
-            self.assertEqual(self.store[0]["devices"][1]["id"], original_id)
-            self.assertEqual(len(self.store[0]["devices"]), 2)
-            if format == "singbox":
-                exported, actual_extension = manager.render_client_profile(self.store[0], original_id)
-                self.assertEqual(actual_extension, extension)
-                self.assertEqual(json.loads(exported)["outbounds"][0]["password"], original_id)
-        self.provision.assert_not_called()
 
-    def test_single_format_and_unknown_clients_cannot_switch_in_settings(self):
-        for agent, target in [("ClashMi/1.0", "singbox"), ("SFI/1.0", "xray"), ("Unknown/1.0", "singbox")]:
-            with self.subTest(agent=agent):
-                self.store = [deepcopy(self.initial)]
-                self.fetch(agent)
-                devices = deepcopy(self.store[0]["devices"])
-                devices[1]["routing"]["client_config_format"] = target
-                with self.assertRaises(manager.HTTPException) as error:
-                    manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**item) for item in devices]))
-                self.assertEqual(error.exception.status_code, 422)
 
     def test_without_hwid_uses_standard_yaml_even_when_legacy_shared_exists(self):
         self.store[0]["devices"].append({"id": "shared", "name": "Shared", "manual": True, "routing": {"client_config_format": "singbox"}})

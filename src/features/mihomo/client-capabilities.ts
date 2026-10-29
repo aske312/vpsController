@@ -3,7 +3,8 @@ import extensions from "../../../protocol-images/mihomo/client-extensions.json" 
 import type { ProfileConnection } from "./types";
 
 export function clientCapabilities(format: unknown, os?: string, client?: string): { label: string; components: string[]; transports: string[]; features: string[]; strategies: string[]; rules: string[] } {
-  const base = catalog[format as keyof typeof catalog] || catalog.mihomo;
+  format = "mihomo";
+  const base = catalog.mihomo;
   const extension = extensions[client as keyof typeof extensions];
   const caps = extension && extension.format === format ? { ...base, components: [...base.components, ...extension.components], transports: [...base.transports, ...extension.transports], features: [...base.features, ...extension.features] } : base;
   const platformRules = os !== undefined && os !== "windows" ? caps.rules.filter((key) => key !== "windows_geolocation") : caps.rules;
@@ -12,8 +13,7 @@ export function clientCapabilities(format: unknown, os?: string, client?: string
 
 export function compatibleClientRouting(routing: Record<string, string | number | boolean>, format: string, os?: string, client?: string) {
   const caps = clientCapabilities(format, os, client);
-  const result: Record<string, string | number | boolean> = { ...routing, client_config_format: format };
-  if (format === "uri") result.rules = "";
+  const result: Record<string, string | number | boolean> = Object.fromEntries(Object.entries(routing).filter(([key]) => key !== "client_config_format" && !key.startsWith("block_ads") && !key.startsWith("tunnel_fragment")));
   for (const key of [...catalog.mihomo.rules, "tunnel_privacy", "tunnel_ech", "tunnel_fragment"]) {
     if (key in result && ![...caps.features, ...caps.rules].includes(key)) result[key] = false;
   }

@@ -168,13 +168,6 @@
       ]
     },
     {
-      "key": "block_ads",
-      "label": "Блокировка рекламы",
-      "type": "boolean",
-      "default": false,
-      "help": "Отсекает доступные на сетевом уровне баннерные и видеорекламные сети, рекламные SDK и профильные трекеры. Агрессивная общая блокировка аналитики не используется, чтобы не ломать сайты."
-    },
-    {
       "key": "block_privacy",
       "label": "Приватность",
       "type": "boolean",
@@ -230,7 +223,6 @@
     { "key": "quic_domains", "label": "Дополнительные домены QUIC", "type": "textarea", "default": "", "help": "Домены без URL, по одному на строку." },
     { "key": "direct_ru_services", "label": "Госуслуги и операторы", "type": "boolean", "default": false, "help": "Государственные сервисы и операторы напрямую." },
     { "key": "direct_ru_services_rules", "label": "Список госуслуг и операторов", "type": "textarea", "default": "@default" },
-    { "key": "block_ads_rules", "label": "Список блокировки рекламы", "type": "textarea", "default": "@default" },
     { "key": "block_privacy_rules", "label": "Список защиты приватности", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_sites_rules", "label": "Список российских сайтов", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_banks_rules", "label": "Список банков и платежей", "type": "textarea", "default": "@default" },

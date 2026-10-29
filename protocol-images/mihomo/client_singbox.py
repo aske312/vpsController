@@ -8,7 +8,6 @@ import re
 from client_labels import connection_label
 import xray_protocols
 from routing_presets import QUIC_RULE_PATTERN, SECURITY_PROVIDERS
-from advertising_rules import ad_catalog_matchers
 from dns_routing import singbox_route_dns
 
 
@@ -228,15 +227,6 @@ def singbox_rules(rules, proxy_tag="GATE.312"):
             rule_sets[tag] = {"type": "remote", "tag": tag, "format": "binary",
                               "url": f"https://raw.githubusercontent.com/SagerNet/sing-{kind.lower()}/rule-set/{tag}.srs",
                               "download_detour": proxy_tag, "update_interval": "1d"}
-            if kind == 'GEOSITE' and name == 'category-ads-all':
-                # Named groups own their known domains even when disabled.
-                # The aggregate feed only handles the remainder of its list.
-                excluded = {}
-                for match_kind, domain in ad_catalog_matchers():
-                    field = 'domain' if match_kind == 'DOMAIN' else 'domain_suffix'
-                    excluded.setdefault(field, []).append(domain)
-                item = {'type': 'logical', 'mode': 'and', 'rules': [
-                    {'rule_set': [tag]}, {**excluded, 'invert': True}], 'outbound': item['outbound']}
         else:
             raise UnsupportedClientConfig(f"Правило {kind} не поддерживается sing-box")
         route_rules.append(item)

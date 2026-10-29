@@ -4,12 +4,6 @@ import test from "node:test";
 import { ruleIconGroups } from "../../src/features/mihomo/catalog.ts";
 import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "../../src/features/mihomo/rule-groups.ts";
 
-const manager = fs.readFileSync(new URL("../../protocol-images/mihomo/advertising_rules.py", import.meta.url), "utf8");
-const adsBlock = manager.split('AD_RULES = [', 2)[1].split(/^\]/m, 1)[0];
-const adsLines = [...adsBlock.matchAll(/^\s*"((?:DOMAIN|DOMAIN-SUFFIX|GEOSITE),[^"\n]+)"/gm)].map((match) => match[1]);
-const list = { id: "block_ads", key: "block_ads_rules", default_rules: adsLines.join("\n") };
-const groups = ruleIconGroups.block_ads;
-
 test("reviewed RU domains belong to the matching service switch", () => {
   const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/ru-service-domains.json", import.meta.url), "utf8"));
   for (const entry of catalog.groups) {
@@ -24,33 +18,13 @@ test("reviewed RU domains belong to the matching service switch", () => {
   }
 });
 
-test("every built-in advertising entry belongs to exactly one group", () => {
-  assert.ok(adsLines.length > 150);
-  const partition = partitionRuleGroups(list, groups);
-  const assigned = Object.values(partition).flat();
-  assert.equal(assigned.length, new Set(assigned).size);
-  assert.deepEqual(new Set(assigned), new Set(adsLines));
-  assert.ok(partition.global_rtb.includes("DOMAIN-SUFFIX,advertising.com,REJECT"));
-  assert.ok(partition.global_rtb.includes("DOMAIN-SUFFIX,adform.com,REJECT"));
-  assert.ok(partition.adult_video.includes("DOMAIN-SUFFIX,ero-advertising.com,REJECT"));
-  assert.ok(partition.adult_video.includes("DOMAIN-SUFFIX,eroadvertising.com,REJECT"));
-  assert.ok(partition.mobile.includes("DOMAIN-SUFFIX,bidmachine.io,REJECT"));
-});
-
-test("disabling any advertising group preserves all other groups and custom rules", () => {
-  const custom = "DOMAIN,custom.example,REJECT";
-  const partition = partitionRuleGroups(list, groups);
-  for (const group of groups) {
-    assert.ok(partition[group.id].length, `Empty group: ${group.id}`);
-    const value = toggleRuleGroup(list, groups, `${list.default_rules}\n${custom}`, group.id);
-    const remaining = new Set(value.split("\n"));
-    assert.ok(remaining.has(custom));
-    for (const [id, entries] of Object.entries(partition)) {
-      for (const entry of entries) assert.equal(remaining.has(entry), id !== group.id, `${group.id}: ${entry}`);
-    }
-    const disabled = toggleRuleGroup(list, groups, "@default", group.id);
-    assert.equal(toggleRuleGroup(list, groups, disabled, group.id), "@default");
-  }
+test("generic group toggles preserve custom rules and round trip", () => {
+  const list = { default_rules: "DOMAIN-SUFFIX,example.com,REJECT\nDOMAIN-SUFFIX,other.test,REJECT" };
+  const groups = [{ id: "one", tokens: ["example.com"] }, { id: "other", tokens: [] }];
+  const disabled = toggleRuleGroup(list, groups, "@default", "one");
+  assert.equal(disabled.includes("example.com"), false);
+  assert.equal(disabled.includes("other.test"), true);
+  assert.equal(toggleRuleGroup(list, groups, disabled, "one"), "@default");
 });
 
 test("overlapping future tokens have one owner and unknown entries use the fallback", () => {
@@ -105,7 +79,7 @@ test("group captions describe routes, protection, QUIC and partial selections", 
   }
   assert.equal(ruleGroupStatus("udp_tunnel_exclusions", true), "Через VPN");
   assert.equal(ruleGroupStatus("udp_tunnel_exclusions", false), "Напрямую");
-  for (const id of ["block_ads", "block_privacy", "block_malware"]) {
+  for (const id of ["block_privacy", "block_malware"]) {
     assert.equal(ruleGroupStatus(id, true), "Блокируется");
     assert.equal(ruleGroupStatus(id, false), "Без блокировки");
   }

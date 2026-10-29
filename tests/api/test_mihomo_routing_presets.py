@@ -55,9 +55,8 @@ class RoutingPresetTests(unittest.TestCase):
         rule = 'DOMAIN-SUFFIX,vk-portal.net,DIRECT'
         rules = manager.profile_rules(item['routing'])
         self.assertIn(rule, rules)
-        self.assertLess(rules.index('GEOSITE,category-ads-all,REJECT'), rules.index(rule))
         self.assertLess(rules.index('RULE-SET,security-phishing,REJECT'), rules.index(rule))
-        for format in ('mihomo', 'singbox'):
+        for format in ('mihomo',):
             with self.subTest(format=format):
                 rendered, _ = manager.render_client_profile(deepcopy(item), 'common', format)
                 self.assertIn('vk-portal.net', rendered)
@@ -77,7 +76,6 @@ class RoutingPresetTests(unittest.TestCase):
                     self.assertIn(rule, selected)
                     self.assertNotIn(rule, disabled)
                     self.assertNotIn(rule, custom)
-                    self.assertLess(enabled.index('GEOSITE,category-ads-all,REJECT'), enabled.index(rule))
                     self.assertLess(enabled.index('RULE-SET,security-phishing,REJECT'), enabled.index(rule))
         all_rules = {rule for values in RU_DIRECT_RULES.values() for rule in values}
         for domain in ('amazonaws.com', 'akamaized.net', 'clstorage.net', 'ipify.org', 'api.ipify.org', 'ipinfo.io', 'vkcdnservice.com'):
@@ -88,26 +86,7 @@ class RoutingPresetTests(unittest.TestCase):
         for source in RU_SERVICE_CATALOG['sources']:
             self.assertRegex(source['blob_sha'], r'^[a-f0-9]{40}$')
 
-    def test_service_preset_exports_added_government_and_operator_domains_to_xray(self):
-        item = profile()
-        item['routing'] = {'direct_ru_services': True}
-        rendered = json.loads(manager.render_client_profile(item, 'common', 'xray')[0])
-        for rule in RU_DIRECT_RULES['direct_ru_services']:
-            self.assertTrue(any(rule.split(',')[1] in domain for row in rendered[0]['routing']['rules'] for domain in row.get('domain', [])))
 
-    def test_singbox_aggregate_ads_excludes_named_group_resources(self):
-        rules, providers = singbox_rules(['GEOSITE,category-ads-all,REJECT',
-                                         'DOMAIN-SUFFIX,advertising.com,REJECT'])
-        base, named = rules
-        self.assertEqual(base['mode'], 'and')
-        self.assertEqual(base['rules'][0], {'rule_set': ['geosite-category-ads-all']})
-        excluded = base['rules'][1]
-        self.assertTrue(excluded['invert'])
-        for domain in ['advertising.com', 'adform.com', 'ero-advertising.com', 'eroadvertising.com']:
-            self.assertIn(domain, excluded['domain_suffix'])
-        self.assertNotIn('youtube.com', excluded['domain_suffix'])
-        self.assertEqual(named, {'domain_suffix': ['advertising.com'], 'outbound': 'block'})
-        self.assertEqual(len(providers), 1)
 
     def test_profile_inheritance_device_override_and_no_mutation(self):
         item = profile()
@@ -129,20 +108,10 @@ class RoutingPresetTests(unittest.TestCase):
         self.assertNotIn('rule-providers', empty)
         self.assertFalse(any(rule.startswith('AND,') for rule in empty['rules']))
 
-    def test_quic_matches_domain_and_udp443_only_in_singbox(self):
-        item = profile()
-        item['routing'] = {'quic_compatibility': True, 'quic_domains': 'video.example.org'}
-        config = json.loads(manager.render_client_profile(item, 'common', 'singbox')[0])
-        blocked = [rule for rule in config['route']['rules'] if rule.get('outbound') == 'block']
-        self.assertTrue(blocked)
-        for rule in blocked:
-            self.assertEqual(rule['network'], ['udp'])
-            self.assertEqual(rule['port'], [443])
-            self.assertTrue(rule['domain_suffix'])
-        self.assertIn('video.example.org', {domain for rule in blocked for domain in rule['domain_suffix']})
-        self.assertNotIn('NETWORK,UDP,REJECT', manager.profile_rules(item['routing']))
-        with self.assertRaises(UnsupportedClientConfig):
-            singbox_rules(['AND,((NETWORK,UDP),(DST-PORT,444)),REJECT'])
+    def test_quic_rule_translates_for_transport_diagnostics(self):
+        rules = manager.profile_rules({'quic_compatibility':True})
+        translated, _ = singbox_rules(rules)
+        self.assertTrue(any(rule.get('port') == [443] for rule in translated))
 
     def test_video_groups_are_selectable_and_preserve_saved_selections(self):
         catalog = (ROOT / 'src/features/mihomo/catalog.ts').read_text(encoding='utf-8')
@@ -198,7 +167,7 @@ class RoutingPresetTests(unittest.TestCase):
     def test_services_reach_rule_exporters_and_legacy_routes_remain(self):
         item = profile()
         item['routing'] = {'direct_ru_services': True}
-        for format in ('mihomo', 'singbox', 'xray'):
+        for format in ('mihomo',):
             config, _ = manager.render_client_profile(deepcopy(item), 'common', format)
             self.assertIn('gosuslugi.ru', config)
             self.assertIn('t2.ru', config)
@@ -208,20 +177,12 @@ class RoutingPresetTests(unittest.TestCase):
         self.assertNotIn('GEOIP,RU,DIRECT,no-resolve', SERVICE_RULES)
         self.assertNotIn('DOMAIN-SUFFIX,ru,DIRECT', SERVICE_RULES)
 
-    def test_export_capabilities_and_singbox_security_providers(self):
-        self.assertIn('block_malware', device_capabilities('mihomo')['rules'])
-        self.assertIn('quic_compatibility', device_capabilities('singbox')['rules'])
+    def test_yaml_keeps_security_providers_after_removing_ads(self):
         item = profile()
-        item['routing'] = {'block_malware': True}
-        config = json.loads(manager.render_client_profile(item, 'common', 'singbox')[0])
-        self.assertEqual({provider['tag'] for provider in config['route']['rule_set']}, set(SECURITY_PROVIDERS))
-        for provider in config['route']['rule_set']:
-            self.assertEqual(provider['url'], SECURITY_PROVIDERS[provider['tag']]['singbox_url'])
-            self.assertEqual(provider['update_interval'], f"{SECURITY_PROVIDERS[provider['tag']]['interval']}s")
-        self.assertTrue(config['experimental']['cache_file']['enabled'])
-        for format in ('xray', 'uri'):
-            self.assertNotIn('block_malware', device_capabilities(format)['rules'])
-            self.assertFalse(compatible_routing({'block_malware': True}, format)['block_malware'])
+        item['routing'] = {'block_malware':True, 'block_ads':True}
+        config = yaml.safe_load(manager.render_client_profile(item, 'common')[0])
+        self.assertEqual(set(config['rule-providers']), set(SECURITY_PROVIDERS))
+        self.assertNotIn('block_ads', device_capabilities('mihomo')['rules'])
 
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires real Mihomo')
     def test_all_new_presets_pass_real_mihomo_validation(self):
