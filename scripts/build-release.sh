@@ -23,7 +23,7 @@ rsync -a --delete \
   --exclude '/docs/audit/' --exclude '/.servers/' --exclude 'AGENTS.md' \
   --exclude '/docs/.audit/' --exclude '/docs/.backlog/' --exclude '/docs/.plans/' \
   --exclude '/docs/backlog/' --exclude '/docs/plans/' --exclude '/docs/direct-audit/' \
-  --exclude '.env*' --exclude 'venv/' \
+  --include '/.env.example' --exclude '.env*' --exclude 'venv/' \
   "${ROOT_DIR}/" "${STAGE}/"
 
 # Check the staged release, not an ignored file left in a developer's workspace.

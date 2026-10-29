@@ -1,5 +1,6 @@
 """Real TLS/DoH through an observable local proxy, without public DNS or TUN."""
 import base64
+import http.client
 import http.server
 import os
 from pathlib import Path
@@ -102,6 +103,7 @@ class WebHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.send_response(200)
+        self.send_header('Content-Length', str(len(b'local-route-ok')))
         self.end_headers()
         self.wfile.write(b'local-route-ok')
 
@@ -130,10 +132,12 @@ class RouteDnsDohTests(unittest.TestCase):
                             reply = read_exact(client, 10)
                             self.assertEqual(reply[1], 0)
                             client.sendall(b'GET / HTTP/1.0\r\nHost: local.test\r\n\r\n')
-                            result = b''
-                            while chunk := client.recv(4096):
-                                result += chunk
-                            self.assertIn(b'local-route-ok', result)
+                            # A proxy may keep TCP open after the complete HTTP
+                            # response. Verify HTTP framing rather than TCP EOF.
+                            with http.client.HTTPResponse(client) as response:
+                                response.begin()
+                                self.assertEqual(response.status, 200)
+                                self.assertEqual(response.read(), b'local-route-ok')
                         if domain == 'fake.direct.test':
                             self.assertIn(domain, lab.https['direct'].queries)
                         else:

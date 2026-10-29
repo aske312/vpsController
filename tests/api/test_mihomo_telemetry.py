@@ -172,8 +172,11 @@ class QuicTrafficTests(unittest.TestCase):
                     self.assertEqual(denied.exception.code(), grpc.StatusCode.UNAUTHENTICATED)
                 collector = ConnectionTelemetry(f"127.0.0.1:{api_port}", "test-secret")
                 collector.start()
-                with patch.object(manager, "public_endpoint", return_value="127.0.0.1"):
+                # Export against the same isolated listener as the server. The
+                # installed host may have its own QUIC certificate to pin.
+                with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "public_endpoint", return_value="127.0.0.1"):
                     proxy = yaml.safe_load("proxies:\n" + "\n".join(manager.render_proxy("transport-" + module, credential, "test")))["proxies"][0]
+                self.assertTrue(proxy.get("fingerprint"), "The fixture listener must retain certificate pinning")
                 client_file = root / "client.yaml"
                 client_file.write_text(yaml.safe_dump({"mixed-port": proxy_port, "proxies": [proxy],
                     "rules": [f"DST-PORT,{readiness_port},DIRECT", "MATCH,test"]}), encoding="utf-8")
