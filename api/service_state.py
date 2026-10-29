@@ -8,6 +8,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 
 _observations: ContextVar[dict | None] = ContextVar("service_observations", default=None)
+_PROPERTIES = "LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description"
+_TIMER_PROPERTIES = ",LastTriggerUSec,NextElapseUSecRealtime"
 
 
 @contextmanager
@@ -34,15 +36,44 @@ def observe_service(unit: str, *, timer: bool = False) -> dict:
     return observation
 
 
+def prime_services(units, *, timers=()) -> None:
+    """Batch fresh observations into the current response's private scope."""
+    scope = _observations.get()
+    if scope is None:
+        return
+    keys = {(unit, False) for unit in units} | {(unit, True) for unit in timers}
+    keys.difference_update(scope)
+    if not keys:
+        return
+    names = sorted({unit for unit, _ in keys})
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", *names, "--property=Id," + _PROPERTIES + _TIMER_PROPERTIES],
+            capture_output=True, text=True, timeout=8, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return  # Individual reads retain their existing failure semantics.
+    if result.returncode not in (0, 4):
+        return
+    checked_at = datetime.now(timezone.utc).isoformat()
+    for block in result.stdout.strip().split("\n\n"):
+        properties = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+        unit = properties.get("Id")
+        if not properties.get("LoadState"):
+            continue
+        for timer in (False, True):
+            key = (unit, timer)
+            if key in keys:
+                scope[key] = _service_observation(properties, checked_at, timer=timer)
+
+
 def _observe_service(unit: str, *, timer: bool = False) -> dict:
     checked_at = datetime.now(timezone.utc).isoformat()
     properties = {}
-    reason = "Не удалось получить состояние службы"
     try:
         result = subprocess.run(
             ["systemctl", "show", unit,
-             "--property=LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description"
-             + (",LastTriggerUSec,NextElapseUSecRealtime" if timer else "")],
+             "--property=" + _PROPERTIES + (_TIMER_PROPERTIES if timer else "")],
             capture_output=True, text=True, timeout=8, check=False,
         )
         if result.returncode == 0:
@@ -52,6 +83,11 @@ def _observe_service(unit: str, *, timer: bool = False) -> dict:
     except (OSError, subprocess.TimeoutExpired):
         pass
 
+    return _service_observation(properties, checked_at, timer=timer)
+
+
+def _service_observation(properties, checked_at, *, timer=False):
+    reason = "Не удалось получить состояние службы"
     load = properties.get("LoadState", "")
     present = False if load == "not-found" else True if load in {
         "loaded", "masked", "error", "bad-setting", "merged",

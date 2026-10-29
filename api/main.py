@@ -66,7 +66,7 @@ from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
-from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count, observation_scope
+from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count, observation_scope, prime_services
 from component_state import image_files, component_state
 from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
 from system_metrics import CpuSampler, collect_resources
@@ -3945,6 +3945,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
 @observation_scope()
 def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict]:
     images: dict[str, dict] = {}
+    candidates = []
     if not PROTOCOL_IMAGES_DIR.exists():
         return images
     try:
@@ -3978,6 +3979,9 @@ def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict
         # Stream proxies do not create a tunnel interface. Their manifests use a
         # fixed systemd unit, while WG-like images may still interpolate one.
         service = service_template.replace("{interface}", interface) if service_template else ""
+        candidates.append((manifest, image_id, uninstaller, installable, interface, service, service_template))
+    prime_services([item[5] for item in candidates])
+    for manifest, image_id, uninstaller, installable, interface, service, service_template in candidates:
         # Shared wg/awg templates alone do not prove a Direct instance exists.
         # Legacy installed means detected; component_state carries the full
         # installation proof, and management separately controls mutations.
@@ -4839,7 +4843,10 @@ def update_operation_history_settings(payload: OperationHistorySettings, _: None
 def services_status(_: None = Depends(require_token)) -> dict:
     failed = failed_unit_count()
     items = []
-    for service_id, definition in managed_services().items():
+    definitions = managed_services()
+    prime_services([definition["unit"] for definition in definitions.values()] + ["ssh.socket"],
+                   timers=[f"vps-control-auto-{name}.timer" for name in ("reboot", "cleanup", "update")])
+    for service_id, definition in definitions.items():
         details = service_details(service_id, definition)
         # "monitor" is direct WG/AWG CSV logging specifically; hide it until
         # a direct tunnel exists for it to record. Protocol and Mihomo rows
