@@ -1,4 +1,6 @@
 import json
+import errno
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -36,6 +38,17 @@ class ApplicationOperationTests(unittest.TestCase):
         operations.write_status(self.root, self.current, started["action"], "succeeded", 100, "Done", started["started_at"], started["id"])
         self.assertEqual(self.start()["state"], "succeeded")
         self.launch.assert_called_once()
+
+    def test_failed_payload_flush_leaves_identity_available_for_explicit_retry(self):
+        identity, payload = 'f' * 32, {'private': 'fixture-only', 'settings': {'enabled': True}}
+        with patch.object(operations.os, 'fsync', side_effect=OSError(errno.ENOSPC, 'Fixture storage full')):
+            with self.assertRaises(OSError):
+                operations.persist_payload(self.root, identity, payload)
+        self.assertFalse((self.root / 'operation-inputs' / (identity + '.json')).exists())
+        path, digest = operations.persist_payload(self.root, identity, payload)
+        self.assertEqual(json.loads(path.read_text()), payload)
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+        self.assertEqual(operations.persist_payload(self.root, identity, payload), (path, digest))
 
     def test_concurrent_requests_only_admit_one_worker(self):
         def attempt(number):

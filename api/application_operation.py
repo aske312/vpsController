@@ -75,13 +75,14 @@ def read(path: Path) -> dict:
     return value
 
 
-def atomic_json(path: Path, value: dict) -> None:
+def atomic_json(path: Path, value: dict, *, canonical: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with temporary.open("x", encoding="utf-8") as target:
             os.chmod(temporary, 0o600)
-            json.dump(value, target, ensure_ascii=False)
+            json.dump(value, target, ensure_ascii=False, sort_keys=canonical,
+                      separators=(",", ":") if canonical else None)
             target.flush()
             os.fsync(target.fileno())
         temporary.replace(path)
@@ -107,12 +108,8 @@ def persist_payload(data_dir: Path, identity: str, value: dict) -> tuple[Path, s
         if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise OperationConflict("Идентификатор уже используется для другого запроса")
     else:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with path.open("xb") as target:
-            os.chmod(path, 0o600)
-            target.write(encoded)
-            target.flush()
-            os.fsync(target.fileno())
+        # A failed write must not leave a partial request under its final ID.
+        atomic_json(path, value, canonical=True)
     return path, digest
 
 

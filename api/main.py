@@ -4700,22 +4700,26 @@ def refresh_application_version_cache() -> None:
 
 def application_version_status() -> dict:
     cached: dict = {}
+    age = float("inf")
     try:
         cached = json.loads(APP_VERSION_FILE.read_text(encoding="utf-8"))
+        age = time.time() - APP_VERSION_FILE.stat().st_mtime
     except (OSError, json.JSONDecodeError):
         pass
-    age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
+    if (not isinstance(cached, dict)
+            or any(not isinstance(cached.get(key), str) for key in ("branch", "current_commit", "latest_commit", "error"))
+            or not (cached.get("outdated") is None or type(cached["outdated"]) is bool)
+            or cached.get("checked_at") is not None and not isinstance(cached["checked_at"], str)):
+        cached = {}
     expected_branch = expected_application_branch()
     installed_commit = installed_build_commit()
-    refreshing = (
-        age > 600
-        or cached.get("branch") != expected_branch
-        or cached.get("current_commit") != installed_commit
-    )
+    if cached.get("branch") != expected_branch or cached.get("current_commit") != installed_commit:
+        cached = {}  # A comparison for another installation cannot describe this one.
+    refreshing = not cached or not 0 <= age <= 600
     if refreshing and not app_version_refresh_lock.locked():
         threading.Thread(target=refresh_application_version_cache, daemon=True).start()
     if cached:
-        return {**cached, "refreshing": refreshing}
+        return {**cached, "outdated": None if refreshing else cached.get("outdated"), "refreshing": refreshing}
     return {
         "branch": expected_branch, "current_commit": installed_commit, "latest_commit": "",
         "outdated": None, "checked_at": None, "error": "", "refreshing": True,
