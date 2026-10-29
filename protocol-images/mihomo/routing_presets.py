@@ -1,6 +1,19 @@
 """Client-side routing catalogs. No server listeners or credentials are changed."""
 import re
 import ipaddress
+import json
+from pathlib import Path
+
+
+# Reviewed service-owned domains; shared cloud/CDN hosts retain exact matching.
+# The UI uses the same catalog so a service switch controls all of its assets.
+RU_SERVICE_CATALOG = json.loads(Path(__file__).with_name('ru-service-domains.json').read_text(encoding='utf-8'))
+RU_DIRECT_RULES = {}
+for _group in RU_SERVICE_CATALOG['groups']:
+    _rules = [f'DOMAIN-SUFFIX,{domain},DIRECT' for domain in _group['domains']]
+    _rules += [f'DOMAIN,{host},DIRECT' for host in _group['hosts']]
+    for _preset in _group['presets']:
+        RU_DIRECT_RULES.setdefault(_preset, []).extend(_rules)
 
 
 def quic_rule(domain):
@@ -103,7 +116,10 @@ SERVICE_GROUPS = {
     'rostelecom': ('rt.ru', 'rostelecom.ru', 'onlime.ru'),
     'providers': ('domru.ru', 'ertelecom.ru', 'ttk.ru'),
 }
-SERVICE_RULES = list(dict.fromkeys(f'DOMAIN-SUFFIX,{domain},DIRECT' for domains in SERVICE_GROUPS.values() for domain in domains))
+SERVICE_RULES = list(dict.fromkeys([
+    *(f'DOMAIN-SUFFIX,{domain},DIRECT' for domains in SERVICE_GROUPS.values() for domain in domains),
+    *RU_DIRECT_RULES['direct_ru_services'],
+]))
 
 # Exact-host feeds preserve the upstream treatment of shared hosting domains.
 # TIF mini is the upstream's smaller threat feed for client devices.

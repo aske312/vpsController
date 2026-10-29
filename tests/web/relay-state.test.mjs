@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { createServer } from 'vite';
-const loader = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
+import { createTestLoader } from "./vite-test-loader.mjs";
+const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
 const { relayConnection, relaySnapshot, relayClientResult } = await loader.ssrLoadModule('/src/features/network/relay-state.ts');
 
 const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', token: 's'.repeat(48), certificate_sha256: 'a'.repeat(64) };
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
 const status = { revision: 'c'.repeat(32), hosts: [host], pending: false, origin_ip: '195.14.118.112', origin_hosts: ['195.14.118.112'], targets: [{ transport: 'tcp', port: 443 }] };
+
+test('profile preparation failures are explicit and reject unknown reasons', () => {
+  const profile = { id: 'abcdef123456', name: 'Phone', channels: [], relay_failures: [{ host_id: host.id, reason: 'preparation_failed' }] };
+  assert.equal(relaySnapshot({ ...status, profiles: [profile] }).profiles[0].relay_failures.length, 1);
+  assert.throws(() => relaySnapshot({ ...status, profiles: [{ ...profile, relay_failures: [{ host_id: host.id, reason: 'raw agent output' }] }] }));
+  assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, profile_failures: -1 }] }));
+});
 
 test('release discovery and manual update results require known states and verified metadata', () => {
   const agent_release = { state: 'outdated', version: '1.5.0', digest: 'sha256:'+'a'.repeat(64) };

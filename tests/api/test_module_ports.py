@@ -13,6 +13,13 @@ from tests.api.support import ROOT, manager
 
 
 class ModulePortsTests(unittest.TestCase):
+    def test_relay_automatic_ports_skip_protected_listeners(self):
+        with patch.object(manager, 'unavailable_module_ports', return_value=set()):
+            self.assertEqual(manager.next_vless_port({'inbounds': []}, 9443), 9443)
+            self.assertEqual(manager.next_vless_port({'inbounds': []}, 9443, relay=True), 9444)
+            self.assertEqual(manager.next_vless_port({'inbounds': [{'port': 9444}]}, 9443, relay=True), 9445)
+            self.assertEqual(manager.next_vless_port({'inbounds': []}, 8000, relay=True), 8001)
+
     def setUp(self):
         folder = self.enterContext(tempfile.TemporaryDirectory())
         self.root = Path(folder)

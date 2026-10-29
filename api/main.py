@@ -2765,6 +2765,11 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
                         candidates.append({'id': f"mihomo:{profile['id']}:{item['id']}", 'label': f"{profile.get('name', profile['id'])} · {item.get('name') or item['id']}", 'host_id': relay_id})
         result['consumers'] = list({item['id']: item for item in candidates}.values())
         result['profiles'] = relay_connections.profile_summaries(profiles, result['hosts'], PUBLIC_IPV4)
+        from relay_profile_status import failures
+        for profile in result['profiles']:
+            profile['relay_failures'] = failures(control, profile['id'])
+        for host in result['hosts']:
+            host['profile_failures'] = sum(any(error['host_id'] == host['id'] for error in profile['relay_failures']) for profile in result['profiles'])
         for host in result['hosts']:
             for route in host['routes']:
                 check = route.get('check')

@@ -190,6 +190,29 @@ class SubscriptionFormatTests(unittest.TestCase):
         return manager.public_profile_subscription("test-token", manager.Request({"type": "http", "method": "GET", "path": "/s/test-token",
                                                                                    "query_string": query, "headers": headers}))
 
+    def test_mrs_is_automatic_for_new_existing_and_hwidless_devices(self):
+        import os
+        import yaml
+        rules = ['GEOSITE,category-ads-all,REJECT',
+                 'RULE-SET,security-threats,REJECT', 'RULE-SET,security-phishing,REJECT']
+        with patch.dict(os.environ, {'PUBLIC_DOMAIN': 'panel.example'}), \
+                patch.object(manager, 'MRS_CACHE'), \
+                patch.object(manager, 'profile_rules', return_value=rules):
+            for platform in ('ios', 'android', 'windows', 'macos', 'linux', 'unknown'):
+                with self.subTest(platform=platform):
+                    headers = [(b'x-device-os', platform.encode())]
+                    first = self.fetch('ClashMeta/1.19.32', 'new-' + platform, extra_headers=headers)
+                    saved_connections = deepcopy(self.store[0]['connections'])
+                    config = yaml.safe_load(first.body)
+                    self.assertEqual(len(config['rule-providers']), 3)
+                    self.assertTrue(all(p['format'] == 'mrs' for p in config['rule-providers'].values()))
+                    second = self.fetch('ClashMeta/1.19.32', 'new-' + platform, extra_headers=headers)
+                    self.assertEqual(first.body, second.body)
+                    self.assertEqual(self.store[0]['connections'], saved_connections)
+            shared = yaml.safe_load(self.fetch('ClashMeta/1.19.32', hwid=None).body)
+            self.assertTrue(all(p['format'] == 'mrs' for p in shared['rule-providers'].values()))
+            self.assertEqual(len(self.store[0]['devices']), 7)
+
     def test_first_request_detects_format_and_repeat_keeps_device_credentials(self):
         for agent, extension, supported in [("ClashMeta/1.0", "yaml", ["mihomo"]), ("ClashMi/1.0", "yaml", ["mihomo"]),
                                             ("sing-box MT (sing-box 1.14.4)", "yaml", ["singbox"]), ("SFI/1.0", "yaml", ["singbox"]),

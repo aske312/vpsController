@@ -15,8 +15,12 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -26,6 +30,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Select application version
+        id: version
+        shell: bash
+        run: |
+          version="$(python3 scripts/release-version.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - run: pip install -r tests/requirements.txt
       - run: python -m unittest discover -s tests/api -t . -p 'test_*.py'
       - name: Verify disposable WireGuard peer in isolated network
@@ -68,17 +78,11 @@ jobs:
         with:
           go-version: '1.26.10'
           cache: false
-      - name: Select test package version
-        shell: bash
-        run: |
-          base="$(node -p 'require("./package.json").version')"
-          latest="$(git tag --list "pro-v${base%.*}.*" --sort=-v:refname | head -n 1)"
-          [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
-          echo "RELEASE_VERSION=${latest#pro-}" >> "$GITHUB_ENV"
       - name: Verify PRO packaging
         env:
           BUILD_COMMIT: ${{ github.sha }}
           RELEASE_EDITION: pro
           RELEASE_CHANNEL: test
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
           RELEASE_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: bash scripts/build-release.sh "outputs/vps-control-pro-linux-${{ matrix.architecture }}.tar.gz"

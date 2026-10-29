@@ -15,7 +15,7 @@ from unittest.mock import patch
 import yaml
 from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 from tests.api.test_mihomo_rules_runtime import profile
-from routing_presets import quic_rule, quic_domains, QUIC_DEFAULT_GROUPS, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES
+from routing_presets import quic_rule, quic_domains, QUIC_DEFAULT_GROUPS, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, RU_SERVICE_CATALOG
 from client_singbox import singbox_rules, UnsupportedClientConfig
 from client_capabilities import compatible_routing, device_capabilities
 
@@ -48,6 +48,52 @@ class RoutingPresetTests(unittest.TestCase):
         self.assertIn('DOMAIN-SUFFIX,imgsmail.ru,DIRECT', rules)
         translated, _ = singbox_rules(rules)
         self.assertFalse(any('mail.com' in rule.get('domain_suffix', []) for rule in translated))
+
+    def test_vk_portal_follows_vk_route_in_supported_client_formats(self):
+        item = profile()
+        item['routing'] = {'direct_ru_sites': True, 'block_ads': True, 'block_malware': True}
+        rule = 'DOMAIN-SUFFIX,vk-portal.net,DIRECT'
+        rules = manager.profile_rules(item['routing'])
+        self.assertIn(rule, rules)
+        self.assertLess(rules.index('GEOSITE,category-ads-all,REJECT'), rules.index(rule))
+        self.assertLess(rules.index('RULE-SET,security-phishing,REJECT'), rules.index(rule))
+        for format in ('mihomo', 'singbox'):
+            with self.subTest(format=format):
+                rendered, _ = manager.render_client_profile(deepcopy(item), 'common', format)
+                self.assertIn('vk-portal.net', rendered)
+        item['devices'][0]['routing'] = {'direct_ru_sites': False}
+        self.assertNotIn(rule, yaml.safe_load(manager.render_profile(item))['rules'])
+        custom = {'direct_ru_sites': True, 'direct_ru_sites_rules': 'DOMAIN-SUFFIX,example.org,DIRECT'}
+        self.assertNotIn(rule, manager.profile_rules(custom))
+
+    def test_reviewed_ru_resources_follow_their_preset_and_keep_protection_priority(self):
+        enabled = manager.profile_rules({**{key: True for key in RU_DIRECT_RULES}, 'block_ads': True, 'block_malware': True})
+        for preset, resources in RU_DIRECT_RULES.items():
+            selected = manager.profile_rules({preset: True})
+            disabled = manager.profile_rules({preset: False})
+            custom = manager.profile_rules({preset: True, preset + '_rules': 'DOMAIN,custom.example,DIRECT'})
+            for rule in resources:
+                with self.subTest(preset=preset, rule=rule):
+                    self.assertIn(rule, selected)
+                    self.assertNotIn(rule, disabled)
+                    self.assertNotIn(rule, custom)
+                    self.assertLess(enabled.index('GEOSITE,category-ads-all,REJECT'), enabled.index(rule))
+                    self.assertLess(enabled.index('RULE-SET,security-phishing,REJECT'), enabled.index(rule))
+        all_rules = {rule for values in RU_DIRECT_RULES.values() for rule in values}
+        for domain in ('amazonaws.com', 'akamaized.net', 'clstorage.net', 'ipify.org', 'api.ipify.org', 'ipinfo.io', 'vkcdnservice.com'):
+            self.assertFalse(any(rule.split(',')[1] == domain for rule in all_rules))
+        for group in RU_SERVICE_CATALOG['groups']:
+            for domain in group['domains'] + group['hosts']:
+                self.assertRegex(domain, r'^[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
+        for source in RU_SERVICE_CATALOG['sources']:
+            self.assertRegex(source['blob_sha'], r'^[a-f0-9]{40}$')
+
+    def test_service_preset_exports_added_government_and_operator_domains_to_xray(self):
+        item = profile()
+        item['routing'] = {'direct_ru_services': True}
+        rendered = json.loads(manager.render_client_profile(item, 'common', 'xray')[0])
+        for rule in RU_DIRECT_RULES['direct_ru_services']:
+            self.assertTrue(any(rule.split(',')[1] in domain for row in rendered[0]['routing']['rules'] for domain in row.get('domain', [])))
 
     def test_singbox_aggregate_ads_excludes_named_group_resources(self):
         rules, providers = singbox_rules(['GEOSITE,category-ads-all,REJECT',

@@ -28,7 +28,7 @@ export function RelayProfilePicker({ host, profiles, selected, onChange }: { hos
       const configured = profile.channels.filter(channel => channel.host_id === host.id);
       const ids = new Set(configured.flatMap(channel => channel.route_ids));
       const routes = host.routes.filter(route => ids.has(route.id));
-      const attention = routes.some(routeNeedsAttention) || configured.some(channel => !channel.route_ids.length);
+      const attention = profile.relay_failures?.some(error => error.host_id === host.id) || routes.some(routeNeedsAttention) || configured.some(channel => !channel.route_ids.length);
       return <button type="button" className="relayProfileChoice" key={profile.id} aria-pressed={selected === profile.id} onClick={() => onChange(profile.id)}>
         <span className="relayProfileName"><strong>{profile.name}</strong><small data-state={host.state !== "connected" ? "unknown" : attention ? "warning" : "listening"}>{host.state !== "connected" ? "Нет связи с Agent" : attention ? "Требует внимания" : "Пересылки настроены"}</small></span>
         <span className="relayProfileTransports">{(["tcp", "udp"] as const).map(transport => <span key={transport}>

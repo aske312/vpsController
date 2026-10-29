@@ -156,7 +156,7 @@ test("PRO publishes rolling pre-releases from test-pro and keeps production upda
   assert.match(releaseWorkflow, /github\.ref_name == 'test-pro' && 'test' \|\| 'production'/);
   assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
   assert.doesNotMatch(releaseWorkflow, /verify:\s*\n\s+if:/);
-  assert.match(releaseWorkflow, /publish:\s*\n\s+needs: package\s*\n\s+if: always\(\) && needs\.package\.result == 'success'/);
+  assert.match(releaseWorkflow, /publish:\s*\n\s+needs: \[verify, package\]\s*\n\s+if: always\(\) && needs\.verify\.result == 'success' && needs\.package\.result == 'success'/);
   assert.doesNotMatch(releaseWorkflow, /main-latest/);
   assert.match(testWorkflow, /pull_request:[\s\S]*branches: \[test-pro, pro\]/);
   assert.match(testWorkflow, /python -m unittest discover/);

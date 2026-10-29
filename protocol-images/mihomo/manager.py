@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
@@ -44,16 +44,18 @@ import client_compatibility
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from advertising_rules import AD_RULES, mihomo_ad_base_rule
 from dns_routing import mihomo_route_dns, validate_route_dns
-from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, quic_domains, quic_rule
+from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
+from mrs_cache import MrsCache
 import cdn_security
 import application_operation
 import network_routes
 import server_addresses
 import network_probe
 import relay_connections
+import relay_profile_status
 import relay_cdn
 import xray_protocols
 import xray_core
@@ -284,11 +286,14 @@ async def manager_lifespan(_app):
     stopped = threading.Event()
     worker = threading.Thread(target=transition_worker, args=(stopped,), daemon=True)
     worker.start()
+    mrs_worker = threading.Thread(target=maintain_mrs, args=(stopped,), daemon=True)
+    mrs_worker.start()
     try:
         yield
     finally:
         stopped.set()
         await asyncio.to_thread(worker.join, 10)
+        await asyncio.to_thread(mrs_worker.join, 2)
         for collector in list(quic_telemetry.values()):
             await asyncio.to_thread(collector.close)
         quic_telemetry.clear()
@@ -886,7 +891,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                 raise HTTPException(status_code=422, detail="Неизвестный формат клиента")
             result[key] = raw
             continue
-        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment", "route_dns"}:
+        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment", "route_dns", "mrs_rule_sets"}:
             if not isinstance(raw, bool):
                 raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
@@ -938,6 +943,44 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 
 AD_RULE_PROVIDER = "ads-extended"
 AD_RULE_PROVIDER_URL = "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/reject.txt"
+
+MRS_CACHE = MrsCache(DATA_ROOT / 'rule-sets' / 'mrs', CORE_BIN, {
+    **SECURITY_PROVIDERS,
+    AD_RULE_PROVIDER: {'url': AD_RULE_PROVIDER_URL, 'format': 'yaml', 'interval': 86400},
+})
+
+
+def maintain_mrs(stopped: threading.Event) -> None:
+    while not stopped.is_set():
+        if component_is_managed() and CORE_BIN.is_file():
+            MRS_CACHE.maintain(stopped, logger)
+            return
+        stopped.wait(60)
+
+
+def mrs_provider(name: str, definition: dict[str, Any]) -> dict[str, Any]:
+    domain = os.getenv('PUBLIC_DOMAIN', '').strip()
+    if not domain:
+        raise HTTPException(status_code=503, detail='Для MRS нужен публичный домен подписки')
+    if not MRS_CACHE.path(name).is_file():
+        raise HTTPException(status_code=503, detail='Списки MRS подготавливаются; повторите обновление подписки через минуту')
+    return {**definition, 'format': 'mrs', 'url': f'https://{domain}/s/rules/{name}.mrs'}
+
+
+@app.get('/s/rules/{name}.mrs')
+def public_mrs_rules(name: str, request: Request) -> Response:
+    try:
+        data = MRS_CACHE.read(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='Rule set not found') from None
+    except (OSError, ValueError):
+        # Do not substitute a large text feed or compile in an HTTP worker.
+        raise HTTPException(status_code=503, detail='Rule set is being prepared', headers={'Retry-After': '60'}) from None
+    etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+    headers = {'ETag': etag, 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff'}
+    if request.headers.get('if-none-match') == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(data, media_type='application/octet-stream', headers=headers)
 
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
     "block_malware": [f"RULE-SET,{name},REJECT" for name in SECURITY_PROVIDERS],
@@ -1114,6 +1157,9 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,nodejs.org,DIRECT",
     ],
 }
+
+for _preset, _rules in RU_DIRECT_RULES.items():
+    DIRECT_RULE_PRESETS[_preset] = list(dict.fromkeys([*DIRECT_RULE_PRESETS[_preset], *_rules]))
 
 PRIVACY_TELEMETRY_RULES = [
     "DOMAIN,settings-win.data.microsoft.com,REJECT",
@@ -1720,7 +1766,10 @@ def require_mihomo_admission(request: Request, _: None = Depends(auth_required))
         if identity and application_operation.read(DATA_ROOT.parent / "operations" / f"{application_operation.operation_id(identity)}.json"):
             return
         require_mihomo_management()
-        application_operation.require_recovery_clear(DATA_ROOT.parent)
+        action = ('mihomo-profile-create' if request.method == 'POST' and request.url.path == '/api/mihomo/profiles'
+                  else 'mihomo-profile-update' if request.method == 'PATCH' and re.fullmatch(r'/api/mihomo/profiles/[^/]+', request.url.path)
+                  else None)
+        application_operation.require_recovery_clear(DATA_ROOT.parent, action)
     except application_operation.OperationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except ValueError:
@@ -2502,7 +2551,7 @@ def start_profile_operation(action: str, payload: dict, identity: str | None):
         with application_operation.locked(root):
             if not application_operation.read(root / "operations" / f"{identity}.json"):
                 require_mihomo_management()
-                application_operation.require_recovery_clear(root)
+                application_operation.require_recovery_clear(root, f"mihomo-profile-{action}")
                 if action == "module-settings":
                     check_module_settings_revision(payload["module_id"], payload["settings"].get("expected_revision"))
                 elif action in {"create", "update"} and payload.get("settings", {}).get("connections") is not None:
@@ -2530,6 +2579,17 @@ def submit_module_settings(module_id: str, payload: ModuleSettingsPatch, operati
 @app.post("/api/mihomo/profiles", status_code=202, dependencies=[Depends(require_mihomo_admission)])
 def submit_profile_create(payload: ProfileCreate, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
     return start_profile_operation("create", {"settings": payload.model_dump()}, operation_id)
+
+
+@app.post("/api/mihomo/profiles/{profile_id}/relays", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_profile_relays(profile_id: str, relay_revision: str = Header(alias="If-Match"), operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    try:
+        relay_connection_control().checked(relay_revision)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except (ValueError, OSError):
+        raise HTTPException(status_code=503, detail="Реестр Relay недоступен") from None
+    return start_profile_operation("relay-prepare", {"profile_id": profile_id, "relay_revision": relay_revision}, operation_id)
 
 
 @app.patch("/api/mihomo/profiles/{profile_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
@@ -3159,8 +3219,9 @@ def used_vless_ports(config: dict[str, Any]) -> set[int]:
     return {int(item.get("port", 0)) for item in config.get("inbounds", []) if isinstance(item, dict) and int(item.get("port", 0) or 0) > 0}
 
 
-def next_vless_port(config: dict[str, Any], start: int, owner: str | None = None) -> int:
-    return free_module_port(start, {"tcp"}, used=used_vless_ports(config), owner=owner)
+def next_vless_port(config: dict[str, Any], start: int, owner: str | None = None, *, relay: bool = False) -> int:
+    reserved = {22, 8000, 9443} if relay else set()
+    return free_module_port(start, {"tcp"}, used=used_vless_ports(config) | reserved, owner=owner)
 
 
 def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> dict[str, Any]:
@@ -3345,7 +3406,7 @@ def apply_tunnel_privacy(enabled: bool) -> None:
     # Validate every device, including HWID-bound and fallback connections.
     for item in items:
         for device_id in {str(connection.get("device_id", item["common_device_id"])) for connection in item.get("connections", [])}:
-            validate_rendered_profile(render_profile(item, device_id))
+            validate_rendered_profile(render_profile(item, device_id, resolve_relays=False))
     if changed:
         apply_reality_config(config_path, config)
     if items:
@@ -3363,7 +3424,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     core = module_settings("transport-reality")
     direct_enabled = settings["route_mode"] in {"direct", "both"}
     allocation_owner = f"mihomo:vless:{profile_id}-{connection_id}"
-    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]), allocation_owner + ":direct")) if direct_enabled else 0
+    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]), allocation_owner + ":direct", **({"relay": True} if relay_connections.host_id(settings) else {}))) if direct_enabled else 0
     if direct_enabled and int(settings["port"]) and direct_port in (used_vless_ports(config) | unavailable_module_ports({"tcp"})):
         raise RuntimeError(f"VLESS port {direct_port} is already used")
     if direct_enabled and int(settings["port"]):
@@ -3996,7 +4057,7 @@ def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
         changed = True
     if changed:
         for device_id in {str(entry.get("device_id", "device-1")) for entry in profile.get("connections", [])}:
-            validate_rendered_profile(render_profile(profile, device_id))
+            validate_rendered_profile(render_profile(profile, device_id, resolve_relays=False))
         if runtime_changed:
             apply_reality_config(config_path, config, restart_service=False)
             apply_batched_reality_runtime()
@@ -4046,7 +4107,7 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
             completed.append({**definition, "credential": credential})
         if batch_reality:
             apply_batched_reality_runtime()
-        prepare_profile_relays({'connections': completed}, os.getenv('VPS_CONTROL_OPERATION_ID'))
+        prepare_profile_relays({'id': profile_id, 'connections': completed}, os.getenv('VPS_CONTROL_OPERATION_ID'), partial=True)
     except Exception:
         for connection in reversed(completed):
             try:
@@ -4728,16 +4789,10 @@ def with_relay_labels(connections):
             for item in connections]
 
 
-def prepare_profile_relays(item, identity=None, previous=()):
-    if not any(relay_connections.host_id(connection.get('settings', {})) for connection in item.get('connections', [])):
-        return
-    try:
-        relay_connections.prepare_mihomo(relay_connection_control(), effective_client_connections(item['connections']),
-                                        (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous)
-    except RelayAddressError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (ValueError, OSError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail='Не удалось подтвердить пересылку Relay. Проверьте узел и результат операции в ROUTES перед повтором') from exc
+def prepare_profile_relays(item, identity=None, previous=(), *, partial=False):
+    return relay_profile_status.prepare(
+        relay_connection_control(), item['id'], effective_client_connections(item.get('connections', [])),
+        (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous, partial=partial)
 
 
 def relay_client_nodes(connection, nodes, endpoints=()):
@@ -4905,7 +4960,7 @@ def render_vless_tls(credential: dict[str, Any], proxy_name: str) -> list[str]:
     return render_vless_cdn({**credential, "cdn_domain": credential.get("tls_domain", ""), "cdn_path": credential.get("tls_path", "/"), "cdn_transport": credential.get("tls_transport", "xhttp"), "cdn_xhttp_mode": credential.get("tls_xhttp_mode", "auto")}, proxy_name)
 
 
-def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
+def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolve_relays: bool = True) -> str:
     default_names = {
         "transport-awg": "AWG",
         "transport-wg": "WG",
@@ -4918,7 +4973,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     normalized["connections"] = subscription_limits.client_connections(normalized, effective_client_connections(normalized.get("connections", [])))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
-    connections = with_relay_labels(connections)
+    connections = with_relay_labels(connections) if resolve_relays else connections
+    redirect = relay_client_lines if resolve_relays else lambda connection, lines: lines
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     profile_routing = device_routing(normalized, selected_device)
@@ -5041,12 +5097,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     lines.append("proxies:")
     for connection, name, cdn_name, tls_name in rendered:
         if name:
-            lines.extend(relay_client_lines(connection, render_proxy(str(connection["component"]), connection.get("credential", {}), name)))
+            lines.extend(redirect(connection, render_proxy(str(connection["component"]), connection.get("credential", {}), name)))
         if cdn_name:
             credential = connection.get("credential", {})
-            lines.extend(relay_client_lines(connection, render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name)))
+            lines.extend(redirect(connection, render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name)))
         if tls_name:
-            lines.extend(relay_client_lines(connection, render_vless_tls(connection.get("credential", {}), tls_name)))
+            lines.extend(redirect(connection, render_vless_tls(connection.get("credential", {}), tls_name)))
     group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
@@ -5081,12 +5137,17 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         rules = [mihomo_ad_base_rule(AD_RULE_PROVIDER) if rule == "GEOSITE,category-ads-all,REJECT" else rule for rule in rules]
     used_providers = {name: definition for name, definition in providers.items() if any(
         rule.startswith(f'RULE-SET,{name},') or f'(RULE-SET,{name})' in rule for rule in rules)}
+    # Read-only legacy installations cannot build a cache, and IP-only panels
+    # have no portable HTTPS rule URL. Preserve their existing subscriptions.
+    automatic_mrs = bool(os.getenv('PUBLIC_DOMAIN', '').strip()) and component_is_managed()
+    if profile_routing.get('mrs_rule_sets', automatic_mrs):
+        used_providers = {name: mrs_provider(name, definition) for name, definition in used_providers.items()}
     if used_providers:
         lines.append('rule-providers:')
         for name, definition in used_providers.items():
             lines += [f'  {name}:', '    type: http', '    behavior: domain',
                       f"    format: {definition['format']}", f"    url: {q(definition['url'])}",
-                      f"    path: ./rule-providers/{name}.{'yaml' if definition['format'] == 'yaml' else 'txt'}",
+                      f"    path: ./rule-providers/{name}.{'txt' if definition['format'] == 'text' else definition['format']}",
                       f"    interval: {definition['interval']}", '    size-limit: 16777216',
                       f'    proxy: {q(MIHOMO_PROXY_GROUP)}']
     lines.append("rules:")
@@ -5578,8 +5639,16 @@ def execute_profile_operation(action: str, path: Path, digest: str, identity: st
     adapter = SimpleNamespace(DATA_DIR=DATA_ROOT.parent, ACTION_FILE=DATA_ROOT.parent / "application-action.json", logger=logger)
     def perform():
         require_mihomo_management()
+        application_operation.require_recovery_clear(adapter.DATA_DIR, f"mihomo-profile-{action}")
         payload = application_operation.load_payload(adapter.DATA_DIR, identity, path, digest)
-        if action == "create":
+        if action == "relay-prepare":
+            relay_connection_control().checked(payload["relay_revision"])
+            item = next((item for item in profiles() if item["id"] == payload["profile_id"]), None)
+            if item is None:
+                raise HTTPException(status_code=404, detail="Профиль не найден")
+            if prepare_profile_relays(item, identity):
+                raise HTTPException(status_code=409, detail="Не удалось настроить пересылку Relay. Подробности на странице Сеть → ROUTES")
+        elif action == "create":
             create_profile(ProfileCreate.model_validate(payload["settings"]))
         elif action == "update":
             update_profile(payload["profile_id"], ProfileUpdate.model_validate(payload["settings"]))

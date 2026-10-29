@@ -1,4 +1,5 @@
 import type { ProfilePreset, RuleIconGroup } from "./types";
+import ruServices from "../../../protocol-images/mihomo/ru-service-domains.json" with { type: "json" };
 
 export const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-reality", transport: "xhttp", label: "VLESS · XHTTP" },
@@ -339,6 +340,19 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "discovery", code: "CAST", name: "Обнаружение устройств", tokens: ["224.0.0.0/4", "ff00::/8"] },
   ],
 };
+
+for (const entry of ruServices.groups) {
+  const tokens = [
+    ...entry.domains.map(domain => `DOMAIN-SUFFIX,${domain},`),
+    ...entry.hosts.map(host => `DOMAIN,${host},`),
+  ];
+  for (const preset of entry.presets) {
+    const groups = ruleIconGroups[preset];
+    const existing = groups.find(group => group.id === entry.id);
+    if (existing) existing.tokens = [...new Set([...existing.tokens, ...tokens])];
+    else groups.push({ id: entry.id, code: entry.code, name: entry.name, tokens });
+  }
+}
 
 export const profileStrategies = [
   { value: "", code: "AUTO", title: "Общие", text: "Наследовать стратегию маршрутизации." },

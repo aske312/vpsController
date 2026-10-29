@@ -7,7 +7,7 @@ export function ruleGroupStatus(id: string, enabled: boolean, partial = false) {
   if (id === "quic_compatibility") return enabled ? "Без QUIC" : "QUIC разрешён";
   if (id.startsWith("block_")) return enabled ? "Блокируется" : "Без блокировки";
   if (id === "udp_tunnel_exclusions") return enabled ? "Через VPN" : "Напрямую";
-  return enabled ? "Напрямую" : "Через VPN";
+  return enabled ? "Напрямую" : "По общим правилам";
 }
 
 function lines(value: string) {

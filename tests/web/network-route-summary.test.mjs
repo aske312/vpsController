@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
-import { createServer } from "vite";
+import { createTestLoader } from "./vite-test-loader.mjs";
 
-const loader = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } });
+const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
 const { domainRouteSummary, relayRouteSummary, serverAddressSummary } = await loader.ssrLoadModule("/src/features/network/route-summary.ts");
+
+test('saved profile failures remain visible even when all existing routes listen', () => {
+  const summary = relayRouteSummary({ state: 'connected', profile_failures: 1, routes: [{ transport: 'tcp', state: 'listening' }] });
+  assert.equal(summary.state, 'error');
+  assert.match(summary.detail, /1/);
+});
 
 const domain = { value: "edge.example.com", role: "CDN endpoint", source: "settings", endpoint_kind: "cdn", resolved: ["203.0.113.2"], matches_origin: false, route: "proxy_or_cdn" };
 const check = { kind: "cdn", domain: domain.value, status: "ready", ready: true, verification: "end_to_end", message: "ok", binding_id: "binding", check_id: "nonce", desired_revision: 2, checked_revision: 2, checked_at: "2026-10-18T00:00:00Z" };

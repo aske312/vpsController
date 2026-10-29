@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createServer } from 'vite';
+import { createTestLoader } from "./vite-test-loader.mjs";
 import reactPlugin from '@vitejs/plugin-react';
 
-const loader = await createServer({ configFile: false, cacheDir: '.runtime/vite-relay-route-picker-tests', plugins: [reactPlugin()], server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
+const loader = await createTestLoader(import.meta.url, [reactPlugin()]);
 after(() => loader.close());
 const { RelayRoutePicker, RelayConsumerPicker, RelayProfilePicker, compactPorts } = await loader.ssrLoadModule('/src/features/network/relay-route-picker.tsx');
 const route = { id: 'tcp', transport: 'tcp', listen_port: 20000, target_port: 443, state: 'listening', sessions: 0 };

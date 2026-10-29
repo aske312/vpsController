@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test, {after} from 'node:test';
-import {createServer} from 'vite';
+import { createTestLoader } from "./vite-test-loader.mjs";
 import react from '@vitejs/plugin-react';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-const loader=await createServer({configFile:false,plugins:[react()],server:{middlewareMode:true,hmr:false},appType:'custom',optimizeDeps:{noDiscovery:true}});
+const loader = await createTestLoader(import.meta.url, [react()]);
 after(()=>loader.close());
 const {routePage,RoutePagination}=await loader.ssrLoadModule('/src/features/network/route-pagination.tsx');
 

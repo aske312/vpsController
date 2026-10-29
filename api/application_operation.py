@@ -157,7 +157,7 @@ def mutation_lock(data_dir: Path):
 
 
 def require_recovery_clear(data_dir: Path, action: str | None = None) -> None:
-    if (data_dir / 'relay/pending.json').exists() and action not in {'relay-reconcile', 'relay-resume', 'relay-reconnect', 'network-check', 'integrity-check', 'doctor'}:
+    if (data_dir / 'relay/pending.json').exists() and action not in {'relay-reconcile', 'relay-resume', 'relay-reconnect', 'mihomo-profile-create', 'mihomo-profile-update', 'network-check', 'integrity-check', 'doctor'}:
         raise OperationConflict('Сначала проверьте результат прерванного изменения Relay в разделе Сеть → ROUTES')
     if (data_dir / "recovery/application-update").exists() or (data_dir / "recovery/application-update").is_symlink():
         if action not in {"network-check", "integrity-check", "doctor"}:

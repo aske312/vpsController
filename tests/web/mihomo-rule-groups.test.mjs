@@ -10,6 +10,20 @@ const adsLines = [...adsBlock.matchAll(/^\s*"((?:DOMAIN|DOMAIN-SUFFIX|GEOSITE),[
 const list = { id: "block_ads", key: "block_ads_rules", default_rules: adsLines.join("\n") };
 const groups = ruleIconGroups.block_ads;
 
+test("reviewed RU domains belong to the matching service switch", () => {
+  const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/ru-service-domains.json", import.meta.url), "utf8"));
+  for (const entry of catalog.groups) {
+    const rules = [...entry.domains.map(domain => `DOMAIN-SUFFIX,${domain},DIRECT`), ...entry.hosts.map(host => `DOMAIN,${host},DIRECT`)];
+    for (const preset of entry.presets) {
+      const list = { id: preset, default_rules: rules.join("\n") };
+      const groups = ruleIconGroups[preset];
+      assert.deepEqual(partitionRuleGroups(list, groups)[entry.id], rules);
+      const disabled = toggleRuleGroup(list, groups, "@default", entry.id);
+      for (const rule of rules) assert.equal(disabled.includes(rule), false);
+    }
+  }
+});
+
 test("every built-in advertising entry belongs to exactly one group", () => {
   assert.ok(adsLines.length > 150);
   const partition = partitionRuleGroups(list, groups);
@@ -74,10 +88,20 @@ test("Mail.ru selection changes its own entries and preserves Russian zones", ()
   assert.equal(toggleRuleGroup(ruList, ruGroups, vpn, "mail"), "@default");
 });
 
+test("VK portal CDN routes belong to the VK switch", () => {
+  const rule = "DOMAIN-SUFFIX,vk-portal.net,DIRECT";
+  const list = { id: "direct_ru_sites", default_rules: ["DOMAIN-SUFFIX,ru,DIRECT", rule].join("\n") };
+  const groups = ruleIconGroups.direct_ru_sites;
+  assert.deepEqual(partitionRuleGroups(list, groups).vk, [rule]);
+  const disabled = toggleRuleGroup(list, groups, "@default", "vk");
+  assert.equal(disabled.includes(rule), false);
+  assert.ok(disabled.includes("DOMAIN-SUFFIX,ru,DIRECT"));
+});
+
 test("group captions describe routes, protection, QUIC and partial selections", () => {
   for (const id of ["direct_ru_sites", "direct_ru_services", "direct_ru_banks", "direct_ru_marketplaces", "direct_local_network", "direct_downloads", "windows_geolocation"]) {
     assert.equal(ruleGroupStatus(id, true), "Напрямую");
-    assert.equal(ruleGroupStatus(id, false), "Через VPN");
+    assert.equal(ruleGroupStatus(id, false), "По общим правилам");
   }
   assert.equal(ruleGroupStatus("udp_tunnel_exclusions", true), "Через VPN");
   assert.equal(ruleGroupStatus("udp_tunnel_exclusions", false), "Напрямую");
