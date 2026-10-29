@@ -8,6 +8,8 @@ import re
 import ssl
 from urllib.parse import urlsplit
 
+MAX_RESPONSE_BYTES = 256 * 1024
+
 
 class AgentAPIError(RuntimeError):
     def __init__(self, status, detail):
@@ -50,8 +52,9 @@ class RelayClient:
                 headers['If-Match'] = str(revision)
             connection.request(method, path, json.dumps(body) if body is not None else None, headers)
             response = connection.getresponse()
-            raw = response.read(65537)
-            if len(raw) > 65536:
+            # A full 64-route inventory includes diagnostics and may exceed 64 KiB.
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
                 raise AgentAPIError(502, 'Слишком большой ответ агента')
             # Never reflect arbitrary remote text into UI, logs or operation history.
             if response.status != 200:

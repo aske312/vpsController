@@ -61,6 +61,7 @@ import relay_client_creation
 import native_client_creation
 import xray_native
 import xray_core
+from version_comparison import newer_release
 from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
@@ -3927,6 +3928,8 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
         available_version = github_latest_tag(SING_BOX_GITHUB_REPO)
     else:
         installed_version = available_version = ""
+    if not package and image_id in {"mihomo", "hysteria2", "tuic", "trojan"}:
+        update_available_override = newer_release(installed_version, available_version)
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
     update_breaking = update_available and version_major(installed_version) != version_major(available_version)
     return {
@@ -4201,7 +4204,11 @@ def application_operations(_: None = Depends(require_token)) -> dict:
             current = get_application_operation(current["id"], None)
         items = [{**item, "source": "system"} for item in application_operation.history(DATA_DIR)]
         items = [{**item, **current} if item.get("id") == current.get("id") else item for item in items]
-        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo"))
+        delegated = {(item.get("id"), item.get("action")) for item in items if item.get("id")}
+        # A delegated worker shares its parent's identity. The parent owns the
+        # final result, including failures after the Mihomo phase completed.
+        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo")
+                     if (item.get("id"), item.get("action")) not in delegated)
         for path in sorted(cdn_operation.DIRECTORY.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:100]:
             if not re.fullmatch(r"[0-9a-f]{32}", path.stem):
                 continue

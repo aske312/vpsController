@@ -155,6 +155,28 @@ class ApplicationOperationTests(unittest.TestCase):
             self.assertEqual(client.get("/api/application/operations/" + "1" * 32).json()["state"], "unknown")
             self.launch.assert_called_once()
 
+    def test_history_shows_delegated_mihomo_operation_once_with_parent_result(self):
+        from fastapi.testclient import TestClient
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        self.addCleanup(api.app.dependency_overrides.clear)
+        parent = {'id': 'a' * 32, 'action': 'mihomo-profile-update', 'state': 'failed',
+                  'message': 'Parent rollback failed', 'started_at': '2026-10-29T10:00:00+00:00'}
+        child = {**parent, 'state': 'succeeded', 'message': 'Child completed'}
+        independent = {**child, 'id': 'b' * 32}
+        operations.atomic_json(self.root / 'operations' / (parent['id'] + '.json'), parent)
+        for item in (child, independent):
+            operations.atomic_json(self.root / 'mihomo' / 'operations' / (item['id'] + '.json'), item)
+        with patch.object(api, 'DATA_DIR', self.root), patch.object(api, 'ACTION_FILE', self.current), \
+             patch.object(api.cdn_operation, 'DIRECTORY', self.root / 'cdn'):
+            response = TestClient(api.app).get('/api/application/operations')
+        self.assertEqual(response.status_code, 200, response.text)
+        items = response.json()['items']
+        self.assertEqual(len(items), 2)
+        combined = next(item for item in items if item['id'] == parent['id'])
+        self.assertEqual((combined['source'], combined['state'], combined['message']),
+                         ('system', 'failed', 'Parent rollback failed'))
+        self.assertEqual(next(item for item in items if item['id'] == independent['id'])['source'], 'mihomo')
+
     def test_panel_modes_are_durable_nonblocking_and_reject_identity_reuse(self):
         from fastapi.testclient import TestClient
         api.app.dependency_overrides[api.require_token] = lambda: None

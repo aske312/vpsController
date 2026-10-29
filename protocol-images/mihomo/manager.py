@@ -59,6 +59,7 @@ import relay_profile_status
 import relay_cdn
 import xray_protocols
 import xray_core
+from version_comparison import newer_release
 import subscription_limits
 from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
@@ -2120,6 +2121,7 @@ def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -
     elif module_id in {"transport-hysteria2", "transport-tuic"}:
         installed_version = singbox_installed_version() if installed else ""
         available_version = github_latest_tag(SINGBOX_GITHUB_REPO)
+        update_available_override = newer_release(installed_version, available_version)
     else:
         installed_version = available_version = ""
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)

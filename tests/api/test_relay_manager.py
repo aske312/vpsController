@@ -912,6 +912,32 @@ class RelayManagementTests(unittest.TestCase):
         self.assertEqual(connection.request.call_count, 1)
         self.assertEqual(connection.request.call_args.args[3]['Authorization'], 'Bearer '+TOKEN)
 
+    def test_all_64_routes_with_diagnostics_fit_bounded_agent_response(self):
+        from relay_diagnostics import ERROR_CODES
+        counter = 2**53 - 1
+        diagnostics = {'sent_packets': counter, 'received_packets': counter, 'dropped_packets': counter,
+                       'error_counts': {key: counter for key in ERROR_CODES}, 'last_error': 'udp_buffer_full',
+                       'last_error_at': 1793300000, 'last_sent_at': 1793300000, 'last_received_at': 1793300000,
+                       'return_state': 'flowing', 'no_return_sessions': 0}
+        routes = [{'id': f'foreign-route-{index:050d}', 'transport': 'udp', 'listen_port': 20000 + index,
+                   'target_ip': ORIGIN, 'target_port': 443, 'state': 'listening', 'target_verified': False,
+                   'sent_bytes': counter, 'received_bytes': counter, 'errors': counter, 'sessions': 128,
+                   'diagnostics': diagnostics} for index in range(64)]
+        raw = json.dumps({'revision': 64, 'items': routes}).encode()
+        self.assertGreater(len(raw), 65536)
+        connection = Mock()
+        connection.sock.getpeercert.return_value = b'certificate'
+        response = connection.getresponse.return_value
+        response.status = 200
+        response.read.side_effect = lambda limit: raw[:limit]
+        with patch('relay_client.http.client.HTTPSConnection', return_value=connection):
+            client = RelayClient(f'https://{AGENT}:9443', TOKEN, hashlib.sha256(b'certificate').hexdigest())
+            self.assertEqual(len(route_snapshot(client.request('GET', '/v1/routes'))['items']), 64)
+            response.read.side_effect = lambda limit: b' ' * limit
+            with self.assertRaises(AgentAPIError):
+                client.request('GET', '/v1/routes')
+        connection.close.assert_called()
+
     def test_nonpublic_agent_and_invalid_urls_rejected(self):
         for url in ('http://'+AGENT+':9443', 'https://127.0.0.1:9443', 'https://10.0.0.1:9443', 'https://example.com:9443', f'https://{AGENT}:9443/path'):
             with self.subTest(url=url), self.assertRaises(ValueError):
