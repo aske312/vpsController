@@ -27,6 +27,21 @@ const mihomoAddress = (component, settings = {}, props = {}) => {
   ]);
 };
 
+test('every connection path ends at the Internet resource, including both legacy branches', () => {
+  for (const mode of ['direct', 'tls', 'cdn', 'udp', 'both']) {
+    for (const relay of [undefined, { address: 'relay.example', port: 20001 }, { address: 'relay.example', afterCdn: true }]) {
+      const html = renderToStaticMarkup(createElement(ConnectionRouteMap, { route: { mode, domain: 'cdn.example', originAddress: '203.0.113.10', originPort: 443, relay } }));
+      const paths = html.match(/role="img" aria-label="([^"]+)"/)[1].split('; ');
+      assert.equal(paths.length, mode === 'both' ? 2 : 1);
+      for (const path of paths) {
+        assert.ok(path.startsWith('Клиент → '));
+        assert.ok(path.endsWith(' → Интернет'));
+        assert.equal(path.split('Интернет').length, 2);
+      }
+    }
+  }
+});
+
 test('Mihomo separates protocol mode from Relay endpoint and keeps TLS identity visible', () => {
   const settings = { route_mode: 'tls', tls_domain: 'origin-tls.example', relay_host_id: host.id, relay_address: 'relay.example' };
   const html = mihomoAddress('transport-reality', settings);

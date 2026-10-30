@@ -1330,13 +1330,10 @@
 
 /* Connection selection stays stable while the selected protocol is edited. */
 .mihomoConnectionWorkspace { display:grid; grid-template-columns:minmax(0,1fr); width:100%; min-width:0; gap:8px; align-items:start; }
-.mihomoConnectionDetailLayout { display:grid; grid-template-columns:minmax(0,640px) minmax(180px,1fr); gap:16px; align-items:start; min-width:0; }
-.mihomoConnectionSettingsPane { min-width:0; overflow-x:auto; }
-.mihomoConnectionMapPane { display:grid; gap:10px; min-width:0; padding:10px; border-left:1px solid var(--line); }
+.mihomoConnectionDetailLayout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:center; min-width:0; }
+.mihomoConnectionSettingsPane { display:flex; justify-content:center; align-items:center; min-width:0; overflow-x:auto; }
+.mihomoConnectionMapPane { display:grid; place-content:center; justify-items:center; align-self:stretch; gap:14px; min-width:0; padding:16px; border-left:1px solid var(--line); }
 .mihomoConnectionMapPane > b { color:var(--muted); font-size:11px; font-weight:500; }
-.mihomoConnectionMapPane .mihomoRouteLine { flex-direction:column; align-items:flex-start; gap:6px; }
-.mihomoConnectionMapPane .mihomoRouteStep { flex-direction:column; align-items:flex-start; gap:6px; }
-.mihomoConnectionMapPane .mihomoRouteArrow { margin-left:12px; transform:rotate(90deg); }
 .mihomoConnectionCarousel { display:grid; grid-template-columns:28px minmax(0,1fr) 28px; align-items:stretch; gap:6px; }
 .mihomoConnectionArrow { padding:0; border:1px solid var(--line); border-radius:7px; background:var(--panel-soft); color:var(--text); font-size:24px; cursor:pointer; }
 .mihomoConnectionArrow:disabled { opacity:.3; cursor:default; }
@@ -1413,16 +1410,20 @@
 .mihomoProfilesPagination button { min-height:32px; padding:0 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel-soft); color:inherit; }
 .mihomoProfilesPagination button:disabled { opacity:.45; cursor:default; }
 .mihomoProfilesPagination strong { white-space:nowrap; font-family:var(--font-mono),monospace; }
-.mihomoConnectionRoute { display:grid; gap:4px; min-width:0; padding:3px 0; }
-.mihomoRouteLine { display:flex; flex-wrap:wrap; align-items:center; gap:4px; min-width:0; }
-.mihomoRouteStep { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; }
-.mihomoRouteArrow { flex:none; color:var(--muted); font-size:12px; }
-.mihomoRouteHop { display:inline-flex; align-items:baseline; gap:5px; min-width:0; max-width:100%; padding:3px 6px; border:1px solid var(--line); border-radius:5px; background:var(--panel-soft); line-height:1.4; }
-.mihomoRouteHop b { flex:none; color:var(--muted); font-size:10px; font-weight:500; }
+.mihomoConnectionRoute { display:flex; flex-wrap:wrap; justify-content:center; gap:24px; min-width:0; max-width:100%; }
+.mihomoRouteLine { display:grid; justify-items:center; align-content:start; min-width:0; max-width:100%; }
+.mihomoRouteStep { display:grid; justify-items:center; min-width:0; width:100%; }
+.mihomoRouteArrow { display:grid; place-items:center; height:28px; color:var(--muted); }
+.mihomoRouteArrow svg { width:20px; height:24px; fill:none; stroke:currentColor; stroke-width:1.25; }
+.mihomoRouteHop { --hop-color:var(--muted); display:flex; align-items:center; gap:10px; box-sizing:border-box; min-width:160px; max-width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:var(--panel-soft); line-height:1.4; }
+.mihomoRouteHopIcon { display:grid; place-items:center; flex:none; width:32px; height:32px; border-radius:8px; background:rgba(91,113,138,.1); color:var(--hop-color); }
+.mihomoRouteHopIcon svg { width:21px; height:21px; }
+.mihomoRouteHopBody { display:grid; gap:3px; min-width:0; }
+.mihomoRouteHop b { color:var(--hop-color); font-size:12px; font-weight:600; }
 .mihomoRouteHop code { min-width:0; color:var(--text); font:10px/1.4 var(--font-mono),monospace; overflow-wrap:anywhere; }
-.mihomoRouteHop[data-hop="relay"] b { color:var(--cyan); }
-.mihomoRouteHop[data-hop="cdn"] b { color:var(--amber); }
-.mihomoRouteHop[data-hop="vps"] b { color:var(--green); }
+.mihomoRouteHop[data-hop="relay"],.mihomoRouteHop[data-hop="client"] { --hop-color:var(--cyan); }
+.mihomoRouteHop[data-hop="cdn"] { --hop-color:var(--amber); }
+.mihomoRouteHop[data-hop="vps"],.mihomoRouteHop[data-hop="internet"] { --hop-color:var(--green); }
 .mihomoDnsRouteResolvers { min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel-soft); }
 .mihomoDnsRouteResolvers > header { display:grid; gap:5px; margin-bottom:15px; }
 .mihomoDnsRouteResolvers small { display:block; color:var(--muted); font-size:11px; line-height:1.5; }

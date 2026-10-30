@@ -2,7 +2,8 @@ import type { RelayHost, RelayStatus } from "../network/relay-state";
 import { connectionAddressModes } from "./connection-address";
 import type { ProfileConnection } from "./types";
 
-type RouteHop = { label: string; address?: string; port?: number; pendingPort?: boolean };
+type HopKind = "client" | "relay" | "cdn" | "vps" | "internet";
+type RouteHop = { kind: HopKind; label: string; address?: string; port?: number; pendingPort?: boolean };
 export type ConnectionRoute = {
   mode: "direct" | "tls" | "udp" | "cdn" | "both";
   originAddress?: string;
@@ -54,23 +55,36 @@ function hopText(hop: RouteHop): string {
   return hop.label + (detail ? ` (${detail})` : "");
 }
 
+function RouteHopIcon({ kind }: { kind: HopKind }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {kind === "client" ? <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8m-4-4v4" /></>
+      : kind === "internet" ? <><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18M5 6h14M5 18h14" /></>
+      : kind === "cdn" ? <path d="M7 18a5 5 0 0 1-1-9.9 6 6 0 0 1 11.6-1.6A5.8 5.8 0 0 1 18 18H7Z" />
+      : kind === "relay" ? <><path d="M4 8h16m-4-4 4 4-4 4M20 16H4m4-4-4 4 4 4" /></>
+      : <><rect x="4" y="3" width="16" height="8" rx="2" /><rect x="4" y="13" width="16" height="8" rx="2" /><path d="M8 7h.01M8 17h.01M12 7h4M12 17h4" /></>}
+  </svg>;
+}
+
 /** Endpoint information only: never infer a forwarding port from an unrelated rule. */
 export function ConnectionRouteMap({ route }: { route: ConnectionRoute }) {
-  const origin: RouteHop = { label: "VPS", address: route.originAddress, port: route.originPort };
-  const relay: RouteHop | undefined = route.relay && { label: "Relay", address: route.relay.address, port: route.relay.port, pendingPort: !route.relay.port };
-  const cdn: RouteHop = { label: "CDN", address: route.domain, port: 443 };
+  const origin: RouteHop = { kind: "vps", label: "VPS", address: route.originAddress, port: route.originPort };
+  const relay: RouteHop | undefined = route.relay && { kind: "relay", label: "Relay", address: route.relay.address, port: route.relay.port, pendingPort: !route.relay.port };
+  const cdn: RouteHop = { kind: "cdn", label: "CDN", address: route.domain, port: 443 };
+  const client: RouteHop = { kind: "client", label: "Клиент" };
+  const internet: RouteHop = { kind: "internet", label: "Интернет" };
   const hops = route.mode === "cdn"
     ? route.relay?.afterCdn ? [cdn, relay!, origin] : [relay, cdn, origin]
     : [relay, { ...origin, address: !relay && route.domain && ["tls", "udp"].includes(route.mode) ? route.domain : origin.address }];
-  const paths = [[{ label: "Клиент" }, ...hops.filter((hop): hop is RouteHop => Boolean(hop))]];
-  if (route.mode === "both") paths.push([{ label: "Клиент" }, cdn, { ...origin, port: 443 }]);
+  const paths = [[client, ...hops.filter((hop): hop is RouteHop => Boolean(hop)), internet]];
+  if (route.mode === "both") paths.push([client, cdn, { ...origin, port: 443 }, internet]);
   const text = paths.map(path => path.map(hopText).join(" → ")).join("; ");
   return <div className="mihomoConnectionRoute" data-connection-route role="img" aria-label={text}>
     {paths.map((path, pathIndex) => <span className="mihomoRouteLine" key={pathIndex} aria-hidden="true">
       {path.map((hop, index) => <span className="mihomoRouteStep" key={index}>
-        {index > 0 && <span className="mihomoRouteArrow">→</span>}
-        <span className="mihomoRouteHop" data-hop={hop.label.toLowerCase()}>
-          <b>{hop.label}</b>{hopDetail(hop) && <code>{hopDetail(hop)}</code>}
+        {index > 0 && <span className="mihomoRouteArrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18m-4-4 4 4 4-4" /></svg></span>}
+        <span className="mihomoRouteHop" data-hop={hop.kind}>
+          <span className="mihomoRouteHopIcon"><RouteHopIcon kind={hop.kind} /></span>
+          <span className="mihomoRouteHopBody"><b>{hop.label}</b>{hopDetail(hop) && <code>{hopDetail(hop)}</code>}</span>
         </span>
       </span>)}
     </span>)}
