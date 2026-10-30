@@ -94,6 +94,27 @@ class ProfileModeTests(unittest.TestCase):
             kind = 'IP-CIDR6' if parsed.version == 6 else 'IP-CIDR'
             self.assertIn(f'{kind},{network},{manager.MIHOMO_PROXY_GROUP},no-resolve', config['rules'])
 
+    def test_expanded_catalog_routes_each_service_without_selecting_others(self):
+        all_ids = ','.join(VPN_SERVICES)
+        self.assertEqual(manager.validate_routing({'vpn_services': all_ids}, current={})['vpn_services'], all_ids)
+        for key, entry in VPN_SERVICES.items():
+            with self.subTest(service=key):
+                config = self.config({'routing_scope': 'selected', 'vpn_services': key})
+                expected = [f'DOMAIN-SUFFIX,{domain},{manager.MIHOMO_PROXY_GROUP}' for domain in entry['domains']]
+                expected += [f'DOMAIN,{host},{manager.MIHOMO_PROXY_GROUP}' for host in entry.get('hosts', [])]
+                self.assertTrue(set(expected).issubset(config['rules']))
+                self.assertEqual(config['rules'][-1], 'MATCH,DIRECT')
+                self.assertEqual(len(config['rules']), len(set(config['rules'])))
+        for entry in VPN_SERVICES.values():
+            self.assertFalse({'amazonaws.com', 'cloudfront.net', 'storage.googleapis.com', 'akamaiedge.net', 'fastly.net'} & set(entry['domains']))
+
+    def test_shared_cdn_uses_exact_host_rules(self):
+        config = self.config({'routing_scope': 'selected', 'vpn_services': 'discord,snapchat,roblox,linkedin'})
+        for service in ('discord', 'snapchat', 'roblox', 'linkedin'):
+            for host in VPN_SERVICES[service].get('hosts', []):
+                self.assertIn(f'DOMAIN,{host},{manager.MIHOMO_PROXY_GROUP}', config['rules'])
+                self.assertNotIn(f'DOMAIN-SUFFIX,{host},{manager.MIHOMO_PROXY_GROUP}', config['rules'])
+
     def test_personal_application_exception_precedes_service_preset_but_not_protection(self):
         config = self.config({'connection_mode': 'tun', 'routing_scope': 'selected',
                               'vpn_services': 'youtube', 'block_privacy': True},
@@ -171,7 +192,7 @@ class ProfileModeTests(unittest.TestCase):
                 with self.subTest(capture=capture, scope=scope), tempfile.TemporaryDirectory() as folder, mihomo_readiness() as ready:
                     root = Path(folder)
                     config = self.config({'connection_mode': capture, 'routing_scope': scope,
-                                          'vpn_services': 'youtube,telegram', 'strategy': 'select'},
+                                          'vpn_services': ','.join(VPN_SERVICES), 'strategy': 'select'},
                                          ['DOMAIN,allowed.youtube.com,DIRECT', 'DOMAIN,blocked.audit.test,REJECT'])
                     path = root / 'config.yaml'
                     path.write_text(yaml.safe_dump(config), encoding='utf-8')
@@ -183,6 +204,9 @@ class ProfileModeTests(unittest.TestCase):
                     cases = [('youtube.com', b'via-vpn-fixture'), ('91.108.4.1', b'via-vpn-fixture'),
                              ('allowed.youtube.com', b'via-direct-fixture'), ('blocked.audit.test', b'502'),
                              ('other.audit.test', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture')]
+                    cases += [(entry['domains'][0], b'via-vpn-fixture') for key, entry in VPN_SERVICES.items() if key not in {'youtube', 'telegram'}]
+                    cases += [('discord-attachments-uploads-prd.storage.googleapis.com', b'via-vpn-fixture'),
+                              ('other.storage.googleapis.com', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture')]
                     config['hosts'] = {name: '127.0.0.1' for name, _ in cases if name != '91.108.4.1'}
                     config['tun']['enable'] = False
                     config['dns']['enable'] = False

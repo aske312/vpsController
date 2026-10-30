@@ -1,9 +1,10 @@
 import { clientCapabilities } from "./client-capabilities";
 import { profileConnectionMode } from "./profile-modes";
+import { ProfileModeToggle } from "./profile-mode-toggle";
 
 type Routing = Record<string, string | number | boolean>;
 
-export function ProfileProtection({ routing, common = false, echAvailable = false, onChange }: { routing: Routing; common?: boolean; echAvailable?: boolean; onChange: (key: string, value: string | boolean) => void }) {
+export function ProfileProtection({ routing, echAvailable = false, onChange }: { routing: Routing; echAvailable?: boolean; onChange: (key: string, value: string | boolean) => void }) {
   const caps = clientCapabilities();
   const tun = profileConnectionMode(routing) === "tun";
   const mihomoFeatures = [
@@ -20,13 +21,9 @@ export function ProfileProtection({ routing, common = false, echAvailable = fals
   const enabledCount = visibleKeys.filter((key) => routing[key]).length;
   const totalCount = visibleKeys.length;
   return <section className="mihomoProfileRules mihomoProfileProtection">
-    <header><div><b>Защита соединений</b><small>{common ? "Общие параметры защиты. Поддержка зависит от ядра VPN-клиента; у устройства можно задать свои значения." : "Настройки выбранного устройства. После сохранения обновите подписку в клиенте."}</small></div><span>Выбрано {enabledCount} из {totalCount}</span></header>
+    <header><div><b>Защита соединений</b></div><span>Выбрано {enabledCount} из {totalCount}</span></header>
     <section className="mihomoCaptureMode">
-      <div className="mihomoModeChoices" role="group" aria-label="Режим подключения">
-        <button type="button" aria-pressed={tun} onClick={() => onChange("connection_mode", "tun")}><b>TUN режим</b><small>Перехват трафика устройства. Требует разрешения VPN в клиенте.</small></button>
-        <button type="button" aria-pressed={!tun} onClick={() => onChange("connection_mode", "proxy")}><b>Proxy</b><small>Локальный прокси без TUN. Его должны использовать приложения или ОС.</small></button>
-      </div>
-      <p className="mihomoHint">После сохранения обновите подписку. Если клиент переопределяет TUN, переключите его режим также в клиенте.</p>
+      <ProfileModeToggle label="Режим подключения" value={tun ? "TUN" : "Proxy"} active={tun} onToggle={() => onChange("connection_mode", tun ? "proxy" : "tun")} />
     </section>
     <div>
       {caps.features.includes("tunnel_privacy") && <button type="button" className={`mihomoProfileRuleButton${routing.tunnel_privacy ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.tunnel_privacy)} onClick={() => onChange("tunnel_privacy", !routing.tunnel_privacy)}><i>VPS</i><span><b>Шифрование до VPS</b><small>VLESS Encryption · требуется актуальное ядро клиента</small></span></button>}

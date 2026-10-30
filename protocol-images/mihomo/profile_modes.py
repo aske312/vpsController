@@ -29,6 +29,7 @@ def service_rules(routing):
     for key in service_ids(routing.get('vpn_services', '')):
         entry = VPN_SERVICES[key]
         rules.extend(f'DOMAIN-SUFFIX,{domain},GATE.312' for domain in entry['domains'])
+        rules.extend(f'DOMAIN,{host},GATE.312' for host in entry.get('hosts', []))
         rules.extend(f"{'IP-CIDR6' if ':' in network else 'IP-CIDR'},{network},GATE.312,no-resolve"
                      for network in entry['networks'])
     return list(dict.fromkeys(rules))

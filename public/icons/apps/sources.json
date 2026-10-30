@@ -1,0 +1,106 @@
+[
+  {
+    "id": "youtube",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/youtube.svg",
+    "upstream_sha256": "5038808acbbc4e6edda16cbeb1cc6dec80e4e4ee4e227e039c41229fa222aa8c",
+    "brand_source": "https://www.youtube.com/howyoutubeworks/resources/brand-resources/#logos-icons-and-colors",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "telegram",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/telegram.svg",
+    "upstream_sha256": "147fd8f8923e7e5f463fe98c0eb9913bead6b2ae59935728cda141002ec8a7c9",
+    "brand_source": "https://telegram.org/tour/screenshots",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "discord",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/discord.svg",
+    "upstream_sha256": "1d364b72c9eaf1fe37d17ca88cd8fb541308dc0f3b09e2ab3b824f380b3493d5",
+    "brand_source": "https://discord.com/branding",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "whatsapp",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/whatsapp.svg",
+    "upstream_sha256": "8fb209a53a61618c3483594b3e070481a35575d6aaecbe00a6fe386670c8fb1c",
+    "brand_source": "https://about.meta.com/brand/resources/whatsapp/whatsapp-brand",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "instagram",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/instagram.svg",
+    "upstream_sha256": "f53af2d1fc5292ba1433b5c1faf50005ce6a997fa302d1816989929f379a59dc",
+    "brand_source": "https://about.meta.com/brand/resources/instagram",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "facebook",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/facebook.svg",
+    "upstream_sha256": "b06d18d844ed621b89faffb1a33440cc0ec4f1ffea9f36191f50db19a47c59a6",
+    "brand_source": "https://about.meta.com/brand/resources/facebook/logo",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "x",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/x.svg",
+    "upstream_sha256": "be03adbfce4a46c4e42eae5ee7b5e676b59627fa25e15a317e453bb18153ff5f",
+    "brand_source": "https://x.com",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "signal",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/signal.svg",
+    "upstream_sha256": "391f46b8feaef281a44dfdf40035d9a4546ded17d2c3eb88d6614762779f1930",
+    "brand_source": "https://signal.org/brand",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "viber",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/viber.svg",
+    "upstream_sha256": "2cc123deda743aeb31e3a9cba6bdd73bee79475704dfba9cf0c7b46023095914",
+    "brand_source": "https://www.viber.com/brand-center",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "snapchat",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/snapchat.svg",
+    "upstream_sha256": "fbbc31c5544954fbf7525dddbc0d3e79990bb89461f54a94917b6dffc2c5130e",
+    "brand_source": "https://www.snapchat.com/brand-guidelines",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "roblox",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/roblox.svg",
+    "upstream_sha256": "9245b2f23fde91a5ef34f36aea32c1bf08a1a1254c08b86e7f060a4f72986234",
+    "brand_source": "https://www.roblox.com",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "linkedin",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/0af835e2949a9222965522780e5e0810d3c53382/icons/linkedin.svg",
+    "upstream_sha256": "2687ac468d96bd03e748dc8646ef6465cb4cc7f34b96e1d0bc86fcb3dd79121a",
+    "brand_source": "https://brand.linkedin.com/",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "threads",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/threads.svg",
+    "upstream_sha256": "8d4e0be28b72e417b02ae2e8f1d1ca4e3ab4adc025e6a1e2451b6d979f16d47a",
+    "brand_source": "https://about.meta.com/brand/resources/instagram/threads",
+    "license": "CC0-1.0",
+    "modification": "Added the brand fill color; geometry unchanged."
+  }
+]

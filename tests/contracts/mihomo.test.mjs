@@ -241,7 +241,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /connections: profileConnections/);
   assert.doesNotMatch(view, /sniffer: true/);
   assert.doesNotMatch(view, /tun_enabled: true/);
-  assert.match(view, /profileStep === 2 && <ProfileProtection common=\{commonDevice\}/);
+  assert.match(view, /profileStep === 2 && <ProfileProtection routing=/);
   assert.ok(view.indexOf(">Защита</button>") < view.indexOf(">Маршрутизация</button>"), "protection must precede routing in the profile editor");
   assert.ok(view.indexOf(">Маршрутизация</button>") < view.indexOf(">Подключения <i>"), "routing must precede connections in the profile editor");
   assert.match(view, /cdn_enabled/);

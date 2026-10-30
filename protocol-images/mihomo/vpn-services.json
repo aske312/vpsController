@@ -5,18 +5,278 @@
       "name": "YouTube",
       "code": "YT",
       "description": "Сайт, видео, изображения и API YouTube.",
-      "domains": ["youtube.com", "googlevideo.com", "youtubei.googleapis.com", "ytimg.com", "youtube-nocookie.com", "youtube.googleapis.com", "youtubeembeddedplayer.googleapis.com", "youtu.be"],
-      "networks": []
+      "domains": [
+        "youtube.com",
+        "googlevideo.com",
+        "youtubei.googleapis.com",
+        "ytimg.com",
+        "youtube-nocookie.com",
+        "youtube.googleapis.com",
+        "youtubeembeddedplayer.googleapis.com",
+        "youtu.be"
+      ],
+      "networks": [],
+      "icon": "/icons/apps/youtube.svg"
     },
     {
       "id": "telegram",
       "name": "Telegram",
       "code": "TG",
       "description": "Домены Telegram и опубликованные сети сервиса. Звонки P2P могут использовать другие адреса.",
-      "domains": ["telegram.org", "telegram.me", "t.me", "tdesktop.com", "telegra.ph", "telesco.pe"],
-      "networks": ["91.108.56.0/22", "91.108.4.0/22", "91.108.8.0/22", "91.108.16.0/22", "91.108.12.0/22", "149.154.160.0/20", "91.105.192.0/23", "91.108.20.0/22", "185.76.151.0/24", "2001:b28:f23d::/48", "2001:b28:f23f::/48", "2001:67c:4e8::/48", "2001:b28:f23c::/48", "2a0a:f280::/32"],
+      "domains": [
+        "telegram.org",
+        "telegram.me",
+        "t.me",
+        "tdesktop.com",
+        "telegra.ph",
+        "telesco.pe"
+      ],
+      "networks": [
+        "91.108.56.0/22",
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.16.0/22",
+        "91.108.12.0/22",
+        "149.154.160.0/20",
+        "91.105.192.0/23",
+        "91.108.20.0/22",
+        "185.76.151.0/24",
+        "2001:b28:f23d::/48",
+        "2001:b28:f23f::/48",
+        "2001:67c:4e8::/48",
+        "2001:b28:f23c::/48",
+        "2a0a:f280::/32"
+      ],
       "source": "https://core.telegram.org/resources/cidr.txt",
-      "checked_at": "2026-10-30"
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/telegram.svg"
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "code": "DIS",
+      "description": "Discord",
+      "domains": [
+        "dis.gd",
+        "discord.co",
+        "discord.com",
+        "discord.gg",
+        "discord.media",
+        "discordapp.com",
+        "discordapp.net",
+        "discord-activities.com",
+        "discordactivities.com",
+        "discordcdn.com"
+      ],
+      "hosts": [
+        "discord-attachments-uploads-prd.storage.googleapis.com"
+      ],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/discord",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/discord.svg"
+    },
+    {
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "code": "WHA",
+      "description": "WhatsApp",
+      "domains": [
+        "wa.me",
+        "whatsapp.com",
+        "whatsapp.net",
+        "whatsapp.org"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/whatsapp",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/whatsapp.svg"
+    },
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "code": "INS",
+      "description": "Instagram",
+      "domains": [
+        "instagram.com",
+        "cdninstagram.com",
+        "ig.me",
+        "igcdn.com",
+        "igtv.com"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/instagram",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/instagram.svg"
+    },
+    {
+      "id": "facebook",
+      "name": "Facebook",
+      "code": "FAC",
+      "description": "Facebook",
+      "domains": [
+        "facebook.com",
+        "facebook.net",
+        "fb.com",
+        "fb.me",
+        "fb.watch",
+        "fbcdn.com",
+        "fbcdn.net",
+        "messenger.com",
+        "m.me"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/facebook",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/facebook.svg"
+    },
+    {
+      "id": "x",
+      "name": "X (Twitter)",
+      "code": "X",
+      "description": "X (Twitter)",
+      "domains": [
+        "x.com",
+        "twitter.com",
+        "t.co",
+        "twimg.com",
+        "twitteroauth.com",
+        "twtrdns.net",
+        "twttr.com",
+        "twttr.net",
+        "tweetdeck.com",
+        "twvid.com"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/twitter",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/x.svg"
+    },
+    {
+      "id": "signal",
+      "name": "Signal",
+      "code": "SIG",
+      "description": "Signal",
+      "domains": [
+        "signal.org",
+        "signal.art",
+        "signal.group",
+        "signal.link",
+        "signal.me",
+        "signal.tube",
+        "signalusers.org",
+        "whispersystems.org"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/signal",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/signal.svg"
+    },
+    {
+      "id": "viber",
+      "name": "Viber",
+      "code": "VIB",
+      "description": "Viber",
+      "domains": [
+        "viber.com",
+        "viber.co",
+        "viber.me",
+        "vbcdn.com",
+        "vbcdn.net"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/viber",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/viber.svg"
+    },
+    {
+      "id": "snapchat",
+      "name": "Snapchat",
+      "code": "SNA",
+      "description": "Snapchat",
+      "domains": [
+        "snapchat.com",
+        "snap.com",
+        "sc-cdn.net",
+        "sc-gw.com",
+        "sc-static.net",
+        "snap-dev.net",
+        "snapkit.co"
+      ],
+      "hosts": [
+        "impala-media-production.s3.amazonaws.com"
+      ],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/snap",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/snapchat.svg"
+    },
+    {
+      "id": "roblox",
+      "name": "Roblox",
+      "code": "ROB",
+      "description": "Roblox",
+      "domains": [
+        "roblox.com",
+        "rbxcdn.com",
+        "rbxinfra.net",
+        "rblx.com",
+        "rblx.co",
+        "rbx.com",
+        "roblox.net",
+        "robloxlabs.com"
+      ],
+      "hosts": [
+        "roblox-api.arkoselabs.com",
+        "d1unuk07s6td74.cloudfront.net",
+        "d348twzf7a8p5.cloudfront.net",
+        "doy2mn9upadnk.cloudfront.net"
+      ],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/roblox",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/roblox.svg"
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "code": "LIN",
+      "description": "LinkedIn",
+      "domains": [
+        "linkedin.com",
+        "linkedin.at",
+        "licdn.com",
+        "lnkd.in"
+      ],
+      "hosts": [
+        "l-0005.dc-msedge.net",
+        "l-0005.l-msedge.net"
+      ],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/linkedin",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/linkedin.svg"
+    },
+    {
+      "id": "threads",
+      "name": "Threads",
+      "code": "THR",
+      "description": "Threads",
+      "domains": [
+        "threads.com",
+        "threads.net"
+      ],
+      "hosts": [],
+      "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/threads",
+      "checked_at": "2026-10-30",
+      "icon": "/icons/apps/threads.svg"
     }
   ]
 }
