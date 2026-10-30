@@ -6,29 +6,5 @@
     "features": ["tunnel_privacy", "tunnel_ech"],
     "strategies": ["", "fallback", "url-test", "select"],
     "rules": ["block_malware", "quic_compatibility", "direct_ru_services", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "windows_geolocation", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
-  },
-  "singbox": {
-    "label": "sing-box JSON",
-    "components": ["transport-reality", "transport-shadowsocks", "transport-wg", "transport-hysteria2", "transport-tuic"],
-    "transports": ["raw", "tcp", "grpc", "websocket", "httpupgrade"],
-    "features": ["tunnel_fragment", "tunnel_ech"],
-    "strategies": ["url-test", "select"],
-    "rules": ["block_malware", "quic_compatibility", "direct_ru_services", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "windows_geolocation", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
-  },
-  "uri": {
-    "label": "Xray URI-подписка (TXT)",
-    "components": ["transport-reality"],
-    "transports": ["raw", "tcp", "grpc", "websocket", "httpupgrade"],
-    "features": [],
-    "strategies": [],
-    "rules": []
-  },
-  "xray": {
-    "label": "Xray JSON",
-    "components": ["transport-reality", "transport-shadowsocks"],
-    "transports": ["raw", "tcp", "xhttp", "grpc", "websocket", "httpupgrade"],
-    "features": ["tunnel_privacy"],
-    "strategies": [],
-    "rules": ["direct_ru_services", "block_privacy", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "windows_geolocation", "direct_local_network"]
   }
 }

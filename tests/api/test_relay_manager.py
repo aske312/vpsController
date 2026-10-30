@@ -65,9 +65,7 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
-    def test_first_hop_cdn_keeps_protocol_transport_and_tls_in_every_export(self):
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+    def test_first_hop_cdn_keeps_protocol_transport_and_tls_in_yaml_export(self):
         for kind in ('vless', 'vmess', 'trojan'):
             for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
                 with self.subTest(protocol=kind, transport=transport):
@@ -82,19 +80,10 @@ class RelayManagementTests(unittest.TestCase):
                     self.assertEqual([(row['target_ip'],row['target_port'],row['cdn_domain']) for row in routes], [('104.16.1.2',443,'cdn.example')])
                     port = routes[0]['listen_port']
                     original = copy.deepcopy(connection)
-                    node = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)[0]['outbounds'][0]
-                    endpoint = node['settings']['servers' if kind == 'trojan' else 'vnext'][0]
-                    self.assertEqual((endpoint['address'],endpoint['port']), (AGENT,port))
-                    self.assertEqual(node['protocol'],kind)
-                    self.assertEqual(node['streamSettings']['tlsSettings']['serverName'],'cdn.example')
-                    self.assertEqual(node['streamSettings']['network'],'ws' if transport == 'websocket' else transport)
                     lines = relay_connections.redirect_mihomo_lines(self.control, 'transport-reality', settings, manager.render_vless_cdn(credential, 'CDN'))
                     proxy = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
                     self.assertEqual((proxy['server'],proxy['port'],proxy['servername']), (AGENT,port,'cdn.example'))
                     self.assertEqual(proxy['type'], kind)
-                    if transport != 'xhttp':
-                        proxy = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)['outbounds'][0]
-                        self.assertEqual((proxy['server'],proxy['server_port'],proxy['tls']['server_name']), (AGENT,port,'cdn.example'))
                     self.assertEqual(connection,original)
 
     def test_cdn_target_is_validated_pinned_and_does_not_reuse_origin_socket(self):
@@ -182,10 +171,8 @@ class RelayManagementTests(unittest.TestCase):
         self.assertEqual(native.call_count,1)
         self.assertEqual(len(self.control.read()['routes']),1)
 
-    def test_cdn_relay_preserves_each_transport_in_client_exports(self):
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        for transport, key in [('websocket', 'wsSettings'), ('xhttp', 'xhttpSettings'), ('grpc', 'grpcSettings'), ('httpupgrade', 'httpupgradeSettings')]:
+    def test_cdn_relay_preserves_each_transport_in_yaml_export(self):
+        for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
             with self.subTest(transport=transport):
                 credential = {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'cdn.example',
                               'cdn_path': '/private', 'cdn_transport': transport, 'cdn_xhttp_mode': 'packet-up'}
@@ -202,20 +189,6 @@ class RelayManagementTests(unittest.TestCase):
                 if transport == 'httpupgrade': self.assertTrue(node['ws-opts']['v2ray-http-upgrade'])
                 if transport == 'xhttp': self.assertEqual(node['xhttp-opts'], {'path':'/private', 'mode':'packet-up'})
                 if transport == 'grpc': self.assertEqual(node['grpc-opts']['grpc-service-name'], 'private')
-                xray = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)[0]['outbounds'][0]
-                endpoint = xray['settings']['vnext'][0]
-                self.assertEqual((endpoint['address'], endpoint['port']), ('cdn.example', 443))
-                stream = xray['streamSettings']
-                self.assertEqual(stream['network'], 'ws' if transport == 'websocket' else transport)
-                self.assertEqual(stream['tlsSettings']['serverName'], 'cdn.example')
-                self.assertEqual(stream[key]['serviceName' if transport == 'grpc' else 'path'], 'private' if transport == 'grpc' else '/private')
-                if transport == 'xhttp': self.assertEqual(stream[key]['mode'], 'packet-up')
-                if transport != 'xhttp':
-                    exported = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
-                    node = next(item for item in exported['outbounds'] if item['type'] == 'vless')
-                    self.assertEqual((node['server'], node['server_port'], node['tls']['server_name']), ('cdn.example', 443, 'cdn.example'))
-                    self.assertEqual(node['transport']['type'], 'ws' if transport == 'websocket' else transport)
-                    self.assertEqual(node['transport']['service_name' if transport == 'grpc' else 'path'], 'private' if transport == 'grpc' else '/private')
                 self.assertEqual(connection, source)
 
     def test_cdn_relay_reuses_https_and_acme_ingress_and_rejects_other_port80_consumers(self):
@@ -486,32 +459,21 @@ class RelayManagementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             relay_connections.direct_groups('ikev2', settings, {'config': ''})
 
-    def test_mihomo_native_formats_redirect_only_selected_socket_preserving_host_and_sni(self):
+    def test_mihomo_yaml_redirect_only_selected_socket_preserving_host_and_sni(self):
         connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'settings': {'relay_host_id': self.host_id, 'route_mode': 'cdn'}, 'credential': {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'origin.example', 'cdn_path': '/private', 'cdn_transport': 'websocket'}}
         relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        configs = manager.build_xray_configs([connection], {}, {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}, [], ORIGIN, lambda: {}, redirect)
-        node = configs[0]['outbounds'][0]
-        self.assertEqual(node['settings']['vnext'][0]['address'], AGENT)
-        self.assertEqual(node['streamSettings']['tlsSettings']['serverName'], 'origin.example')
-        self.assertEqual(node['streamSettings']['wsSettings']['headers']['Host'], 'origin.example')
         lines = manager.render_vless_cdn(connection['credential'], 'CDN')
         changed = relay_connections.redirect_mihomo_lines(self.control, connection['component'], connection['settings'], lines)
         self.assertIn('    server: "'+AGENT+'"', changed)
         self.assertIn('    servername: "origin.example"', changed)
         self.assertIn('        Host: "origin.example"', changed)
-        singbox = manager.build_singbox_config([connection], {}, {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}, [], ORIGIN, lambda: {}, False, redirect=redirect)
-        node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
-        self.assertEqual((node['server'], node['server_port']), (AGENT, 20000))
-        self.assertEqual(node['tls']['server_name'], 'origin.example')
-        self.assertEqual(node['transport']['headers']['Host'], 'origin.example')
         before = sum(method == 'PUT' for method, _ in self.agent.calls)
         self.agent.offline = True
         relay_connections.prepare_mihomo(self.control, [{**connection, 'name': 'Renamed'}], 'd'*32, previous=[connection])
         self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), before)
 
     @patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (AGENT, 0))])
-    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_all_exports(self, _dns):
+    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_yaml_export(self, _dns):
         self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example', 'backup.example']}
         self.control.public()
         credential = {'uuid': 'key-value', 'route_mode': 'tls', 'tls_enabled': True, 'tls_domain': 'origin.example',
@@ -521,8 +483,6 @@ class RelayManagementTests(unittest.TestCase):
                       'credential': credential}
         original = copy.deepcopy(connection)
         relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
         for address in ('relay.example', 'backup.example'):
             selected = {**connection, 'settings': {**connection['settings'], 'relay_address': address}}
             with self.subTest(address=address):
@@ -531,15 +491,6 @@ class RelayManagementTests(unittest.TestCase):
                 self.assertEqual((node['server'], node['port']), (address, 20000))
                 self.assertEqual(node['servername'], 'origin.example')
                 self.assertEqual(node['ws-opts']['headers']['Host'], 'origin.example')
-                singbox = manager.build_singbox_config([selected], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
-                node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
-                self.assertEqual((node['server'], node['server_port']), (address, 20000))
-                self.assertEqual(node['tls']['server_name'], 'origin.example')
-                self.assertEqual(node['transport']['headers']['Host'], 'origin.example')
-                xray = manager.build_xray_configs([selected], {}, dns, [], ORIGIN, lambda: {}, redirect)
-                node = xray[0]['outbounds'][0]
-                self.assertEqual(node['settings']['vnext'][0]['address'], address)
-                self.assertEqual(node['streamSettings']['tlsSettings']['serverName'], 'origin.example')
                 self.agent.calls.clear()
                 relay_connections.prepare_mihomo(self.control, [selected], 'd'*32, previous=[connection])
                 self.assertEqual(self.agent.calls, [])

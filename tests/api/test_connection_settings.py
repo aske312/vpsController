@@ -26,7 +26,7 @@ class ConnectionSettingsTests(unittest.TestCase):
             with self.subTest(module=module), self.assertRaises(manager.HTTPException):
                 manager.validate_connection("transport-" + module, values)
 
-    def test_per_user_quic_settings_override_shared_defaults_in_both_exports(self):
+    def test_per_user_quic_settings_override_shared_defaults_in_yaml_export(self):
         for module, values, expected in (
             ("tuic", {"congestion_control": "cubic", "heartbeat": "30s", "udp_relay_mode": "quic"}, {"congestion-controller": "cubic", "heartbeat-interval": 30000, "udp-relay-mode": "quic"}),
             ("hysteria2", {"up_mbps": 23, "down_mbps": 45}, {"up": "23 Mbps", "down": "45 Mbps"}),
@@ -40,9 +40,6 @@ class ConnectionSettingsTests(unittest.TestCase):
                     exported = yaml.safe_load("proxies:\n" + "\n".join(manager.render_proxy(row["component"], result["credential"], "test")))["proxies"][0]
                 for key, value in expected.items():
                     self.assertEqual(exported[key], value)
-                config = manager.build_singbox_config([result], {}, {"nameserver": "1.1.1.1", "fallback": "8.8.8.8"}, [], "127.0.0.1", lambda: {}, None)
-                for key, value in values.items():
-                    self.assertEqual(config["outbounds"][0][key], value)
                 self.assertEqual(exported["port"], 5678)
                 self.assertEqual(credential["port"], 1234)
 

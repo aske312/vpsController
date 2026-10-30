@@ -1,13 +1,11 @@
-"""Client format selection and sing-box TLS fragmentation."""
+"""Mihomo YAML exports and safe migration of saved profile settings."""
 from copy import deepcopy
-import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
 import yaml
 from unittest.mock import Mock, patch
-from urllib.parse import unquote
 
 from tests.api.support import manager, managed_mihomo_fixture
 
@@ -51,9 +49,9 @@ class ClientOptionsTests(unittest.TestCase):
         for format in ('singbox', 'xray', 'uri', 'invalid'):
             with self.subTest(format=format), self.assertRaises(manager.HTTPException) as rejected:
                 manager.render_client_profile(self.profile, 'phone', format)
-            self.assertEqual(rejected.exception.status_code, 422)
+            self.assertEqual(rejected.exception.status_code, 422 if format == "invalid" else 410)
 
-    def test_subscription_names_follow_routes_relay_name_in_every_format(self):
+    def test_subscription_names_follow_routes_relay_name_in_yaml(self):
         connection = self.profile['connections'][0]
         connection['settings'].update(relay_host_id='a'*32, relay_cdn=True, cdn_domain='example.com')
         source = deepcopy(self.profile)
@@ -62,27 +60,17 @@ class ClientOptionsTests(unittest.TestCase):
         with patch.object(manager, 'relay_connection_control', return_value=control):
             for name in ['Relay West', 'Москва · "CDN"']:
                 control.read.return_value = {'hosts': [{'id': 'a'*32, 'name': name}]}
-                for format in ['mihomo']:
-                    with self.subTest(name=name, format=format):
-                        control.read.reset_mock()
-                        data, _ = manager.render_client_profile(self.profile, 'common', format)
-                        if format == 'mihomo':
-                            config = yaml.safe_load(data)
-                            label = config['proxies'][0]['name']
-                            group = config['proxy-groups'][0]
-                            self.assertEqual(group['name'], '312node.net')
-                            self.assertEqual(group['proxies'], [label])
-                            self.assertEqual(config['rules'][-1], 'MATCH,312node.net')
-                        elif format == 'singbox':
-                            config = json.loads(data)
-                            label = config['outbounds'][0]['tag']
-                            self.assertEqual(config['route']['final'], label)
-                        elif format == 'xray':
-                            label = json.loads(data)[0]['remarks']
-                        else:
-                            label = unquote(data.strip().rsplit('#', 1)[1])
-                        self.assertEqual(label, f'1 · VLESS · WebSocket · TLS · CDN · Relay: {name}')
-                        control.read.assert_called_once_with()
+                with self.subTest(name=name):
+                    control.read.reset_mock()
+                    data, _ = manager.render_client_profile(self.profile, 'common')
+                    config = yaml.safe_load(data)
+                    label = config['proxies'][0]['name']
+                    group = config['proxy-groups'][0]
+                    self.assertEqual(group['name'], '312node.net')
+                    self.assertEqual(group['proxies'], [label])
+                    self.assertEqual(config['rules'][-1], 'MATCH,312node.net')
+                    self.assertEqual(label, f'1 \u00b7 VLESS \u00b7 WebSocket \u00b7 TLS \u00b7 CDN \u00b7 Relay: {name}')
+                    control.read.assert_called_once_with()
         self.assertEqual(self.profile, source)
 
     def test_relay_labels_keep_protocol_details_for_all_components_and_modes(self):

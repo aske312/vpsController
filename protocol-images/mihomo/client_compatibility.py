@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 
 MATRIX_FILE = Path(__file__).with_name("client-verification.json")
-FORMATS = {"mihomo", "singbox", "xray", "uri"}
+FORMATS = {"mihomo"}
 IDENTITY_FIELDS = ("client_name", "client_version", "core_name", "core_version", "os", "os_version")
 PROTOCOL_OPTIONS = frozenset("bbr_profile cdn_xhttp_mode congestion_control cwnd disable_mtu_discovery down_mbps fingerprint handshake_timeout heartbeat initial_connection_receive_window initial_stream_receive_window ip_version jc jmax jmin keepalive max_connection_receive_window max_datagram_frame_size max_open_streams max_stream_receive_window max_udp_relay_packet_size method mptcp mtu name_cert_verify no_delay recv_window recv_window_conn skip_cert_verify tfo timeout tls_xhttp_mode udp_mtu udp_relay_mode up_mbps xhttp_mode xmux_concurrency xpadding zero_rtt".split())
 
@@ -48,13 +48,6 @@ def verified_records(path=None):
 
 def matching_records(scenario, records=None):
     return [record for record in (verified_records() if records is None else records) if record["scenario"] == scenario]
-
-
-def select_format(metadata, scenario, records=None):
-    for record in matching_records(scenario, records):
-        if all(str(metadata.get(key, "")).casefold() == record[key].casefold() for key in IDENTITY_FIELDS):
-            return record["format"]
-    return "mihomo"
 
 
 def public_record(record):

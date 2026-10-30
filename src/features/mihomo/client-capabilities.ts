@@ -1,28 +1,24 @@
 import catalog from "../../../protocol-images/mihomo/client-capabilities.json" with { type: "json" };
-import extensions from "../../../protocol-images/mihomo/client-extensions.json" with { type: "json" };
 import type { ProfileConnection } from "./types";
 
-export function clientCapabilities(format: unknown, os?: string, client?: string): { label: string; components: string[]; transports: string[]; features: string[]; strategies: string[]; rules: string[] } {
-  format = "mihomo";
-  const base = catalog.mihomo;
-  const extension = extensions[client as keyof typeof extensions];
-  const caps = extension && extension.format === format ? { ...base, components: [...base.components, ...extension.components], transports: [...base.transports, ...extension.transports], features: [...base.features, ...extension.features] } : base;
+export function clientCapabilities(os?: string): { label: string; components: string[]; transports: string[]; features: string[]; strategies: string[]; rules: string[] } {
+  const caps = catalog.mihomo;
   const platformRules = os !== undefined && os !== "windows" ? caps.rules.filter((key) => key !== "windows_geolocation") : caps.rules;
   return { ...caps, rules: os !== undefined && !["windows", "macos", "linux"].includes(os) ? platformRules.filter((key) => !["direct_games_enabled", "direct_p2p_enabled"].includes(key)) : platformRules };
 }
 
-export function compatibleClientRouting(routing: Record<string, string | number | boolean>, format: string, os?: string, client?: string) {
-  const caps = clientCapabilities(format, os, client);
+export function compatibleClientRouting(routing: Record<string, string | number | boolean>, os?: string) {
+  const caps = clientCapabilities(os);
   const result: Record<string, string | number | boolean> = Object.fromEntries(Object.entries(routing).filter(([key]) => key !== "client_config_format" && !key.startsWith("block_ads") && !key.startsWith("tunnel_fragment")));
-  for (const key of [...catalog.mihomo.rules, "tunnel_privacy", "tunnel_ech", "tunnel_fragment"]) {
+  for (const key of [...catalog.mihomo.rules, "tunnel_privacy", "tunnel_ech"]) {
     if (key in result && ![...caps.features, ...caps.rules].includes(key)) result[key] = false;
   }
   if (!caps.strategies.includes(String(result.strategy || ""))) result.strategy = caps.strategies[0] || "";
   return result;
 }
 
-export function clientConnectionSupported(connection: Pick<ProfileConnection, "component" | "settings">, format: unknown, client?: string) {
-  const caps = clientCapabilities(format, undefined, client);
+export function clientConnectionSupported(connection: Pick<ProfileConnection, "component" | "settings">) {
+  const caps = clientCapabilities();
   if (!caps.components.includes(connection.component)) return false;
   if (connection.component !== "transport-reality") return true;
   const settings = connection.settings;

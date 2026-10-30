@@ -15,9 +15,9 @@ profile_rules = manager.profile_rules
 
 
 def check(scenario, **changes):
-    return {"id": "fixture-check", "client_name": "Happ", "client_version": "3.0",
-            "core_name": "Xray", "core_version": "25.1", "os": "windows", "os_version": "11",
-            "format": "xray", "app_url": "https://example.invalid/app",
+    return {"id": "fixture-check", "client_name": "Clash Mi", "client_version": "3.0",
+            "core_name": "Mihomo", "core_version": "25.1", "os": "windows", "os_version": "11",
+            "format": "mihomo", "app_url": "https://example.invalid/app",
             "scenario": deepcopy(scenario), "evidence": {"kind": "application", "result": "passed",
             "reference": "test fixture, not a real application check", "checked_at": "2026-10-12"}, **changes}
 
@@ -48,29 +48,24 @@ class VerificationMatrixTests(unittest.TestCase):
                    {**valid, "os": "unknown"}, {**valid, "scenario": {"connections": []}}]
         self.assertEqual(self.write(invalid + [valid]), [valid])
 
-    def test_exact_identity_and_configuration_are_required(self):
+    def test_only_exact_yaml_scenarios_are_recommended(self):
         record = check(self.scenario)
-        metadata = {key: record[key] for key in policy.IDENTITY_FIELDS}
-        self.assertEqual(policy.select_format(metadata, self.scenario, [record]), "xray")
-        for key in policy.IDENTITY_FIELDS:
-            with self.subTest(key=key):
-                self.assertEqual(policy.select_format({**metadata, key: "other"}, self.scenario, [record]), "mihomo")
-                reduced = {k: v for k, v in metadata.items() if k != key}
-                self.assertEqual(policy.select_format(reduced, self.scenario, [record]), "mihomo")
-        self.assertEqual(policy.select_format(metadata, {"connections": [{"component": "transport-awg"}]}, [record]), "mihomo")
+        self.assertEqual(policy.matching_records(self.scenario, [record]), [record])
+        self.assertEqual(policy.matching_records({"connections": []}, [record]), [])
+        self.assertEqual(self.write([check(self.scenario, format="xray")]), [])
 
     def test_versions_are_observed_without_guessing_a_bundled_core(self):
-        self.assertEqual(manager.observed_client_versions("Happ/3.0 (Xray/25.1)", "Happ"),
-                         {"client_version": "3.0", "core_name": "Xray", "core_version": "25.1"})
-        self.assertEqual(manager.observed_client_versions("Happ/3.0 like sing-box", "Happ")["core_version"], "")
-        self.assertEqual(manager.observed_client_versions("CFNetwork/3860 Darwin/25", "Happ")["client_version"], "")
-        self.assertEqual(manager.observed_client_versions("RocketVPN/582994", "Happ")["client_version"], "")
+        self.assertEqual(manager.observed_client_versions("ClashMi/3.0 (Mihomo/25.1)", "Clash Mi"),
+                         {"client_version": "3.0", "core_name": "Mihomo", "core_version": "25.1"})
+        self.assertEqual(manager.observed_client_versions("ClashMi/3.0 like sing-box", "Clash Mi")["core_version"], "")
+        self.assertEqual(manager.observed_client_versions("CFNetwork/3860 Darwin/25", "Clash Mi")["client_version"], "")
+        self.assertEqual(manager.observed_client_versions("RocketVPN/582994", "Clash Mi")["client_version"], "")
 
 
 class VerifiedSubscriptionTests(unittest.TestCase):
     def setUp(self):
         subscription_tests.SubscriptionFormatTests.setUp(self)
-        # Xray exports independent configs, without a proxy-group strategy.
+        # Keep a minimal routing fixture for application verification.
         values = {**manager.routing_settings(), "strategy": ""}
         self.enterContext(patch.object(manager, "routing_settings", return_value=values))
         self.enterContext(patch.object(manager, "profile_rules", side_effect=profile_rules))
@@ -84,13 +79,13 @@ class VerifiedSubscriptionTests(unittest.TestCase):
 
     @staticmethod
     def headers():
-        return [(b"x-client-version", b"3.0"), (b"x-core-name", b"Xray"), (b"x-core-version", b"25.1"),
+        return [(b"x-client-version", b"3.0"), (b"x-core-name", b"Mihomo"), (b"x-core-version", b"25.1"),
                 (b"x-device-os", b"Windows"), (b"x-ver-os", b"11")]
 
     def test_verified_client_gets_format_without_hwid_or_profile_mutation(self):
         self.matrix()
         before = manager.normalize_profile(deepcopy(self.store[0]))["devices"]
-        response = self.fetch("Happ/3.0", hwid=None, extra_headers=self.headers())
+        response = self.fetch("ClashMi/3.0", hwid=None, extra_headers=self.headers())
         self.assertIn(".yaml", response.headers["content-disposition"])
         self.assertEqual(yaml.safe_load(response.body)["proxies"][0]["type"], "ss")
         self.assertEqual(self.store[0]["devices"], before)
@@ -98,22 +93,22 @@ class VerifiedSubscriptionTests(unittest.TestCase):
 
     def test_explicit_versions_in_user_agent_can_match_verification(self):
         self.matrix()
-        response = self.fetch("Happ/3.0 (Xray/25.1)", hwid=None,
+        response = self.fetch("ClashMi/3.0 (Mihomo/25.1)", hwid=None,
                               extra_headers=[(b"x-device-os", b"Windows"), (b"x-ver-os", b"11")])
         self.assertIn(".yaml", response.headers["content-disposition"])
-        response = self.fetch("Happ/3.0 like Xray", hwid=None,
+        response = self.fetch("ClashMi/3.0 like Mihomo", hwid=None,
                               extra_headers=[(b"x-device-os", b"Windows"), (b"x-ver-os", b"11")])
         self.assertIn(".yaml", response.headers["content-disposition"])
 
     def test_registered_verified_client_keeps_credentials_and_configuration_on_repeat(self):
         self.matrix()
-        response = self.fetch("Happ/3.0", extra_headers=self.headers())
+        response = self.fetch("ClashMi/3.0", extra_headers=self.headers())
         self.assertIn(".yaml", response.headers["content-disposition"])
         device = self.store[0]["devices"][1]
         device_id = device["id"]
         self.assertNotIn("client_config_format", device["routing"])
         credentials = deepcopy(self.store[0]["connections"])
-        repeat = self.fetch("Happ/3.0", extra_headers=self.headers())
+        repeat = self.fetch("ClashMi/3.0", extra_headers=self.headers())
         self.assertEqual(repeat.body, response.body)
         self.assertEqual(self.store[0]["connections"], credentials)
         self.assertEqual(self.provision.call_count, 1)
@@ -123,7 +118,7 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         # New app/core version is unverified: default YAML, no credential rotation
         # or rewriting the saved explicit exporter selection.
         headers = [(key, b"26.0" if key == b"x-core-version" else value) for key, value in self.headers()]
-        unknown = self.fetch("Happ/3.0", extra_headers=headers)
+        unknown = self.fetch("ClashMi/3.0", extra_headers=headers)
         self.assertIn(".yaml", unknown.headers["content-disposition"])
         self.assertEqual(self.store[0]["connections"], credentials)
         self.assertEqual(self.store[0]["devices"][1]["id"], device_id)
@@ -131,11 +126,11 @@ class VerifiedSubscriptionTests(unittest.TestCase):
 
     def test_profile_edit_cannot_remove_or_replace_observed_core_metadata(self):
         self.matrix()
-        self.fetch("Happ/3.0", extra_headers=self.headers())
+        self.fetch("ClashMi/3.0", extra_headers=self.headers())
         devices = [manager.ProfileDeviceInput(**{**device, "client_version": "fake", "os_version": "fake"}) for device in self.store[0]["devices"]]
         manager.update_profile("profile", manager.ProfileUpdate(devices=devices))
         device = self.store[0]["devices"][1]
-        self.assertEqual(device["core_name"], "Xray")
+        self.assertEqual(device["core_name"], "Mihomo")
         self.assertEqual(device["core_version"], "25.1")
         self.assertEqual(device["client_version"], "3.0")
         self.assertEqual(device["os_version"], "11")
@@ -145,7 +140,7 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         self.assertEqual(len(manager.verified_profile_clients(self.store[0], "common")), 1)
         self.store[0]["devices"][0]["routing"]["tunnel_ech"] = True
         self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
-        response = self.fetch("Happ/3.0", hwid=None, extra_headers=self.headers())
+        response = self.fetch("ClashMi/3.0", hwid=None, extra_headers=self.headers())
         self.assertIn(".yaml", response.headers["content-disposition"])
 
     def test_inherited_strategy_is_checked_before_recommending_an_exporter(self):
@@ -154,10 +149,10 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         with patch.object(manager, "routing_settings", return_value=global_values):
             scenario = manager.client_verification_scenario(self.store[0], "common")
             self.assertEqual(scenario["strategy"], "fallback")
-            record = check(scenario)
+            record = check(scenario, format="xray")
             with patch.object(policy, "verified_records", return_value=[record]):
                 self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
-                self.assertIn(".yaml", self.fetch("Happ/3.0", hwid=None, extra_headers=self.headers()).headers["content-disposition"])
+                self.assertIn(".yaml", self.fetch("ClashMi/3.0", hwid=None, extra_headers=self.headers()).headers["content-disposition"])
 
     def test_rule_and_resolver_content_changes_invalidate_a_matching_check(self):
         self.store[0]["devices"][0]["routing"] = {"rules": "DOMAIN-SUFFIX,private.example,DIRECT"}
@@ -199,15 +194,15 @@ class VerifiedSubscriptionTests(unittest.TestCase):
             self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
             self.assertNotIn("private.example", json.dumps(manager.client_verification_scenario(self.store[0], "common")))
 
-    def test_record_cannot_hide_unsupported_connections_or_features(self):
-        for routing in ({"tunnel_ech": True}, {"strategy": "fallback"}, {"direct_games_enabled": True}):
-            with self.subTest(routing=routing):
+    def test_record_cannot_hide_unsupported_connections_or_platform_features(self):
+        for routing, os in (({"direct_games_enabled": True}, "ios"),):
+            with self.subTest(routing=routing, os=os):
                 self.store[0]["devices"][0]["routing"] = routing
-                record = check(manager.client_verification_scenario(self.store[0], "common"))
+                record = check(manager.client_verification_scenario(self.store[0], "common"), os=os)
                 with patch.object(policy, "verified_records", return_value=[record]):
                     self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
         self.store[0]["devices"][0]["routing"] = {}
-        self.store[0]["connections"][0]["component"] = "transport-awg"
+        self.store[0]["connections"][0]["component"] = "transport-unknown"
         record = check(manager.client_verification_scenario(self.store[0], "common"))
         with patch.object(policy, "verified_records", return_value=[record]):
             self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
@@ -215,19 +210,19 @@ class VerifiedSubscriptionTests(unittest.TestCase):
     def test_import_page_only_lists_matching_verified_clients(self):
         self.matrix()
         response = self.fetch("Mozilla/5.0", hwid=None, extra_headers=[(b"accept", b"text/html")])
-        self.assertIn("Happ 3.0", response.body.decode())
-        self.assertIn("Xray 25.1", response.body.decode())
+        self.assertIn("Clash Mi 3.0", response.body.decode())
+        self.assertIn("Mihomo 25.1", response.body.decode())
         self.assertNotIn("sing-box://", response.body.decode())
         self.store[0]["devices"][0]["routing"] = {"tunnel_ech": True}
         response = self.fetch("Mozilla/5.0", hwid=None, extra_headers=[(b"accept", b"text/html")])
-        self.assertNotIn("Happ 3.0", response.body.decode())
+        self.assertNotIn("Clash Mi 3.0", response.body.decode())
 
     def test_bound_hwid_rechecks_verification_and_manual_legacy_export_is_preserved(self):
         self.matrix()
-        self.fetch("Happ/3.0", extra_headers=self.headers())
+        self.fetch("ClashMi/3.0", extra_headers=self.headers())
         device = self.store[0]["devices"][1]
         token = manager.device_subscription_token("test-token", device["id"])
-        headers = [(b"user-agent", b"Happ/3.0"), (b"x-hwid", b"phone"), *self.headers()]
+        headers = [(b"user-agent", b"ClashMi/3.0"), (b"x-hwid", b"phone"), *self.headers()]
         request = manager.Request({"type": "http", "method": "GET", "path": "/s/" + token, "query_string": b"", "headers": headers})
         self.assertIn(".yaml", manager.public_profile_subscription(token, request).headers["content-disposition"])
         with patch.object(policy, "verified_records", return_value=[]):
@@ -256,7 +251,7 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         with patch.object(manager, "save_profiles", side_effect=AssertionError("Read wrote profile")):
             result = manager.profile_client_verification("profile")
         self.assertEqual(result["scenario"], manager.client_verification_scenario(self.store[0], "common"))
-        self.assertEqual(result["verified_clients"][0]["client_name"], "Happ")
+        self.assertEqual(result["verified_clients"][0]["client_name"], "Clash Mi")
         self.assertNotIn("test-only", json.dumps(result))
         self.assertNotIn("test-token", json.dumps(result))
         self.assertEqual(self.store, before)

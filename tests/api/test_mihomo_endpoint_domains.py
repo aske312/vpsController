@@ -125,12 +125,11 @@ class MihomoEndpointDomainTests(unittest.TestCase):
         with self.assertRaises(manager.HTTPException):
             manager.validate_connection_inputs([value], [saved])
 
-    def test_udp_address_reaches_yaml_singbox_and_xray_without_overwriting_sni_or_credentials(self):
+    def test_udp_address_reaches_yaml_without_overwriting_sni_or_credentials(self):
         base = {'server_address': ORIGIN, 'port': 51830, 'ip': '10.0.0.2/32', 'private_key': 'private', 'server_public_key': 'public', 'mtu': 1400,
                 'password': 'password', 'uuid': '00000000-0000-4000-8000-000000000001', 'method': 'aes-128-gcm',
                 'up_mbps': 100, 'down_mbps': 100, 'sni': 'cert.example', 'skip_cert_verify': False,
                 'amnezia': {key: 1 for key in ('jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4')}}
-        dns = {'nameserver': 'https://dns.google/dns-query', 'fallback': '1.1.1.1'}
         for component in UDP_COMPONENTS:
             original = {'id': component, 'component': component, 'name': component, 'settings': {'udp_domain': DOMAIN}, 'credential': copy.deepcopy(base)}
             snapshot = copy.deepcopy(original)
@@ -138,18 +137,9 @@ class MihomoEndpointDomainTests(unittest.TestCase):
             self.assertEqual(original, snapshot)
             proxy = yaml.safe_load('proxies:\n'+'\n'.join(manager.render_proxy(component, effective['credential'], component)))['proxies'][0]
             self.assertEqual((proxy['server'], proxy['port']), (DOMAIN, base['port']))
-            exported = manager.build_singbox_config([effective], {}, dns, [], ORIGIN, lambda: {}, None, {'components': ['transport-awg']})
-            if component in ('transport-wg', 'transport-awg'):
-                self.assertEqual(exported['endpoints'][0]['peers'][0]['address'], DOMAIN)
-            else:
-                self.assertEqual(exported['outbounds'][0]['server'], DOMAIN)
             if component in ('transport-hysteria2', 'transport-tuic'):
                 self.assertEqual(proxy['sni'], 'cert.example')
                 self.assertFalse(proxy['skip-cert-verify'])
-                self.assertEqual(exported['outbounds'][0]['tls']['server_name'], 'cert.example')
-            if component == 'transport-shadowsocks':
-                xray = manager.build_xray_configs([effective], {}, dns, [], ORIGIN, lambda: {})
-                self.assertIn(DOMAIN, json.dumps(xray))
             cleared = manager.effective_client_connections([{**original, 'settings': {'udp_domain': ''}}])[0]
             self.assertEqual(cleared['credential']['server_address'], ORIGIN)
 

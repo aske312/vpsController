@@ -196,7 +196,7 @@ export function MihomoPage({
   const activeProfileRouting = activeProfileDevice?.scope === "common"
     ? commonProfileRouting
     : { ...commonProfileRouting, ...(activeProfileDevice?.routing || {}) };
-  const activeCapabilities = clientCapabilities("mihomo", activeProfileDevice?.scope === "common" ? undefined : activeProfileDevice?.os || "unknown", activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
+  const activeCapabilities = clientCapabilities(activeProfileDevice?.scope === "common" ? undefined : activeProfileDevice?.os || "unknown");
   const commonDevice = activeProfileDevice?.scope === "common";
   const visibleProfileStrategies = profileStrategies.filter((strategy) => commonDevice || activeCapabilities.strategies.includes(strategy.value));
   const visibleProfileRules = profileDirectRules.filter((rule) => commonDevice
@@ -908,7 +908,7 @@ export function MihomoPage({
     }));
     setProfileConnections(connections);
     setProfileRouting({ ...(profile.routing || {}) });
-    const devices = (profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]).map((device) => ({ ...device, routing: device.scope === "common" ? { ...(device.routing || profile.routing || {}) } : compatibleClientRouting(device.routing || {}, "mihomo", device.os || "unknown", device.manual ? undefined : device.client_name) }));
+    const devices = (profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]).map((device) => ({ ...device, routing: device.scope === "common" ? { ...(device.routing || profile.routing || {}) } : compatibleClientRouting(device.routing || {}, device.os || "unknown") }));
     setProfileDevices(devices);
     setProfileInitialDraft(JSON.stringify([profile.name, connections, { ...(profile.routing || {}) }, devices, { ...unlimitedSubscription, ...profile.limits }]));
     setActiveDeviceId(profile.common_device_id || devices.find((device) => device.scope === "common")?.id || devices[0].id);
@@ -1004,7 +1004,7 @@ export function MihomoPage({
       connections.push({ id: `connection-${clientUuid()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : ""}`, device_id: activeDeviceId, settings });
     }
     setProfileConnections((current) => [...current.filter((connection) => connection.device_id !== activeDeviceId), ...connections]);
-    if (!profileStrategyTouched) setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: commonDevice ? { ...(device.routing || profileRouting), strategy: preset.strategy } : compatibleClientRouting({ ...(device.routing || profileRouting), strategy: preset.strategy }, "mihomo", activeProfileDevice?.os || "unknown", activeProfileDevice?.client_name) } : device));
+    if (!profileStrategyTouched) setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: commonDevice ? { ...(device.routing || profileRouting), strategy: preset.strategy } : compatibleClientRouting({ ...(device.routing || profileRouting), strategy: preset.strategy }, activeProfileDevice?.os || "unknown") } : device));
     if (!profileName.trim()) setProfileName(preset.name);
   }
 
@@ -1590,7 +1590,7 @@ export function MihomoPage({
           {!dnsByRoute && <>
           {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Дополнительный резолвер для проверки ответов.']] as const).map(([key, title, note]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b><small>{note}</small></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b><small>{meta.note}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
           </>}
-          <aside className="mihomoDnsNote"><b>Применение настроек</b><span>{dnsByRoute ? "При недоступности VPN туннельный DNS не переключается на прямой. Для правил по IP и приложениям DNS может понадобиться до выбора маршрута. Для sing-box требуется ядро 1.14+. " : "Основной и резервный DNS должны отличаться. "}После сохранения обновите подписку в клиенте.</span></aside>
+          <aside className="mihomoDnsNote"><b>Применение настроек</b><span>{dnsByRoute ? "При недоступности VPN туннельный DNS не переключается на прямой. Для правил по IP и приложениям DNS может понадобиться до выбора маршрута. " : "Основной и резервный DNS должны отличаться. "}После сохранения обновите подписку в клиенте.</span></aside>
           <footer className="mihomoDnsFooter"><button type="button" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Отменить изменения</button><span>{!dnsReadKnown ? "Не удалось прочитать настройки DNS. Обновите данные; ваш ввод сохранён." : dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy) || dnsRevisionConflict || Boolean(dnsSaveError)}>{busy === "settings:dns-private" ? "Сохранение…" : dnsSaveError ? "Проверьте DNS" : "Сохранить DNS"}</button></footer>
         </form>
       )}
@@ -1755,7 +1755,7 @@ export function MihomoPage({
               </>}
             </section>
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
-            {profileStep === 2 && <ProfileProtection common={commonDevice} client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
+            {profileStep === 2 && <ProfileProtection common={commonDevice} routing={activeProfileRouting} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
             {profileStep === 3 && <section className="mihomoDnsMode"><header><div><b>Маршрут DNS</b><small>Для выбранной конфигурации. После сохранения обновите подписку в клиенте.</small></div></header><div>{([
@@ -1771,7 +1771,7 @@ export function MihomoPage({
                 const settings = Object.fromEntries((protocolModule?.connection_settings || []).map((field) => [field.key, field.default]));
                 settings.route_mode = item.tls ? "tls" : item.cdn ? "cdn" : "direct";
                 if (item.transport) settings[item.tls ? "tls_transport" : item.cdn ? "cdn_transport" : "transport"] = item.transport;
-                return clientConnectionSupported({ component: id, settings }, "mihomo", activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
+                return clientConnectionSupported({ component: id, settings });
               })).map((preset) => {
                 const needsCdn = preset.components.some((item) => item.cdn);
                 const needsTls = preset.components.some((item) => item.tls);
@@ -1795,7 +1795,7 @@ export function MihomoPage({
                 <div className="mihomoConnectionList">
                 {(selectedConnection ? [selectedConnection] : []).map((connection, index) => {
                   const protocolModule = modules.find((item) => item.id === connection.component);
-                  const supported = commonDevice || clientConnectionSupported(connection, "mihomo", activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
+                  const supported = commonDevice || clientConnectionSupported(connection);
                   const schema = commonDevice || activeCapabilities.components.includes(connection.component) ? protocolModule?.connection_settings || [] : [];
                   const xrayName = ({vless:"VLESS",vmess:"VMess",trojan:"Trojan"} as Record<string, string>)[String(connection.settings.xray_protocol || "vless")] || "Xray";
                   const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";

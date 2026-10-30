@@ -135,7 +135,7 @@ class TunnelPrivacyTests(unittest.TestCase):
                     profile = {"common_device_id": "device", "routing": {"tunnel_privacy": not encrypted, "tunnel_ech": not ech},
                                "devices": [{"id": "device", "routing": {"tunnel_privacy": encrypted, "tunnel_ech": ech}}],
                                "connections": [{"component": "transport-reality", "device_id": "device", "settings": {"route_mode": "cdn"}, "credential": {"uuid": str(uuid.uuid4()), "encryption": "public" if encrypted else "", "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test"}}]}
-                    with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "routing_settings", return_value={}), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]), patch.object(manager, "cdn_supports_ech", return_value=True):
+                    with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "routing_settings", return_value={}), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]):
                         proxy = yaml.safe_load(manager.render_profile(profile))["proxies"][0]
                     self.assertEqual(bool(proxy.get("encryption")), encrypted)
                     self.assertEqual(bool(proxy.get("ech-opts", {}).get("enable")), ech)
@@ -190,68 +190,9 @@ class TunnelPrivacyTests(unittest.TestCase):
         manager.ensure_vless_panel_route(config)
         self.assertEqual(json.dumps(config), repaired)
 
-    def test_global_toggle_preserves_channels_and_skips_other_protocols(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            config_path = root / "reality/config.json"
-            config_path.parent.mkdir()
-            inbounds = [{"protocol": "vless", "port": 10443 + index, "settings": {"clients": [{"id": identity}], "decryption": "none"}} for index, identity in enumerate(("one", "two"))]
-            config_path.write_text(json.dumps({"inbounds": inbounds}))
-            connections = [{"component": "transport-reality", "device_id": identity, "settings": {"privacy_mode": "standard"}, "credential": {"uuid": identity, "cdn_path": "/keep-" + identity}} for identity in ("one", "two")]
-            untouched = {"component": "transport-wg", "device_id": "one", "credential": {"private_key": "unchanged"}}
-            connections.append(untouched)
-            items = [{"common_device_id": "one", "connections": connections}]
-            def apply(path, value):
-                path.write_text(json.dumps(value))
-            with patch.object(manager, "CONFIG_ROOT", root), patch.object(manager, "profiles", return_value=items), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")) as pair, patch.object(manager, "apply_reality_config", side_effect=apply) as runtime, patch.object(manager, "render_profile", return_value="yaml") as render, patch.object(manager, "validate_rendered_profile"), patch.object(manager, "save_profiles"):
-                manager.apply_tunnel_privacy(True)
-                self.assertEqual(pair.call_count, 2)
-                self.assertEqual(render.call_count, 2)
-                self.assertEqual(runtime.call_count, 1)
-                for index, connection in enumerate(connections[:2]):
-                    self.assertEqual(connection["credential"]["encryption"], "public")
-                    self.assertEqual(connection["credential"]["cdn_path"], "/keep-" + connection["credential"]["uuid"])
-                    self.assertEqual(json.loads(config_path.read_text())["inbounds"][index]["port"], 10443 + index)
-                self.assertEqual(untouched["credential"], {"private_key": "unchanged"})
-                manager.apply_tunnel_privacy(True)
-                self.assertEqual(pair.call_count, 2)
-                self.assertEqual(runtime.call_count, 1)
-                pair.return_value = ("none", "")
-                manager.apply_tunnel_privacy(False)
-                self.assertTrue(all(entry["settings"]["decryption"] == "none" for entry in json.loads(config_path.read_text())["inbounds"]))
 
     @unittest.skip("Privacy is profile-scoped")
-    def test_failed_global_toggle_restores_setting_profiles_and_server_config(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            config = root / "config"
-            config.mkdir()
-            server = config / "config.json"
-            profile = root / "profiles.json"
-            routing = root / "settings/routing.json"
-            routing.parent.mkdir()
-            for path, content in ((server, "{}"), (profile, "[]"), (routing, '{"tunnel_privacy": false}')):
-                path.write_text(content)
-            def fail(_):
-                server.write_text("changed")
-                profile.write_text("changed")
-                raise RuntimeError("validation failed")
-            with patch.object(manager, "CONFIG_ROOT", config), patch.object(manager, "PROFILE_FILE", profile), patch.object(manager, "ROUTING_SETTINGS_FILE", routing), patch.object(manager, "routing_settings", return_value={"tunnel_privacy": False}), patch.object(manager, "validate_routing", return_value={"tunnel_privacy": True}), patch.object(manager, "observe_service", return_value={"unit_present": True, "runtime": {"state": "stopped"}}), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "apply_tunnel_privacy", side_effect=fail):
-                with self.assertRaisesRegex(RuntimeError, "validation failed"):
-                    manager.patch_routing_settings(manager.ModuleSettingsPatch(values={"tunnel_privacy": True}))
-            self.assertEqual(json.loads(routing.read_text()), {"tunnel_privacy": False})
-            self.assertEqual(profile.read_text(), "[]")
-            self.assertEqual(server.read_text(), "{}")
 
-    def test_ech_capability_is_optional_and_cached(self):
-        manager.ech_capability_cache.clear()
-        with patch.object(manager.urllib.request, "urlopen") as request:
-            request.return_value.__enter__.return_value.read.return_value = json.dumps({"Status": 0, "Answer": [{"type": 65, "data": '1 . alpn="h2" ech="ABC123=="'}]}).encode()
-            self.assertTrue(manager.cdn_supports_ech("supported.example"))
-            self.assertTrue(manager.cdn_supports_ech("supported.example"))
-            self.assertEqual(request.call_count, 1)
-            request.side_effect = OSError("unavailable")
-            self.assertFalse(manager.cdn_supports_ech("unsupported.example"))
 
     def test_ech_requires_encrypted_resolvers_and_preserves_direct_rules(self):
         profile = {"common_device_id": "common", "routing": {"direct_ru_sites": True}, "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"route_mode": "cdn", "cdn_ech": True}, "credential": {"uuid": str(uuid.uuid4()), "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test"}}]}
@@ -260,7 +201,7 @@ class TunnelPrivacyTests(unittest.TestCase):
         profile["connections"][0]["credential"]["encryption"] = "public-key"
         profile["routing"]["tunnel_privacy"] = True
         profile["routing"]["tunnel_ech"] = True
-        with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
+        with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
             config = yaml.safe_load(manager.render_profile(profile))
             self.assertEqual(config["dns"]["proxy-server-nameserver"], [dns["nameserver"], dns["fallback"]])
             self.assertEqual(config["rules"], [*rules, "MATCH,312node.net"])
@@ -377,7 +318,7 @@ class RealCorePrivacyTests(unittest.TestCase):
             for transport in ("websocket", "xhttp", "httpupgrade", "grpc"):
                 profile = {"common_device_id": "common", "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"route_mode": "cdn", "cdn_ech": True, "privacy_mode": "encrypted"}, "credential": {"uuid": str(uuid.uuid4()), "encryption": encryption, "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test", "cdn_transport": transport}}]}
                 dns = {"enhanced_mode": "fake-ip", "nameserver": "https://cloudflare-dns.com/dns-query", "fallback": "https://dns.google/dns-query"}
-                with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]):
+                with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]):
                     profile["routing"] = {"tunnel_privacy": True, "tunnel_ech": True}
                     config = yaml.safe_load(manager.render_profile(profile))
                     self.assertTrue(config["proxies"][0]["ech-opts"]["enable"])

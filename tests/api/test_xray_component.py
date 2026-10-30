@@ -11,7 +11,6 @@ import yaml
 from tests.api.support import manager, ROOT
 import network_probe
 import xray_protocols
-from client_subscription import vless_subscription
 
 
 class XrayComponentTests(unittest.TestCase):
@@ -41,7 +40,7 @@ class XrayComponentTests(unittest.TestCase):
         credential = manager.add_reality_credential('profile', 'node', settings, restart_service=False, reload_caddy=False)
         return {'id':'node', 'name':'node', 'component':'transport-reality', 'settings':settings, 'credential':credential}
 
-    def test_protocols_and_transports_provision_export_and_remove_without_touching_neighbors(self):
+    def test_protocols_and_transports_provision_render_yaml_and_remove_without_touching_neighbors(self):
         for kind in ('vless', 'vmess', 'trojan'):
             for route in ('tls', 'cdn'):
                 for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
@@ -57,15 +56,6 @@ class XrayComponentTests(unittest.TestCase):
                         self.assertEqual(proxy['type'], kind)
                         for key, value in xray_protocols.mihomo_auth(credential).items(): self.assertEqual(proxy[key], value)
                         if kind == 'trojan': self.assertNotIn('uuid', proxy)
-                        configs = manager.build_xray_configs([connection], {}, self.dns, [], '192.0.2.1', lambda:{})
-                        outbound = configs[0]['outbounds'][0]
-                        self.assertEqual(outbound['protocol'], kind)
-                        self.assertEqual(outbound['settings'], xray_protocols.outbound_settings(credential, route+'.example', 443))
-                        if transport != 'xhttp':
-                            exported = manager.build_singbox_config([connection], {}, self.dns, [], '192.0.2.1', lambda:{}, False)
-                            node = next(row for row in exported['outbounds'] if row['type'] == kind)
-                            self.assertEqual(node['server_port'], 443)
-                            self.assertIn(kind+'://', vless_subscription(configs))
                         manager.remove_reality_credential('profile', credential, restart_service=False, reload_caddy=False)
                         self.assertEqual(json.loads(self.config.read_text())['inbounds'], [self.neighbor])
                         self.assertFalse(list((self.root/'routes').glob('*.json')))

@@ -20,6 +20,7 @@ mkdir -p "${STAGE}" "$(dirname -- "${OUTPUT}")"
 rsync -a --delete \
   --exclude '.git/' --exclude '.idea/' --exclude '.runtime/' --exclude '.vinext/' \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
+  --exclude '__pycache__/' --exclude '*.pyc' \
   --exclude '/docs/audit/' --exclude '/.servers/' --exclude 'AGENTS.md' \
   --exclude '/docs/.audit/' --exclude '/docs/.backlog/' --exclude '/docs/.plans/' \
   --exclude '/docs/backlog/' --exclude '/docs/plans/' --exclude '/docs/direct-audit/' \

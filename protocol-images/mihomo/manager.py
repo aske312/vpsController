@@ -36,8 +36,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
-from client_singbox import build_singbox_config
-from client_xray import build_xray_configs
 from client_labels import connection_label
 from client_subscription import CLIENT_HINTS, import_page
 import client_compatibility
@@ -319,8 +317,18 @@ def public_http_error(status_code: int, detail: object) -> str:
     return PUBLIC_COMMAND_ERROR if status_code >= 500 or technical else (message or "Команда не выполнена.")
 
 
+class ProfileFormatError(HTTPException):
+    def __init__(self, status_code: int, code: str, message: str):
+        super().__init__(status_code=status_code, detail=message, headers={"Cache-Control": "no-store"})
+        self.code = code
+
+
 @app.exception_handler(HTTPException)
 async def public_http_exception_handler(_, exc: HTTPException) -> JSONResponse:
+    if isinstance(exc, ProfileFormatError):
+        return JSONResponse(status_code=exc.status_code, content={
+            "detail": exc.detail, "code": exc.code, "supported_formats": ["mihomo", "yaml"],
+        }, headers=exc.headers)
     detail = public_http_error(exc.status_code, exc.detail)
     if detail == PUBLIC_COMMAND_ERROR:
         logger.error("Suppressed technical Mihomo error (%s): %s", exc.status_code, exc.detail)
@@ -873,7 +881,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
         # Accept saved profiles and older clients without restoring the retired cap.
         if key in {"vless_max_connections_per_device", "client_config_format"} or key.startswith(("block_ads", "tunnel_fragment")):
             continue
-        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment", "route_dns", "mrs_rule_sets"}:
+        if key in {"tunnel_privacy", "tunnel_ech", "route_dns", "mrs_rule_sets"}:
             if not isinstance(raw, bool):
                 raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
@@ -916,7 +924,6 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     if result.get('route_dns'):
         client_dns_settings(result)
     return result
-
 
 
 MRS_CACHE = MrsCache(DATA_ROOT / 'rule-sets' / 'mrs', CORE_BIN, {
@@ -3323,69 +3330,6 @@ def vless_encryption_pair(settings: dict[str, Any]) -> tuple[str, str]:
     return ".".join(server_fields), ".".join(client_fields)
 
 
-ech_capability_cache: dict[str, tuple[float, bool]] = {}
-
-
-def cdn_supports_ech(domain: str) -> bool:
-    """Best effort capability check, never contact an arbitrary supplied URL."""
-    cached = ech_capability_cache.get(domain)
-    if cached and cached[0] > time.monotonic():
-        return cached[1]
-    supported = False
-    if domain:
-        try:
-            url = "https://dns.google/resolve?" + urllib.parse.urlencode({"name": domain, "type": 65})
-            with urllib.request.urlopen(url, timeout=3) as response:
-                data = json.loads(response.read(65536))
-            supported = data.get("Status") == 0 and any(
-                answer.get("type") == 65 and re.search(r'(?:^|\s)ech="?[A-Za-z0-9+/]', str(answer.get("data", "")))
-                for answer in data.get("Answer", [])
-            )
-        except (OSError, ValueError):
-            pass
-    ech_capability_cache[domain] = (time.monotonic() + 300, bool(supported))
-    return bool(supported)
-
-
-def apply_tunnel_privacy(enabled: bool) -> None:
-    """Called under the mutation lock/rollback transaction; retain all identities."""
-    items = profiles()
-    config_path = CONFIG_ROOT / "reality" / "config.json"
-    config = load_json(config_path, {})
-    changed = False
-    for item in items:
-        for connection in item.get("connections", []):
-            if connection.get("component") != "transport-reality":
-                continue
-            credential = connection.get("credential", {})
-            if xray_protocols.protocol(credential) != 'vless':
-                continue
-            identity = credential.get("uuid")
-            inbounds = [entry for entry in config.get("inbounds", []) if identity and entry.get("protocol") == "vless" and any(client.get("id") == identity for client in entry.get("settings", {}).get("clients", []))]
-            if not inbounds or any(len(entry["settings"]["clients"]) != 1 for entry in inbounds):
-                raise HTTPException(status_code=409, detail="Невозможно безопасно обновить шифрование существующего канала: проверьте конфигурацию сервера.")
-            encrypted = bool(credential.get("encryption"))
-            if enabled != encrypted:
-                decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if enabled else "standard"})
-                for entry in inbounds:
-                    entry["settings"]["decryption"] = decryption
-                credential["encryption"] = encryption
-                changed = True
-            elif enabled and any(entry["settings"].get("decryption", "none") == "none" for entry in inbounds):
-                raise HTTPException(status_code=409, detail="Параметры шифрования клиента и сервера не согласованы.")
-            connection.get("settings", {}).pop("privacy_mode", None)
-            connection.get("settings", {}).pop("cdn_ech", None)
-        sync_legacy_profile_fields(item)
-    # Validate every device, including HWID-bound and fallback connections.
-    for item in items:
-        for device_id in {str(connection.get("device_id", item["common_device_id"])) for connection in item.get("connections", [])}:
-            validate_rendered_profile(render_profile(item, device_id, resolve_relays=False))
-    if changed:
-        apply_reality_config(config_path, config)
-    if items:
-        save_profiles(items)
-
-
 @port_allocation.release_on_error(lambda profile_id, connection_id, *args, **kwargs: f"mihomo:vless:{profile_id}-{connection_id}:")
 def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True, privacy_enabled: bool = False) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
@@ -4101,23 +4045,6 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
     return completed
 
 
-def create_profile_credentials(profile_id: str, channels: list[str]) -> dict[str, Any]:
-    credentials: dict[str, Any] = {}
-    completed: list[str] = []
-    try:
-        for module_id in channels:
-            credentials[module_id] = provision(profile_id, module_id)
-            completed.append(module_id)
-    except Exception:
-        for module_id in reversed(completed):
-            try:
-                deprovision(profile_id, module_id, credentials[module_id])
-            except Exception:
-                pass
-        raise
-    return credentials
-
-
 def reconciliation_report(repair: bool = False) -> dict[str, Any]:
     saved_profiles = profiles()
     expected_reality_tags: set[str] = set()
@@ -4330,8 +4257,7 @@ def client_verification_scenario(profile: dict[str, Any], device_id: str) -> dic
         effective_options = {**{key: credential[key] for key in client_compatibility.PROTOCOL_OPTIONS if key in credential}, **settings}
         value["options"] = {key: effective_options[key] for key in sorted(effective_options) if key in client_compatibility.PROTOCOL_OPTIONS}
         pin_credential = {**credential, **{key: value for key, value in settings.items() if key in client_connection_keys(component)}}
-        if device_routing(profile, device_id).get("client_config_format", "mihomo") == "mihomo":
-            pin_credential = mihomo_quic_certificate(component, pin_credential)
+        pin_credential = mihomo_quic_certificate(component, pin_credential)
         value["certificate_pinning"] = bool(pin_credential.get("certificate_fingerprint"))
         if component == "transport-awg":
             value["amnezia"] = {key: credential.get("amnezia", {}).get(key) for key in ("version", "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4")}
@@ -4360,22 +4286,16 @@ def verified_profile_clients(profile: dict[str, Any], device_id: str) -> list[di
     selected = [connection for connection in normalize_profile(deepcopy(profile))["connections"] if str(connection.get("device_id")) == device_id]
     result = []
     for record in client_compatibility.matching_records(scenario, records):
-        format, client = record["format"], record["client_name"]
+        format = record["format"]
         if format != "mihomo":
             continue
-        compatible = compatible_routing(routing, format, record["os"], client)
+        compatible = compatible_routing(routing, record["os"])
         if any(routing.get(key) and compatible.get(key) != routing[key] for key in FEATURES | RULES | {"strategy", "rules"}):
             continue
-        if scenario["personal_rule_kinds"] and (format == "uri" or "process" in scenario["personal_rule_kinds"] and format == "xray"):
-            continue
-        if any(not connection_supported(connection, format, reality_connection_settings, client) or connection.get("credential", {}).get("encryption") and "tunnel_privacy" not in device_capabilities(format, client=client)["features"] for connection in selected):
+        if any(not connection_supported(connection, reality_connection_settings) or connection.get("credential", {}).get("encryption") and "tunnel_privacy" not in device_capabilities()["features"] for connection in selected):
             continue
         result.append(record)
     return result
-
-
-def subscription_client_format(profile: dict[str, Any], device_id: str, metadata: dict[str, Any]) -> str:
-    return "mihomo"
 
 
 @app.get("/api/mihomo/profiles/{profile_id}/client-verification", dependencies=[Depends(auth_required)])
@@ -4754,11 +4674,6 @@ def prepare_profile_relays(item, identity=None, previous=(), *, partial=False):
     return relay_profile_status.prepare(
         relay_connection_control(), item['id'], effective_client_connections(item.get('connections', [])),
         (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous, partial=partial)
-
-
-def relay_client_nodes(connection, nodes, endpoints=()):
-    if relay_connections.host_id(connection.get('settings', {})):
-        relay_connections.redirect_nodes(relay_connection_control(), connection, nodes, endpoints)
 
 
 def relay_client_lines(connection, lines):
@@ -5142,9 +5057,7 @@ def validate_client_capabilities(profile):
             raise HTTPException(status_code=422, detail="Геолокация Windows доступна только зарегистрированному по HWID устройству Windows")
         if device["id"] == common_id:
             continue
-        format = "mihomo"
-        client = None if device.get("manual") else device.get("client_name")
-        caps = device_capabilities(format, device.get("os", "unknown"), client)
+        caps = device_capabilities(device.get("os", "unknown"))
         if routing.get("windows_geolocation") and device.get("os") != "windows":
             raise HTTPException(status_code=422, detail=f"{caps['label']}: правило геолокации доступно только для Windows")
         for key in FEATURES | RULES:
@@ -5153,13 +5066,27 @@ def validate_client_capabilities(profile):
         if routing.get("strategy") and routing["strategy"] not in caps["strategies"]:
             raise HTTPException(status_code=422, detail=f"{caps['label']}: стратегия недоступна")
         for connection in profile.get("connections", []):
-            if connection.get("device_id") == device["id"] and not connection_supported(connection, format, client=client):
+            if connection.get("device_id") == device["id"] and not connection_supported(connection):
                 raise HTTPException(status_code=422, detail=f"{caps['label']}: несовместимое подключение {connection.get('name') or connection.get('component')}")
 
 
-def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None, client_name: str | None = None) -> tuple[str, str]:
-    if requested_format not in (None, "mihomo", "yaml"):
-        raise HTTPException(status_code=422, detail="Профили доступны только в формате YAML")
+def require_yaml_export(requested_format: str | None = None, metadata: dict[str, Any] | None = None) -> None:
+    retired = {"singbox", "sing-box", "xray", "uri", "json", "txt"}
+    if requested_format is not None and requested_format not in {"mihomo", "yaml"}:
+        if requested_format not in retired:
+            raise ProfileFormatError(422, "unsupported_profile_format",
+                                     "Неизвестный формат профиля. Используйте Mihomo/Clash YAML.")
+        incompatible = True
+    else:
+        formats = client_formats(metadata or {})
+        incompatible = bool(formats) and "mihomo" not in formats
+    if incompatible:
+        raise ProfileFormatError(410, "profile_format_retired",
+                                 "Экспорт sing-box/Xray JSON и URI-подписок удалён. Используйте клиент с поддержкой Mihomo/Clash YAML и добавьте общую ссылку профиля заново.")
+
+
+def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None) -> tuple[str, str]:
+    require_yaml_export(requested_format)
     profile = normalize_profile(item)
     profile["connections"] = subscription_limits.client_connections(profile, effective_client_connections(profile.get("connections", [])))
     config = render_profile(profile, device_id)
@@ -5418,6 +5345,10 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
     access = subscription_limits.status(selected_profile, DATA_ROOT / "subscription-limits")
     if access["state"] in {"expired", "exhausted"}:
         raise HTTPException(status_code=403, detail="Срок подписки истёк" if access["state"] == "expired" else "Объём трафика подписки исчерпан")
+    metadata = subscription_device_metadata(request)
+    # Reject retired clients before recording access, binding HWID or provisioning.
+    for requested_format in request.query_params.getlist("format") or [None]:
+        require_yaml_export(requested_format, metadata)
     if "text/html" in request.headers.get("accept", "").lower() and not request.query_params.get("client") and not client_formats(subscription_device_metadata(request)):
         import_device = bound_device or str(normalize_profile(selected_profile)["common_device_id"])
         apps = [client_compatibility.public_record(record) for record in verified_profile_clients(selected_profile, import_device)]
@@ -5470,9 +5401,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request), read_only=allow_changes is False)
-    selected = next(device for device in normalize_profile(selected_profile)["devices"] if str(device["id"]) == selected_device)
-    requested_format = None if selected.get("manual") else subscription_client_format(selected_profile, selected_device, subscription_device_metadata(request))
-    config, extension = render_client_profile(selected_profile, selected_device, requested_format, subscription_device_metadata(request).get("client_name"))
+    config, extension = render_client_profile(selected_profile, selected_device)
     delivery = None
     if allow_changes is not False and any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
         delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,

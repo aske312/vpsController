@@ -123,17 +123,13 @@ SERVICE_RULES = list(dict.fromkeys([
 
 # Exact-host feeds preserve the upstream treatment of shared hosting domains.
 # TIF mini is the upstream's smaller threat feed for client devices.
-# sing-box uses maintained URLhaus/phishing-filter SRS catalogs because its
-# remote rule sets cannot consume these plain-domain text formats.
 SECURITY_PROVIDERS = {
     'security-threats': {
         'url': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt',
-        'singbox_url': 'https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-malware.srs',
         'format': 'text', 'interval': 43200,
     },
     'security-phishing': {
         'url': 'https://phishing.army/download/phishing_army_blocklist_extended.txt',
-        'singbox_url': 'https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-phishing.srs',
         'format': 'text', 'interval': 21600,
     },
 }

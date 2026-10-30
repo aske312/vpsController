@@ -101,17 +101,15 @@ class TelemetryTests(unittest.TestCase):
 class QuicTrafficTests(unittest.TestCase):
     def test_hysteria2_and_tuic_report_authenticated_user_traffic(self):
         for module in ("hysteria2", "tuic"):
-            for client_format in ("mihomo", "singbox"):
-                with self.subTest(module=module, client=client_format):
-                    self.probe(module, client_format)
+            with self.subTest(module=module):
+                self.probe(module)
 
     def test_settings_apply_preserves_authenticated_user_traffic(self):
         for module in ("hysteria2", "tuic"):
-            for client_format in ("mihomo", "singbox"):
-                with self.subTest(module=module, client=client_format):
-                    self.probe(module, client_format, edit_settings=True)
+            with self.subTest(module=module):
+                self.probe(module, edit_settings=True)
 
-    def probe(self, module, client_format, *, edit_settings=False):
+    def probe(self, module, *, edit_settings=False):
         with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness_port:
             root = Path(folder)
             self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", root / "data"))
@@ -180,17 +178,9 @@ class QuicTrafficTests(unittest.TestCase):
                 client_file = root / "client.yaml"
                 client_file.write_text(yaml.safe_dump({"mixed-port": proxy_port, "proxies": [proxy],
                     "rules": [f"DST-PORT,{readiness_port},DIRECT", "MATCH,test"]}), encoding="utf-8")
-                if client_format == "singbox":
-                    config = manager.build_singbox_config([{"id": "a", "component": "transport-" + module, "credential": credential}], {}, {"nameserver": "1.1.1.1", "fallback": "8.8.8.8"}, [], "127.0.0.1", lambda: {}, None)
-                    config["inbounds"] = [{"type": "mixed", "listen": "127.0.0.1", "listen_port": proxy_port}]
-                    client_file = root / "client.json"
-                    client_file.write_text(json.dumps(config), encoding="utf-8")
-                    client = start([os.environ["PRIVACY_SINGBOX_BIN"], "run", "-c", str(client_file)])
-                else:
-                    client = start([os.environ["PRIVACY_MIHOMO_BIN"], "-d", str(root), "-f", str(client_file)])
+                client = start([os.environ["PRIVACY_MIHOMO_BIN"], "-d", str(root), "-f", str(client_file)])
                 wait_port(proxy_port, client)
-                if client_format == "mihomo":
-                    wait_http_proxy(proxy_port, client, readiness_port)
+                wait_http_proxy(proxy_port, client, readiness_port)
                 connection = socket.create_connection(("127.0.0.1", proxy_port), timeout=5)
                 connection.settimeout(5)
                 connection.sendall(f"GET http://127.0.0.1:{origin.server_port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.server_port}\r\nConnection: close\r\n\r\n".encode())

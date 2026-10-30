@@ -1,4 +1,4 @@
-"""Universal subscriptions select a device by HWID and a format by client."""
+"""Mihomo YAML subscriptions preserve device identities and credentials."""
 from contextlib import nullcontext
 from copy import deepcopy
 from itertools import product
@@ -50,41 +50,14 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertNotIn("happ://add/", body)
         self.assertNotIn("sing-box://import-remote-profile", body)
         self.assertNotIn("client=v2rage", body)
-        self.assertIn("стандартный Mihomo YAML", body)
+        self.assertIn("Mihomo/Clash YAML", body)
         self.assertEqual(self.store, before)
         self.provision.assert_not_called()
 
-    def test_happ_import_handoff_works_with_generic_user_agent(self):
-        result = self.fetch("CFNetwork/3860 Darwin/25", hwid=None, query=b"client=happ")
-        self.assertIn(".yaml", result.headers["content-disposition"])
-        self.assertEqual(self.store[0]["common_access"]["user_agent"], "CFNetwork/3860 Darwin/25")
-        self.assertEqual(self.store[0]["common_access"]["client_name"], "Happ")
-
-    def test_explicit_import_client_wins_over_user_agent_and_survives_save(self):
-        response = self.fetch("RocketVPN/582994", query=b"client=happ")
-        self.assertIn(".yaml", response.headers["content-disposition"])
-        device = self.store[0]["devices"][1]
-        self.assertEqual(device["routing"].get("client_config_format", "mihomo"), "mihomo")
-        self.assertEqual(manager.client_formats(device), ("xray",))
-        self.assertEqual(device["user_agent"], "RocketVPN/582994")
-        manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**entry) for entry in self.store[0]["devices"]]))
-        self.assertEqual(manager.client_formats(self.store[0]["devices"][1]), ("xray",))
-        self.assertIn(".yaml", self.fetch("RocketVPN/582995", query=b"client=happ").headers["content-disposition"])
-        self.assertEqual(len(self.store[0]["devices"]), 2)
-
-    def test_unverified_rocketvpn_and_v2rage_get_yaml_without_promising_compatibility(self):
-        self.store[0]["connections"] = [{"id": "ws", "device_id": "common", "component": "transport-reality",
-            "settings": {"route_mode": "cdn"}, "credential": {"uuid": "00000000-0000-4000-8000-000000000001",
-            "cdn_enabled": True, "cdn_domain": "example.com", "cdn_transport": "websocket", "cdn_path": "/vpn?a=1&b=2"}}]
-        for agent in ("RocketVPN/582994 CFNetwork/3860 Darwin/25", "v2RAGE/1.9"):
-            response = self.fetch(agent, hwid=None)
-            self.assertIn(".yaml", response.headers["content-disposition"])
-            self.assertIn("/vpn?a=1&b=2", response.body.decode())
-        self.provision.assert_not_called()
 
     def test_remove_registered_device_preserves_other_devices(self):
         self.fetch("koala-clash/1.0", "first")
-        self.fetch("Happ/3.0", "second")
+        self.fetch("ClashMi/3.0", "second")
         profile = manager.profile_response(self.store[0])
         removed = profile["devices"][1]["id"]
         retained = [entry for entry in profile["connections"] if entry["device_id"] != removed]
@@ -100,7 +73,7 @@ class SubscriptionFormatTests(unittest.TestCase):
             deprovision.assert_not_called()
 
     def test_device_delete_protects_common_and_preserves_state_on_failure(self):
-        self.fetch("Happ/3.0")
+        self.fetch("ClashMi/3.0")
         before = deepcopy(self.store)
         with self.assertRaises(manager.HTTPException) as error:
             manager.delete_profile_device("profile", "common")
@@ -110,7 +83,7 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(self.store, before)
 
     def test_device_delete_revokes_retiring_connections_and_batches_reality(self):
-        self.fetch("Happ/3.0")
+        self.fetch("ClashMi/3.0")
         device_id = self.store[0]["devices"][1]["id"]
         self.store[0]["connections"][1]["component"] = "transport-reality"
         self.store[0]["retiring_connections"] = [{"id": "old", "device_id": device_id, "component": "transport-reality", "credential": {"id": "old-credential"}}]
@@ -124,12 +97,12 @@ class SubscriptionFormatTests(unittest.TestCase):
     def test_same_hwid_in_different_apps_registers_separate_devices(self):
         self.fetch("koala-clash/1.0")
         first = deepcopy(self.store[0]["devices"][1])
-        self.fetch("Happ/3.0")
+        self.fetch("ClashMi/3.0")
         second = deepcopy(self.store[0]["devices"][2])
         self.assertEqual(first["hwid_hash"], second["hwid_hash"])
         self.assertNotEqual(first["id"], second["id"])
         self.fetch("koala-clash/2.0")
-        self.fetch("Happ/4.0")
+        self.fetch("ClashMi/4.0")
         self.assertEqual(len(self.store[0]["devices"]), 3)
         self.assertEqual(self.provision.call_count, 2)
         self.assertEqual(self.store[0]["devices"][1]["id"], first["id"])
@@ -145,16 +118,6 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(self.store[0]["connections"], previous)
         self.assertEqual(self.store[0]["devices"][1]["client_identity_key"], "karing")
 
-    def test_unverified_singbox_uses_yaml_without_removing_encrypted_connections(self):
-        encrypted = {"id": "encrypted", "device_id": "common", "component": "transport-reality",
-                     "settings": {"transport": "tcp"}, "credential": {"encryption": "test-encryption"}}
-        self.store[0]["connections"].append(encrypted)
-        with patch.object(manager, "render_profile", return_value="proxies: []\n") as render:
-            response = self.fetch("sing-box MT/1.0", hwid=None)
-        self.assertIn(".yaml", response.headers["content-disposition"])
-        self.assertEqual(render.call_args.args[0]["connections"][1], encrypted)
-        self.assertEqual(self.store[0]["connections"][1], encrypted)
-        self.provision.assert_not_called()
 
     def setUp(self):
         managed_mihomo_fixture(self)
@@ -190,6 +153,85 @@ class SubscriptionFormatTests(unittest.TestCase):
         return manager.public_profile_subscription("test-token", manager.Request({"type": "http", "method": "GET", "path": "/s/test-token",
                                                                                    "query_string": query, "headers": headers}))
 
+    def test_retired_clients_fail_before_profile_writes_or_registration(self):
+        clients = ("Happ/3.0", "v2rayN/7.0", "v2RAGE/1.9", "RocketVPN/582994",
+                   "singbox-launcher/1.0", "sing-box MT/1.0", "SFA/1.0", "SFI/1.0")
+        before = deepcopy(self.store)
+        with patch.object(manager, "save_profiles") as save, patch.object(manager, "render_profile") as render:
+            for agent, hwid in product(clients, (None, "new-device")):
+                with self.subTest(agent=agent, hwid=hwid), self.assertRaises(manager.ProfileFormatError) as rejected:
+                    self.fetch(agent, hwid)
+                self.assertEqual(rejected.exception.status_code, 410)
+                self.assertEqual(rejected.exception.code, "profile_format_retired")
+                self.assertIn("Mihomo/Clash YAML", rejected.exception.detail)
+            save.assert_not_called()
+            render.assert_not_called()
+        self.assertEqual(self.store, before)
+        self.provision.assert_not_called()
+
+    def test_retired_queries_fail_even_with_generic_or_yaml_user_agent(self):
+        queries = [b"format=" + value for value in (b"singbox", b"sing-box", b"xray", b"uri", b"json", b"txt")]
+        queries += [b"client=happ", b"client=singbox", b"client=v2rage", b"format=xray&format=yaml"]
+        before = deepcopy(self.store)
+        for query, agent in product(queries, ("CFNetwork/3860", "ClashMi/1.0")):
+            with self.subTest(query=query, agent=agent), self.assertRaises(manager.ProfileFormatError) as rejected:
+                self.fetch(agent, query=query)
+            self.assertEqual(rejected.exception.status_code, 410)
+        self.assertEqual(self.store, before)
+        self.provision.assert_not_called()
+
+    def test_unknown_format_is_distinct_and_does_not_echo_input(self):
+        with self.assertRaises(manager.ProfileFormatError) as rejected:
+            self.fetch("ClashMi/1.0", query=b"format=private-marker")
+        self.assertEqual(rejected.exception.status_code, 422)
+        self.assertEqual(rejected.exception.code, "unsupported_profile_format")
+        self.assertNotIn("private-marker", rejected.exception.detail)
+        self.assertEqual(self.store, [self.initial])
+        self.provision.assert_not_called()
+
+    def test_yaml_aliases_and_unrecognized_clients_keep_yaml_subscription(self):
+        for query in (b"", b"format=mihomo", b"format=yaml"):
+            response = self.fetch("UnrecognizedClient/1.0", hwid=None, query=query)
+            self.assertIn(".yaml", response.headers["content-disposition"])
+            self.assertIn(b'password: "test-only"', response.body)
+        self.provision.assert_not_called()
+
+    def test_http_error_contract_and_unknown_token_do_not_expose_state(self):
+        from fastapi.testclient import TestClient
+        overrides = {manager.subscription_mutation_access: lambda: False, manager.auth_required: lambda: None}
+        with patch.dict(manager.app.dependency_overrides, overrides), \
+                patch.object(manager, "get_action_payload", side_effect=AssertionError("Format errors must not read operation history")):
+            client = TestClient(manager.app)
+            for path in ("/s/test-token", "/api/mihomo/subscriptions/test-token",
+                         "/api/mihomo/profiles/profile/config"):
+                with self.subTest(path=path):
+                    response = client.get(path, params={"format": "xray"})
+                    self.assertEqual(response.status_code, 410)
+                    body = response.json()
+                    self.assertEqual(body["code"], "profile_format_retired")
+                    self.assertEqual(body["supported_formats"], ["mihomo", "yaml"])
+                    self.assertIsInstance(body["detail"], str)
+                    self.assertNotIn("test-token", response.text)
+                    self.assertNotIn("test-only", response.text)
+                    self.assertEqual(response.headers["cache-control"], "no-store")
+        # A retired format must not reveal whether an unknown token was valid.
+        with self.assertRaises(manager.HTTPException) as rejected:
+            manager.public_profile_subscription("unknown", manager.Request({
+                "type": "http", "method": "GET", "path": "/s/unknown", "query_string": b"format=xray", "headers": []}), False)
+        self.assertEqual(rejected.exception.status_code, 404)
+
+    def test_bound_subscription_rejects_retired_format_without_changing_binding(self):
+        self.fetch("ClashMi/1.0")
+        before = deepcopy(self.store)
+        token = manager.device_subscription_token("test-token", self.store[0]["devices"][1]["id"])
+        request = manager.Request({"type": "http", "method": "GET", "path": "/s/" + token,
+                                   "query_string": b"format=singbox", "headers": [(b"x-hwid", b"phone")]})
+        with self.assertRaises(manager.ProfileFormatError) as rejected:
+            manager.public_profile_subscription(token, request)
+        self.assertEqual(rejected.exception.status_code, 410)
+        self.assertEqual(self.store, before)
+        self.assertEqual(self.provision.call_count, 1)
+
     def test_mrs_is_automatic_for_new_existing_and_hwidless_devices(self):
         import os
         import yaml
@@ -215,7 +257,7 @@ class SubscriptionFormatTests(unittest.TestCase):
 
     def test_first_request_detects_format_and_repeat_keeps_device_credentials(self):
         for agent, extension, supported in [("ClashMeta/1.0", "yaml", ["mihomo"]), ("ClashMi/1.0", "yaml", ["mihomo"]),
-                                            ("sing-box MT (sing-box 1.14.4)", "yaml", ["singbox"]), ("SFI/1.0", "yaml", ["singbox"]),
+
                                             ("Karing/1.2", "yaml", ["mihomo", "singbox"]), ("UnrecognizedClient/1.0", "yaml", [])]:
             with self.subTest(agent=agent):
                 self.store = [deepcopy(self.initial)]
@@ -318,71 +360,16 @@ class SubscriptionFormatTests(unittest.TestCase):
 
     def test_multiple_hwid_clients_receive_independent_profiles(self):
         first = self.fetch("HiddifyNext/2.5 (ios) like ClashMeta v2ray sing-box", "hiddify-phone")
-        second = self.fetch("SFA/1.0", "android-phone")
+        second = self.fetch("ClashMetaForAndroid/1.0", "android-phone")
         self.assertIn(".yaml", first.headers["content-disposition"])
         self.assertIn(".yaml", second.headers["content-disposition"])
         self.assertEqual(len(self.store[0]["devices"]), 3)
         first_device, second_device = self.store[0]["devices"][1:]
         self.assertNotEqual(first_device["id"], second_device["id"])
         self.assertEqual(first_device["client_name"], "Hiddify")
-        self.assertEqual(second_device["client_name"], "sing-box for Android")
+        self.assertEqual(second_device["client_name"], "Clash Meta for Android")
         self.assertEqual(manager.profile_response(self.store[0])["devices"][1]["supported_formats"], ["mihomo"])
         self.assertIn(second_device["id"].encode(), second.body)
-
-    def test_unverified_happ_keeps_all_template_connections_and_protection_settings(self):
-        self.store[0]["connections"].append({"id": "awg", "device_id": "common", "component": "transport-awg", "settings": {}})
-        self.store[0]["devices"][0]["routing"] = {"tunnel_ech": True, "tunnel_fragment": True, "direct_games_enabled": True}
-        with patch.object(manager, "render_profile", return_value="proxies: []\n"):
-            first = self.fetch("Happ/3.13.0", "desktop")
-            self.assertEqual(self.fetch("Happ/3.13.0", "desktop").body, first.body)
-        device = self.store[0]["devices"][1]
-        self.assertEqual(device["routing"].get("client_config_format", "mihomo"), "mihomo")
-        self.assertTrue(device["routing"]["tunnel_ech"])
-        self.assertNotIn("tunnel_fragment", device["routing"])
-        self.assertTrue(device["routing"]["direct_games_enabled"])
-        self.assertIn(".yaml", first.headers["content-disposition"])
-        self.assertEqual(len(self.provision.call_args.args[1]), 2)
-        self.assertEqual(len(self.store[0]["devices"]), 2)
-
-    def test_happ_without_hwid_does_not_use_shared_singbox(self):
-        result = self.fetch("Happ/3.13.0", hwid=None)
-        self.assertIn(".yaml", result.headers["content-disposition"])
-        self.assertEqual(len(self.store[0]["devices"]), 1)
-        self.provision.assert_not_called()
-
-    def test_unverified_v2rayn_receives_standard_yaml_from_universal_subscription(self):
-        result = self.fetch("v2rayN/7.0", hwid=None)
-        self.assertIn(".yaml", result.headers["content-disposition"])
-        self.assertIn(b'password: "test-only"', result.body)
-        self.assertEqual(manager.client_identity({"user_agent": "v2rayN/7.0"}), ("v2rayN", ("xray",)))
-        self.provision.assert_not_called()
-
-    def test_launcher_registration_keeps_supported_extensions(self):
-        self.store[0]["devices"][0]["routing"] = {"tunnel_privacy": True, "tunnel_ech": True}
-        self.store[0]["connections"].append({"id": "awg", "device_id": "common", "component": "transport-awg", "settings": {}})
-        awg = {"port": 51820, "private_key": "A" * 43 + "=", "server_public_key": "A" * 43 + "=", "ip": "10.0.0.2/32", "mtu": 1420, "amnezia": {"jc": 4, "jmin": 10, "jmax": 50, "s1": 0, "s2": 0, "h1": 1, "h2": 2, "h3": 3, "h4": 4}}
-        self.provision.side_effect = lambda pid, definitions, **kw: [
-            {**entry, "credential": awg if entry["component"] == "transport-awg" else {"port": 12001, "method": "aes-128-gcm", "password": entry["device_id"]}}
-            for entry in definitions]
-        response = self.fetch("singbox-launcher/1.0", "desktop")
-        self.assertIn(".yaml", response.headers["content-disposition"])
-        self.assertIn(b"jc: 4", response.body)
-        device = self.store[0]["devices"][1]
-        self.assertEqual(device["client_name"], "Sing-Box Launcher")
-        self.assertTrue(device["routing"]["tunnel_privacy"])
-        self.assertTrue(device["routing"]["tunnel_ech"])
-        self.assertEqual(len(self.provision.call_args.args[1]), 2)
-        manager.validate_client_capabilities(self.store[0])
-        self.assertEqual(self.fetch("singbox-launcher/1.0", "desktop").body, response.body)
-
-    def test_unverified_happ_keeps_awg_in_standard_yaml_instead_of_empty_registration(self):
-        self.store[0]["connections"][0]["component"] = "transport-awg"
-        with patch.object(manager, "render_profile", return_value="proxies: []\n"):
-            self.fetch("Happ/3.13.0")
-        self.assertEqual(len(self.store[0]["devices"]), 2)
-        self.assertEqual(self.provision.call_args.args[1][0]["component"], "transport-awg")
-
-
 
 
     def test_without_hwid_uses_standard_yaml_even_when_legacy_shared_exists(self):
@@ -391,7 +378,7 @@ class SubscriptionFormatTests(unittest.TestCase):
         connection.update(id="shared-ss", device_id="shared")
         connection["credential"]["password"] = "shared-password"
         self.store[0]["connections"].append(connection)
-        response = self.fetch("sing-box MT/1.14", hwid=None)
+        response = self.fetch("ClashMi/1.14", hwid=None)
         self.assertIn(b'password: "test-only"', response.body)
         yaml = self.fetch("ClashMi/1.0", hwid=None)
         self.assertIn('.yaml', yaml.headers["content-disposition"])

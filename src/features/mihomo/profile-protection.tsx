@@ -1,10 +1,9 @@
 import { clientCapabilities } from "./client-capabilities";
-import type { Module, ProfileConnection } from "./types";
 
 type Routing = Record<string, string | number | boolean>;
 
-export function ProfileProtection({ routing, common = false, client, echAvailable = false, onChange }: { routing: Routing; connections: ProfileConnection[]; modules: Module[]; common?: boolean; client?: string; echAvailable?: boolean; onChange: (key: string, value: string | boolean) => void }) {
-  const caps = clientCapabilities("mihomo", undefined, client);
+export function ProfileProtection({ routing, common = false, echAvailable = false, onChange }: { routing: Routing; common?: boolean; echAvailable?: boolean; onChange: (key: string, value: string | boolean) => void }) {
+  const caps = clientCapabilities();
   const mihomoFeatures = [
     ["tun_enabled", "TUN", "TUN режим", "Перехватывает системный трафик устройства."],
     ["sniffer", "SNI", "Определение доменов", "Находит домен внутри TLS/HTTP для корректных правил."],

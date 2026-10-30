@@ -31,7 +31,7 @@ class YamlProfileTests(unittest.TestCase):
         for saved in ('mihomo','singbox','xray','uri'):
             item={'id':'fixture','devices':[{'id':'common','routing':{'client_config_format':saved}}], 'common_device_id':'common','connections':[]}
             with self.subTest(saved=saved), patch.object(manager,'render_profile',return_value='proxies: []\n') as render, patch.object(manager,'validate_rendered_profile') as validate:
-                text,extension=manager.render_client_profile(item,'common',client_name='Happ')
+                text,extension=manager.render_client_profile(item,'common')
                 self.assertEqual((text,extension),('proxies: []\n','yaml'))
                 self.assertNotIn('client_config_format',render.call_args.args[0]['devices'][0]['routing'])
                 validate.assert_called_once_with(text)
@@ -41,5 +41,5 @@ class YamlProfileTests(unittest.TestCase):
             for format in ('xray','singbox','uri','invalid'):
                 with self.subTest(format=format), self.assertRaises(manager.HTTPException) as rejected:
                     manager.render_client_profile({},'common',format)
-                self.assertEqual(rejected.exception.status_code,422)
+                self.assertEqual(rejected.exception.status_code,422 if format == "invalid" else 410)
             render.assert_not_called()

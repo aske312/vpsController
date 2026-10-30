@@ -1,6 +1,5 @@
 """DNS settings, first-match resource policy and client exporter contracts."""
 from copy import deepcopy
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -11,7 +10,7 @@ from unittest.mock import patch
 import yaml
 from tests.api.support import manager, ROOT
 from tests.api.test_mihomo_rules_runtime import profile
-from dns_routing import domain_dns_routes, mihomo_route_dns, singbox_route_dns
+from dns_routing import domain_dns_routes, mihomo_route_dns
 
 
 class RouteDnsTests(unittest.TestCase):
@@ -75,7 +74,7 @@ class RouteDnsTests(unittest.TestCase):
         self.assertTrue(policy['.ads.ru'][0].endswith('#VPN'))
         self.assertEqual(domain_dns_routes(['PROCESS-NAME,browser.exe,GATE.312', 'DOMAIN-SUFFIX,ru,DIRECT']), [])
 
-    def test_profile_switch_is_independent_in_all_exports(self):
+    def test_profile_switch_is_independent_in_yaml(self):
         for global_value in (False, True):
             self.settings['route_dns'] = global_value
             for profile_value in (False, True):
@@ -83,17 +82,10 @@ class RouteDnsTests(unittest.TestCase):
                 item['routing'] = {'route_dns': profile_value, 'direct_ru_sites': True}
                 original = deepcopy(item)
                 with patch.object(manager, 'dns_settings', return_value=self.settings):
-                    for format in ('mihomo',):
-                        with self.subTest(global_value=global_value, profile_value=profile_value, format=format):
-                            text, _ = manager.render_client_profile(deepcopy(item), 'common', format)
-                            config = yaml.safe_load(text) if format == 'mihomo' else json.loads(text)
-                            if format == 'mihomo':
-                                enabled = 'direct-nameserver' in config['dns']
-                            elif format == 'singbox':
-                                enabled = any(row['tag'] == 'direct-dns' for row in config['dns']['servers'])
-                            else:
-                                enabled = bool(config[0]['dns'].get('disableFallbackIfMatch'))
-                            self.assertEqual(enabled, profile_value)
+                    with self.subTest(global_value=global_value, profile_value=profile_value):
+                        text, _ = manager.render_client_profile(deepcopy(item), 'common')
+                        config = yaml.safe_load(text)
+                        self.assertEqual('direct-nameserver' in config['dns'], profile_value)
                 self.assertEqual(item, original)
                 self.assertEqual(self.settings['route_dns'], global_value)
 
@@ -139,9 +131,6 @@ class RouteDnsTests(unittest.TestCase):
         self.assertNotIn('unreachable.test', config['nameserver-policy'])
         with patch.object(manager, 'dns_settings', return_value=self.settings):
             self.assertEqual(manager.client_dns_settings({'dns_secure': True})['nameserver'], self.settings['nameserver'])
-        sb = singbox_route_dns(self.settings, rules, 'VPN')
-        self.assertEqual(sb['final'], 'direct-dns')
-        self.assertEqual(sb['rules'][0]['query_type'], ['AAAA'])
 
     def test_legacy_mode_is_preserved_and_global_mode_does_not_bypass(self):
         item = profile()
@@ -178,41 +167,23 @@ class RouteDnsTests(unittest.TestCase):
         self.assertEqual(first['default-nameserver'], ['1.1.1.1'])
         self.assertEqual(first['proxy-server-nameserver'], [self.settings['proxy_nameserver'] + '#DIRECT'])
 
-    def test_all_client_configs_compile_and_keep_resolver_transport_separate(self):
+    def test_yaml_config_keeps_resolver_transport_separate_and_compiles(self):
         self.settings['route_dns'] = True
         item = profile()
         item['routing'] = {'direct_ru_services': True}
-        binaries = {
-            'mihomo': os.getenv('PRIVACY_MIHOMO_BIN'),
-            'singbox': os.getenv('PRIVACY_SINGBOX_BIN'),
-            'xray': os.getenv('PRIVACY_XRAY_BIN'),
-        }
-        for format in ('mihomo',):
-            with self.subTest(format=format), patch.object(manager, 'dns_settings', return_value=self.settings):
-                text, extension = manager.render_client_profile(deepcopy(item), 'common', format)
-                if format == 'singbox':
-                    config = json.loads(text)
-                    by_tag = {row['tag']: row for row in config['dns']['servers']}
-                    self.assertEqual(by_tag['direct-dns']['detour'], 'direct')
-                    self.assertEqual(by_tag['remote']['detour'], config['route']['final'])
-                    self.assertEqual(by_tag['fallback']['detour'], config['route']['final'])
-                    self.assertEqual(by_tag['bootstrap']['detour'], 'direct')
-                    self.assertEqual(config['route']['default_domain_resolver'], 'remote')
-                    self.assertTrue(any(row.get('server') == 'direct-dns' for row in config['dns']['rules']))
-                if format == 'xray':
-                    config = json.loads(text)[0]
-                    self.assertTrue(config['dns']['disableFallbackIfMatch'])
-                    self.assertEqual(config['routing']['rules'][0]['outboundTag'], 'direct')
-                    text = json.dumps(config)
-                binary = binaries[format]
-                if binary:
-                    with tempfile.TemporaryDirectory() as folder:
-                        path = Path(folder) / ('config.' + extension)
-                        path.write_text(text, encoding='utf-8')
-                        args = ['-t', '-d', folder, '-f', str(path)] if format == 'mihomo' else (
-                            ['check', '-c', str(path)] if format == 'singbox' else ['run', '-test', '-config', str(path)])
-                        checked = subprocess.run([binary, *args], capture_output=True, text=True, timeout=30)
-                        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        with patch.object(manager, 'dns_settings', return_value=self.settings):
+            text, extension = manager.render_client_profile(deepcopy(item), 'common')
+        dns = yaml.safe_load(text)['dns']
+        self.assertEqual(dns['proxy-server-nameserver'], [self.settings['proxy_nameserver'] + '#DIRECT'])
+        self.assertTrue(all(value.endswith('#' + manager.MIHOMO_PROXY_GROUP) for value in dns['nameserver']))
+        self.assertEqual(dns['direct-nameserver'], [self.settings['direct_nameserver'] + '#DIRECT'])
+        binary = os.getenv('PRIVACY_MIHOMO_BIN')
+        if binary:
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / ('config.' + extension)
+                path.write_text(text, encoding='utf-8')
+                checked = subprocess.run([binary, '-t', '-d', folder, '-f', str(path)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
 
 
 if __name__ == '__main__':

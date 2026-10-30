@@ -59,7 +59,7 @@ class StandardSubscriptionTrafficTests(unittest.TestCase):
                   patch.object(manager, "CORE_BIN", mihomo), patch.object(manager, "CORE_HOME", root / "validate"),
                   patch.object(manager.client_compatibility, "verified_records", return_value=[])):
                 request = manager.Request({"type": "http", "method": "GET", "path": "/s/test-token", "query_string": b"",
-                                           "headers": [(b"user-agent", b"Happ/3.0")]})
+                                           "headers": [(b"user-agent", b"UnknownClient/1.0")]})
                 response = manager.public_profile_subscription("test-token", request, False)
                 save.assert_not_called()
             self.assertIn(".yaml", response.headers["content-disposition"])
