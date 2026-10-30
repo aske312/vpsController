@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { read, readMihomoSources, readApiSources } from "./support.mjs";
 
+test("shipped connection presets cover the supported protocol and transport catalog", async () => {
+  const variants = JSON.parse(await read("protocol-images/mihomo/connection-variants.json"));
+  const presets = JSON.parse(await read("protocol-images/mihomo/default-profile-presets.json"));
+  const identity = row => JSON.stringify([row.id, row.xray_protocol || "vless", Boolean(row.tls), Boolean(row.cdn), row.transport || ""]);
+  const matrix = new Set(variants.map(identity));
+  assert.equal(matrix.size, 32);
+  for (const preset of presets) for (const component of preset.components) assert.ok(matrix.has(identity(component)), preset.id);
+  for (const [id, strategy] of [["all-connections", "select"], ["all-fast", "url-test"], ["all-reserve", "fallback"]]) {
+    const preset = presets.find(row => row.id === id);
+    assert.equal(preset.strategy, strategy);
+    assert.deepEqual(new Set(preset.components.map(identity)), matrix);
+  }
+});
+
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
   const [manager, page, dnsManifest, routingManifest] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),
@@ -246,12 +260,10 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.ok(view.indexOf(">Маршрутизация</button>") < view.indexOf(">Подключения <i>"), "routing must precede connections in the profile editor");
   assert.match(view, /cdn_enabled/);
   assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
-  assert.match(manager, /Все VLESS/);
   assert.match(manager, /httpupgrade/);
   assert.match(manager, /render_vless_tls/);
   assert.match(manager, /mihomo-vless-tls-/);
   assert.ok(manager.indexOf('("PUBLIC_IPV4", "PUBLIC_IP", "PUBLIC_ENDPOINT")') > -1, "Mihomo TLS must compare DNS with the VPS IP before a proxied panel hostname");
-  assert.match(view, /VLESS CDN · HTTPUpgrade/);
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);

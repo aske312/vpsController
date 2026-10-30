@@ -9,6 +9,7 @@ import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-gr
 import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
+import builtInProfilePresets from "../../../protocol-images/mihomo/default-profile-presets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
@@ -911,7 +912,7 @@ export function MihomoPage({
       ...connection,
       settings: connection.component === "transport-reality"
         ? { ...connection.settings, route_mode: connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct") }
-        : { ...connection.settings },
+        : { ...connection.settings, ...(["transport-hysteria2", "transport-tuic"].includes(connection.component) && connection.settings.skip_cert_verify !== false && ["", "gate.312"].includes(String(connection.settings.sni || "")) ? { sni: realityTargets[0] } : {}) },
     }));
     setProfileConnections(connections);
     setProfileRouting({ ...(profile.routing || {}) });
@@ -993,6 +994,7 @@ export function MihomoPage({
       const componentModule = modules.find((item) => item.installed && item.id === componentId);
       if (!componentModule) continue;
       const settings = Object.fromEntries((componentModule.connection_settings || []).map((field) => [field.key, field.default]));
+      if (componentId === "transport-reality") settings.xray_protocol = definition.xray_protocol || "vless";
       if (componentId === "transport-reality" && definition.tls) {
         settings.route_mode = "tls";
         settings.tls_domain = tlsDomain;
@@ -1232,6 +1234,7 @@ export function MihomoPage({
       const matches = (component: ProfilePreset["components"][number]) => component.id === option.id
         && Boolean(component.cdn) === Boolean(option.cdn)
         && Boolean(component.tls) === Boolean(option.tls)
+        && (component.xray_protocol || "vless") === (option.xray_protocol || "vless")
         && String(component.transport || "") === String(option.transport || "");
       return { ...preset, components: checked ? [...preset.components.filter((item) => !matches(item)), { ...option }] : preset.components.filter((item) => !matches(item)) };
     }));
@@ -1767,10 +1770,11 @@ export function MihomoPage({
             <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
               <header><div><b>Пресеты</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => void closeProfile(() => setView("routing"))}>Настроить пресеты</button></header>
-              <div>{profilePresets.filter((preset) => commonDevice || preset.components.every((item) => {
+              <div>{[...profilePresets, ...(builtInProfilePresets as ProfilePreset[]).filter(preset => !profilePresets.some(saved => saved.id === preset.id))].filter((preset) => commonDevice || preset.components.every((item) => {
                 const id = item.id === "$primary" ? String(routingPolicy?.values.preset_primary || "transport-reality") : item.id === "$fallback" ? String(routingPolicy?.values.preset_fallback || "transport-awg") : item.id;
                 const protocolModule = modules.find((entry) => entry.id === id);
                 const settings = Object.fromEntries((protocolModule?.connection_settings || []).map((field) => [field.key, field.default]));
+                if (id === "transport-reality") settings.xray_protocol = item.xray_protocol || "vless";
                 settings.route_mode = item.tls ? "tls" : item.cdn ? "cdn" : "direct";
                 if (item.transport) settings[item.tls ? "tls_transport" : item.cdn ? "cdn_transport" : "transport"] = item.transport;
                 return clientConnectionSupported({ component: id, settings });
@@ -1914,8 +1918,8 @@ export function MihomoPage({
                 {presetOptionGroups.map((group) => <section key={group.id}>
                   <header><b>{group.title}</b><small>{group.note}</small></header>
                   <div>{group.options.map((option) => {
-                    const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && Boolean(item.tls) === Boolean(option.tls) && String(item.transport || "") === String(option.transport || ""));
-                    return <label key={`${option.id}-${option.cdn ? "cdn" : option.tls ? "tls" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;
+                    const selected = preset.components.some((item) => item.id === option.id && (item.xray_protocol || "vless") === (option.xray_protocol || "vless") && Boolean(item.cdn) === Boolean(option.cdn) && Boolean(item.tls) === Boolean(option.tls) && String(item.transport || "") === String(option.transport || ""));
+                    return <label key={`${option.id}-${option.xray_protocol || "vless"}-${option.cdn ? "cdn" : option.tls ? "tls" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;
                   })}</div>
                 </section>)}
               </div>

@@ -211,6 +211,7 @@ function presetRows(value: unknown): ProfilePreset[] {
     if (typeof row.name !== "string" || (row.description !== undefined && typeof row.description !== "string") || !["fallback", "url-test", "select"].includes(String(row.strategy))
       || !Array.isArray(row.components) || row.components.some((component) => !record(component) || typeof component.id !== "string"
         || ["label", "transport"].some((key) => component[key] !== undefined && typeof component[key] !== "string")
+        || (component.xray_protocol !== undefined && !["vless", "vmess", "trojan"].includes(String(component.xray_protocol)))
         || ["cdn", "tls"].some((key) => component[key] !== undefined && typeof component[key] !== "boolean"))) {
       throw new Error("Некорректный пресет Mihomo");
     }

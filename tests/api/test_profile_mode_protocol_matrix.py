@@ -40,6 +40,11 @@ def connection_fixture():
             connections.append({'id': route + '-' + transport, 'device_id': 'common',
                                 'component': 'transport-reality', 'settings': {'route_mode': route},
                                 'credential': credential})
+            if route in ('tls', 'cdn') and transport != 'raw':
+                for protocol in ('vmess', 'trojan'):
+                    connections.append({'id': protocol + '-' + route + '-' + transport, 'device_id': 'common',
+                                        'component': 'transport-reality', 'settings': {'route_mode': route, 'xray_protocol': protocol},
+                                        'credential': {**credential, 'xray_protocol': protocol}})
     item = profile()
     item['connections'] = connections
     return item
@@ -56,8 +61,8 @@ class ProfileModeProtocolMatrixTests(unittest.TestCase):
         item = connection_fixture()
         original = deepcopy(item)
         baseline = yaml.safe_load(manager.render_profile(item))['proxies']
-        self.assertEqual(len(baseline), 17)
-        self.assertEqual({row['type'] for row in baseline}, {'vless', 'ss', 'wireguard', 'hysteria2', 'tuic'})
+        self.assertEqual(len(baseline), 33)
+        self.assertEqual({row['type'] for row in baseline}, {'vless', 'vmess', 'trojan', 'ss', 'wireguard', 'hysteria2', 'tuic'})
         for capture, scope, route_dns, strategy in product(('tun', 'proxy'), ('all', 'selected'),
                                                           (False, True), ('', 'select', 'fallback', 'url-test')):
             routing = dict(connection_mode=capture, routing_scope=scope, route_dns=route_dns,
@@ -73,6 +78,9 @@ class ProfileModeProtocolMatrixTests(unittest.TestCase):
             group = next(row for row in config['proxy-groups'] if row['name'] == manager.MIHOMO_PROXY_GROUP)
             self.assertEqual(group['type'], strategy or 'fallback')
             self.assertEqual(set(group['proxies']), {row['name'] for row in baseline})
+            self.assertEqual(group['proxies'], [row['name'] for row in config['proxies']])
+            if strategy == 'url-test':
+                self.assertEqual(group['tolerance'], 0)
             self.assertEqual(candidate['connections'], original['connections'])
             self.assertEqual(item, original)
             yield routing, config

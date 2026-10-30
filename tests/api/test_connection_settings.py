@@ -26,6 +26,39 @@ class ConnectionSettingsTests(unittest.TestCase):
             with self.subTest(module=module), self.assertRaises(manager.HTTPException):
                 manager.validate_connection("transport-" + module, values)
 
+    def test_sni_defaults_and_pki_names_have_separate_sources(self):
+        self.assertTrue(5 <= len(manager.MIHOMO_REALITY_SNI_POOL) <= 10)
+        for module in ("transport-hysteria2", "transport-tuic"):
+            with self.subTest(module=module):
+                automatic = manager.validate_connection(module, {"sni": ""})
+                self.assertIn(automatic["sni"], manager.MIHOMO_REALITY_SNI_POOL)
+                self.assertEqual(manager.validate_connection(module, {"sni": "gate.312"})["sni"], automatic["sni"])
+                with self.assertRaises(manager.HTTPException):
+                    manager.validate_connection(module, {"sni": automatic["sni"], "skip_cert_verify": False})
+                custom = manager.validate_connection(module, {"sni": "owned.example", "skip_cert_verify": False})
+                self.assertEqual(custom["sni"], "owned.example")
+                self.assertFalse(custom["skip_cert_verify"])
+
+    def test_preset_catalog_covers_protocol_mode_transport_matrix(self):
+        presets = manager.default_profile_presets()
+        checked = manager.validate_profile_presets(presets)
+        matrix = next(row for row in checked if row["id"] == "all-connections")["components"]
+        self.assertEqual(len(matrix), 32)
+        for protocol in ("vless", "vmess", "trojan"):
+            for mode in ("tls", "cdn"):
+                transports = {row["transport"] for row in matrix if row.get("xray_protocol") == protocol and row[mode]}
+                self.assertEqual(transports, {"xhttp", "websocket", "httpupgrade", "grpc"})
+        self.assertEqual({row["id"] for row in matrix if row["id"] != "transport-reality"},
+                         {"transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"})
+        invalid = {"id": "bad", "name": "Invalid", "components": [{"id": "transport-reality", "xray_protocol": "vmess"}]}
+        with self.assertRaises(manager.HTTPException):
+            manager.validate_profile_presets([invalid])
+        custom = {"id": "owner", "name": "Owner preset", "components": [{"id": "transport-wg"}]}
+        with patch.object(manager, "atomic_json") as write:
+            saved = manager.profile_presets([custom])
+        self.assertEqual([row["id"] for row in saved], ["owner"])
+        write.assert_not_called()
+
     def test_per_user_quic_settings_override_shared_defaults_in_yaml_export(self):
         for module, values, expected in (
             ("tuic", {"congestion_control": "cubic", "heartbeat": "30s", "udp_relay_mode": "quic"}, {"congestion-controller": "cubic", "heartbeat-interval": 30000, "udp-relay-mode": "quic"}),

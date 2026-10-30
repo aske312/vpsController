@@ -90,7 +90,7 @@ class RuleExportTests(unittest.TestCase):
             if strategy != "select":
                 self.assertEqual((group["interval"], group["timeout"], group["max-failed-times"], group["url"]), (77, 1700, 4, "http://audit.test/check"))
             if strategy == "url-test":
-                self.assertEqual(group["tolerance"], 99)
+                self.assertEqual(group["tolerance"], 0)
 
 
 

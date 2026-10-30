@@ -83,9 +83,9 @@ CORE_BIN = RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
 CORE_HOME = DATA_ROOT / "core-home"
 MIHOMO_PROXY_GROUP = "312node.net"
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
-# SNI values for Mihomo-only REALITY exports. These are high-traffic HTTPS
-# candidates checked for TLS 1.3 / h2; reachability varies by network.
-# Each new REALITY connection receives its own matching target and SNI.
+# HTTPS candidates for REALITY targets and certificate-pinned QUIC SNI.
+# Checked for TLS 1.3 / h2; reachability still depends on the client network.
+# PKI-verified TLS/CDN must use the actual certificate name of its endpoint.
 MIHOMO_REALITY_SNI_POOL = tuple(json.loads(Path(__file__).with_name("reality-targets.json").read_text(encoding="utf-8")))
 MIHOMO_CLIENT_FIELDS = {path.parent.name: tuple(field for field in json.loads(path.read_text(encoding="utf-8")).get("connection_settings", []) if field.get("export_key")) for path in Path(__file__).with_name("modules").glob("transport-*/manifest.json")}
 
@@ -1451,11 +1451,7 @@ PERSONAL_RULES_FILE = SETTINGS_ROOT / "personal-rules.json"
 
 
 def default_profile_presets() -> list[dict[str, Any]]:
-    return [
-        {"id": "all-vless", "name": "Все VLESS", "description": "REALITY, прямой TLS и CDN со всеми транспортами", "strategy": "select", "components": [{"id": "transport-reality", "transport": "xhttp", "label": "VLESS REALITY · XHTTP"}, {"id": "transport-reality", "transport": "raw", "label": "VLESS REALITY · RAW"}, {"id": "transport-reality", "transport": "grpc", "label": "VLESS REALITY · gRPC"}, {"id": "transport-reality", "tls": True, "transport": "xhttp", "label": "VLESS TLS · XHTTP"}, {"id": "transport-reality", "tls": True, "transport": "websocket", "label": "VLESS TLS · WS"}, {"id": "transport-reality", "tls": True, "transport": "httpupgrade", "label": "VLESS TLS · HTTPUpgrade"}, {"id": "transport-reality", "tls": True, "transport": "grpc", "label": "VLESS TLS · gRPC"}, {"id": "transport-reality", "cdn": True, "transport": "xhttp", "label": "VLESS CDN · XHTTP"}, {"id": "transport-reality", "cdn": True, "transport": "websocket", "label": "VLESS CDN · WS"}, {"id": "transport-reality", "cdn": True, "transport": "httpupgrade", "label": "VLESS CDN · HTTPUpgrade"}, {"id": "transport-reality", "cdn": True, "transport": "grpc", "label": "VLESS CDN · gRPC"}]},
-        {"id": "direct-fallback", "name": "VLESS + резерв", "description": "Основной VLESS и резервный AWG", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
-        {"id": "cdn-first", "name": "CDN-first", "description": "VLESS WebSocket через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True, "transport": "websocket"}, {"id": "transport-awg"}]},
-    ]
+    return json.loads(Path(__file__).with_name("default-profile-presets.json").read_text(encoding="utf-8"))
 
 
 def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1476,13 +1472,18 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
                 raise HTTPException(status_code=422, detail=f"Unknown component in preset {preset_id}")
             is_cdn = bool(component.get("cdn", False))
             is_tls = bool(component.get("tls", False))
+            protocol = str(component.get("xray_protocol", "vless"))
+            if protocol not in xray_protocols.PROTOCOLS or (component_id != "transport-reality" and ("xray_protocol" in component or is_tls or is_cdn)):
+                raise HTTPException(status_code=422, detail=f"Unsupported protocol in preset {preset_id}")
+            if component_id == "transport-reality" and protocol != "vless" and not (is_tls or is_cdn):
+                raise HTTPException(status_code=422, detail="VMess и Trojan требуют TLS или CDN")
             if is_cdn and is_tls:
                 raise HTTPException(status_code=422, detail=f"VLESS route in preset {preset_id} cannot be TLS and CDN at the same time")
             transport = str(component.get("transport", ""))
             allowed_transports = {"xhttp", "websocket", "httpupgrade", "grpc"} if is_cdn or is_tls else {"xhttp", "raw", "grpc"}
             if transport and transport not in allowed_transports:
                 raise HTTPException(status_code=422, detail=f"Unsupported VLESS transport in preset {preset_id}")
-            components.append({"id": component_id, "cdn": is_cdn, "tls": is_tls, "transport": transport, "label": str(component.get("label", ""))[:80]})
+            components.append({"id": component_id, "cdn": is_cdn, "tls": is_tls, "transport": transport, "label": str(component.get("label", ""))[:80], **({"xray_protocol": protocol} if component_id == "transport-reality" else {})})
         if not components:
             raise HTTPException(status_code=422, detail=f"Preset {preset_id} has no connections")
         result.append({"id": preset_id, "name": str(value.get("name") or f"Preset {index + 1}")[:80], "description": str(value.get("description", ""))[:160], "strategy": strategy, "components": components})
@@ -3073,6 +3074,10 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
         raise HTTPException(status_code=422, detail="Неизвестный TLS fingerprint")
     if "sni" in result:
         result["sni"] = str(result["sni"]).strip().lower()
+        if result["sni"] in {"", "gate.312"} and result.get("skip_cert_verify", True):
+            result["sni"] = MIHOMO_REALITY_SNI_POOL[0]
+        if not result.get("skip_cert_verify", True) and result["sni"] in MIHOMO_REALITY_SNI_POOL:
+            raise HTTPException(status_code=422, detail="Для проверки сертификата укажите TLS-имя вашего сервера, а не домен из списка REALITY")
     if "sni" in result and not valid_sni_hostname(result["sni"]):
         raise HTTPException(status_code=422, detail="SNI должен быть доменным именем без порта")
     for field in manifest(component).get("connection_settings", []):
@@ -3640,7 +3645,7 @@ def add_quic_credential(profile_id: str, module_id: str, connection_id: str) -> 
         "instance_id": instance_id,
         "password": secrets.token_urlsafe(32),
         "port": int(module_settings(module_id)["port"]),
-        "sni": "gate.312",
+        "sni": MIHOMO_REALITY_SNI_POOL[0],
         "skip_cert_verify": True,
     }
     if module == "tuic":
@@ -5040,7 +5045,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             f"    max-failed-times: {int(routing.get('max_failed_times', 2))}",
         ]
         if group_type == "url-test":
-            lines.append(f"    tolerance: {int(routing.get('tolerance', 50))}")
+            lines.append("    tolerance: 0")
     providers = dict(SECURITY_PROVIDERS)
     used_providers = {name: definition for name, definition in providers.items() if any(
         rule.startswith(f'RULE-SET,{name},') or f'(RULE-SET,{name})' in rule for rule in rules)}
