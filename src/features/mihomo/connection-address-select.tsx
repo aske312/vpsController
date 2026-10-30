@@ -54,10 +54,11 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
     }
   }
   return <div className="relayEndpointSelector">
+    <div className="mihomoConnectionProtocolRow">
     {modes.tls && <label><span>Протокол Xray</span><select aria-label="Протокол Xray" value={xrayProtocol} disabled={locked} onChange={event => onChange(xrayProtocolSettings(settings, event.target.value, tlsDomains, cdnDomains))}>
       <option value="vless">VLESS</option><option value="vmess">VMess</option><option value="trojan">Trojan</option>
     </select></label>}
-    <span>Режим подключения</span>
+    <div><span>Режим подключения</span>
     <span className="mihomoAddressModes" role="group" aria-label="Режим подключения">
       {modes.tls ? <>
         {xrayProtocol === "vless" && <button type="button" aria-pressed={mode === "direct"} disabled={locked} onClick={() => selectMode("direct")}>REALITY</button>}
@@ -66,7 +67,9 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
           <button type="button" aria-pressed={mode === "cdn"} disabled={locked || !cdnDomains.length && !settings.cdn_domain} onClick={() => selectMode("cdn")}>CDN</button>
         </>}
       </> : modes.udp ? <button type="button" aria-pressed disabled={locked}>{label}</button> : <span>Прямое подключение</span>}
-    </span>
+    </span></div>
+    </div>
+    <div className="mihomoConnectionEndpointRow">
     <input type="search" aria-label="Поиск адреса подключения" placeholder="Найти IP, домен или узел…" value={query} onChange={event => setQuery(event.target.value)} disabled={locked} />
     <label><span>Адрес подключения</span><select aria-label="Адрес подключения" value={selected} disabled={locked} onChange={event => {
       if (!event.target.value) { change({ relay_host_id: "", relay_address: "", udp_domain: "" }); return; }
@@ -82,6 +85,7 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
       {domains.filter(item => selected === JSON.stringify(["direct", item]) || matches(item)).map(item => <option key={item} value={JSON.stringify(["direct", item])}>{item} · {cdnRelay ? `CDN через Relay · ${savedHost?.name || "сохранённый узел"}` : mode === "cdn" ? "CDN" : "напрямую"}</option>)}
       {canRelay && choices.filter(choice => choice.key === selected || matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.key} value={choice.key}>{choice.address} · через Relay · {choice.host.name}</option>)}
     </select></label>
+    </div>
     {mode === "cdn" && (webTransports.length > 0 || cdnRelay) && <><label><span>Вход в CDN</span><select aria-label="Вход в CDN" value={relay ? JSON.stringify(["relay", relay, relayAddress]) : ""} disabled={locked} onChange={event => {
       const choice = choices.find(item => item.key === event.target.value);
       change({ relay_host_id: choice?.host.id || "", relay_address: choice?.address || "", relay_cdn: Boolean(choice), relay_cdn_mode: "before_cdn" });

@@ -1794,7 +1794,8 @@ export function MihomoPage({
               <div className="mihomoConnectionWorkspace">
                 {deviceConnections.length > 0 && <ConnectionOrderNav key={activeDeviceId} connections={deviceConnections} modules={modules} selectedId={selectedConnection?.id} disabled={Boolean(busy) || Boolean(pendingProfileSave)} onSelect={setSelectedConnectionId} onReorder={(sourceId, targetId) => setProfileConnections((current) => reorderDeviceConnections(current, sourceId, targetId))} />}
                 <div className="mihomoConnectionList">
-                {(selectedConnection ? [selectedConnection] : []).map((connection, index) => {
+                {(selectedConnection ? [selectedConnection] : []).map((connection) => {
+                  const connectionIndex = deviceConnections.findIndex(item => item.id === connection.id);
                   const protocolModule = modules.find((item) => item.id === connection.component);
                   const supported = commonDevice || clientConnectionSupported(connection);
                   const schema = commonDevice || activeCapabilities.components.includes(connection.component) ? protocolModule?.connection_settings || [] : [];
@@ -1804,8 +1805,8 @@ export function MihomoPage({
                   return <article key={connection.id} className={`mihomoConnectionCard mihomoConnectionEditor protocol-${connection.component}${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
                     <header>
                       <span className={`protocol-${connection.component}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /></span>
-                      <div><b>{vlessRoute === "cdn" ? `${xrayName} CDN` : vlessRoute === "tls" ? `${xrayName} TLS` : vlessRoute === "direct" ? `${xrayName} REALITY` : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? (connection.settings.relay_host_id ? "TLS через Relay" : "Прямой домен с TLS") : vlessRoute === "direct" ? (connection.settings.relay_host_id ? "REALITY через Relay" : "Прямое REALITY-подключение") : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
-                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
+                      <div><b>{vlessRoute === "cdn" ? `${xrayName} CDN` : vlessRoute === "tls" ? `${xrayName} TLS` : vlessRoute === "direct" ? `${xrayName} REALITY` : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? (connection.settings.relay_host_id ? "TLS через Relay" : "Прямой домен с TLS") : vlessRoute === "direct" ? (connection.settings.relay_host_id ? "REALITY через Relay" : "Прямое REALITY-подключение") : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${connectionIndex + 1}`}</small></div>
+                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedConnectionId((deviceConnections[connectionIndex + 1] || deviceConnections[connectionIndex - 1])?.id || ""); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
                     <MihomoConnectionAddress connection={connection} inventory={relayInventory}

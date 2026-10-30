@@ -1360,35 +1360,47 @@
 .mihomoUnavailableField { color:var(--muted); font-size:10px; line-height:1.4; }
 
 /* Connection selection stays stable while the selected protocol is edited. */
-.mihomoConnectionWorkspace { display:grid; grid-template-columns:minmax(165px,220px) minmax(0,1fr); gap:16px; align-items:start; }
-.mihomoConnectionNav { display:grid; gap:6px; min-width:0; }
+.mihomoConnectionWorkspace { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; align-items:start; }
+.mihomoConnectionCarousel { display:grid; grid-template-columns:28px minmax(0,1fr) 28px; align-items:stretch; gap:6px; }
+.mihomoConnectionArrow { padding:0; border:1px solid var(--line); border-radius:7px; background:var(--panel-soft); color:var(--text); font-size:24px; cursor:pointer; }
+.mihomoConnectionArrow:disabled { opacity:.3; cursor:default; }
+.mihomoConnectionArrow:focus-visible,.mihomoConnectionSelect:focus-visible { outline:2px solid #59c792; outline-offset:-2px; }
+.mihomoConnectionPosition { padding-top:3px; color:var(--muted); text-align:right; font:10px var(--font-mono); }
+.mihomoConnectionNav { display:flex; gap:5px; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin; padding:2px 2px 5px; }
 .mihomoConnectionOrder { min-width:0; }
-.mihomoConnectionTile { display:flex; align-items:stretch; position:relative; border:1px solid var(--line); border-radius:10px; background:rgba(8,17,26,.95); color:var(--text); min-width:0; }
+.mihomoConnectionTile { display:flex; flex:0 0 190px; align-items:stretch; position:relative; border:1px solid var(--line); border-radius:8px; background:rgba(8,17,26,.95); color:var(--text); min-width:0; }
 .mihomoConnectionTile.is-active { border-color:#59c792; background:var(--panel-soft); }
 .mihomoConnectionTile.is-dragging { z-index:2; box-shadow:0 8px 24px #0008; opacity:.85; pointer-events:none; }
 .mihomoConnectionTile.is-drop-target { outline:2px dashed #59c792; outline-offset:2px; }
-.mihomoConnectionSelect { display:flex; flex:1; align-items:center; gap:10px; text-align:left; padding:12px; border:0; border-radius:10px; background:transparent; color:inherit; min-width:0; }
-.mihomoConnectionSelect > span:last-child { display:grid; gap:4px; min-width:0; }
-.mihomoConnectionDrag { flex:0 0 28px; padding:0; border:0; border-left:1px solid var(--line); border-radius:0 10px 10px 0; background:transparent; color:var(--muted); font-size:22px; cursor:grab; touch-action:none; user-select:none; }
+.mihomoConnectionSelect { display:flex; flex:1; align-items:center; gap:6px; text-align:left; padding:7px; border:0; border-radius:8px; background:transparent; color:inherit; min-width:0; }
+.mihomoConnectionSelect > span:nth-child(2) { display:grid; gap:3px; min-width:0; flex:1; }
+.mihomoConnectionSelect > em { color:var(--muted); font:9px var(--font-mono); }
+.mihomoConnectionDrag { flex:0 0 22px; padding:0; border:0; border-left:1px solid var(--line); border-radius:0 8px 8px 0; background:transparent; color:var(--muted); font-size:18px; cursor:grab; touch-action:none; user-select:none; }
 .mihomoConnectionDrag:active { cursor:grabbing; }
 .mihomoConnectionDrag:disabled { cursor:default; opacity:.4; }
 .mihomoConnectionOrderStatus { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-.mihomoConnectionNav b { overflow-wrap:anywhere; font-size:12px; }
-.mihomoConnectionNav small { color:var(--muted); font-size:10px; }
-.mihomoConnectionNav svg { width:24px; height:24px; }
+.mihomoConnectionNav b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.mihomoConnectionNav small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:9px; }
+.mihomoConnectionNav svg { width:20px; height:20px; }
 .mihomoProfileDialog .mihomoConnectionWorkspace .mihomoConnectionList { grid-template-columns:minmax(0,1fr); }
-.mihomoProfileDialog .mihomoConnectionEditor { padding:18px; gap:18px; }
-.mihomoConnectionEditor > header { padding-bottom:14px; border-bottom:1px solid var(--line); }
-.mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields label > small { display:block; font-size:11px; line-height:1.5; }
-.mihomoConnectionEditor input:not([type=checkbox]), .mihomoConnectionEditor select { width:100%; min-height:40px; box-sizing:border-box; }
+.mihomoProfileDialog .mihomoConnectionEditor { padding:10px; gap:10px; }
+.mihomoConnectionEditor > header { padding-bottom:8px; border-bottom:1px solid var(--line); }
+.mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields { grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr)); gap:9px; }
+.mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields label > small { display:none; }
+.mihomoConnectionEditor input:not([type=checkbox]), .mihomoConnectionEditor select { width:100%; min-height:32px; box-sizing:border-box; }
+.mihomoConnectionProtocolRow,.mihomoConnectionEndpointRow { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; gap:8px; }
+.mihomoConnectionProtocolRow > label,.mihomoConnectionProtocolRow > div,.mihomoConnectionEndpointRow > label { display:grid; gap:5px; min-width:0; }
+.mihomoConnectionEditor .mihomoAddressModes button { min-height:32px; padding:5px 9px; }
+.mihomoConnectionEditor .mihomoAddressApply { gap:3px; }
+.mihomoConnectionEditor .mihomoAddressApply button { min-height:30px; padding:5px 8px; font-size:11px; }
+.mihomoConnectionEditor .mihomoAddressApply small { font-size:10px; }
 @media (max-width:1000px) {
   .mihomoConnectionWorkspace { grid-template-columns:minmax(0,1fr); }
-  .mihomoConnectionNav { display:flex; overflow-x:auto; padding-bottom:6px; }
-  .mihomoConnectionTile { flex:0 0 200px; }
+  .mihomoConnectionTile { flex-basis:170px; }
 }
 @media (max-width:640px) {
   .mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields { grid-template-columns:minmax(0,1fr); }
+  .mihomoConnectionProtocolRow,.mihomoConnectionEndpointRow { grid-template-columns:minmax(0,1fr); }
 }
 
 .mihomoProfilesPagination { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; grid-column:1 / -1; padding:10px 14px; border:1px solid var(--line); border-radius:10px; color:var(--muted); font-size:12px; }
