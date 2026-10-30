@@ -634,8 +634,10 @@
 .mihomoProfileStageIntro small { color:var(--muted); font-size:9px; line-height:1.4; }
 .mihomoProfileStrategy { display:grid; gap:7px; margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
 .mihomoProfileProtection { display:grid; gap:9px; margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
-.mihomoRoutingMode { display:grid; gap:8px; padding:10px; border:1px solid var(--line); border-radius:10px; }
-.mihomoRoutingMode > header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.mihomoRoutingMode { display:grid; gap:8px; padding:8px; border:1px solid var(--line); border-radius:10px; }
+.mihomoRoutingToolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px 20px; }
+.mihomoRoutingToolbar > div { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.mihomoRoutingToolbar > div > b { color:var(--muted); font-size:10px; font-weight:600; }
 .mihomoModeToggle { display:inline-flex; align-items:center; gap:7px; width:fit-content; min-height:30px; padding:5px 8px; border:1px solid rgba(89,199,146,.4); border-radius:7px; background:rgba(37,112,79,.12); color:var(--text); text-align:left; cursor:pointer; }
 .mihomoModeToggle > b { font-size:11px; line-height:1.2; white-space:nowrap; }
 .mihomoModeToggle > svg { width:14px; height:14px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
@@ -644,11 +646,12 @@
 .mihomoTrafficFunctions { display:grid; gap:7px; padding-top:9px; border-top:1px solid var(--line); }
 .mihomoTrafficFunctions h4 { margin:0; color:var(--muted); font-size:10px; font-weight:600; }
 .mihomoTrafficFunctions > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr)); gap:6px; }
-.mihomoVpnServices { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr)); gap:6px; }
-.mihomoVpnService { display:flex; align-items:center; gap:7px; min-height:42px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:rgba(8,17,26,.72); color:var(--text); text-align:left; cursor:pointer; }
+.mihomoVpnServices { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(132px,100%),1fr)); gap:5px; }
+.mihomoVpnService { display:flex; align-items:center; gap:6px; min-height:36px; padding:5px 7px; border:1px solid var(--line); border-radius:8px; background:rgba(8,17,26,.72); color:var(--text); text-align:left; cursor:pointer; }
 .mihomoVpnService[aria-pressed=true] { border-color:rgba(89,199,146,.55); background:rgba(37,112,79,.17); }
-.mihomoVpnServiceIcon { display:grid; place-items:center; width:26px; height:26px; flex-shrink:0; border-radius:6px; background:#f6f8fa; }
-.mihomoVpnServiceIcon.is-snapchat { background:#fffc00; }
+.mihomoVpnServiceIcon { display:grid; place-items:center; width:24px; height:24px; flex-shrink:0; border:1px solid rgba(132,157,180,.16); border-radius:6px; background:#101b27; }
+.mihomoVpnServiceIcon.is-monochrome img { filter:brightness(0) invert(1); }
+.mihomoVpnServiceIcon.is-snapchat { background:#272714; border-color:rgba(255,252,0,.28); }
 .mihomoVpnServiceIcon img { display:block; width:20px; height:20px; object-fit:contain; }
 .mihomoVpnService > b { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
 .mihomoVpnServiceState { color:var(--muted); font-size:14px; }
