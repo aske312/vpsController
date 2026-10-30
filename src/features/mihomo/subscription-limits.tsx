@@ -1,44 +1,50 @@
 "use client";
 
 import { useId } from "react";
-import type { SubscriptionLimits, SubscriptionLimitsStatus } from "./types";
+import { aggregateTraffic, bytes } from "../../shared/lib/control-plane-ui";
+import type { ProfileConnection, ProfileStats, SubscriptionLimits, SubscriptionLimitsStatus } from "./types";
 
 export const unlimitedSubscription: SubscriptionLimits = { speed_mbps: null, traffic_gb: null, days: null };
+export type SubscriptionTraffic = ReturnType<typeof aggregateTraffic>;
 
 const fields = [
-  { key: "speed_mbps", label: "Скорость", unit: "Мбит/с", max: 100000, defaultValue: 100, help: "Общая для всех устройств. Одинаковый потолок отдельно на приём и передачу." },
-  { key: "traffic_gb", label: "Общий трафик", unit: "GB", max: 1000000, defaultValue: 100, help: "Приём + передача по всем протоколам и устройствам. 1 GB = 1 000 000 000 байт." },
-  { key: "days", label: "Дни использования", unit: "дней", max: 36500, defaultValue: 30, help: "С момента включения ограничения. Изменение профиля не начинает срок заново." },
+  { key: "speed_mbps", label: "Скорость", unit: "Мбит/с", max: 100000, presets: [0, 10, 25, 50, 100, 200, 500, 1000] },
+  { key: "traffic_gb", label: "Трафик", unit: "GB", max: 1000000, presets: [0, 10, 50, 100, 250, 500, 1000, 5000] },
+  { key: "days", label: "Срок", unit: "дней", max: 36500, presets: [0, 7, 14, 30, 90, 180, 365] },
 ] as const;
 
-export function SubscriptionLimitsFields({ value, status, disabled, onChange }: { value: SubscriptionLimits; status?: SubscriptionLimitsStatus; disabled: boolean; onChange: (value: SubscriptionLimits) => void }) {
+export function subscriptionLimitChange(value: SubscriptionLimits, key: keyof SubscriptionLimits, input: number): SubscriptionLimits {
+  return { ...value, [key]: input === 0 ? null : input };
+}
+
+/** Scope by saved connection ownership, independently from unsaved form edits. */
+export function subscriptionTraffic(stats: ProfileStats | undefined, connections: ProfileConnection[], deviceId?: string): SubscriptionTraffic | undefined {
+  if (!stats) return undefined;
+  return aggregateTraffic(connections.filter(connection => deviceId === undefined || connection.device_id === deviceId)
+    .map(connection => stats.connections[connection.id]));
+}
+
+export function SubscriptionLimitsFields({ value, status, traffic, disabled, onChange }: { value: SubscriptionLimits; status?: SubscriptionLimitsStatus; traffic?: SubscriptionTraffic; disabled: boolean; onChange: (value: SubscriptionLimits) => void }) {
   const id = useId();
   return <section className="mihomoSubscriptionLimits" aria-label="Контроль подписки">
-    <header><div><b>Контроль подписки</b></div></header>
-    <div className="mihomoSubscriptionLimitGrid">{fields.map(field => <div className="mihomoSubscriptionLimit" key={field.key} title={field.help} role="group" aria-label={field.label}>
-      <label htmlFor={`${id}-${field.key}`}>{field.label}</label>
-      <select id={`${id}-${field.key}`} value={value[field.key] === null ? "unlimit" : "limited"} disabled={disabled} onChange={event => onChange({ ...value, [field.key]: event.target.value === "unlimit" ? null : field.defaultValue })}>
-        <option value="unlimit">Без ограничений</option><option value="limited">Ограничить</option>
-      </select>
-      {value[field.key] !== null ? <label className="mihomoSubscriptionLimitValue"><input type="number" aria-label={`${field.label}, ${field.unit}`} value={value[field.key] ?? ""} min={1} max={field.max} step={1} required disabled={disabled} onChange={event => onChange({ ...value, [field.key]: event.target.value === "" ? 0 : Number(event.target.value) })} /><span>{field.unit}</span></label> : <span className="mihomoSubscriptionLimitEmpty" aria-hidden="true">—</span>}
-    </div>)}</div>
-    <SubscriptionUsage status={status} />
-    <details className="mihomoSubscriptionHelp"><summary>Об ограничениях</summary>
-      <p>Единые серверные ограничения для всех протоколов и устройств этого профиля, включая Relay и CDN.</p>
-      {fields.map(field => <p key={field.key}><b>{field.label}.</b> {field.help}</p>)}
-      <p>При исчерпании трафика или срока доступ останавливается для всей подписки. Unlimit снимает соответствующее ограничение. Учёт трафика сохраняется при изменении настроек.</p>
-      <p>Учитывается трафик через VPN-сервер. Прямой трафик DIRECT на устройстве в квоту не входит.</p>
-    </details>
+    <div className="mihomoSubscriptionLimitGrid">{fields.map(field => <label className="mihomoSubscriptionLimit" key={field.key}>
+      <span>{field.label}</span>
+      <input type="number" aria-label={`${field.label}, ${field.unit}`} list={`${id}-${field.key}`} value={value[field.key] ?? 0} min={0} max={field.max} step={1} required disabled={disabled}
+        onFocus={event => event.currentTarget.select()} onChange={event => onChange(subscriptionLimitChange(value, field.key, Number(event.target.value)))} />
+      <span>{field.unit}</span>
+      <datalist id={`${id}-${field.key}`}>{field.presets.map(preset => <option key={preset} value={preset} />)}</datalist>
+    </label>)}</div>
+    <SubscriptionUsage status={status} traffic={traffic} />
   </section>;
 }
 
-export function SubscriptionUsage({ status }: { status?: SubscriptionLimitsStatus }) {
-  if (!status) return null;
-  return <div className="mihomoSubscriptionUsage" role="status" data-state={status.state}>
-    <span>{status.enforced || status.used_bytes > 0 ? `Использовано: ${(status.used_bytes / 1000000000).toLocaleString("ru-RU", { maximumFractionDigits: 3 })} GB` : "Учёт начнётся после сохранения контроля подписки."}</span>
-    {status.expires_at !== null && <span>Срок до {new Date(status.expires_at * 1000).toLocaleString("ru-RU")}</span>}
-    {status.state === "expired" && <strong>Срок подписки истёк. Доступ остановлен.</strong>}
-    {status.state === "exhausted" && <strong>Объём трафика исчерпан. Доступ остановлен.</strong>}
-    {status.state === "unknown" && <strong>Актуальность серверного контроля не подтверждена.</strong>}
+export function SubscriptionUsage({ status, traffic }: { status?: SubscriptionLimitsStatus; traffic?: SubscriptionTraffic }) {
+  const used = traffic?.stats_available ? `${traffic.stats_partial ? "≥ " : ""}${bytes(traffic.rx_bytes + traffic.tx_bytes)}` : "—";
+  return <div className="mihomoSubscriptionUsage" role="status" data-state={status?.state}>
+    <span>Использовано</span><b>{used}</b>
+    {status?.expires_at != null && <span>до {new Date(status.expires_at * 1000).toLocaleDateString("ru-RU")}</span>}
+    {status?.state === "expired" && <strong>Срок подписки истёк. Доступ остановлен.</strong>}
+    {status?.state === "exhausted" && <strong>Объём трафика исчерпан. Доступ остановлен.</strong>}
+    {status?.state === "unknown" && <strong>Актуальность серверного контроля не подтверждена.</strong>}
   </div>;
 }

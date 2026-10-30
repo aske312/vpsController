@@ -52,6 +52,22 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(row["rx_bytes"], 1024)
             self.assertEqual(row["tx_bytes"], 256)
 
+    def test_device_counters_are_isolated_and_profile_sums_all_devices(self):
+        profile = {"id": "separate", "devices": [{"id": key} for key in ("common", "phone", "laptop")], "connections": [
+            {"id": key, "device_id": device, "component": "transport-reality", "credential": {}}
+            for key, device in (("pool", "common"), ("phone-a", "phone"), ("phone-b", "phone"), ("laptop-a", "laptop"))
+        ]}
+        counters = {"pool": (10, 20), "phone-a": (100, 200), "phone-b": (300, 400), "laptop-a": (1000, 2000)}
+        def sample(_, connection_id):
+            rx, tx = counters[connection_id]
+            return {"rx_bytes": rx, "tx_bytes": tx, "stats_available": True}
+        with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "reality_profile_stats", side_effect=sample):
+            stats = manager.profile_stats_payload(profile)
+        self.assertEqual((stats["devices"]["phone"]["rx_bytes"], stats["devices"]["phone"]["tx_bytes"]), (400, 600))
+        self.assertEqual((stats["devices"]["laptop"]["rx_bytes"], stats["devices"]["laptop"]["tx_bytes"]), (1000, 2000))
+        for direction in ("rx_bytes", "tx_bytes"):
+            self.assertEqual(stats["summary"][direction], sum(row[direction] for row in stats["devices"].values()))
+
     def test_maintenance_failure_does_not_disable_other_protocols(self):
         stopped = threading.Event()
         with patch.object(stopped, "wait", side_effect=lambda _: stopped.set()), patch.object(manager, "cleanup_profile_transitions"), patch.object(manager, "ensure_reality_telemetry", side_effect=RuntimeError("unavailable")), patch.object(manager, "ensure_quic_telemetry") as quic, patch.object(manager.logger, "error"):

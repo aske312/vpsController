@@ -12,7 +12,7 @@ import realityTargets from "../../../protocol-images/mihomo/reality-targets.json
 import { ProfileProtection } from "./profile-protection";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
-import { unlimitedSubscription } from "./subscription-limits";
+import { subscriptionTraffic, unlimitedSubscription } from "./subscription-limits";
 import { ProfileGeneral } from "./profile-general";
 import type { SubscriptionLimits } from "./types";
 import { AccessReveal } from "../../shared/components/access-reveal";
@@ -1751,6 +1751,7 @@ export function MihomoPage({
               <main ref={profileCanvasRef} className="mihomoProfileCanvas">
             <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННАЯ КОНФИГУРАЦИЯ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Параметры профиля" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 1 ? "is-active" : ""} onClick={() => setProfileStep(1)}>Общее</button><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Защита</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Маршрутизация</button><button type="button" className={profileStep === 4 ? "is-active" : ""} onClick={() => setProfileStep(4)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button></nav></section>
             <ProfileGeneral device={activeProfileDevice} profileName={profileName} limits={profileLimits}
+              traffic={subscriptionTraffic(liveDialogProfile ? profileStats[liveDialogProfile.id] : undefined, liveDialogProfile?.connections || [], commonDevice ? undefined : activeDeviceId)}
               status={latestEditProfile?.limits_status} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
               onProfileNameChange={setProfileName} onLimitsChange={setProfileLimits}
               onDeviceNameChange={name => setProfileDevices(current => current.map(device => device.id === activeDeviceId ? { ...device, name } : device))}
