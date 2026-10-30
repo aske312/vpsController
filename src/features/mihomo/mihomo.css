@@ -496,17 +496,20 @@
 .mihomoFields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
 
 .mihomoFields label, .mihomoProfileName { display: grid; gap: 6px; }
-.mihomoSubscriptionLimits { display:grid; gap:14px; min-width:0; margin-top:12px; padding-top:16px; border-top:1px solid var(--line); }
+.mihomoSubscriptionLimits { display:grid; gap:8px; min-width:0; margin-top:2px; padding-top:8px; border-top:1px solid var(--line); }
 .mihomoSubscriptionLimits > header > div { display:grid; gap:5px; }
 .mihomoSubscriptionLimits > header small, .mihomoSubscriptionLimits > small, .mihomoSubscriptionLimit > small { color:var(--muted); font-size:11px; line-height:1.6; }
-.mihomoSubscriptionLimitGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr)); align-items:start; gap:12px; }
-.mihomoSubscriptionLimit { display:grid; align-content:start; gap:8px; min-width:0; }
-.mihomoSubscriptionLimit > label { color:var(--text); font-size:12px; }
+.mihomoSubscriptionLimitGrid { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; }
+.mihomoSubscriptionLimit { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; }
+.mihomoSubscriptionLimit > label { color:var(--text); font-size:11px; }
 .mihomoSubscriptionLimit :is(select,input) { width:100%; min-width:0; min-height:38px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); font:12px/1.5 var(--ui-font); }
 .mihomoSubscriptionLimit .mihomoSubscriptionLimitValue { display:flex; align-items:center; gap:8px; }
 .mihomoSubscriptionLimitValue > span { flex-shrink:0; color:var(--muted); font-size:11px; }
-.mihomoSubscriptionUsage { display:flex; flex-wrap:wrap; gap:8px 16px; padding:12px; border:1px solid var(--line); border-radius:8px; color:var(--muted); font-size:12px; }
+.mihomoSubscriptionUsage { display:flex; flex-wrap:wrap; gap:6px 12px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; color:var(--muted); font-size:11px; }
 .mihomoSubscriptionUsage strong { flex-basis:100%; color:var(--amber); font-size:12px; }
+.mihomoSubscriptionHelp { color:var(--muted); font-size:11px; line-height:1.5; }
+.mihomoSubscriptionHelp summary { width:fit-content; cursor:pointer; }
+.mihomoSubscriptionHelp p { margin:6px 0; }
 
 .mihomoFields label > span, .mihomoProfileName > span { color: #8297a6; font-size: 10px; }
 .mihomoFields label > small { color:#617987; font-size:9px; line-height:1.4; }
@@ -1031,13 +1034,16 @@
 .mihomoProfileEditorHead nav button { display:flex; align-items:center; gap:7px; padding:8px 12px; border:0; border-radius:7px; background:transparent; color:var(--muted); cursor:pointer; }
 .mihomoProfileEditorHead nav button.is-active { background:rgba(92,75,180,.22); color:#e4edff; }
 .mihomoProfileEditorHead nav i { display:grid; place-items:center; min-width:18px; height:18px; padding:0 4px; border-radius:999px; background:rgba(91,113,138,.18); font:800 8px var(--font-mono); }
-.mihomoProfileGeneral { gap:14px; padding:18px; }
+.mihomoProfileGeneral { width:min(100%,760px); box-sizing:border-box; justify-self:start; gap:8px; padding:10px; }
 .mihomoProfileGeneral > header > div { display:grid; gap:4px; }
-.mihomoProfileGeneral > header b { color:var(--text); font-size:14px; }
+.mihomoProfileGeneral > header b { color:var(--text); font-size:12px; }
 .mihomoProfileGeneral > header small { color:var(--muted); font-size:10px; }
-.mihomoProfileGeneral > label { display:grid; gap:6px; max-width:680px; }
+.mihomoProfileGeneral > label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .mihomoProfileGeneral > label > span { color:#8297a6; font-size:10px; }
-.mihomoProfileGeneral input { min-height:42px; font-size:13px; }
+.mihomoProfileGeneral :is(input:not([type=checkbox]),select) { box-sizing:border-box; width:auto; max-width:100%; min-height:28px; padding:4px 7px; border-radius:5px; font-size:12px; }
+.mihomoProfileGeneral > label > input { width:28ch; }
+.mihomoProfileGeneral input[type=number] { width:10ch; }
+.mihomoProfileGeneral > p { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-2 .mihomoProfileProtection,.mihomoProfileDialog.is-step-2 .mihomoProfileRules { display:grid; }
 .mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
@@ -1319,7 +1325,7 @@
 .mihomoProfileDialog.is-step-4 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileProtection,
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,
-.mihomoProfileDialog.is-step-3 .mihomoProfileRules:not(.mihomoProfileProtection),
+.mihomoProfileDialog.is-step-3 .mihomoProfileRules:not(.mihomoProfileProtection) { display:grid; }
 .mihomoProfileDialog.is-step-4 .mihomoPresetPicker { display:flex; }
 .mihomoProfileDialog.is-step-4 .mihomoConnectionBuilder { display:grid; }
 .mihomoUnavailableField { color:var(--muted); font-size:10px; line-height:1.4; }
