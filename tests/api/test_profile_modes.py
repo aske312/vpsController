@@ -94,6 +94,16 @@ class ProfileModeTests(unittest.TestCase):
             kind = 'IP-CIDR6' if parsed.version == 6 else 'IP-CIDR'
             self.assertIn(f'{kind},{network},{manager.MIHOMO_PROXY_GROUP},no-resolve', config['rules'])
 
+    def test_personal_application_exception_precedes_service_preset_but_not_protection(self):
+        config = self.config({'connection_mode': 'tun', 'routing_scope': 'selected',
+                              'vpn_services': 'youtube', 'block_privacy': True},
+                             ['PROCESS-NAME,browser.exe,DIRECT'])
+        rules = config['rules']
+        self.assertLess(rules.index('PROCESS-NAME,browser.exe,DIRECT'),
+                        rules.index('DOMAIN-SUFFIX,youtube.com,' + manager.MIHOMO_PROXY_GROUP))
+        self.assertLess(rules.index('DOMAIN-SUFFIX,google-analytics.com,REJECT'),
+                        rules.index('PROCESS-NAME,browser.exe,DIRECT'))
+
     def test_route_dns_uses_same_fallback_and_domain_selection(self):
         config = self.config({'connection_mode': 'tun', 'routing_scope': 'selected',
                               'vpn_services': 'youtube', 'route_dns': True})

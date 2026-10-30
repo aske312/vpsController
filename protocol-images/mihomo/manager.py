@@ -1412,8 +1412,8 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
             rules.extend(configured_preset_rules(routing, setting))
     if routing.get('quic_compatibility', False):
         rules.extend(quic_rule(domain) for domain in quic_domains(routing.get('quic_domains', '')))
-    rules.extend(service_rules(routing))
     rules.extend(rule for rule in personal if rule.startswith("PROCESS-"))
+    rules.extend(service_rules(routing))
     for setting in DIRECT_RULE_PRESETS:
         if setting in {"direct_local_network", "block_malware", "block_privacy", "quic_compatibility"}:
             continue
