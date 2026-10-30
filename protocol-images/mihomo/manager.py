@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
 from client_labels import connection_label
+from profile_modes import connection_mode, service_ids, service_rules
 from client_subscription import CLIENT_HINTS, import_page
 import client_compatibility
 from client_capabilities import FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
@@ -878,6 +879,18 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     result = yaml_profile_routing(current) if current is not None else routing_defaults()
     result.pop("vless_max_connections_per_device", None)
     for key, raw in values.items():
+        if key in {"connection_mode", "routing_scope"}:
+            options = ("tun", "proxy") if key == "connection_mode" else ("all", "selected")
+            if not isinstance(raw, str) or raw not in options:
+                raise HTTPException(status_code=422, detail=f"Unsupported value for {key}")
+            result[key] = raw
+            continue
+        if key == "vpn_services":
+            try:
+                result[key] = ','.join(service_ids(raw))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+            continue
         # Accept saved profiles and older clients without restoring the retired cap.
         if key in {"vless_max_connections_per_device", "client_config_format"} or key.startswith(("block_ads", "tunnel_fragment")):
             continue
@@ -923,6 +936,8 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                 result[key] = str(raw)
     if result.get('route_dns'):
         client_dns_settings(result)
+    if result.get('routing_scope') == 'selected':
+        profile_final_rules(result)
     return result
 
 
@@ -1397,20 +1412,36 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
             rules.extend(configured_preset_rules(routing, setting))
     if routing.get('quic_compatibility', False):
         rules.extend(quic_rule(domain) for domain in quic_domains(routing.get('quic_domains', '')))
+    rules.extend(service_rules(routing))
     rules.extend(rule for rule in personal if rule.startswith("PROCESS-"))
     for setting in DIRECT_RULE_PRESETS:
         if setting in {"direct_local_network", "block_malware", "block_privacy", "quic_compatibility"}:
             continue
+        if routing.get('routing_scope') == 'selected':
+            continue  # Broad bypass presets belong to the VPN-by-default mode.
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
     # Tunnel-required games win over both process-level DIRECT and the global
     # UDP bypass when a user accidentally enables overlapping rules.
-    rules.extend(tunnel_game_rules(routing))
-    rules.extend(direct_game_rules(routing))
-    rules.extend(direct_p2p_rules(routing))
+    if routing.get('routing_scope') != 'selected':
+        rules.extend(tunnel_game_rules(routing))
+        rules.extend(direct_game_rules(routing))
+        rules.extend(direct_p2p_rules(routing))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
+    if routing.get('connection_mode') == 'proxy':
+        # Keep saved application choices for TUN, but do not export inert rules.
+        rules = [rule for rule in rules if not rule.startswith('PROCESS-') and '(PROCESS-' not in rule]
     return list(dict.fromkeys(rules))
+
+
+def profile_final_rules(routing: dict[str, Any]) -> list[str]:
+    rules = profile_rules(routing)
+    if routing.get('routing_scope') == 'selected':
+        if any(rule.startswith('MATCH,') and rule != 'MATCH,DIRECT' for rule in rules):
+            raise HTTPException(status_code=422, detail='Режим «Только выбранное» несовместим с пользовательским MATCH через VPN. Измените общее правило маршрутизации.')
+        return list(dict.fromkeys([*rules, 'MATCH,DIRECT']))
+    return [*rules, f'MATCH,{MIHOMO_PROXY_GROUP}']
 
 
 DNS_SETTINGS_FILE = SETTINGS_ROOT / f"{DNS_MODULE_ID}.json"
@@ -4845,7 +4876,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         "transport-hysteria2": "HY2",
         "transport-tuic": "TUIC",
     }
-    normalized = normalize_profile(item)
+    normalized = normalize_profile(deepcopy(item))
     normalized["connections"] = subscription_limits.client_connections(normalized, effective_client_connections(normalized.get("connections", [])))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
@@ -4895,8 +4926,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     # existing subscription.
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
-    mode = str(routing.get("mode", "rule"))
+    mode = "rule" if routing.get('routing_scope') in ('all', 'selected') else str(routing.get("mode", "rule"))
+    tun_enabled = connection_mode(routing) == 'tun'
+    explicit_proxy = routing.get('connection_mode') == 'proxy'
+    rules = profile_final_rules(routing)
     dns = client_dns_settings(profile_routing, ech_enabled)
+    if explicit_proxy:
+        dns = {**dns, 'enhanced_mode': 'redir-host'}
     lines = [
         "mixed-port: 7890",
         "allow-lan: false",
@@ -4917,17 +4953,19 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         "    QUIC:",
         "      ports: [443, 8443]",
         "tun:",
-        # A portable profile must start without a privileged TUN driver.
-        # Desktop clients can enable TUN explicitly after import; mixed-port
-        # remains immediately usable on every supported platform.
-        f"  enable: {str(bool(routing.get('tun_enabled', False) or routing.get('tun_force', False))).lower()}",
+        # Preserve legacy capture flags until a mode is explicitly selected.
+        # TUN still requires client permission; mixed-port is available in both modes.
+        f"  enable: {str(tun_enabled).lower()}",
         "  stack: mixed",
-        "  auto-route: true",
-        f"  strict-route: {str(bool(routing.get('tun_strict_route', True))).lower()}",
+        f"  auto-route: {str(not explicit_proxy).lower()}",
+        f"  strict-route: {str(not explicit_proxy and bool(routing.get('tun_strict_route', True))).lower()}",
     ]
-    if bool(routing.get("dns_hijack_force", True)):
+    if not explicit_proxy and bool(routing.get("dns_hijack_force", True)):
         lines += ["  dns-hijack:", '    - "any:53"']
-    if routing.get("direct_games_enabled", False) or any(str(rule).startswith("PROCESS-NAME") for rule in routing.get("_personal_rule_lines", [])):
+    explicit_modes = routing.get('connection_mode') in ('tun', 'proxy') or routing.get('routing_scope') in ('all', 'selected')
+    needs_process = (any('PROCESS-' in rule for rule in rules) if explicit_modes else
+                     routing.get('direct_games_enabled', False) or any(str(rule).startswith('PROCESS-NAME') for rule in routing.get('_personal_rule_lines', [])))
+    if not explicit_proxy and needs_process:
         lines.insert(4, "find-process-mode: strict")
     lines += [
         "dns:",
@@ -4948,7 +4986,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         # Replace the legacy common resolver pool only when explicitly enabled.
         dns_start = lines.index('  nameserver:')
         del lines[dns_start:]
-        for key, value in mihomo_route_dns(dns, profile_rules(routing), MIHOMO_PROXY_GROUP, mode).items():
+        for key, value in mihomo_route_dns(dns, rules, MIHOMO_PROXY_GROUP, mode).items():
             if isinstance(value, bool):
                 lines.append(f'  {key}: {str(value).lower()}')
             elif isinstance(value, dict):
@@ -5003,7 +5041,6 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         ]
         if group_type == "url-test":
             lines.append(f"    tolerance: {int(routing.get('tolerance', 50))}")
-    rules = profile_rules(routing)
     providers = dict(SECURITY_PROVIDERS)
     used_providers = {name: definition for name, definition in providers.items() if any(
         rule.startswith(f'RULE-SET,{name},') or f'(RULE-SET,{name})' in rule for rule in rules)}
@@ -5023,7 +5060,6 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     lines.append("rules:")
     for rule in rules:
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")
-    lines.append(f"  - {q(f'MATCH,{MIHOMO_PROXY_GROUP}')}")
     return "\n".join(lines) + "\n"
 
 

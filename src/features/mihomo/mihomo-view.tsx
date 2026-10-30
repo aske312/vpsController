@@ -10,6 +10,8 @@ import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
+import { ProfileRoutingMode } from "./profile-routing-mode";
+import { profileConnectionMode, profileModeChange, profileRuleVisible } from "./profile-modes";
 import { SubscriptionLimitsFields, unlimitedSubscription } from "./subscription-limits";
 import type { SubscriptionLimits } from "./types";
 import { AccessReveal } from "../../shared/components/access-reveal";
@@ -196,10 +198,12 @@ export function MihomoPage({
   const activeProfileRouting = activeProfileDevice?.scope === "common"
     ? commonProfileRouting
     : { ...commonProfileRouting, ...(activeProfileDevice?.routing || {}) };
+  const effectiveProfileRouting = { ...routingPolicy?.values, ...activeProfileRouting };
+  const activeConnectionMode = profileConnectionMode(effectiveProfileRouting);
   const activeCapabilities = clientCapabilities(activeProfileDevice?.scope === "common" ? undefined : activeProfileDevice?.os || "unknown");
   const commonDevice = activeProfileDevice?.scope === "common";
   const visibleProfileStrategies = profileStrategies.filter((strategy) => commonDevice || activeCapabilities.strategies.includes(strategy.value));
-  const visibleProfileRules = profileDirectRules.filter((rule) => commonDevice
+  const visibleProfileRules = profileDirectRules.filter((rule) => profileRuleVisible(rule.key, effectiveProfileRouting)).filter((rule) => commonDevice
     ? !["windows_geolocation", "direct_games_enabled", "direct_p2p_enabled"].includes(rule.key)
     : activeCapabilities.rules.includes(rule.key) && (rule.key !== "windows_geolocation" || (activeProfileDevice?.scope === "hwid" && activeProfileDevice.os === "windows")));
   // Poll live delivery/cleanup status without replacing unsaved form fields.
@@ -616,7 +620,7 @@ export function MihomoPage({
 
   function setProfileRoutingValue(key: string, value: string | number | boolean) {
     setProfileDevices((current) => current.map((device) => device.id === activeDeviceId
-      ? { ...device, routing: { ...(device.scope === "common" ? (device.routing || profileRouting) : (device.routing || {})), [key]: value } }
+      ? { ...device, routing: { ...(device.scope === "common" ? (device.routing || profileRouting) : (device.routing || {})), ...profileModeChange(key, value) } }
       : device));
   }
 
@@ -878,7 +882,7 @@ export function MihomoPage({
   function newProfile() {
     setProfileBaselineConflict(false);
     profileSession.current += 1;
-    setProfileInitialDraft(JSON.stringify(["", [], {}, [{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }], unlimitedSubscription]));
+    setProfileInitialDraft(JSON.stringify(["", [], {}, [{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: { connection_mode: "tun", routing_scope: "all" } }], unlimitedSubscription]));
     profileMutationId.current = clientUuid();
     setProfileStep(1);
     setProfileStrategyTouched(false);
@@ -887,7 +891,7 @@ export function MihomoPage({
     setProfileLimits({ ...unlimitedSubscription });
     setProfileConnections([]);
     setProfileRouting({});
-    setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]);
+    setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: { connection_mode: "tun", routing_scope: "all" } }]);
     setActiveDeviceId("profile-common");
   }
 
@@ -1353,7 +1357,7 @@ export function MihomoPage({
     return true;
   });
   const normalizedRuleSearch = ruleSearch.trim().toLocaleLowerCase("ru");
-  const profilePersonalRules = personalRules.filter((rule) => rule.kind !== "process" || (!commonDevice && ["windows", "macos", "linux"].includes(activeProfileDevice?.os || "unknown") && activeCapabilities.rules.includes("direct_games_enabled")));
+  const profilePersonalRules = personalRules.filter((rule) => rule.kind !== "process" || (activeConnectionMode === "tun" && !commonDevice && ["windows", "macos", "linux"].includes(activeProfileDevice?.os || "unknown") && activeCapabilities.rules.includes("direct_games_enabled")));
   const visibleRuleGroups = [...new Set(visibleProfileRules.map((rule) => rule.group))].map((group) => ({
     group,
     rules: profileDirectRules.filter((rule) => rule.group === group && (!normalizedRuleSearch || `${rule.title} ${rule.text} ${rule.code}`.toLocaleLowerCase("ru").includes(normalizedRuleSearch))),
@@ -1755,13 +1759,14 @@ export function MihomoPage({
               </>}
             </section>
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
-            {profileStep === 2 && <ProfileProtection common={commonDevice} routing={activeProfileRouting} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
+            {profileStep === 2 && <ProfileProtection common={commonDevice} routing={effectiveProfileRouting} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
+            {profileStep === 3 && <ProfileRoutingMode routing={effectiveProfileRouting} onChange={setProfileRoutingValue} />}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
             {profileStep === 3 && <section className="mihomoDnsMode"><header><div><b>Маршрут DNS</b><small>Для выбранной конфигурации. После сохранения обновите подписку в клиенте.</small></div></header><div>{([
               [false, "Общий DNS", "Основной и резервный DNS без разделения маршрутов."],
-              [true, "DNS по маршруту", "Прямые сайты — напрямую, остальные — через VPN."],
-            ] as const).map(([value, title, note]) => <button key={String(value)} type="button" aria-pressed={profileDnsByRoute === value} className={profileDnsByRoute === value ? "is-selected" : ""} onClick={() => setProfileRoutingValue("route_dns", value)}><span>{value ? "ROUTE" : "DNS"}</span><p><b>{title}</b><small>{note}</small></p><i>{profileDnsByRoute === value ? "Выбран" : ""}</i></button>)}</div>{profileDnsByRoute && <><p className="mihomoHint">DNS-серверы выбираются в разделе Mihomo → DNS.</p><details className="mihomoDnsRouteDetails"><summary>Как работает разделение DNS</summary><p className="mihomoHint">Для доменов с прямым маршрутом используется прямой DNS, для остальных — DoH через VPN. При недоступности VPN эти запросы не переключаются на прямой DNS. DNS может выполняться до проверки правил по IP и приложениям, поэтому разделение по этим правилам не гарантируется. В режиме Fake IP имя сайта может разрешаться на стороне VPN без отдельного DNS-запроса клиента. Для клиентов sing-box требуется ядро 1.14 или новее.</p></details></>}</section>}
+              [true, "DNS по маршруту", "DNS следует доменным правилам и маршруту по умолчанию."],
+            ] as const).map(([value, title, note]) => <button key={String(value)} type="button" aria-pressed={profileDnsByRoute === value} className={profileDnsByRoute === value ? "is-selected" : ""} onClick={() => setProfileRoutingValue("route_dns", value)}><span>{value ? "ROUTE" : "DNS"}</span><p><b>{title}</b><small>{note}</small></p><i>{profileDnsByRoute === value ? "Выбран" : ""}</i></button>)}</div>{profileDnsByRoute && <><p className="mihomoHint">DNS-серверы выбираются в разделе Mihomo → DNS.</p><details className="mihomoDnsRouteDetails"><summary>Как работает разделение DNS</summary><p className="mihomoHint">Для доменов с прямым маршрутом используется прямой DNS, для выбранных VPN-доменов — DoH через VPN. Остальные запросы следуют маршруту по умолчанию, когда его можно определить до соединения. При недоступности VPN эти запросы не переключаются на прямой DNS. DNS может выполняться до проверки правил по IP и приложениям, поэтому разделение по этим правилам не гарантируется. В режиме Fake IP имя сайта может разрешаться на стороне VPN без отдельного DNS-запроса клиента.</p></details></>}</section>}
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Включаются только в конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
               <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => void closeProfile(() => setView("routing"))}>Настроить пресеты</button></header>
