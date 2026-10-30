@@ -34,8 +34,15 @@ test('general settings isolate subscription editing from device identity and pre
       assert.match(html, /50 Мбит\/с/);
       assert.match(html, scope === 'manual' ? /Без HWID/ : />HWID</);
     }
-    const name = ProfileGeneral(props).props.children.find(node => node?.type === 'label');
-    name.props.children[1].props.onChange({ target: { value: 'Renamed' } });
+    const findNameInput = node => {
+      if (!node || typeof node !== 'object') return undefined;
+      if (node.type === 'input' && node.props.type !== 'number') return node;
+      for (const child of [node.props?.children].flat(Infinity)) {
+        const match = findNameInput(child);
+        if (match) return match;
+      }
+    };
+    findNameInput(ProfileGeneral(props)).props.onChange({ target: { value: 'Renamed' } });
     assert.deepEqual(changed, [[scope === 'common' ? 'subscription' : 'device', 'Renamed']]);
   }
 });

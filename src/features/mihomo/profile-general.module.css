@@ -1,0 +1,89 @@
+section.root {
+  display: grid;
+  width: min(100%, 680px);
+  min-width: 0;
+  gap: 18px;
+  justify-self: start;
+}
+
+.panel {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+  margin: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(8, 17, 26, .72);
+}
+
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading h3 { margin: 0; color: var(--text); font-size: 15px; font-weight: 600; }
+.binding { padding: 4px 8px; border-radius: 6px; background: var(--panel-soft); color: var(--muted); font-size: 11px; }
+.nameRow { display: grid; grid-template-columns: 140px minmax(0, 1fr); align-items: center; gap: 16px; min-width: 0; }
+.nameRow > span, .limitRow > span:first-child { color: var(--muted); font-size: 13px; }
+
+section.root input.nameInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+}
+
+section.root input.nameInput:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(89, 184, 215, .1); }
+
+.limitRows { display: grid; gap: 14px; }
+.limitRow { display: grid; grid-template-columns: minmax(100px, 1fr) 220px; align-items: center; gap: 16px; min-width: 0; }
+.valueBox { display: flex; align-items: center; min-width: 0; padding-right: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+.valueBox > span { flex: none; color: var(--muted); font-size: 12px; }
+.valueBox:focus-within { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(89, 184, 215, .1); }
+
+section.root input.limitInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  box-shadow: none;
+}
+
+.facts, .sharedValues { display: grid; gap: 14px; margin: 0; }
+.facts > div, .sharedValues > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); align-items: baseline; gap: 16px; }
+.facts dt, .sharedValues dt { color: var(--muted); font-size: 13px; }
+.facts dd, .sharedValues dd { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.editLink { padding: 4px 0; border: 0; background: none; color: var(--cyan); font-size: 12px; cursor: pointer; }
+.editLink:disabled { opacity: .5; cursor: default; }
+.usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.usage > b { margin-left: auto; color: var(--text); font: 500 18px var(--font-mono); }
+.usage > strong { flex-basis: 100%; color: var(--amber); font-size: 12px; font-weight: 500; }
+.empty { margin: 0; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 640px) {
+  .panel { gap: 16px; padding: 16px; }
+  .nameRow { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .limitRow { grid-template-columns: minmax(80px, 1fr) minmax(140px, 190px); gap: 12px; }
+  .facts > div, .sharedValues > div { grid-template-columns: 100px minmax(0, 1fr); gap: 12px; }
+  section.root input.nameInput, section.root input.limitInput { font-size: 16px; }
+}
+
+@media (max-width: 380px) {
+  .limitRow { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}

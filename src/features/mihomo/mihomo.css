@@ -496,15 +496,7 @@
 .mihomoFields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
 
 .mihomoFields label { display: grid; gap: 6px; }
-.mihomoSubscriptionLimits { display:grid; justify-items:start; gap:6px; min-width:0; max-width:100%; }
-.mihomoSubscriptionLimitGrid { display:flex; flex-wrap:wrap; gap:5px 10px; min-width:0; }
-.mihomoSubscriptionLimit { display:flex; align-items:center; gap:6px; min-width:0; }
-.mihomoSubscriptionLimit > span { color:var(--muted); font-size:11px; white-space:nowrap; }
-.mihomoSubscriptionUsage { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding-top:7px; border-top:1px solid var(--line); color:var(--muted); font-size:11px; }
-.mihomoSubscriptionUsage > b { color:var(--text); font:12px var(--font-mono); }
-.mihomoSubscriptionUsage strong { flex-basis:100%; color:var(--amber); font-size:12px; }
-
-.mihomoFields label > span, .mihomoProfileName > span { color: #8297a6; font-size: 10px; }
+.mihomoFields label > span { color: #8297a6; font-size: 10px; }
 .mihomoFields label > small { color:#617987; font-size:9px; line-height:1.4; }
 
 .mihomoDialog input, .mihomoDialog select, .mihomoDialog textarea { width: 100%; min-height: 42px; padding: 0 11px; border: 1px solid rgba(91,113,138,.22); border-radius: 10px; outline: none; background: rgba(5, 13, 21, .82); color: #edf5fa; }
@@ -1026,27 +1018,6 @@
 .mihomoProfileEditorHead nav button { display:flex; align-items:center; gap:7px; padding:8px 12px; border:0; border-radius:7px; background:transparent; color:var(--muted); cursor:pointer; }
 .mihomoProfileEditorHead nav button.is-active { background:rgba(92,75,180,.22); color:#e4edff; }
 .mihomoProfileEditorHead nav i { display:grid; place-items:center; min-width:18px; height:18px; padding:0 4px; border-radius:999px; background:rgba(91,113,138,.18); font:800 8px var(--font-mono); }
-.mihomoProfileGeneral { display:grid; justify-items:start; width:fit-content; max-width:100%; box-sizing:border-box; justify-self:start; gap:6px; padding:7px; border:1px solid var(--line); border-radius:7px; background:rgba(8,17,26,.72); }
-.mihomoGeneralHeading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
-.mihomoGeneralHeading > b { color:var(--text); font-size:13px; }
-.mihomoGeneralHeading > span { padding:3px 6px; border-radius:4px; background:var(--panel-soft); color:var(--muted); font-size:10px; }
-.mihomoGeneralIdentity { display:flex; flex-wrap:wrap; align-items:center; gap:6px; max-width:100%; }
-.mihomoGeneralIdentity > span { color:var(--muted); font-size:11px; }
-.mihomoProfileGeneral :is(input:not([type=checkbox]),select) { box-sizing:border-box; width:auto; max-width:100%; min-height:26px; padding:3px 6px; border-radius:4px; font-size:12px; }
-.mihomoProfileGeneral > p { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
-.mihomoGeneralDeviceFacts { display:flex; flex-wrap:wrap; gap:5px 10px; max-width:100%; margin:0; }
-.mihomoGeneralDeviceFacts > div { display:flex; flex-wrap:wrap; align-items:center; gap:5px; }
-.mihomoGeneralDeviceFacts dt,.mihomoGeneralSharedLimits dt { color:var(--muted); font-size:11px; }
-.mihomoGeneralDeviceFacts dd,.mihomoGeneralSharedLimits dd { margin:0; color:var(--text); font-size:12px; overflow-wrap:anywhere; }
-.mihomoGeneralSharedLimits { display:grid; justify-items:start; gap:5px; max-width:100%; padding-top:5px; border-top:1px solid var(--line); }
-.mihomoGeneralSharedLimits > header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
-.mihomoGeneralSharedLimits b { color:var(--text); font-size:11px; font-weight:600; }
-.mihomoGeneralSharedLimits button { padding:0; border:0; background:none; color:var(--cyan); font-size:11px; cursor:pointer; }
-.mihomoGeneralSharedLimits > dl { display:flex; flex-wrap:wrap; gap:5px 10px; margin:0; }
-.mihomoGeneralSharedLimits > dl > div { display:flex; align-items:center; gap:5px; }
-@media (max-width:640px) {
-  .mihomoProfileGeneral :is(input:not([type=checkbox]),select) { min-height:34px; font-size:16px; }
-}
 .mihomoProfileDialog.is-step-2 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-2 .mihomoProfileProtection,.mihomoProfileDialog.is-step-2 .mihomoProfileRules { display:grid; }
 .mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
