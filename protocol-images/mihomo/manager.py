@@ -47,6 +47,7 @@ from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
 import traffic_usage
+import profile_presets as preset_catalog
 from mrs_cache import MrsCache
 import cdn_security
 import application_operation
@@ -1521,20 +1522,7 @@ def profile_presets(stored: Any = None) -> list[dict[str, Any]]:
         stored = load_json(PRESET_SETTINGS_FILE, None)
     if not isinstance(stored, list) or not stored:
         return default_profile_presets()
-    if mutation_record(stored):
-        return validate_profile_presets(stored)
-    legacy_ids = {"all-vless", "direct-fallback", "cdn-first", "low-latency", "all"}
-    stored_ids = {str(item.get("id", "")) for item in stored if isinstance(item, dict)}
-    if stored_ids == legacy_ids and len(stored) == len(legacy_ids):
-        stored = default_profile_presets()
-        atomic_json(PRESET_SETTINGS_FILE, stored)
-    # Upgrade the former built-in preset without overwriting user-created presets.
-    if not any(str(item.get("id", "")) == "all-vless" for item in stored if isinstance(item, dict)):
-        legacy_index = next((index for index, item in enumerate(stored) if isinstance(item, dict) and item.get("id") == "reliable"), None)
-        if legacy_index is not None:
-            stored[legacy_index] = default_profile_presets()[0]
-            atomic_json(PRESET_SETTINGS_FILE, stored)
-    return validate_profile_presets(stored)
+    return preset_catalog.migrate(validate_profile_presets(stored), validate_profile_presets(default_profile_presets()))
 
 
 def dns_provider_options() -> list[dict[str, str]]:

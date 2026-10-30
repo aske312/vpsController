@@ -9,7 +9,6 @@ import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-gr
 import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
-import builtInProfilePresets from "../../../protocol-images/mihomo/default-profile-presets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
@@ -1770,7 +1769,7 @@ export function MihomoPage({
             <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
               <header><div><b>Пресеты</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => void closeProfile(() => setView("routing"))}>Настроить пресеты</button></header>
-              <div>{[...profilePresets, ...(builtInProfilePresets as ProfilePreset[]).filter(preset => !profilePresets.some(saved => saved.id === preset.id))].filter((preset) => commonDevice || preset.components.every((item) => {
+              <div>{profilePresets.filter((preset) => commonDevice || preset.components.every((item) => {
                 const id = item.id === "$primary" ? String(routingPolicy?.values.preset_primary || "transport-reality") : item.id === "$fallback" ? String(routingPolicy?.values.preset_fallback || "transport-awg") : item.id;
                 const protocolModule = modules.find((entry) => entry.id === id);
                 const settings = Object.fromEntries((protocolModule?.connection_settings || []).map((field) => [field.key, field.default]));
@@ -1785,7 +1784,7 @@ export function MihomoPage({
                 const missingTls = needsTls && !availableNetworkRoute("tls");
                 const missingModules = preset.components.filter((definition) => !modules.some((item) => item.id === definition.id && item.installed));
                 const unavailable = missingCdn || missingTls || missingModules.length > 0;
-                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : "Создать готовый набор"}</small></span></button>;
+                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : preset.description}</small></span></button>;
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">

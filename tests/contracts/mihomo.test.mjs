@@ -2,18 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { read, readMihomoSources, readApiSources } from "./support.mjs";
 
-test("shipped connection presets cover the supported protocol and transport catalog", async () => {
+test("two ready connection bundles use the full catalog without per-protocol presets", async () => {
   const variants = JSON.parse(await read("protocol-images/mihomo/connection-variants.json"));
   const presets = JSON.parse(await read("protocol-images/mihomo/default-profile-presets.json"));
   const identity = row => JSON.stringify([row.id, row.xray_protocol || "vless", Boolean(row.tls), Boolean(row.cdn), row.transport || ""]);
   const matrix = new Set(variants.map(identity));
   assert.equal(matrix.size, 32);
   for (const preset of presets) for (const component of preset.components) assert.ok(matrix.has(identity(component)), preset.id);
-  for (const [id, strategy] of [["all-connections", "select"], ["all-fast", "url-test"], ["all-reserve", "fallback"]]) {
-    const preset = presets.find(row => row.id === id);
-    assert.equal(preset.strategy, strategy);
-    assert.deepEqual(new Set(preset.components.map(identity)), matrix);
+  assert.deepEqual(presets.map(row => row.id), ["direct-bundle", "cdn-bundle"]);
+  for (const preset of presets) {
+    assert.equal(preset.strategy, "fallback");
+    assert.deepEqual(preset.components.slice(0, 3).map(row => row.id), ["transport-tuic", "transport-hysteria2", "transport-awg"]);
+    assert.ok(preset.components.length <= 6);
   }
+  assert.ok(presets[0].components.every(row => !row.cdn && !row.tls));
+  assert.deepEqual(presets[1].components.slice(3).map(row => row.transport), ["websocket", "xhttp", "httpupgrade"]);
 });
 
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
