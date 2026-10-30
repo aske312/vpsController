@@ -274,12 +274,20 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
   }
   const connections = value.connections === undefined ? {} : value.connections;
   if (!record(connections)) throw new Error("Некорректная статистика подключений профиля");
+  if (value.usage != null) {
+    if (!record(value.usage) || !record(value.usage.devices)) throw new Error("Некорректный учёт трафика");
+    for (const row of [value.usage.summary, ...Object.values(value.usage.devices)]) {
+      if (!record(row) || typeof row.stats_available !== "boolean" || typeof row.stats_partial !== "boolean"
+        || (row.used_bytes !== null && (typeof row.used_bytes !== "number" || !Number.isSafeInteger(row.used_bytes) || row.used_bytes < 0))
+        || (row.stats_available && row.used_bytes === null)) throw new Error("Некорректный расход трафика");
+    }
+  }
   for (const row of [summary, ...Object.values(connections)]) {
     if (!record(row)) throw new Error("Некорректная статистика подключения");
     for (const key of ["stats_available", "stats_partial", "activity_available"]) {
       if (row[key] !== undefined && typeof row[key] !== "boolean") throw new Error("Некорректная доступность статистики профиля");
     }
-    for (const key of ["rx_bytes", "tx_bytes", "handshake_age_s", "last_handshake_age_s", "latency_ms"]) {
+    for (const key of ["rx_bytes", "tx_bytes", "used_bytes", "handshake_age_s", "last_handshake_age_s", "latency_ms"]) {
       if (row[key] != null && (typeof row[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0)) throw new Error("Некорректные значения статистики профиля");
     }
     if (row !== summary && row.active != null && typeof row.active !== "boolean") throw new Error("Некорректное состояние подключения");

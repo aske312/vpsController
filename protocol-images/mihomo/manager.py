@@ -46,6 +46,7 @@ from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_P
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
+import traffic_usage
 from mrs_cache import MrsCache
 import cdn_security
 import application_operation
@@ -104,6 +105,7 @@ profile_mutation_lock = threading.Lock()
 github_release_cache: dict[str, dict[str, Any]] = {}
 latency_cache: dict[str, tuple[float, float | None]] = {}
 latency_cache_lock = threading.Lock()
+traffic_sampling_lock = threading.Lock()
 quic_telemetry_lock = threading.Lock()
 quic_telemetry: dict[str, ConnectionTelemetry] = {}
 xray_telemetry = XrayStats()
@@ -278,6 +280,27 @@ def transition_worker(stopped: threading.Event) -> None:
         stopped.wait(60)
 
 
+def traffic_worker(stopped: threading.Event) -> None:
+    warned = False
+    while not stopped.is_set():
+        failed = False
+        if component_is_managed():
+            try:
+                for item in profiles():
+                    if stopped.is_set():
+                        break
+                    try:
+                        profile_stats_payload(item, collect_latency=False)
+                    except Exception:
+                        failed = True
+            except Exception:
+                failed = True
+        if failed and not warned:
+            logger.error("Traffic accounting sample unavailable")
+        warned = failed
+        stopped.wait(5)
+
+
 @asynccontextmanager
 async def manager_lifespan(_app):
     if Path("/run/systemd/system").is_dir():
@@ -287,12 +310,15 @@ async def manager_lifespan(_app):
     worker.start()
     mrs_worker = threading.Thread(target=maintain_mrs, args=(stopped,), daemon=True)
     mrs_worker.start()
+    usage_worker = threading.Thread(target=traffic_worker, args=(stopped,), daemon=True)
+    usage_worker.start()
     try:
         yield
     finally:
         stopped.set()
         await asyncio.to_thread(worker.join, 10)
         await asyncio.to_thread(mrs_worker.join, 2)
+        await asyncio.to_thread(usage_worker.join, 3)
         for collector in list(quic_telemetry.values()):
             await asyncio.to_thread(collector.close)
         quic_telemetry.clear()
@@ -3731,24 +3757,19 @@ def endpoint_latency_ms(endpoint: str | None) -> float | None:
 
 def shadowsocks_profile_stats(profile_id: str, port: int, instance_id: str | None = None) -> dict[str, Any]:
     unit = f"vps-control-mihomo-ss@{instance_id or profile_id}.service"
-
-    def counter(name: str) -> int | None:
-        try:
-            result = run("systemctl", "show", unit, f"--property={name}", "--value")
-            return int(result.stdout.strip()) if result.returncode == 0 else None
-        except ValueError:
-            return None
-
+    sample = load_json(DATA_ROOT / "shadowsocks-traffic" / f"{instance_id or profile_id}.json", {})
+    fresh = 0 <= time.time() - sample.get("updated_at", 0) < 120
     result = run("ss", "-Htn", "state", "established", f"( sport = :{port} )")
     active_connections = len([line for line in result.stdout.splitlines() if line.strip()]) if result.returncode == 0 else None
-    rx, tx = counter("IPEgressBytes"), counter("IPIngressBytes")
     return {
         "active": active_connections > 0 if active_connections is not None else None,
         "service_active": systemctl_active(unit),
         "activity_source": "tcp_sessions",
-        "rx_bytes": rx,
-        "tx_bytes": tx,
-        "stats_available": rx is not None and tx is not None,
+        "rx_bytes": None,
+        "tx_bytes": None,
+        "used_bytes": sample.get("used_bytes") if fresh else None,
+        "counter_epoch": sample.get("epoch"),
+        "stats_available": fresh and sample.get("used_bytes") is not None,
         "activity_available": active_connections is not None,
         "active_connections": active_connections,
     }
@@ -3770,12 +3791,18 @@ def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> 
     return xray_telemetry.snapshot(reality_api_server(), email, enabled)
 
 
-def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
+def profile_stats_payload(item: dict[str, Any], *, collect_latency: bool = True) -> dict[str, Any]:
+    # Serialize reads together with checkpoints: a delayed older request must
+    # not look like a core counter reset and count the same bytes twice.
+    with traffic_sampling_lock:
+        return collect_profile_stats(item, collect_latency=collect_latency)
+
+
+def collect_profile_stats(item: dict[str, Any], *, collect_latency: bool = True) -> dict[str, Any]:
     profile_id = str(item.get("id", ""))
     connections: dict[str, Any] = {}
     wg_dump: dict[str, dict[str, Any]] | None = None
     awg_dump: dict[str, dict[str, Any]] | None = None
-    empty_peer = {"active": False, "endpoint": None, "rx_bytes": 0, "tx_bytes": 0, "handshake_age_s": None}
     unknown_peer = {"active": None, "rx_bytes": None, "tx_bytes": None, "stats_available": False, "activity_available": False}
     for connection in normalize_profile(item).get("connections", []):
         connection_id = str(connection.get("id", ""))
@@ -3783,19 +3810,21 @@ def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
         credential = connection.get("credential", {})
         if module_id == "transport-wg":
             wg_dump = wg_like_dump("transport-wg") if wg_dump is None else wg_dump
-            connections[connection_id] = wg_dump.get(str(credential.get("public_key", "")), empty_peer) if wg_dump is not None else dict(unknown_peer)
+            connections[connection_id] = wg_dump.get(str(credential.get("public_key", "")), dict(unknown_peer)) if wg_dump is not None else dict(unknown_peer)
         elif module_id == "transport-awg":
             awg_dump = wg_like_dump("transport-awg") if awg_dump is None else awg_dump
-            connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer) if awg_dump is not None else dict(unknown_peer)
+            connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), dict(unknown_peer)) if awg_dump is not None else dict(unknown_peer)
         elif module_id == "transport-shadowsocks":
             connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)), credential.get("instance_id"))
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
         elif module_id in {"transport-hysteria2", "transport-tuic"}:
             connections[connection_id] = quic_profile_stats(module_id, credential)
+    def directional(row):
+        return row.get("stats_available", True) and row.get("rx_bytes") is not None and row.get("tx_bytes") is not None
     values = list(connections.values())
     for value in values:
-        if value.get("endpoint") and (value.get("active") or int(value.get("active_connections", 0) or 0) > 0 or value.get("handshake_age_s") is not None):
+        if collect_latency and value.get("endpoint") and (value.get("active") or int(value.get("active_connections", 0) or 0) > 0 or value.get("handshake_age_s") is not None):
             value["latency_ms"] = endpoint_latency_ms(str(value["endpoint"]))
     rx_bytes = sum(int(value.get("rx_bytes", 0) or 0) for value in values)
     tx_bytes = sum(int(value.get("tx_bytes", 0) or 0) for value in values)
@@ -3808,9 +3837,13 @@ def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
         rows = [connections[value] for value in ids if value in connections]
         ages = [int(row["handshake_age_s"]) for row in rows if row.get("handshake_age_s") is not None]
         latencies = [float(row["latency_ms"]) for row in rows if row.get("latency_ms") is not None]
-        device_summaries[device_id] = {"stats_available": not rows or any(row.get("stats_available", True) for row in rows), "stats_partial": any(not row.get("stats_available", True) for row in rows), "activity_available": all(row.get("activity_available", True) for row in rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
+        device_summaries[device_id] = {"stats_available": not rows or any(directional(row) for row in rows), "stats_partial": any(not directional(row) for row in rows), "activity_available": all(row.get("activity_available", True) for row in rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
     latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
-    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": not values or any(value.get("stats_available", True) for value in values), "stats_partial": any(not value.get("stats_available", True) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
+    try:
+        usage = traffic_usage.snapshot(normalize_profile(item), connections, DATA_ROOT / "traffic-usage", load_json, atomic_json)
+    except (OSError, ValueError, KeyError, TypeError):
+        usage = None
+    return {"id": profile_id, "usage": usage, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": not values or any(directional(value) for value in values), "stats_partial": any(not directional(value) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
 
 
 @app.get("/api/mihomo/stats", dependencies=[Depends(auth_required)])

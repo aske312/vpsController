@@ -79,25 +79,20 @@ test('limit suggestions include zero and allow an arbitrary custom number', () =
   for (const number of [137, 423, 19]) assert.ok(html.includes(`value="${number}"`));
 });
 
-test('usage sums each saved connection once and keeps device ownership and missing counters separate', () => {
-  const connections = [{ id: 'one', device_id: 'phone' }, { id: 'two', device_id: 'laptop' }, { id: 'three', device_id: 'phone' }, { id: 'pool', device_id: 'common' }];
-  const stats = { connections: { one: { rx_bytes: 1024, tx_bytes: 2048 }, two: { rx_bytes: 8192, tx_bytes: 0 }, three: { rx_bytes: 1024, tx_bytes: 0 }, pool: { rx_bytes: 1024, tx_bytes: 0 } } };
-  const phone = subscriptionTraffic(stats, connections, 'phone');
-  const laptop = subscriptionTraffic(stats, connections, 'laptop');
-  const common = subscriptionTraffic(stats, connections, 'common');
-  const all = subscriptionTraffic(stats, connections);
-  assert.equal(phone.rx_bytes + phone.tx_bytes, 4096);
-  assert.equal(laptop.rx_bytes + laptop.tx_bytes, 8192);
-  for (const direction of ['rx_bytes', 'tx_bytes']) assert.equal(all[direction], phone[direction] + laptop[direction] + common[direction]);
-  assert.equal(subscriptionTraffic(undefined, connections), undefined);
-  const partial = subscriptionTraffic({ connections: { one: stats.connections.one } }, connections, 'phone');
-  assert.equal(partial.stats_partial, true);
-  assert.match(render({ traffic: partial }), /≥ 3 KB/);
-  assert.match(render({ traffic: all }), />13 KB</);
-  assert.match(render({ traffic: phone }), />4 KB</);
-  const unknown = subscriptionTraffic({ connections: {} }, connections, 'phone');
-  assert.equal(unknown.stats_available, false);
-  assert.match(render({ traffic: unknown, status: { state: 'active', used_bytes: 999999999, expires_at: null } }), />—</);
+test('general uses persisted device usage and subscription sum, never transient core or quota totals', () => {
+  const usage = used_bytes => ({ used_bytes, stats_available: true, stats_partial: true });
+  const stats = { connections: { one: { rx_bytes: 999999999, tx_bytes: 999999999 } }, usage: {
+    summary: usage(13312), devices: { phone: usage(4096), laptop: usage(8192), common: usage(1024) }
+  } };
+  assert.equal(subscriptionTraffic(stats, 'phone').used_bytes, 4096);
+  assert.equal(subscriptionTraffic(stats, 'laptop').used_bytes, 8192);
+  assert.equal(subscriptionTraffic(stats).used_bytes, Object.values(stats.usage.devices).reduce((sum, row) => sum + row.used_bytes, 0));
+  assert.equal(subscriptionTraffic(stats, 'missing'), undefined);
+  assert.equal(subscriptionTraffic(undefined), undefined);
+  assert.equal(subscriptionTraffic({ connections: stats.connections }), undefined);
+  assert.match(render({ traffic: subscriptionTraffic(stats, 'phone') }), /≥ 4 KB/);
+  assert.match(render({ traffic: subscriptionTraffic(stats) }), /≥ 13 KB/);
+  assert.match(render({ status: { state: 'active', used_bytes: 999999999, expires_at: null } }), />—</);
 });
 
 test('exhaustion and unknown enforcement are visible instead of appearing active', () => {

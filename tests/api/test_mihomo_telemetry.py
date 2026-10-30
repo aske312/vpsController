@@ -214,6 +214,11 @@ class QuicTrafficTests(unittest.TestCase):
                 self.assertGreater(stats["tx_bytes"], 0)
                 self.assertEqual(collector.snapshot("b")["rx_bytes"], 0)
                 self.assertFalse(collector.snapshot("b")["active"])
+                profile = {"id": "quic-usage", "devices": [{"id": "phone"}], "connections": [
+                    {"id": "a", "device_id": "phone", "component": f"transport-{module}", "credential": {"instance_id": "a"}}]}
+                for _ in range(2):
+                    usage = manager.traffic_usage.snapshot(profile, {"a": stats}, root / "usage", manager.load_json, manager.atomic_json)
+                    self.assertEqual(usage["devices"]["phone"]["used_bytes"], stats["rx_bytes"] + stats["tx_bytes"])
                 release.set()
                 while connection.recv(8192):
                     pass
