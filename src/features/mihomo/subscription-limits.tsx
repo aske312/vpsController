@@ -29,7 +29,7 @@ export function SubscriptionLimitsFields({ value, status, traffic, disabled, onC
   return <section className="mihomoSubscriptionLimits" aria-label="Контроль подписки">
     <div className="mihomoSubscriptionLimitGrid">{fields.map(field => <label className="mihomoSubscriptionLimit" key={field.key}>
       <span>{field.label}</span>
-      <input type="number" aria-label={`${field.label}, ${field.unit}`} list={`${id}-${field.key}`} value={value[field.key] ?? 0} min={0} max={field.max} step={1} required disabled={disabled}
+      <input type="number" aria-label={`${field.label}, ${field.unit}`} list={`${id}-${field.key}`} value={value[field.key] ?? 0} style={{ width: `${String(value[field.key] ?? 0).length + 5}ch` }} min={0} max={field.max} step={1} required disabled={disabled}
         onFocus={event => event.currentTarget.select()} onChange={event => onChange(subscriptionLimitChange(value, field.key, Number(event.target.value)))} />
       <span>{field.unit}</span>
       <datalist id={`${id}-${field.key}`}>{field.presets.map(preset => <option key={preset} value={preset} />)}</datalist>

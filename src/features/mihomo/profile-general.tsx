@@ -23,7 +23,7 @@ export function ProfileGeneral({ device, profileName, limits, status, traffic, d
   const core = [device.core_name, device.core_version].filter(Boolean).join(" ") || "Не определено";
   return <section className="mihomoProfileName mihomoProfileGeneral" aria-label={common ? "Общие настройки подписки" : "Общие настройки устройства"}>
     <header className="mihomoGeneralHeading"><b>{common ? "Подписка" : "Устройство"}</b>{!common && <span>{binding}</span>}</header>
-    <label className="mihomoGeneralIdentity"><span>Название</span><input value={common ? profileName : device.name} required maxLength={80} disabled={disabled} onChange={event => common ? onProfileNameChange(event.target.value) : onDeviceNameChange(event.target.value)} /></label>
+    <label className="mihomoGeneralIdentity"><span>Название</span><input value={common ? profileName : device.name} size={Math.max(6, Math.min(32, (common ? profileName : device.name).length + 1))} required maxLength={80} disabled={disabled} onChange={event => common ? onProfileNameChange(event.target.value) : onDeviceNameChange(event.target.value)} /></label>
     {common ? <SubscriptionLimitsFields value={limits} status={status} traffic={traffic} disabled={disabled} onChange={onLimitsChange} /> : <>
       <dl className="mihomoGeneralDeviceFacts">
         <div><dt>Система</dt><dd>{deviceSystemLabel(device)}</dd></div>
