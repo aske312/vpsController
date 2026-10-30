@@ -3,11 +3,12 @@ import catalog from "../../../protocol-images/mihomo/vpn-services.json" with { t
 import { type ProfileRouting } from "./profile-modes";
 import { ProfileModeToggle } from "./profile-mode-toggle";
 
-export function ProfileRoutingMode({ routing, onChange }: { routing: ProfileRouting; onChange: (key: string, value: string) => void }) {
+export function ProfileRoutingMode({ routing, onChange }: { routing: ProfileRouting; onChange: (key: string, value: string | boolean) => void }) {
   const selectedOnly = routing.routing_scope === "selected";
   const services = new Set(String(routing.vpn_services || "").split(",").filter(Boolean));
   return <section className="mihomoRoutingMode">
     <header><b>Что направлять через VPN</b><ProfileModeToggle label="Маршрутизация" value={selectedOnly ? "Только выбранное" : "По правилам"} active={selectedOnly} onToggle={() => onChange("routing_scope", selectedOnly ? "all" : "selected")} /></header>
+    <header><b>DNS</b><ProfileModeToggle label="DNS" value={routing.route_dns ? "DNS по маршруту" : "Общий DNS"} active={Boolean(routing.route_dns)} onToggle={() => onChange("route_dns", !routing.route_dns)} /></header>
     {selectedOnly && <div className="mihomoVpnServices" role="group" aria-label="Сервисы через VPN">{catalog.services.map(service => <button className="mihomoVpnService" key={service.id} type="button" aria-pressed={services.has(service.id)} onClick={() => {
         const next = new Set(services);
         if (next.has(service.id)) next.delete(service.id); else next.add(service.id);

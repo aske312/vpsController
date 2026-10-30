@@ -13,7 +13,6 @@ export function ProfileProtection({ routing, echAvailable = false, onChange }: {
     ["tcp_concurrent", "TCP", "Ускоренное подключение", "Параллельно проверяет адреса домена."],
     ["dns_fake_ip", "FAKE", "Fake-IP DNS", "Точный выбор правил по домену в TUN."],
     ["dns_secure", "DoH", "Защищённый DNS", "Отправляет DNS через зашифрованный DoH."],
-    ["route_dns", "ROUTE", "DNS по маршруту", "Выбирает DNS по доменным правилам и маршруту по умолчанию."],
     ["dns_ipv6", "IPv6", "Контроль IPv6", "Разрешает IPv6-адреса в этом профиле."],
     ["dns_prefer_h3", "H3", "HTTP/3 для DNS", "Использует быстрый транспорт DoH, если он доступен."],
   ] as const;

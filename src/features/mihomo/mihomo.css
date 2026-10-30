@@ -1053,10 +1053,11 @@
 .mihomoProfileDialog.is-step-3 .mihomoPresetPicker,.mihomoProfileDialog.is-step-3 .mihomoConnectionBuilder { display:grid; }
 .mihomoProfileDialog.is-step-4 .mihomoProfileName,.mihomoProfileDialog.is-step-4 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-4 .mihomoProfileRules:not(.mihomoProfileProtection),.mihomoProfileDialog.is-step-4 .mihomoPresetPicker,.mihomoProfileDialog.is-step-4 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-4 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-4 .mihomoProfileProtection { display:grid; }
-.mihomoProfileDialog .mihomoProfileStrategy > div { grid-template-columns:repeat(4,minmax(180px,1fr)); }
 .mihomoProfileDialog .mihomoProfileStrategy > div { display:flex; flex-wrap:wrap; }
-.mihomoProfileDialog .mihomoProfileStrategy button { width:190px; flex:0 1 190px; }
+.mihomoProfileDialog .mihomoProfileStrategy button { width:auto; flex:0 1 auto; grid-template-columns:24px minmax(0,1fr); gap:6px; min-height:34px; padding:5px 8px; }
+.mihomoProfileDialog .mihomoProfileStrategy button > i { min-height:22px; }
 .mihomoProfileDialog .mihomoProfileRules > div { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
+.mihomoProfileDialog .mihomoProfileRules:not(.mihomoProfileProtection) > div { grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),210px)); }
 .mihomoProfileDialog .mihomoPresetPicker > div { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
 .mihomoProfileDialog .mihomoConnectionFields { grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }
 .mihomoProfileDialog .mihomoConnectionList { grid-template-columns:repeat(2,minmax(0,1fr)); }

@@ -66,7 +66,7 @@ test("one capture button shows the current mode without guidance", () => {
 
 test("one routing button exposes local brand icons only in selected mode without guidance", () => {
   const selected = render(ProfileRoutingMode, { routing_scope: "selected", vpn_services: "telegram", connection_mode: "proxy" });
-  assert.equal((selected.match(/class="mihomoModeToggle"/g) || []).length, 1);
+  assert.equal((selected.match(/aria-label="Маршрутизация:/g) || []).length, 1);
   assert.match(selected, /aria-label="Маршрутизация: Только выбранное"/);
   assert.equal((selected.match(/class="mihomoVpnService"/g) || []).length, catalog.services.length);
   assert.doesNotMatch(selected, /<small|mihomoHint|локальный прокси/);
@@ -121,7 +121,7 @@ test("routing choices exclude inactive presets for Proxy and selected-only scope
 });
 
 test("traffic functions stay in Protection for both routing scopes and keep their saved keys", () => {
-  const titles = { block_malware: "Фишинг и вредоносные сайты", block_privacy: "Приватность", quic_compatibility: "Совместимость QUIC", route_dns: "DNS по маршруту" };
+  const titles = { block_malware: "Фишинг и вредоносные сайты", block_privacy: "Приватность", quic_compatibility: "Совместимость QUIC" };
   for (const scope of ["all", "selected"]) {
     let routing = { connection_mode: "tun", routing_scope: scope, block_malware: true, route_dns: true };
     const onChange = (key, value) => { routing = { ...routing, [key]: value }; };
@@ -136,6 +136,27 @@ test("traffic functions stay in Protection for both routing scopes and keep thei
       button.props.onClick();
       assert.equal(routing[key], !previous);
       assert.equal(routing.routing_scope, scope);
+    }
+  }
+});
+
+test("routing DNS toggles independently in both connection modes and routing scopes", () => {
+  for (const connection_mode of ["tun", "proxy"]) {
+    for (const routing_scope of ["all", "selected"]) {
+      let routing = { connection_mode, routing_scope, route_dns: true, vpn_services: "telegram" };
+      const onChange = (key, value) => { routing = { ...routing, ...profileModeChange(key, value) }; };
+      for (const previous of [true, false]) {
+        const html = render(ProfileRoutingMode, routing);
+        assert.match(html, previous ? /aria-label="DNS: DNS по маршруту"/ : /aria-label="DNS: Общий DNS"/);
+        assert.doesNotMatch(render(ProfileProtection, routing), /DNS по маршруту/);
+        const control = findElement(ProfileRoutingMode({ routing, onChange }), node => node.type === ProfileModeToggle && node.props.label === "DNS");
+        assert.ok(control);
+        ProfileModeToggle(control.props).props.onClick();
+        assert.equal(routing.route_dns, !previous);
+        assert.equal(routing.connection_mode, connection_mode);
+        assert.equal(routing.routing_scope, routing_scope);
+        assert.equal(routing.vpn_services, "telegram");
+      }
     }
   }
 });
