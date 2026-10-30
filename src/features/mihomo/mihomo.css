@@ -687,7 +687,6 @@
 .mihomoProfileStrategy button small { display:none; }
 .mihomoProfileStrategy button.is-selected { border-color:rgba(89,199,146,.38); background:rgba(37,112,79,.11); }
 .mihomoProfileStrategy button.is-selected > i { background:rgba(42,137,92,.24); color:#b9f3d8; }
-.mihomoStrategyBadge { align-self:center; padding:6px 8px; border:1px solid rgba(89,199,146,.24); border-radius:8px; color:#8ed7b8; font:800 8px var(--font-mono); white-space:nowrap; }
 .mihomoProfileDialog.is-step-1 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-1 .mihomoProfileProtection,.mihomoProfileDialog.is-step-1 .mihomoProfileRules,.mihomoProfileDialog.is-step-1 .mihomoPresetPicker,.mihomoProfileDialog.is-step-1 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-1 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileName,.mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-2 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoProfileName,.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
@@ -727,17 +726,20 @@
 .mihomoDeviceBuilder input { min-height:27px; width:100%; padding:0; border:0; background:transparent; font-weight:700; }
 .mihomoDeviceBuilder button small { color:var(--muted); font-size:8px; }
 .mihomoDeviceBuilder button em { padding:5px 8px; color:#dc8c91; font-style:normal; cursor:pointer; }
-.mihomoPresetPicker { display:grid; gap:7px; margin:0; padding:10px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
-.mihomoPresetPicker > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.mihomoPresetPicker { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0; padding:7px 8px; border:1px solid var(--line); border-radius:8px; background:rgba(8,17,26,.72); }
+.mihomoPresetPicker > header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.mihomoPresetPicker > header b { font-size:11px; }
 .mihomoPresetPicker > header div { display:grid; gap:3px; }
 .mihomoPresetPicker > header small { display:none; }
 .mihomoPresetPicker > header button { border:0; background:none; color:#b9abff; cursor:pointer; font-size:10px; }
-.mihomoPresetPicker > div { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+.mihomoPresetPicker > div { display:flex; flex:1 1 320px; flex-wrap:wrap; align-items:center; gap:5px; min-width:0; }
 .mihomoProfileTechnicalNote { display:none; }
-.mihomoPresetPicker > div > button { min-width:0; display:grid; gap:3px; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--surface-raised); color:var(--text); text-align:left; cursor:pointer; }
+.mihomoPresetPicker > div > button { min-width:0; max-width:100%; display:inline-flex; align-items:center; gap:5px; padding:4px 7px; min-height:28px; border:1px solid var(--line); border-radius:6px; background:var(--surface-raised); color:var(--text); text-align:left; cursor:pointer; }
+.mihomoPresetPicker > div > button > i { display:grid; place-items:center; flex:none; width:16px; height:16px; color:#c7bcff; font:normal 14px/1 sans-serif; }
+.mihomoPresetPicker > div > button > span { min-width:0; }
 .mihomoPresetPicker > div > button:hover { border-color:rgba(116,94,223,.55); }
 .mihomoPresetPicker > div > button:disabled { opacity:.45; cursor:not-allowed; }
-.mihomoPresetPicker b,.mihomoPresetPicker small { overflow:hidden; text-overflow:ellipsis; }
+.mihomoPresetPicker > div b { font-size:11px; font-weight:500; overflow-wrap:anywhere; }
 .mihomoPresetPicker small { color:var(--muted); font-size:9px; line-height:1.35; }
 .mihomoProfileDialog .mihomoPresetPicker > div > button small { display:none; }
 .mihomoPresetRoutingPanel { overflow:hidden; border:1px solid rgba(91,113,138,.22); border-radius:18px; background:linear-gradient(145deg,rgba(10,20,30,.98),rgba(6,14,22,.96)); }
@@ -992,11 +994,10 @@
 .mihomoProfileDialog input:not([type=checkbox]),.mihomoProfileDialog select { min-height:36px; }
 .mihomoProfileName { grid-template-columns:1fr; align-items:stretch; gap:7px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(8,17,26,.72); }
 .mihomoConnectionEmpty { grid-column:1/-1; margin:0; padding:14px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); text-align:center; }
-@media (max-width: 760px) { .mihomoPresetPicker > div { grid-template-columns:1fr 1fr; } }
 @media (max-width: 1100px) { .mihomoGameCatalog { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width: 900px) { .mihomoPresetBackdrop { padding:0; } .mihomoPresetDialog { width:100%; height:100dvh; max-height:none; border:0; border-radius:0; } .mihomoPresetIntro { display:none; } .mihomoPresetEditor { grid-template-columns:1fr; grid-template-rows:124px minmax(0,1fr); padding:10px; } .mihomoPresetRail > header { display:none; } .mihomoPresetRail { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:1fr; } .mihomoPresetRail > div { display:flex; gap:5px; overflow:auto; } .mihomoPresetRail > div > button { min-width:160px; } .mihomoPresetRailAdd { width:120px; } .mihomoSettingsSummary { grid-template-columns:repeat(2,minmax(0,1fr)); } .mihomoSettingsGrid,.mihomoPresetCatalogSettings > div { grid-template-columns:1fr; } .mihomoSettingsGrid > article.is-wide { grid-column:auto; } .mihomoPresetCatalogSettings article { border-right:0; border-bottom:1px solid var(--line); } .mihomoPresetRoutingPanel > div { grid-template-columns:1fr 1fr; } .mihomoPresetGroups { grid-template-columns:1fr; } .mihomoPresetGroups > section { border-left:0; border-top:1px solid rgba(91,113,138,.13); } .mihomoPresetGroups > section:first-child { border-top:0; } .mihomoPresetCard > header { grid-template-columns:32px minmax(0,1fr) 32px; } .mihomoPresetCard > header label,.mihomoPresetCard > header em { grid-column:2; } .mihomoPresetCard > header .mihomoPresetDelete { grid-column:3; grid-row:1; } .mihomoRouteCards,.mihomoRoutingColumns { grid-template-columns:1fr; } .mihomoCustomGames { grid-template-columns:1fr; } .mihomoRuleStudio { grid-template-columns:1fr; } .mihomoRuleStudio > aside { border-right:0; border-bottom:1px solid var(--line); } .mihomoRuleLibrary { max-height:280px; } }
-@media (max-width: 1100px) { .mihomoProfileWorkspace { grid-template-columns:170px minmax(0,1fr); } .mihomoProfileStrategy > div,.mihomoProfileRules > div,.mihomoDeviceBuilder > div { grid-template-columns:repeat(2,minmax(0,1fr)); } .mihomoPresetPicker > div { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-@media (max-width: 640px) { .mihomoSettingsSummary,.mihomoDomainFields,.mihomoPresetPicker > div,.mihomoPresetRoutingPanel > div,.mihomoRoutingFields,.mihomoGameCatalog,.mihomoProfileRules > div,.mihomoProfileRules .mihomoPersonalProfileRules,.mihomoRuleStudio > aside,.mihomoProfileName { grid-template-columns:1fr; } .mihomoPresetHeaderStats { display:none; } .mihomoPresetDescription,.mihomoPersonalRuleFormRow { grid-template-columns:1fr; } .mihomoRoutingHeader,.mihomoRoutingFooter,.mihomoRuleEditorHead,.mihomoRuleEditorActions { align-items:flex-start; flex-direction:column; } .mihomoRouteCards > label { grid-template-columns:40px minmax(0,1fr) auto; } .mihomoCatalogToolbar { grid-template-columns:1fr; } .mihomoPersonalRuleDialog > footer { align-items:stretch; flex-direction:column; } .mihomoPersonalRuleDialog > footer > span { margin:0; } }
+@media (max-width: 1100px) { .mihomoProfileWorkspace { grid-template-columns:170px minmax(0,1fr); } .mihomoProfileStrategy > div,.mihomoProfileRules > div,.mihomoDeviceBuilder > div { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width: 640px) { .mihomoSettingsSummary,.mihomoDomainFields,.mihomoPresetRoutingPanel > div,.mihomoRoutingFields,.mihomoGameCatalog,.mihomoProfileRules > div,.mihomoProfileRules .mihomoPersonalProfileRules,.mihomoRuleStudio > aside,.mihomoProfileName { grid-template-columns:1fr; } .mihomoPresetHeaderStats { display:none; } .mihomoPresetDescription,.mihomoPersonalRuleFormRow { grid-template-columns:1fr; } .mihomoRoutingHeader,.mihomoRoutingFooter,.mihomoRuleEditorHead,.mihomoRuleEditorActions { align-items:flex-start; flex-direction:column; } .mihomoRouteCards > label { grid-template-columns:40px minmax(0,1fr) auto; } .mihomoCatalogToolbar { grid-template-columns:1fr; } .mihomoPersonalRuleDialog > footer { align-items:stretch; flex-direction:column; } .mihomoPersonalRuleDialog > footer > span { margin:0; } }
 @media (max-width: 860px) { .mihomoProfileBackdrop { padding:0; } .mihomoProfileDialog { width:100%; height:100dvh; border:0; border-radius:0; } .mihomoProfileDialog > header { min-height:58px; padding:11px 14px; } .mihomoProfileWorkspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); } .mihomoProfileRail { display:block; padding:9px 12px; border-right:0; border-bottom:1px solid var(--line); } .mihomoProfileSteps { grid-template-columns:repeat(3,1fr); } .mihomoProfileSteps button { grid-template-columns:24px minmax(0,1fr); padding:7px; } .mihomoProfileSteps button i { width:23px; height:23px; } .mihomoProfileSteps button small,.mihomoProfileDraftSummary,.mihomoProfileRailHint { display:none; } .mihomoProfileCanvas { padding:16px 16px 24px; scrollbar-gutter:auto; } .mihomoProfileDialog > footer { padding:10px 14px; } }
 @media (max-width: 640px) { .mihomoProfileStrategy > div { grid-template-columns:1fr; } .mihomoReadyDevices > article { grid-template-columns:1fr; } .mihomoReadyDevices img { width:132px; height:132px; justify-self:center; } .mihomoCreatedProfile .mihomoReadySummary,.mihomoProfileStrategy > header { align-items:flex-start; flex-direction:column; } }
 
@@ -1048,7 +1049,6 @@
 .mihomoProfileDialog .mihomoProfileStrategy button > i { min-height:22px; }
 .mihomoProfileDialog .mihomoProfileRules > div { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
 .mihomoProfileDialog .mihomoProfileRules:not(.mihomoProfileProtection) > div { grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),210px)); }
-.mihomoProfileDialog .mihomoPresetPicker > div { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
 .mihomoProfileDialog > footer { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; }
 .mihomoProfileDialog > footer > span { color:var(--muted); font-size:9px; text-align:right; }
 .mihomoProfileRuleButton { min-width:0; display:grid; grid-template-columns:38px minmax(0,1fr); align-items:center; gap:8px; padding:8px; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,21,.58); color:var(--muted); text-align:left; cursor:pointer; }
@@ -1064,10 +1064,6 @@
 .mihomoFragmentFields input { box-sizing:border-box; width:100%; }
 .mihomoFragmentFields small { color:var(--muted); font-size:10px; line-height:1.5; }
 
-.mihomoProfileDialog .mihomoPresetPicker > div > button { grid-template-columns:28px minmax(0,1fr); align-items:center; gap:8px; border-style:dashed; }
-.mihomoProfileDialog .mihomoPresetPicker > div > button > i { display:grid; place-items:center; width:28px; height:28px; border-radius:8px; background:rgba(92,75,180,.18); color:#c7bcff; font:normal 18px/1 sans-serif; }
-.mihomoProfileDialog .mihomoPresetPicker > div > button > span { min-width:0; display:grid; gap:2px; }
-.mihomoProfileDialog .mihomoPresetPicker > div > button:hover { border-style:solid; background:rgba(92,75,180,.1); }
 
 .mihomoCreatedProfile { width:min(720px,calc(100vw - 32px)); }
 .mihomoCreatedProfile > header { margin-bottom:4px; }
@@ -1324,7 +1320,7 @@
 .mihomoProfileDialog.is-step-2 .mihomoProfileProtection,
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,
 .mihomoProfileDialog.is-step-3 .mihomoProfileRules:not(.mihomoProfileProtection),
-.mihomoProfileDialog.is-step-4 .mihomoPresetPicker,
+.mihomoProfileDialog.is-step-4 .mihomoPresetPicker { display:flex; }
 .mihomoProfileDialog.is-step-4 .mihomoConnectionBuilder { display:grid; }
 .mihomoUnavailableField { color:var(--muted); font-size:10px; line-height:1.4; }
 
@@ -1413,13 +1409,13 @@
 .mihomoConnectionRoute { display:flex; flex-wrap:wrap; justify-content:center; gap:24px; min-width:0; max-width:100%; }
 .mihomoRouteLine { display:grid; justify-items:center; align-content:start; min-width:0; max-width:100%; }
 .mihomoRouteStep { display:grid; justify-items:center; min-width:0; width:100%; }
-.mihomoRouteArrow { display:grid; place-items:center; height:28px; color:var(--muted); }
-.mihomoRouteArrow svg { width:20px; height:24px; fill:none; stroke:currentColor; stroke-width:1.25; }
-.mihomoRouteHop { --hop-color:var(--muted); display:flex; align-items:center; gap:10px; box-sizing:border-box; min-width:160px; max-width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:var(--panel-soft); line-height:1.4; }
-.mihomoRouteHopIcon { display:grid; place-items:center; flex:none; width:32px; height:32px; border-radius:8px; background:rgba(91,113,138,.1); color:var(--hop-color); }
-.mihomoRouteHopIcon svg { width:21px; height:21px; }
-.mihomoRouteHopBody { display:grid; gap:3px; min-width:0; }
-.mihomoRouteHop b { color:var(--hop-color); font-size:12px; font-weight:600; }
+.mihomoRouteArrow { display:grid; place-items:center; height:18px; color:var(--muted); }
+.mihomoRouteArrow svg { width:14px; height:18px; fill:none; stroke:currentColor; stroke-width:1.25; }
+.mihomoRouteHop { --hop-color:var(--muted); display:flex; align-items:center; gap:7px; box-sizing:border-box; min-width:128px; max-width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:7px; background:var(--panel-soft); line-height:1.4; }
+.mihomoRouteHopIcon { display:grid; place-items:center; flex:none; width:24px; height:24px; border-radius:5px; background:rgba(91,113,138,.1); color:var(--hop-color); }
+.mihomoRouteHopIcon svg { width:17px; height:17px; }
+.mihomoRouteHopBody { display:grid; gap:2px; min-width:0; }
+.mihomoRouteHop b { color:var(--hop-color); font-size:11px; font-weight:600; }
 .mihomoRouteHop code { min-width:0; color:var(--text); font:10px/1.4 var(--font-mono),monospace; overflow-wrap:anywhere; }
 .mihomoRouteHop[data-hop="relay"],.mihomoRouteHop[data-hop="client"] { --hop-color:var(--cyan); }
 .mihomoRouteHop[data-hop="cdn"] { --hop-color:var(--amber); }
