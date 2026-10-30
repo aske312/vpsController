@@ -14,7 +14,7 @@ def connection_mode(routing):
 
 
 def service_ids(value):
-    if not isinstance(value, str) or len(value) > 128:
+    if not isinstance(value, str) or len(value) > 512:
         raise ValueError('Некорректный список VPN-сервисов')
     selected = list(dict.fromkeys(part.strip() for part in value.split(',') if part.strip()))
     if any(key not in VPN_SERVICES for key in selected):

@@ -102,5 +102,69 @@
     "brand_source": "https://about.meta.com/brand/resources/instagram/threads",
     "license": "CC0-1.0",
     "modification": "Added the brand fill color; geometry unchanged."
+  },
+  {
+    "id": "claude",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/claude.svg",
+    "upstream_sha256": "2d6fda79eb18ddccca35b799eeb3cece0dfabc22520ce3b10abd25668df9fa93",
+    "brand_source": "https://claude.ai",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "chatgpt",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/openai.svg",
+    "upstream_sha256": "2b4a04ddc2395b20d168694d3850ce2050a702c4a0cdeb4d8b31b9a970481a8c",
+    "brand_source": "https://openai.com/brand",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "tiktok",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/tiktok.svg",
+    "upstream_sha256": "6f54ac8d325faacea8935bdc44cbed60206a6b408641799e5fea1cba7c1a0af7",
+    "brand_source": "https://tiktok.com",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "twitch",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/twitch.svg",
+    "upstream_sha256": "dbe27bc02a01b8d89b6259cacef328c9fa70bb13c29f38c36eb1421863f6f0b6",
+    "brand_source": "https://brand.twitch.tv",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "spotify",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/spotify.svg",
+    "upstream_sha256": "b9ec9bec7769c35643981586d6ea0d675aaf3871b32f8a291bcac7a87fff0bc1",
+    "brand_source": "https://developer.spotify.com/documentation/general/design-and-branding/#using-our-logo",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "reddit",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/reddit.svg",
+    "upstream_sha256": "00e5008d56567543cf956561e61d5bf9bf629f520c7488a4d9a00164c29dd8ba",
+    "brand_source": "https://www.redditinc.com/brand",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "netflix",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/netflix.svg",
+    "upstream_sha256": "953016177fafc83dc8a51868a584600b39dfeff652a07be028a61283915df547",
+    "brand_source": "https://brand.netflix.com/en/assets/brand-symbol",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
+  },
+  {
+    "id": "pinterest",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/5664507081ffb65b5a2a0ed2bf2ee2b3b327cb4e/icons/pinterest.svg",
+    "upstream_sha256": "d0736c4b1390f895ed9bc156cc887d3bd65c5b66258c00ad07888e9ec7d729ad",
+    "brand_source": "https://business.pinterest.com/en/brand-guidelines",
+    "license": "CC0-1.0",
+    "modification": "Added a fill color for dark backgrounds; geometry unchanged."
   }
 ]

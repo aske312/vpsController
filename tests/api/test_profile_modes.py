@@ -154,6 +154,7 @@ class ProfileModeTests(unittest.TestCase):
     def test_api_rejects_unknown_modes_services_and_conflicting_catch_all(self):
         for value in ({'connection_mode': 'both'}, {'connection_mode': True}, {'routing_scope': []},
                       {'vpn_services': ['youtube']}, {'vpn_services': 'private-service'},
+                      {'vpn_services': 'youtube,' * 65},
                       {'routing_scope': 'selected', 'rules': 'MATCH,GATE.312'}):
             with self.subTest(value=value), self.assertRaises(manager.HTTPException) as rejected:
                 manager.validate_routing(value, current={})
