@@ -1,4 +1,6 @@
-import type { RelayHost } from "../network/relay-state";
+import type { RelayHost, RelayStatus } from "../network/relay-state";
+import { connectionAddressModes } from "./connection-address";
+import type { ProfileConnection } from "./types";
 
 type RouteHop = { label: string; address?: string; port?: number; pendingPort?: boolean };
 export type ConnectionRoute = {
@@ -8,6 +10,23 @@ export type ConnectionRoute = {
   domain?: string;
   relay?: { address?: string; port?: number; afterCdn?: boolean };
 };
+
+export function profileConnectionRoute(connection: ProfileConnection, inventory: { status: RelayStatus | null }): ConnectionRoute {
+  const settings = connection.settings;
+  const modes = connectionAddressModes(connection.component);
+  const mode = (modes.tls ? String(settings.route_mode || (settings.cdn_enabled ? "both" : "direct")) : modes.udp ? "udp" : "direct") as ConnectionRoute["mode"];
+  const relay = String(settings.relay_host_id || "");
+  const host = inventory.status?.hosts.find(item => item.id === relay);
+  const address = String(settings.relay_address || host?.client_address || (host ? new URL(host.agent_url).hostname.replace(/^\[|\]$/g, "") : ""));
+  const domain = String(mode === "tls" ? settings.tls_domain || "" : mode === "cdn" || mode === "both" ? settings.cdn_domain || "" : mode === "udp" ? settings.udp_domain || "" : "");
+  const origin = relay ? inventory.status?.origin_ip || connection.credential?.server_address : connection.credential?.server_address || inventory.status?.origin_ip;
+  const port = mode === "cdn" || mode === "tls" ? 443 : connectionPort(settings.port) || connectionPort(connection.credential?.port);
+  const transports = connection.component === "transport-shadowsocks" ? ["tcp", "udp"] : modes.udp ? ["udp"] : ["tcp"];
+  const cdnRelay = mode === "cdn" && settings.relay_cdn === true;
+  const afterCdn = cdnRelay && settings.relay_cdn_mode !== "before_cdn";
+  return { mode, originAddress: origin, originPort: port, domain,
+    ...(relay ? { relay: { address, port: relayListenPort(host, inventory.status?.origin_ip, port, transports, cdnRelay && !afterCdn ? domain : undefined), afterCdn } } : {}) };
+}
 
 export function connectionPort(value: unknown): number | undefined {
   if (typeof value !== "number" && typeof value !== "string") return;

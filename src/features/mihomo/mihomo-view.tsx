@@ -22,6 +22,7 @@ import type { NetworkStatus } from "../../shared/types/control-plane";
 import { configuredCdnDomains, confirmedRouteAddresses, directRouteAddresses } from "../../shared/lib/network-readiness";
 import { useRelayInventory } from "../network/relay-endpoint-select";
 import { ConnectionEditor } from "./connection-editor";
+import { ConnectionRouteMap, profileConnectionRoute } from "./connection-route-map";
 import { MihomoConnectionAddress } from "./connection-address-select";
 import { applyConnectionAddress } from "./connection-address";
 import { reorderDeviceConnections } from "./connection-order";
@@ -1818,7 +1819,8 @@ export function MihomoPage({
                         if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";
                         return true;
                       }).map(field => ({ ...field, options: field.options?.filter(option => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)) }));
-                  return <ConnectionEditor key={connection.id} connection={connection}
+                  return <div key={connection.id} className="mihomoConnectionDetailLayout">
+                    <div className="mihomoConnectionSettingsPane"><ConnectionEditor connection={connection}
                     title={vlessRoute === "cdn" ? `${xrayName} CDN` : vlessRoute === "tls" ? `${xrayName} TLS` : vlessRoute === "direct" ? `${xrayName} REALITY` : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}
                     fields={fields} targets={realityTargets} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
                     onNameChange={name => updateProfileConnection(connection.id, { name })}
@@ -1832,7 +1834,12 @@ export function MihomoPage({
                       {!supported && <p>Подключение несовместимо с YAML-профилем. Измените параметры подключения.</p>}
                       {deviceConnections.length > 1 && <button type="button" title="Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля." disabled={!supported || Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {(["cdn", "tls"].includes(vlessRoute) && (!connection.settings.relay_host_id || connection.settings.relay_cdn)) ? "Xray-подключениям" : connection.settings.udp_domain ? "UDP-подключениям" : "всем подключениям"} устройства</button>}
                     </> : null}
-                  />;
+                    /></div>
+                    <aside className="mihomoConnectionMapPane" aria-label="Карта соединения">
+                      <b>Карта соединения</b>
+                      <ConnectionRouteMap route={profileConnectionRoute(connection, relayInventory)} />
+                    </aside>
+                  </div>;
                 })}
                 {!profileConnections.some((connection) => connection.device_id === activeDeviceId) && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение для выбранного устройства.</p>}
                 </div>

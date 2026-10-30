@@ -12,13 +12,20 @@ const { routeEntries, filterEntries } = await loader.ssrLoadModule("/src/feature
 const { relayMatches } = await loader.ssrLoadModule("/src/features/network/network-relays.tsx");
 const { connectionAddressModes } = await loader.ssrLoadModule("/src/features/mihomo/connection-address.ts");
 const { MihomoConnectionAddress } = await loader.ssrLoadModule("/src/features/mihomo/connection-address-select.tsx");
+const { ConnectionRouteMap, profileConnectionRoute } = await loader.ssrLoadModule("/src/features/mihomo/connection-route-map.tsx");
 const host = { id: "b".repeat(32), name: "Amsterdam", client_address: "relay.example", agent_url: "https://85.209.155.229:9443", state: "unknown", routes: [] };
 
-const mihomoAddress = (component, settings = {}, props = {}) => renderToStaticMarkup(createElement(MihomoConnectionAddress, {
+const mihomoAddress = (component, settings = {}, props = {}) => {
+  const addressProps = {
   connection: { id: 'fixture', name: 'fixture', device_id: 'phone', component, settings },
   inventory: { status: { hosts: [{ ...host, addresses: { ipv4: ['85.209.155.229'], ipv6: [], domains: ['relay.example', 'cdn-relay.example'], cdn_domains: ['cdn-relay.example'] } }] }, failed: false },
   tlsDomains: ['origin-tls.example'], udpDomains: ['origin-udp.example'], cdnDomains: ['origin-cdn.example'], webTransports: ['websocket'], supported: true, disabled: false, onChange: () => {}, ...props,
-}));
+  };
+  return renderToStaticMarkup([
+    createElement(MihomoConnectionAddress, { ...addressProps, key: 'settings' }),
+    createElement(ConnectionRouteMap, { route: profileConnectionRoute(addressProps.connection, addressProps.inventory), key: 'route' }),
+  ]);
+};
 
 test('Mihomo separates protocol mode from Relay endpoint and keeps TLS identity visible', () => {
   const settings = { route_mode: 'tls', tls_domain: 'origin-tls.example', relay_host_id: host.id, relay_address: 'relay.example' };

@@ -4,7 +4,6 @@ import { useId, useState } from "react";
 import { relayAddresses, type RelayStatus } from "../network/relay-state";
 import { connectionAddressModes, xrayProtocolSettings } from "./connection-address";
 import type { ProfileConnection } from "./types";
-import { ConnectionRouteMap, connectionPort, relayListenPort } from "./connection-route-map";
 
 /** Protocol mode and the address of the next hop are independent choices. */
 export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udpDomains, cdnDomains, webTransports, supported, disabled, onChange }: {
@@ -35,10 +34,6 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
   const selected = relay && !cdnRelay ? JSON.stringify(["relay", relay, relayAddress]) : domain ? JSON.stringify(["direct", domain]) : "";
   const canRelay = modes.relay && mode !== "cdn" && mode !== "both";
   const savedOnly = Boolean(relay && !cdnRelay && (!canRelay || !choices.some(choice => choice.key === selected)));
-  const origin = relay ? inventory.status?.origin_ip || connection.credential?.server_address : connection.credential?.server_address || inventory.status?.origin_ip;
-  const originPort = mode === "cdn" || mode === "tls" ? 443 : connectionPort(settings.port) || connectionPort(connection.credential?.port);
-  const transports = connection.component === "transport-shadowsocks" ? ["tcp", "udp"] : modes.udp ? ["udp"] : ["tcp"];
-  const relayPort = relayListenPort(savedHost, inventory.status?.origin_ip, originPort, transports, cdnRelay && !legacyCdnRelay ? domain : undefined);
   const locked = disabled || !supported;
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase());
   const change = (patch: ProfileConnection["settings"]) => onChange({ ...settings, ...patch });
@@ -96,8 +91,6 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
       <small>Для перехода направьте CDN на VPS и уберите прежние Origin Rules этого подключения.</small>
     </>}</>}
     {mode === "tls" && relay && <><label><span>TLS-сервис VPS</span><select aria-label="TLS-сервис основного VPS" value={tlsDomain} disabled={locked} onChange={event => change({ tls_domain: event.target.value })}>{tlsServices.map(item => <option key={item} value={item}>{item}</option>)}</select></label><small>Имя TLS-сервиса сохраняется для SNI и проверки сертификата; подключение идёт на адрес Relay.</small></>}
-    <ConnectionRouteMap route={{ mode: mode as "direct" | "tls" | "cdn" | "udp" | "both", originAddress: origin, originPort, domain,
-      ...(relay ? { relay: { address: relayAddress, port: relayPort, afterCdn: legacyCdnRelay } } : {}) }} />
     {savedOnly && <small>Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес.</small>}
     {modes.tls && webTransports.length > 0 && !tlsServices.length && <small>Для TLS через Relay сначала добавьте рабочий TLS-домен основного VPS в Сеть → ROUTES.</small>}
     {canRelay && (inventory.failed || !inventory.status) && <small>{inventory.failed ? "Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." : "Обновляем адреса подключённых Relay…"}</small>}
