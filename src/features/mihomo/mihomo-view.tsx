@@ -12,7 +12,8 @@ import realityTargets from "../../../protocol-images/mihomo/reality-targets.json
 import { ProfileProtection } from "./profile-protection";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
-import { SubscriptionLimitsFields, unlimitedSubscription } from "./subscription-limits";
+import { unlimitedSubscription } from "./subscription-limits";
+import { ProfileGeneral } from "./profile-general";
 import type { SubscriptionLimits } from "./types";
 import { AccessReveal } from "../../shared/components/access-reveal";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
@@ -1749,16 +1750,14 @@ export function MihomoPage({
               </aside>
               <main ref={profileCanvasRef} className="mihomoProfileCanvas">
             <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННАЯ КОНФИГУРАЦИЯ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Параметры профиля" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 1 ? "is-active" : ""} onClick={() => setProfileStep(1)}>Общее</button><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Защита</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Маршрутизация</button><button type="button" className={profileStep === 4 ? "is-active" : ""} onClick={() => setProfileStep(4)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button></nav></section>
-            <section className="mihomoProfileName mihomoProfileGeneral">
-              {profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? <>
-                <label><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} placeholder="Например, Основной" /></label>
-                <SubscriptionLimitsFields value={profileLimits} status={latestEditProfile?.limits_status} disabled={Boolean(busy) || Boolean(pendingProfileSave)} onChange={setProfileLimits} />
-              </> : <>
-                <header><div><b>Устройство</b><small>Индивидуальные подключения, маршрутизация и файл для клиента.</small></div></header>
-                <p>{activeProfileDevice?.manual ? "Общая конфигурация YAML для всех устройств этого профиля. Без привязки к HWID; трафик и подключения общие." : "Устройство зарегистрировано по HWID. Приложение: " + (activeProfileDevice?.client_name || "не определено")}</p>
-                <label><span>Название устройства</span><input value={profileDevices.find((device) => device.id === activeDeviceId)?.name || ""} maxLength={80} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, name: event.target.value } : device))} /></label>
-              </>}
-            </section>
+            <ProfileGeneral device={activeProfileDevice} profileName={profileName} limits={profileLimits}
+              status={latestEditProfile?.limits_status} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
+              onProfileNameChange={setProfileName} onLimitsChange={setProfileLimits}
+              onDeviceNameChange={name => setProfileDevices(current => current.map(device => device.id === activeDeviceId ? { ...device, name } : device))}
+              onOpenSubscription={profileDevices.some(device => device.scope === "common") ? () => {
+                const common = profileDevices.find(device => device.scope === "common")!;
+                setProfileStrategyTouched(Boolean(common.routing?.strategy)); setActiveDeviceId(common.id);
+              } : undefined} />
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
             {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
             {profileStep === 3 && <ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue} />}
