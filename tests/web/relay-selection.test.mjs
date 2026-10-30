@@ -107,7 +107,9 @@ test('Mihomo retains excluded or unavailable saved Relay endpoints and allows di
   assert.doesNotMatch(html, /<select[^>]*disabled=/);
   assert.match(html, /origin-udp.example/);
   assert.doesNotMatch(mihomoAddress('transport-reality', {}, {webTransports:[]}), /<button[^>]*>(TLS|CDN)<\/button>/);
-  assert.doesNotMatch(mihomoAddress('unknown'), /<button[^>]*>|через Relay/);
+  assert.deepEqual(connectionAddressModes('unknown'), { tls: false, cdn: false, udp: false, relay: false });
+  const unknown = mihomoAddress('unknown');
+  assert.deepEqual([...unknown.matchAll(/<option\b[^>]*value="([^"]*)"/g)].map(match => match[1]), ['']);
   const excluded = mihomoAddress('transport-wg', {}, {inventory:{status:{hosts:[{...host,excluded_addresses:['relay.example']}]},failed:false}});
   assert.doesNotMatch(excluded, /relay.example/);
 });
