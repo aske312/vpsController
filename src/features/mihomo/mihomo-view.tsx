@@ -21,6 +21,7 @@ import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, P
 import type { NetworkStatus } from "../../shared/types/control-plane";
 import { configuredCdnDomains, confirmedRouteAddresses, directRouteAddresses } from "../../shared/lib/network-readiness";
 import { useRelayInventory } from "../network/relay-endpoint-select";
+import { ConnectionEditor } from "./connection-editor";
 import { MihomoConnectionAddress } from "./connection-address-select";
 import { applyConnectionAddress } from "./connection-address";
 import { reorderDeviceConnections } from "./connection-order";
@@ -1802,21 +1803,7 @@ export function MihomoPage({
                   const xrayName = ({vless:"VLESS",vmess:"VMess",trojan:"Trojan"} as Record<string, string>)[String(connection.settings.xray_protocol || "vless")] || "Xray";
                   const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";
                   const webTransports = ["xhttp", "websocket", "httpupgrade", "grpc"].filter(transport => commonDevice || activeCapabilities.transports.includes(transport));
-                  return <article key={connection.id} className={`mihomoConnectionCard mihomoConnectionEditor protocol-${connection.component}${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
-                    <header>
-                      <span className={`protocol-${connection.component}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /></span>
-                      <div><b>{vlessRoute === "cdn" ? `${xrayName} CDN` : vlessRoute === "tls" ? `${xrayName} TLS` : vlessRoute === "direct" ? `${xrayName} REALITY` : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? (connection.settings.relay_host_id ? "TLS через Relay" : "Прямой домен с TLS") : vlessRoute === "direct" ? (connection.settings.relay_host_id ? "REALITY через Relay" : "Прямое REALITY-подключение") : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${connectionIndex + 1}`}</small></div>
-                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedConnectionId((deviceConnections[connectionIndex + 1] || deviceConnections[connectionIndex - 1])?.id || ""); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
-                    </header>
-                    <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
-                    <MihomoConnectionAddress connection={connection} inventory={relayInventory}
-                      tlsDomains={availableNetworkRoutes("tls")} udpDomains={availableNetworkRoutes("udp")} cdnDomains={configuredCdnDomains(networkStatus)}
-                      webTransports={webTransports} supported={supported} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
-                      onChange={settings => updateProfileConnection(connection.id, { settings })} />
-                    {deviceConnections.length > 1 && <div className="mihomoAddressApply"><button type="button" disabled={!supported || Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {(["cdn", "tls"].includes(vlessRoute) && (!connection.settings.relay_host_id || connection.settings.relay_cdn)) ? "Xray-подключениям" : connection.settings.udp_domain ? "UDP-подключениям" : "всем подключениям"} устройства</button><small>Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля.</small></div>}
-                    {!supported && <p>Подключение несовместимо с YAML-профилем. Измените параметры подключения.</p>}
-                    <div className="mihomoConnectionFields">
-                      {schema.filter((field) => {
+                  const fields = schema.filter((field) => {
                         if (connection.component === "transport-hysteria2" && ["up_mbps", "down_mbps"].includes(field.key)) return false;
                         if (field.formats && !field.formats.includes("mihomo")) return false;
                         if (["xray_protocol", "route_mode", "cdn_enabled", "privacy_mode", "cdn_ech", "cdn_domain", "tls_domain"].includes(field.key)) return false;
@@ -1830,22 +1817,22 @@ export function MihomoPage({
                         if (field.key === "transport_path") return connection.settings.transport !== "raw";
                         if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";
                         return true;
-                      }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
-                        <span>{field.label}</span>
-                        {["target", "sni"].includes(field.key) ? <>
-                          <select aria-label={`${field.label}: список адресов`} value="" onChange={(event) => { if (event.target.value) updateConnectionSetting(connection.id, field.key, event.target.value); }}>
-                            <option value="">Выбрать SNI из полного списка…</option>
-                            {realityTargets.map((host) => <option key={host} value={field.key === "target" ? `${host}:443` : host}>{host}</option>)}
-                          </select>
-                          <input aria-label={`${field.label}: свой адрес`} type="text" maxLength={field.key === "target" ? 259 : 253} spellCheck={false} autoCapitalize="none" placeholder={field.key === "target" ? "Домен:443; пусто — автоматически" : "Домен без порта"} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)} />
-                        </> : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
-                          {(field.options || []).filter((option) => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}
-                        </select> : field.type === "boolean" ? <input type="checkbox" checked={Boolean(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.checked)} />
-                          : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} placeholder={field.key === "target" ? "Автоматически при сохранении" : undefined} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
-                        {field.help && <small>{field.help}</small>}
-                      </label>)}
-                    </div>
-                  </article>;
+                      }).map(field => ({ ...field, options: field.options?.filter(option => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)) }));
+                  return <ConnectionEditor key={connection.id} connection={connection}
+                    title={vlessRoute === "cdn" ? `${xrayName} CDN` : vlessRoute === "tls" ? `${xrayName} TLS` : vlessRoute === "direct" ? `${xrayName} REALITY` : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}
+                    fields={fields} targets={realityTargets} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
+                    onNameChange={name => updateProfileConnection(connection.id, { name })}
+                    onSettingChange={(key, value) => updateConnectionSetting(connection.id, key, value)}
+                    onDelete={() => { setSelectedConnectionId((deviceConnections[connectionIndex + 1] || deviceConnections[connectionIndex - 1])?.id || ""); setProfileConnections(current => current.filter(item => item.id !== connection.id)); }}
+                    address={<MihomoConnectionAddress connection={connection} inventory={relayInventory}
+                      tlsDomains={availableNetworkRoutes("tls")} udpDomains={availableNetworkRoutes("udp")} cdnDomains={configuredCdnDomains(networkStatus)}
+                      webTransports={webTransports} supported={supported} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
+                      onChange={settings => updateProfileConnection(connection.id, { settings })} />}
+                    footer={!supported || deviceConnections.length > 1 ? <>
+                      {!supported && <p>Подключение несовместимо с YAML-профилем. Измените параметры подключения.</p>}
+                      {deviceConnections.length > 1 && <button type="button" title="Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля." disabled={!supported || Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {(["cdn", "tls"].includes(vlessRoute) && (!connection.settings.relay_host_id || connection.settings.relay_cdn)) ? "Xray-подключениям" : connection.settings.udp_domain ? "UDP-подключениям" : "всем подключениям"} устройства</button>}
+                    </> : null}
+                  />;
                 })}
                 {!profileConnections.some((connection) => connection.device_id === activeDeviceId) && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение для выбранного устройства.</p>}
                 </div>
