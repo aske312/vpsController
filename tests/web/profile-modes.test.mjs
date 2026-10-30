@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import react from "@vitejs/plugin-react";
 import { createTestLoader } from "./vite-test-loader.mjs";
-import { profileConnectionMode, profileModeChange, profileRuleVisible } from "../../src/features/mihomo/profile-modes.ts";
+import { profileConnectionMode, profileModeChange, profileRuleVisible, profileFunctionKeys, profileRoutingSettings } from "../../src/features/mihomo/profile-modes.ts";
 
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
@@ -39,6 +39,19 @@ test("explicit Proxy wins over legacy forced TUN and switching back restores TUN
   assert.deepEqual(profileModeChange("routing_scope", "selected"), { routing_scope: "selected", mode: "rule" });
 });
 
+test("Protection reflects profile-only traffic functions while inheriting connection defaults", () => {
+  const defaults = { block_malware: true, block_privacy: true, quic_compatibility: true, tun_enabled: true, dns_secure: true };
+  const profile = { block_privacy: true, dns_secure: false };
+  const routing = profileRoutingSettings(defaults, profile);
+  assert.equal(routing.block_malware, false);
+  assert.equal(routing.block_privacy, true);
+  assert.equal(routing.quic_compatibility, false);
+  assert.equal(routing.dns_secure, false);
+  assert.equal(profileConnectionMode(routing), "tun");
+  assert.equal(defaults.block_malware, true);
+  assert.deepEqual(profile, { block_privacy: true, dns_secure: false });
+});
+
 test("one capture button shows the current mode without guidance", () => {
   const proxy = render(ProfileProtection, { connection_mode: "proxy", tun_force: true });
   assert.equal((proxy.match(/class="mihomoModeToggle"/g) || []).length, 1);
@@ -65,6 +78,8 @@ test("one routing button exposes local brand icons only in selected mode without
     assert.doesNotMatch(svg, /<script|href=/);
   }
   assert.doesNotMatch(render(ProfileRoutingMode, { routing_scope: "all" }), /Сервисы через VPN/);
+  assert.match(render(ProfileRoutingMode, { routing_scope: "all" }), /aria-label="Маршрутизация: По правилам"/);
+  assert.doesNotMatch(render(ProfileRoutingMode, { routing_scope: "all" }), /Всё через VPN/);
 });
 
 test("pressing each single button cycles both ways and preserves service selections", () => {
@@ -97,7 +112,30 @@ test("routing choices exclude inactive presets for Proxy and selected-only scope
   assert.equal(profileRuleVisible("direct_games_enabled", { connection_mode: "proxy" }), false);
   assert.equal(profileRuleVisible("direct_p2p_enabled", { connection_mode: "proxy" }), false);
   assert.equal(profileRuleVisible("direct_ru_sites", { routing_scope: "selected" }), false);
-  assert.equal(profileRuleVisible("block_malware", { routing_scope: "selected" }), true);
+  for (const key of profileFunctionKeys) {
+    assert.equal(profileRuleVisible(key, { routing_scope: "all" }), false);
+    assert.equal(profileRuleVisible(key, { routing_scope: "selected" }), false);
+  }
   assert.equal(profileRuleVisible("direct_local_network", { routing_scope: "selected" }), true);
   assert.equal(profileRuleVisible("direct_games_enabled", { connection_mode: "tun" }), true);
+});
+
+test("traffic functions stay in Protection for both routing scopes and keep their saved keys", () => {
+  const titles = { block_malware: "Фишинг и вредоносные сайты", block_privacy: "Приватность", quic_compatibility: "Совместимость QUIC", route_dns: "DNS по маршруту" };
+  for (const scope of ["all", "selected"]) {
+    let routing = { connection_mode: "tun", routing_scope: scope, block_malware: true, route_dns: true };
+    const onChange = (key, value) => { routing = { ...routing, [key]: value }; };
+    const html = render(ProfileProtection, routing);
+    assert.match(html, /Функции трафика/);
+    for (const [key, title] of Object.entries(titles)) {
+      assert.ok(html.includes(title));
+      assert.equal(render(ProfileRoutingMode, routing).includes(title), false);
+      const button = findElement(ProfileProtection({ routing, onChange }), node => node.type === "button" && node.props.className?.includes("mihomoProfileRuleButton") && renderToStaticMarkup(node).includes(title));
+      assert.ok(button, key);
+      const previous = Boolean(routing[key]);
+      button.props.onClick();
+      assert.equal(routing[key], !previous);
+      assert.equal(routing.routing_scope, scope);
+    }
+  }
 });

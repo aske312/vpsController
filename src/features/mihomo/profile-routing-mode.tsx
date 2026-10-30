@@ -7,8 +7,7 @@ export function ProfileRoutingMode({ routing, onChange }: { routing: ProfileRout
   const selectedOnly = routing.routing_scope === "selected";
   const services = new Set(String(routing.vpn_services || "").split(",").filter(Boolean));
   return <section className="mihomoRoutingMode">
-    <header><b>Что направлять через VPN</b></header>
-    <ProfileModeToggle label="Маршрутизация" value={selectedOnly ? "Только выбранное" : "Всё через VPN"} active={selectedOnly} onToggle={() => onChange("routing_scope", selectedOnly ? "all" : "selected")} />
+    <header><b>Что направлять через VPN</b><ProfileModeToggle label="Маршрутизация" value={selectedOnly ? "Только выбранное" : "По правилам"} active={selectedOnly} onToggle={() => onChange("routing_scope", selectedOnly ? "all" : "selected")} /></header>
     {selectedOnly && <div className="mihomoVpnServices" role="group" aria-label="Сервисы через VPN">{catalog.services.map(service => <button className="mihomoVpnService" key={service.id} type="button" aria-pressed={services.has(service.id)} onClick={() => {
         const next = new Set(services);
         if (next.has(service.id)) next.delete(service.id); else next.add(service.id);
