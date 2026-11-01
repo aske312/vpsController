@@ -156,5 +156,10 @@ printf 'schema=1\nedition=%s\nchannel=%s\nversion=%s\ncommit=%s\nbuilt_at=%s\npl
   find . -type f ! -name release.sha256 -print0 | sort -z | xargs -0 sha256sum >release.sha256
 )
 
-tar -C "${WORK_DIR}" -czf "${OUTPUT}" vps-control-release
+if command -v pigz >/dev/null 2>&1; then
+  echo "Compressing release with parallel gzip"
+  tar -C "${WORK_DIR}" -cf - vps-control-release | pigz >"${OUTPUT}"
+else
+  tar -C "${WORK_DIR}" -czf "${OUTPUT}" vps-control-release
+fi
 echo "Prepared release: ${OUTPUT}"
