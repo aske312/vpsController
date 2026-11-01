@@ -3384,8 +3384,35 @@ logs_app() {
   journalctl -u "${APP_NAME}-api.service" -u "${APP_NAME}-web.service" -u caddy.service -n 200 --no-pager
 }
 
+panel_check_url() {
+  local host
+  case "${ACCESS_MODE}" in
+    vpn)
+      host="$(env_value INTERNAL_PANEL_HOST)"
+      printf 'http://%s\n' "${host:-admin.312.net}"
+      ;;
+    local)
+      host="$(env_value PANEL_HOST)"
+      [[ -n "${host}" && "${host}" != "0.0.0.0" ]] || host="${LOCAL_ADDRESS:-}"
+      [[ -n "${host}" ]] || die "Не сохранён локальный адрес панели."
+      printf 'http://%s:%s\n' "${host}" "${HTTP_PORT}"
+      ;;
+    *)
+      host="$(env_value PUBLIC_DOMAIN)"
+      if [[ -n "${host}" ]]; then
+        printf 'https://%s\n' "${host}"
+      else
+        host="$(env_value PUBLIC_ENDPOINT)"
+        [[ -n "${host}" ]] || host="$(env_value PUBLIC_IP)"
+        [[ -n "${host}" ]] || die "Не сохранён публичный адрес панели."
+        printf 'http://%s:%s\n' "${host}" "${HTTP_PORT}"
+      fi
+      ;;
+  esac
+}
+
 verify_app() {
-  configure_access
+  PANEL_URL="$(panel_check_url)"
   info "Проверка установки"
   systemctl is-active --quiet "${APP_NAME}-api.service" || die "API не запущен."
   systemctl is-active --quiet "${APP_NAME}-web.service" || die "веб-служба не запущена."
@@ -3546,7 +3573,7 @@ PY
 }
 
 integrity_check() {
-  configure_access
+  PANEL_URL="$(panel_check_url)"
   info "Проверка целостности приложения и системной конфигурации"
   local manifest="${DATA_DIR}/release.sha256" command_mode
   [[ -s "${manifest}" ]] || die "не найден эталонный manifest целостности; выполните обновление приложения."
