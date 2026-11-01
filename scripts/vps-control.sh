@@ -302,10 +302,10 @@ create_recovery_point() {
   for path in "${INSTALL_CONFIG}" /etc/wireguard /etc/amnezia /etc/caddy /etc/ufw /etc/systemd/system/apt-daily-upgrade.service.d /etc/systemd/system/vps-control-*.service /etc/systemd/system/vps-control-*.timer; do
     if [[ -e "${path}" ]]; then paths+=("${path}"); fi
   done
-  (umask 077; tar --exclude="${DATA_DIR#/}/recovery" --exclude="${DATA_DIR#/}/tmp" \
-    --exclude="${DATA_DIR#/}/logs" --exclude="${DATA_DIR#/}/application-action.json" \
-    -czf "${raw}" "${paths[@]}" "${DATA_DIR}") || return 1
-  openssl enc -aes-256-cbc -salt -pbkdf2 -in "${raw}" -out "${archive}" -pass "file:${key}" || return 1
+  [[ ! -e "${raw}" && ! -e "${archive}" && ! -e "${manifest}" ]] || return 1
+  python3 "${INSTALL_DIR}/api/recovery_snapshot.py" --data-dir "${DATA_DIR}" --archive "${raw}" "${paths[@]}" || return 1
+  openssl enc -aes-256-cbc -salt -pbkdf2 -in "${raw}" -out "${archive}" -pass "file:${key}" \
+    || { rm -f -- "${raw}" "${archive}"; return 1; }
   rm -f -- "${raw}" || return 1
   sha256sum "${archive}" >"${manifest}" || return 1
   chmod 0600 "${archive}" "${manifest}" || return 1
@@ -323,6 +323,9 @@ restore_recovery_point() {
   if [[ -f "${archive}.hardening.enc" ]]; then
     python3 "${INSTALL_DIR}/api/security_recovery.py" check "${archive}" || return 1
   fi
+  # Never overwrite SQLite history while its API writer still has it open.
+  # On extraction failure keep the writer stopped for explicit recovery.
+  systemctl stop "${APP_NAME}-api.service" || return 1
   openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -xzf - -C / || return 1
   if [[ -f "${archive}.hardening.enc" ]]; then
     python3 "${INSTALL_DIR}/api/security_recovery.py" restore "${archive}" || return 1
@@ -1567,6 +1570,7 @@ secure_server() {
   info "Настройка защиты сервера"
   security_preflight
   install -d -m 0700 "${RECOVERY_DIR}"
+  info "Создание и проверка точки восстановления"
   archive="$(create_recovery_point)"
   python3 "${INSTALL_DIR}/api/security_recovery.py" prepare "${archive}" \
     || die "Не удалось проверить снимок защиты; настройки не изменены."

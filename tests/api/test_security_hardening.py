@@ -103,6 +103,7 @@ systemctl() {
   case "$*" in
     'reload ssh.service') step SSH_RELOAD ;;
     'restart vps-control-api.service') step API_RESTART ;;
+    'stop vps-control-api.service') step API_STOP ;;
     'daemon-reload') step DAEMON ;;
     'restart vps-control-api.service vps-control-web.service caddy.service') step RESTART ;;
     *) step SERVICES ;;
@@ -162,7 +163,7 @@ restart_mihomo_manager_if_present() { step MANAGER; }
         self.assertFalse(marker)
 
     def test_recovery_helper_stops_on_failure_even_when_called_from_conditional(self):
-        for failure in ('CHECKSUM', 'DECRYPT', 'EXTRACT', 'DAEMON', 'RESTART', 'MANAGER'):
+        for failure in ('CHECKSUM', 'API_STOP', 'DECRYPT', 'EXTRACT', 'DAEMON', 'RESTART', 'MANAGER'):
             with self.subTest(failure=failure):
                 result, events, _ = self.invoke(failure, real_recovery=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -170,8 +171,10 @@ restart_mihomo_manager_if_present() { step MANAGER; }
                 self.assertNotIn('RESTORED', events)
                 if failure in ('CHECKSUM', 'DECRYPT', 'EXTRACT'):
                     self.assertNotIn('DAEMON', events)
-                if failure == 'CHECKSUM':
+                if failure in ('CHECKSUM', 'API_STOP'):
                     self.assertNotIn('EXTRACT', events)
+                if failure == 'CHECKSUM':
+                    self.assertNotIn('API_STOP', events)
                 if failure == 'RESTART':
                     self.assertNotIn('MANAGER', events)
 
@@ -186,5 +189,6 @@ restart_mihomo_manager_if_present() { step MANAGER; }
                     self.assertNotIn('RESTORED', events)
                 else:
                     self.assertLess(events.index('CHECK_STATE'), events.index('EXTRACT'))
+                    self.assertLess(events.index('API_STOP'), events.index('EXTRACT'))
                     self.assertLess(events.index('EXTRACT'), events.index('RESTORE_STATE'))
                     self.assertIn('RESTORED', events)
