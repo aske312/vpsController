@@ -163,6 +163,8 @@ def require_recovery_clear(data_dir: Path, action: str | None = None) -> None:
         return
     pending = [name for name in ("dns-recovery.json", "automation-recovery.json", "mihomo/profile-recovery/manifest.json", "recovery/security-recovery.txt") if (data_dir / name).exists()]
     if pending:
+        if "recovery/security-recovery.txt" in pending:
+            raise OperationConflict("Восстановите прерванные настройки защиты: sudo vps-control security-recover; новые изменения заблокированы")
         raise OperationConflict("Сначала восстановите прерванные настройки DNS/расписаний/Mihomo/защиты; новые изменения заблокированы")
 
 

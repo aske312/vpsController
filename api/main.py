@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from request_limits import RequestBodyLimit
 import cdn_security
 import port_allocation
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
@@ -157,6 +158,7 @@ async def recover_relay_tests():
 
 
 app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app.add_middleware(RequestBodyLimit)
 logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
@@ -4516,7 +4518,7 @@ def cancel_application_action(_: None = Depends(require_token), expected_operati
                     raise HTTPException(status_code=409, detail="Данные выбранной операции не подтверждены; остановка не запускалась")
                 action = durable  # History remains authoritative after a partial pointer write.
             unit = str(action.get("unit", ""))
-            if not isinstance(action.get("action"), str) or action["action"] not in {"update", "test-rollback", "safe-update", "kernel-update"}:
+            if not isinstance(action.get("action"), str) or action["action"] not in {"update", "test-rollback"}:
                 raise HTTPException(status_code=409, detail="Эта операция не поддерживает безопасную остановку из панели")
             if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
                 raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")

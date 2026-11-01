@@ -2,7 +2,8 @@ import type { NotificationInput } from "../shared/notifications/store";
 
 import type { SystemAction } from "../shared/types/control-plane";
 export type { SystemAction } from "../shared/types/control-plane";
-const rollbackableActions = new Set(["update", "test-rollback", "safe-update", "kernel-update"]);
+// OS package installation cannot be rolled back by the application's archive.
+const rollbackableActions = new Set(["update", "test-rollback"]);
 
 /** Validate fields consumed by notifications before publishing an API operation. */
 export function systemActionSnapshot(value: unknown): SystemAction {

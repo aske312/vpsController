@@ -230,10 +230,16 @@ begin_operation() {
       *) die "Сначала завершите восстановление приложения: sudo python3 ${DATA_DIR}/recovery/application-update/recover.py rollback --data-dir ${DATA_DIR}" ;;
     esac
   fi
-  if [[ -f "${DATA_DIR}/dns-recovery.json" || -f "${DATA_DIR}/automation-recovery.json" || -f "${DATA_DIR}/mihomo/profile-recovery/manifest.json" || -f "${SECURITY_RECOVERY_MARKER}" ]]; then
+  if [[ -f "${DATA_DIR}/dns-recovery.json" || -f "${DATA_DIR}/automation-recovery.json" || -f "${DATA_DIR}/mihomo/profile-recovery/manifest.json" ]]; then
     case "$1" in
       network-check|integrity-check|doctor|ssh-access-rollback|ssh-access-disable) ;;
       *) die "Сначала восстановите прерванные настройки DNS/расписаний/защиты через панель." ;;
+    esac
+  fi
+  if [[ -f "${SECURITY_RECOVERY_MARKER}" ]]; then
+    case "$1" in
+      network-check|integrity-check|doctor|ssh-access-rollback|ssh-access-disable|security-recover) ;;
+      *) die "Сначала восстановите прерванные настройки защиты: sudo vps-control security-recover" ;;
     esac
   fi
   export VPS_CONTROL_OPERATION_ID="${VPS_CONTROL_OPERATION_ID:-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')}"
@@ -306,18 +312,25 @@ create_recovery_point() {
   sha256sum -c "${manifest}" >/dev/null || return 1
   openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -tzf - >/dev/null || return 1
   find "${RECOVERY_DIR}" -maxdepth 1 -type f -name 'recovery-*.tar.gz.enc' -printf '%T@ %p\n' \
-    | sort -rn | awk 'NR > 3 {sub(/^[^ ]+ /, ""); print}' | while IFS= read -r path; do rm -f -- "${path}" "${path}.sha256"; done
+    | sort -rn | awk 'NR > 3 {sub(/^[^ ]+ /, ""); print}' | while IFS= read -r path; do rm -f -- "${path}" "${path}.sha256" "${path}.hardening.enc"; done
   printf '%s\n' "${archive}"
 }
 
 restore_recovery_point() {
   local archive="$1" key="${RECOVERY_DIR}/recovery.key"
   [[ "${archive}" == "${RECOVERY_DIR}/recovery-"*.tar.gz.enc && -f "${archive}" && -s "${key}" ]] || die "точка восстановления недоступна"
-  sha256sum -c "${archive}.sha256" >/dev/null
-  openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -xzf - -C /
-  systemctl daemon-reload
-  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
-  restart_mihomo_manager_if_present
+  sha256sum -c "${archive}.sha256" >/dev/null || return 1
+  if [[ -f "${archive}.hardening.enc" ]]; then
+    python3 "${INSTALL_DIR}/api/security_recovery.py" check "${archive}" || return 1
+  fi
+  openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -xzf - -C / || return 1
+  if [[ -f "${archive}.hardening.enc" ]]; then
+    python3 "${INSTALL_DIR}/api/security_recovery.py" restore "${archive}" || return 1
+    return 0
+  fi
+  systemctl daemon-reload || return 1
+  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service || return 1
+  restart_mihomo_manager_if_present || return 1
 }
 
 auto_safe_update_server() {
@@ -1536,15 +1549,34 @@ PY
   ok "защищённый SSH-доступ отключён; SSH/22 и root открыты."
 }
 
+recover_security() {
+  local archive name
+  [[ -f "${SECURITY_RECOVERY_MARKER}" && ! -L "${SECURITY_RECOVERY_MARKER}" ]] \
+    || die "Нет прерванной операции защиты."
+  archive="$(cat -- "${SECURITY_RECOVERY_MARKER}")"
+  name="${archive##*/}"
+  [[ "${archive}" == "${RECOVERY_DIR}/${name}" && "${name}" =~ ^recovery-[0-9]{8}T[0-9]{6}Z\.tar\.gz\.enc$ \
+    && -f "${archive}.hardening.enc" ]] || die "Снимок защиты не подтверждён; marker сохранён."
+  restore_recovery_point "${archive}" || die "Восстановление защиты не подтверждено; marker сохранён."
+  rm -f -- "${SECURITY_RECOVERY_MARKER}"
+  ok "Предыдущие настройки защиты восстановлены."
+}
+
 secure_server() {
   local archive
   info "Настройка защиты сервера"
   security_preflight
   install -d -m 0700 "${RECOVERY_DIR}"
   archive="$(create_recovery_point)"
+  python3 "${INSTALL_DIR}/api/security_recovery.py" prepare "${archive}" \
+    || die "Не удалось проверить снимок защиты; настройки не изменены."
   printf '%s\n' "${archive}" >"${SECURITY_RECOVERY_MARKER}"
   chmod 0600 "${SECURITY_RECOVERY_MARKER}"
-  if ! {
+  # Bash disables errexit for a conditional command group (and its helpers).
+  # A separate strict child must stop on its first error; inspect only wait.
+  (
+    trap - EXIT
+    set -Eeuo pipefail
     prepare_package_manager
     apt-get -o DPkg::Lock::Timeout=300 update
     apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
@@ -1564,7 +1596,7 @@ net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 kernel.dmesg_restrict = 1
 EOF
-    sysctl --system >/dev/null 2>&1
+    sysctl -p /etc/sysctl.d/99-vps-control-routing.conf >/dev/null 2>&1
     cat >/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf <<'EOF'
 X11Forwarding no
 AllowTcpForwarding yes
@@ -1585,7 +1617,9 @@ EOF
     install_api
     ensure_api_write_access
     systemctl restart "${APP_NAME}-api.service"
-  }; then
+  ) &
+  local hardening_pid=$!
+  if ! wait "${hardening_pid}"; then
     warn "Настройка защиты не завершена; восстанавливается предыдущая конфигурация"
     if ! restore_recovery_point "${archive}"; then
       printf '%s\n' "${archive}" >"${SECURITY_RECOVERY_MARKER}"
@@ -3580,6 +3614,7 @@ usage() {
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту Ubuntu
+  security-recover восстановить настройки после прерванного усиления защиты
   kernel-update    полное обновление ОС с точкой восстановления и reboot (совместимый псевдоним)
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
@@ -3613,7 +3648,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-purge|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|security-recover|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-purge|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
       case "${1}" in
         ssh-key-list) ;;
         automation-apply) [[ "${VPS_CONTROL_AUTOMATION_CHILD:-}" == "1" ]] || begin_operation "${1}" ;;
@@ -3690,6 +3725,7 @@ main() {
       verify_app
       ;;
     secure) secure_server ;;
+    security-recover) recover_security ;;
     safe-update) safe_update_server ;;
     auto-safe-update) auto_safe_update_server ;;
     kernel-update) update_kernel ;;

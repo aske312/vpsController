@@ -65,6 +65,7 @@ from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
 import port_allocation
 from component_registry import ComponentRegistry, RegistryError
+from request_limits import RequestBodyLimit
 
 APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
@@ -335,6 +336,7 @@ app = FastAPI(
     lifespan=manager_lifespan,
 )
 logger = logging.getLogger("vps-control.mihomo")
+app.add_middleware(RequestBodyLimit)
 PUBLIC_COMMAND_ERROR = "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
 TECHNICAL_ERROR_MARKERS = ("traceback", "systemctl", "journalctl", "apt-get", "dpkg", "stderr", "stdout", "command failed", "exit status", "failed to start")
 

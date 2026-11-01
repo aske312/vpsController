@@ -46,7 +46,7 @@ class ApplicationCancelTests(unittest.TestCase):
         self.stop.assert_not_called()
 
     def test_supported_cancel_persists_intent_before_stop_and_does_not_repeat_it(self):
-        for action in ("update", "test-rollback", "safe-update", "kernel-update"):
+        for action in ("update", "test-rollback"):
             with self.subTest(action=action):
                 operations.save(self.root, self.current, {**self.action, "action": action})
                 self.stop.reset_mock()
@@ -68,7 +68,7 @@ class ApplicationCancelTests(unittest.TestCase):
                 self.stop.assert_called_once()
 
     def test_unsupported_actions_units_and_terminal_states_have_no_stop_effect(self):
-        for change in ({"action": "test-update"}, {"action": "protocol-install:wg"}, {"unit": "ssh.service"}, {"state": "succeeded"}, {"state": "unknown"}, {"action": []}, {"state": []}, {"cancel_requested": "true"}):
+        for change in ({"action": "test-update"}, {"action": "safe-update"}, {"action": "kernel-update"}, {"action": "auto-safe-update"}, {"action": "protocol-install:wg"}, {"unit": "ssh.service"}, {"state": "succeeded"}, {"state": "unknown"}, {"action": []}, {"state": []}, {"cancel_requested": "true"}):
             with self.subTest(change=change):
                 operations.atomic_json(self.current, {**self.action, **change})
                 operations.atomic_json(self.root / "operations" / f"{self.identity}.json", {**self.action, **change})

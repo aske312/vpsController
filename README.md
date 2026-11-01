@@ -42,6 +42,7 @@ sudo vps-control uninstall --yes
 - [Подключение клиентских устройств](docs/CONNECTION_GUIDE.md)
 - [Лимиты подписок](docs/SUBSCRIPTION_LIMITS.md)
 - [Диагностика Relay](docs/RELAY_DIAGNOSTICS.md)
+- [Восстановление настроек защиты](docs/SECURITY_RECOVERY.md)
 - [Приватность](docs/PRIVACY_POLICY.md) · [Условия использования](docs/TERMS_OF_USE.md)
 
 Лицензия [MIT](LICENSE).
