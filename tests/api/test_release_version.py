@@ -82,7 +82,9 @@ class ReleaseWorkflowVersionTests(unittest.TestCase):
                 selectors = [step for step in verify['steps'] if 'release-version.py' in step.get('run', '')]
                 self.assertEqual(len(selectors), 1)
                 self.assertEqual(selectors[0]['id'], 'version')
-                self.assertEqual(verify['steps'][0]['with']['fetch-depth'], 0)
+                checkout = next(step for step in verify['steps'] if step.get('uses', '').startswith('actions/checkout@'))
+                self.assertEqual(checkout['with']['fetch-depth'], 0)
+                self.assertLess(verify['steps'].index(checkout), verify['steps'].index(selectors[0]))
                 build = next(step for step in jobs['package']['steps'] if 'RELEASE_VERSION' in step.get('env', {}))
                 self.assertEqual(build['env']['RELEASE_VERSION'], '${{ needs.verify.outputs.version }}')
                 for job_name, job in jobs.items():
