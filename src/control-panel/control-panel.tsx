@@ -706,6 +706,14 @@ export function ControlPanel() {
   }, [actionNeedsPolling, loadApplication, token]);
 
   useEffect(() => {
+    // Finish the package observation started by GET /security even when regular
+    // full security polling is disabled. Stop as soon as it has a result.
+    if (!token || tab !== "security" || (security?.updates as ApplicationMetadata["updates"] | undefined)?.refreshing !== true) return;
+    const timer = window.setTimeout(() => void loadSecurity(), 3000);
+    return () => window.clearTimeout(timer);
+  }, [loadSecurity, security, tab, token]);
+
+  useEffect(() => {
     const completed = trackActionCompletion(application?.action);
     if (!completed) return;
     // React to a newly confirmed server result, never the historical status on mount.
@@ -894,10 +902,10 @@ export function ControlPanel() {
     const risky = action === "restart" || action === "update" || action === "test-update" || action === "test-rollback" || action === "identity" || action === "safe-update" || action === "kernel-update" || action === "reboot";
     if (!automatic && risky && !await askConfirmation({
       title: actionLabels[action] || "Выполнить команду?",
-      message: action === "safe-update"
-        ? "Будут установлены все доступные обновления Debian, включая ядро. Перед установкой создаётся зашифрованная копия приложения, личных данных и конфигурации. Это не снимок диска: он не сможет вернуть старые системные пакеты, если VPS перестанет загружаться. Удаление пакетов запрещено."
+      message: action === "safe-update" || action === "kernel-update"
+        ? "Будут установлены все доступные обновления Debian/Ubuntu, включая ядро. Перед установкой создаётся и проверяется зашифрованная копия приложения, личных данных и конфигурации. После успешной проверки сервер автоматически перезагрузится; соединения временно прервутся. Копия не является снимком диска и не восстанавливает старые пакеты ОС или загрузку VPS. Удаление пакетов запрещено."
         : `Будет выполнена команда «vps-control ${action}». Во время операции возможен кратковременный перерыв в работе.`,
-      confirmLabel: action === "safe-update" ? "Создать точку и обновить" : "Выполнить", danger: action === "reboot",
+      confirmLabel: action === "safe-update" || action === "kernel-update" ? "Создать точку и обновить" : "Выполнить", danger: action === "reboot",
     })) return;
     setBusy(true);
     try {
@@ -962,7 +970,7 @@ export function ControlPanel() {
     finally { setBusy(false); }
   }
 
-  async function fixSecurity(action: "secure" | "kernel-update" | "vpn-firewall") {
+  async function fixSecurity(action: "secure" | "safe-update" | "vpn-firewall") {
     await runApplicationAction(action);
     await loadSecurity();
   }

@@ -3538,12 +3538,11 @@ def security(_: None = Depends(require_token)) -> dict:
             "active": observed_active(observation),
         }
     auditd_active = observed_active(observe_service("auditd.service"))
-    upgrades_observation = observe_service("unattended-upgrades.service")
-    upgrades_active = observed_active(upgrades_observation)
-    upgrades_enabled = observed_enabled(upgrades_observation)
-    automatic_updates = True if upgrades_active is True or upgrades_enabled is True else (
-        False if upgrades_active is False and upgrades_enabled is False else None
-    )
+    update_timers = [observe_service(unit) for unit in ("apt-daily-upgrade.timer", "vps-control-auto-update.timer")]
+    update_states = [True if observed_active(item) is True or observed_enabled(item) is True else (
+        False if observed_active(item) is False and observed_enabled(item) is False else None
+    ) for item in update_timers]
+    automatic_updates = True if True in update_states else False if all(item is False for item in update_states) else None
     env_file = ENV_FILE
     control_file = Path(CONTROL_COMMAND)
     env_mode = env_file.stat().st_mode & 0o777 if env_file.exists() else None
@@ -4496,7 +4495,7 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (["/bin/bash", str(bundled_command), payload.action] if bundled_command.exists() else [CONTROL_COMMAND, payload.action])
     action = start_application_operation(payload.action, command, operation_id=operation_id,
-        properties=(f"--property=RuntimeMaxSec={'60min' if payload.action == 'safe-update' else '20min'}", "--property=TimeoutStopSec=45s"))
+        properties=(f"--property=RuntimeMaxSec={'60min' if payload.action in {'safe-update', 'kernel-update'} else '20min'}", "--property=TimeoutStopSec=45s"))
     return action
 
 
@@ -4632,7 +4631,7 @@ def managed_services() -> dict[str, dict]:
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
-            "name": "Автоматические обновления ОС", "unit": "unattended-upgrades.service",
+            "name": "Автоматические обновления ОС", "unit": "apt-daily-upgrade.timer",
             "controls": ["start", "stop", "restart"],
         },
         "ssh": {

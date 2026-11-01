@@ -318,16 +318,18 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });
 
-test("manual full update and conservative automatic update use separate policies", async () => {
+test("all server update entry points use full updates with recovery", async () => {
   const [manager, api, page, view] = await Promise.all([
     read("scripts/vps-control.sh"), readApiSources(), readUiSources(), read("src/features/application/application-view.tsx"),
   ]);
   assert.match(manager, /safe_update_server\(\)/);
   assert.match(manager, /openssl enc -aes-256-cbc -salt -pbkdf2/);
-  assert.match(manager, /apt-get full-upgrade --no-remove -y/);
-  assert.match(manager, /auto_safe_update_server\(\)/);
-  assert.match(manager, /apt-get install --only-upgrade --no-remove/);
-  assert.match(manager, /no kernel, bootloader, libc, systemd, SSH, major or package removal/);
+  assert.match(manager, /apt-get [^\n]*\\\n[^\n]*full-upgrade --no-remove -y/);
+  for (const entry of ["auto_safe_update_server", "update_kernel"]) {
+    const body = manager.match(new RegExp(`^${entry}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"))?.[1];
+    assert.ok(body?.includes("safe_update_server"), `${entry} must use the shared update policy`);
+    assert.doesNotMatch(body, /apt-get/);
+  }
   assert.match(manager, /"auto-safe-update" "\$\{update_enabled\}"/);
   assert.doesNotMatch(manager, /update_enabled="false"/);
   assert.match(manager, /restore_recovery_point "\$\{archive\}"/);

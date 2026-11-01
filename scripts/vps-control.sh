@@ -247,17 +247,21 @@ begin_operation() {
 finish_operation() {
   local exit_code="$1"
   [[ -n "${CURRENT_ACTION}" ]] || return 0
+  case "${CURRENT_ACTION}" in
+    safe-update|auto-safe-update|kernel-update)
+      # A simulation captured before/during apt must not survive the operation.
+      rm -f -- "${DATA_DIR}/security-updates.json" || warn "Не удалось сбросить кеш обновлений"
+      ;;
+  esac
   if (( exit_code == 0 )); then
     case "${CURRENT_ACTION}" in
       reboot) write_action_status "rebooting" 100 "Сервер перезагружается" ;;
       poweroff) write_action_status "powering-off" 100 "Сервер выключается" ;;
-      safe-update) write_action_status "succeeded" 100 "Безопасное обновление завершено; точка восстановления сохранена" ;;
-      kernel-update)
-        if [[ "${REBOOT_AFTER_UPDATE}" == "yes" ]]; then
-          write_action_status "rebooting" 100 "Kernel updated; server is rebooting"
-          systemctl --no-block --no-wall reboot
-        else
-          write_action_status "succeeded" 100 "Kernel is already up to date"
+      safe-update|auto-safe-update|kernel-update)
+        write_action_status "rebooting" 100 "Системные обновления установлены и проверены; точка восстановления сохранена, сервер перезагружается"
+        if ! systemctl --no-block --no-wall reboot; then
+          write_action_status "failed" 100 "Обновления установлены, но автоматическая перезагрузка не запущена; точка восстановления сохранена"
+          return 1
         fi
         ;;
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
@@ -269,7 +273,7 @@ finish_operation() {
       write_action_status "failed" "${ACTION_PROGRESS}" "Установка тестового релиза завершилась с ошибкой; проверьте результат операции"
     elif [[ "${CURRENT_ACTION}" == "update" ]]; then
       write_action_status "failed" "${ACTION_PROGRESS}" "Обновление приложения остановлено по ошибке или таймауту; рабочая версия сохранена"
-    elif [[ "${CURRENT_ACTION}" == "safe-update" ]]; then
+    elif [[ "${CURRENT_ACTION}" == "safe-update" || "${CURRENT_ACTION}" == "auto-safe-update" || "${CURRENT_ACTION}" == "kernel-update" ]]; then
       write_action_status "failed" "${ACTION_PROGRESS}" "Безопасное обновление завершилось с ошибкой; доступен отчёт"
     else
       write_action_status "failed" "${ACTION_PROGRESS}" "Операция завершилась с ошибкой"
@@ -280,25 +284,27 @@ finish_operation() {
 create_recovery_point() {
   local stamp raw archive key manifest path
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  install -d -m 0700 "${RECOVERY_DIR}"
+  install -d -m 0700 "${RECOVERY_DIR}" || return 1
   key="${RECOVERY_DIR}/recovery.key"
-  [[ -s "${key}" ]] || { openssl rand -hex 32 >"${key}"; chmod 0600 "${key}"; }
+  [[ -s "${key}" ]] || { (umask 077; openssl rand -hex 32 >"${key}") || return 1; }
+  chmod 0600 "${key}" || return 1
   raw="${RECOVERY_DIR}/.${stamp}.tar.gz"
   archive="${RECOVERY_DIR}/recovery-${stamp}.tar.gz.enc"
   manifest="${archive}.sha256"
-  local -a paths=("${INSTALL_DIR}" "${CONFIG_DIR}" "${INSTALL_CONFIG}" /etc/wireguard /etc/amnezia /etc/caddy /etc/ufw)
-  for path in /etc/systemd/system/vps-control-*.service /etc/systemd/system/vps-control-*.timer; do
-    [[ -e "${path}" ]] && paths+=("${path}")
+  [[ -d "${INSTALL_DIR}" && -d "${CONFIG_DIR}" && -d "${DATA_DIR}" ]] || return 1
+  local -a paths=("${INSTALL_DIR}" "${CONFIG_DIR}")
+  for path in "${INSTALL_CONFIG}" /etc/wireguard /etc/amnezia /etc/caddy /etc/ufw /etc/systemd/system/apt-daily-upgrade.service.d /etc/systemd/system/vps-control-*.service /etc/systemd/system/vps-control-*.timer; do
+    if [[ -e "${path}" ]]; then paths+=("${path}"); fi
   done
-  tar --ignore-failed-read --exclude="${DATA_DIR#/}/recovery" --exclude="${DATA_DIR#/}/tmp" \
+  (umask 077; tar --exclude="${DATA_DIR#/}/recovery" --exclude="${DATA_DIR#/}/tmp" \
     --exclude="${DATA_DIR#/}/logs" --exclude="${DATA_DIR#/}/application-action.json" \
-    -czf "${raw}" "${paths[@]}" "${DATA_DIR}"
-  openssl enc -aes-256-cbc -salt -pbkdf2 -in "${raw}" -out "${archive}" -pass "file:${key}"
-  rm -f -- "${raw}"
-  sha256sum "${archive}" >"${manifest}"
-  chmod 0600 "${archive}" "${manifest}"
-  sha256sum -c "${manifest}" >/dev/null
-  openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -tzf - >/dev/null
+    -czf "${raw}" "${paths[@]}" "${DATA_DIR}") || return 1
+  openssl enc -aes-256-cbc -salt -pbkdf2 -in "${raw}" -out "${archive}" -pass "file:${key}" || return 1
+  rm -f -- "${raw}" || return 1
+  sha256sum "${archive}" >"${manifest}" || return 1
+  chmod 0600 "${archive}" "${manifest}" || return 1
+  sha256sum -c "${manifest}" >/dev/null || return 1
+  openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -tzf - >/dev/null || return 1
   find "${RECOVERY_DIR}" -maxdepth 1 -type f -name 'recovery-*.tar.gz.enc' -printf '%T@ %p\n' \
     | sort -rn | awk 'NR > 3 {sub(/^[^ ]+ /, ""); print}' | while IFS= read -r path; do rm -f -- "${path}" "${path}.sha256"; done
   printf '%s\n' "${archive}"
@@ -315,36 +321,22 @@ restore_recovery_point() {
 }
 
 auto_safe_update_server() {
-  local archive candidates installed package
-  install -d -m 0700 "${RECOVERY_DIR}"
-  : >"${SAFE_UPDATE_REPORT}"
-  chmod 0600 "${SAFE_UPDATE_REPORT}"
-  exec > >(tee -a "${SAFE_UPDATE_REPORT}") 2>&1
-  printf '312node.net safe update\nStarted: %s\nPolicy: no kernel, bootloader, libc, systemd, SSH, major or package removal\n\n' "$(date --iso-8601=seconds)"
-  info "Создание и проверка зашифрованной точки восстановления"
-  archive="$(create_recovery_point)"
-  info "Обновление индекса пакетов"
-  apt-get update
-  candidates="$(apt list --upgradable 2>/dev/null | awk -F/ 'NR>1 {print $1}' | grep -E '^(ca-certificates|curl|libcurl[0-9a-z.+-]*|openssl|libssl[0-9a-z.+-]*|tzdata)$' || true)"
-  if [[ -n "${candidates}" ]]; then
-    info "Установка разрешённых обновлений без удаления пакетов"
-    installed=""
-    while IFS= read -r package; do [[ -z "${package}" ]] || installed+=" ${package}"; done <<<"${candidates}"
-    DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade --no-remove -y ${installed}
-    printf 'Updated packages:%s\n' "${installed}"
-  else
-    ok "Разрешённые безопасные пакеты уже актуальны"
-  fi
-  info "Проверка приложения, панели и защищённых каналов"
-  if ! (integrity_check && network_check); then
-    warn "Проверка после обновления не пройдена; выполняется автоматический откат"
-    restore_recovery_point "${archive}"
-    printf '\nResult: failed; recovery point restored\nFinished: %s\n' "$(date --iso-8601=seconds)"
-    write_action_status "failed" "${ACTION_PROGRESS}" "Обновление содержит ошибки; предыдущая конфигурация восстановлена, доступен отчёт"
-    return 1
-  fi
-  printf '\nResult: success\nRecovery point: retained locally\nFinished: %s\n' "$(date --iso-8601=seconds)"
-  ok "Безопасное обновление установлено; точка восстановления сохранена"
+  safe_update_server
+}
+
+configure_os_update_policy() {
+  local unit_dir="${1:-/etc/systemd/system}"
+  install -d -m 0755 "${unit_dir}/apt-daily-upgrade.service.d" || return 1
+  # Keep the distro timer's schedule, but never let it install packages outside
+  # the application's recovery, worker lock, checks and reboot lifecycle.
+  cat >"${unit_dir}/apt-daily-upgrade.service.d/vps-control.conf" <<EOF || return 1
+[Service]
+ExecStart=
+ExecStart=${COMMAND_PATH} auto-safe-update
+TimeoutStartSec=60min
+EOF
+  chmod 0644 "${unit_dir}/apt-daily-upgrade.service.d/vps-control.conf" || return 1
+  systemctl daemon-reload
 }
 
 safe_update_server() {
@@ -355,15 +347,17 @@ safe_update_server() {
   exec > >(tee -a "${SAFE_UPDATE_REPORT}") 2>&1
   printf '312node.net full server update\nStarted: %s\nPolicy: all available Debian packages; package removals are prohibited\nRecovery scope: application, personal data and configuration; not a VPS disk snapshot or package downgrade\n\n' "$(date --iso-8601=seconds)"
   info "Creating and verifying the encrypted recovery point"
-  archive="$(create_recovery_point)"
+  archive="$(create_recovery_point)" || die "Не удалось создать и проверить точку восстановления; системные пакеты не изменены."
+  configure_os_update_policy
   before_packages="${RECOVERY_DIR}/packages-before-update.txt"
   after_packages="${RECOVERY_DIR}/packages-after-update.txt"
   dpkg-query -W -f='${Package}\t${Version}\n' | sort >"${before_packages}"
   chmod 0600 "${before_packages}"
   info "Refreshing the Debian package index"
-  apt-get update
+  apt-get -o DPkg::Lock::Timeout=300 -o APT::Update::Error-Mode=any update
   info "Installing all available Debian updates without removing packages"
-  DEBIAN_FRONTEND=noninteractive apt-get full-upgrade --no-remove -y
+  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 \
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade --no-remove -y
   dpkg-query -W -f='${Package}\t${Version}\n' | sort >"${after_packages}"
   chmod 0600 "${after_packages}"
   printf '\nChanged packages:\n'
@@ -376,7 +370,7 @@ safe_update_server() {
     write_action_status "failed" "${ACTION_PROGRESS}" "Обновление содержит ошибки; приложение и конфигурация восстановлены, доступен отчёт"
     return 1
   fi
-  [[ -e /var/run/reboot-required ]] && printf '\nReboot required: yes\n' || printf '\nReboot required: no\n'
+  printf '\nReboot: automatic after successful checks\n'
   printf 'Result: success\nRecovery point: retained locally\nFinished: %s\n' "$(date --iso-8601=seconds)"
   ok "Full server update completed; recovery point retained"
 }
@@ -390,7 +384,7 @@ handle_exit() {
   rollback_interrupted_update || warn "Emergency rollback encountered an additional error."
   cleanup_update_dir
   restore_update_ssh
-  finish_operation "${exit_code}"
+  finish_operation "${exit_code}" || exit_code=1
   return "${exit_code}"
 }
 
@@ -1555,7 +1549,8 @@ secure_server() {
     apt-get -o DPkg::Lock::Timeout=300 update
     apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
     configure_fail2ban
-    systemctl enable --now unattended-upgrades
+    configure_os_update_policy
+    systemctl enable --now apt-daily-upgrade.timer
     systemctl enable --now auditd
     systemctl enable --now apparmor.service >/dev/null 2>&1
     install -d -m 0755 /etc/sysctl.d /etc/ssh/sshd_config.d
@@ -2662,6 +2657,7 @@ PY
   install_web
   ensure_api_write_access
   install_protocol_monitor
+  configure_os_update_policy
   ensure_mihomo_profile_runtimes
   ensure_ikev2_auth_runtime
   info "Запуск обновлённой версии 312node.net"
@@ -2736,7 +2732,7 @@ uninstall_app() {
   cleanup_installed_protocol_images
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
-    /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}"
+    /etc/logrotate.d/vps-control-monitor /etc/systemd/system/apt-daily-upgrade.service.d/vps-control.conf "${COMMAND_PATH}"
   systemctl daemon-reload
   rm -f -- "${CADDY_CONFIG}"
   rm -rf -- "${CADDY_SNIPPET_DIR}"
@@ -2893,6 +2889,7 @@ install_prebuilt_release() {
     --installed "${INSTALL_DIR}" --previous "${rollback}" --snippets "${CADDY_SNIPPET_DIR}" \
     --file "${CADDY_CONFIG}" --file "${SERVICE_FILE}" --file "${WEB_SERVICE_FILE}" \
     --file /etc/systemd/system/vpn-monitor.service --file /etc/systemd/system/vpn-monitor.timer \
+    --file /etc/systemd/system/apt-daily-upgrade.service.d/vps-control.conf \
     "${recovery_args[@]}" || die "Не удалось сохранить состояние восстановления; замена приложения не начиналась."
   [[ "${legacy_runtime}" != "yes" ]] || stop_legacy_containers
   systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null
@@ -2907,6 +2904,7 @@ install_prebuilt_release() {
     || ! install_api \
     || ! install_web \
     || ! install_protocol_monitor \
+    || ! configure_os_update_policy \
     || ! ensure_api_write_access \
     || ! ensure_mihomo_profile_runtimes \
     || ! ensure_ikev2_auth_runtime \
@@ -3047,6 +3045,7 @@ restore_test_app() {
     --installed "${INSTALL_DIR}" --previous "${failed_install}" --candidate-backup "${TEST_BACKUP_DIR}" \
     --snippets "${CADDY_SNIPPET_DIR}" --file "${CADDY_CONFIG}" --file "${SERVICE_FILE}" --file "${WEB_SERVICE_FILE}" \
     --file /etc/systemd/system/vpn-monitor.service --file /etc/systemd/system/vpn-monitor.timer \
+    --file /etc/systemd/system/apt-daily-upgrade.service.d/vps-control.conf \
     || die "Не удалось сохранить состояние возврата; версия приложения не заменялась."
   systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service"
   mv -- "${INSTALL_DIR}" "${failed_install}"
@@ -3176,30 +3175,8 @@ PY
 }
 
 update_kernel() {
-  info "Проверка обновления ядра Debian/Ubuntu"
-  export DEBIAN_FRONTEND=noninteractive
-  local package status simulation
-  local -a packages=()
-  while read -r package status; do
-    [[ "${status}" == ii* ]] || continue
-    package="${package%%:*}"
-    case "${package}" in
-      linux-image-[0-9]*|linux-headers-[0-9]*|*-dbg) continue ;;
-      linux-image-*|linux-headers-*|linux-generic*|linux-virtual*|linux-aws*|linux-azure*|linux-gcp*|linux-oracle*|linux-lowlatency*) packages+=("${package}") ;;
-    esac
-  done < <(dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' 'linux-*' 2>/dev/null || true)
-  ((${#packages[@]})) || die "не найден установленный метапакет ядра Debian/Ubuntu; автоматическая смена семейства ядра запрещена."
-  apt-get -o DPkg::Lock::Timeout=300 update
-  simulation="$(apt-get -s install --only-upgrade --no-remove "${packages[@]}")" \
-    || die "Не удалось проверить обновление пакетов ядра; установка отменена."
-  if grep -q '^Inst ' <<<"${simulation}"; then
-    REBOOT_AFTER_UPDATE="yes"
-  fi
-  apt-get -o DPkg::Lock::Timeout=300 install -y --only-upgrade --no-remove "${packages[@]}"
-  ok "Пакеты ядра проверены и обновлены; при наличии нового ядра выполните reboot."
-  if [[ "${REBOOT_AFTER_UPDATE}" == "yes" && -z "${CURRENT_ACTION}" ]]; then
-    systemctl --no-block --no-wall reboot
-  fi
+  # Compatibility for existing clients: the same recovery/full-upgrade/reboot policy.
+  safe_update_server
 }
 
 optimize_resources() {
@@ -3310,6 +3287,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=60min
 ExecStart=${COMMAND_PATH} ${command}
 EOF
     cat >"/etc/systemd/system/vps-control-auto-${id}.timer" <<EOF
@@ -3338,7 +3316,7 @@ EOF
   update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
   install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
   install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "update" "Scheduled conservative server update by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}"
+  install_automation_timer "update" "Scheduled full server update and reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}"
   ok "расписания обслуживания применены."
 }
 
@@ -3602,7 +3580,7 @@ usage() {
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту Ubuntu
-  kernel-update    обновить установленное ядро Debian/Ubuntu
+  kernel-update    полное обновление ОС с точкой восстановления и reboot (совместимый псевдоним)
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания

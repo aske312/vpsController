@@ -286,13 +286,24 @@ class SecurityObservationTests(unittest.TestCase):
                     self.assertEqual(value["enabled"], "unknown" if state is None else "not-found" if state == "not-found" else "enabled")
 
     def test_automatic_updates_require_observed_runtime_or_autostart(self):
-        unit = "unattended-upgrades.service"
+        unit = "apt-daily-upgrade.timer"
+        self.units["vps-control-auto-update.timer"] = "not-found"
         for state, enabled, expected in ((None, None, None), ("inactive", None, None),
                                          ("inactive", "disabled", False), ("inactive", "enabled", True),
                                          ("active", None, True), ("not-found", None, False)):
             with self.subTest(state=state, enabled=enabled):
                 self.units[unit] = state
                 self.unit_files[unit] = enabled
+                self.assertIs(api.security()["updates"]["automatic"], expected)
+
+    def test_either_update_timer_confirms_automatic_updates(self):
+        for native, application, expected in (("not-found", "active", True),
+                                               (None, "active", True),
+                                               (None, "not-found", None),
+                                               ("not-found", "not-found", False)):
+            with self.subTest(native=native, application=application):
+                self.units["apt-daily-upgrade.timer"] = native
+                self.units["vps-control-auto-update.timer"] = application
                 self.assertIs(api.security()["updates"]["automatic"], expected)
 
     def test_user_observation_includes_primary_sudo_group_and_excludes_nonlogin_shells(self):
