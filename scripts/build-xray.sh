@@ -13,6 +13,27 @@ done
 # Official v26.3.27 source, plus the reviewed first-read compatibility change.
 COMMIT=d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
 SHA256=14fa566ee0a801d3d51144c67018b449f5dcf462ddfacadd032da069787e61f9
+cache=""
+if [[ -n "${XRAY_CACHE_DIR:-}" ]]; then
+  fingerprint="$(
+    { go version; uname -sm; sha256sum "${BASH_SOURCE[0]}" "${ROOT_DIR}/scripts/xray/"*.go | awk '{print $1}'; } | sha256sum | awk '{print $1}'
+  )"
+  cache="${XRAY_CACHE_DIR}/${fingerprint}"
+  if [[ -f "${cache}/checksums.sha256" ]] && (
+    cd "${cache}"
+    sha256sum -c checksums.sha256 &&
+      printf '%s  source.tar.gz\n' "${SHA256}" | sha256sum -c - &&
+      ./xray version | grep -F 'vpsController-trojan-fragment-v1' >/dev/null
+  ); then
+    mkdir -p -- "$(dirname -- "${OUTPUT}")"
+    cp -- "${cache}/xray" "${OUTPUT}"
+    cp -- "${cache}/source.tar.gz" "${OUTPUT}.source.tar.gz"
+    cp -- "${cache}/LICENSE" "${OUTPUT}.LICENSE"
+    (cd -- "$(dirname -- "${OUTPUT}")"; sha256sum "$(basename -- "${OUTPUT}")" >"${OUTPUT}.sha256")
+    echo "Reused verified Xray build: ${fingerprint}"
+    exit 0
+  fi
+fi
 curl -fL --retry 4 --retry-all-errors -o "${WORK_DIR}/source.tar.gz" \
   "https://codeload.github.com/XTLS/Xray-core/tar.gz/${COMMIT}"
 printf '%s  %s\n' "${SHA256}" "${WORK_DIR}/source.tar.gz" | sha256sum -c -
@@ -43,3 +64,10 @@ mkdir -p -- "$(dirname -- "${OUTPUT}")"
 )
 cp -- "${WORK_DIR}/source.tar.gz" "${OUTPUT}.source.tar.gz"
 cp -- "${SOURCE}/LICENSE" "${OUTPUT}.LICENSE"
+if [[ -n "${cache}" ]]; then
+  mkdir -p -- "${cache}"
+  cp -- "${OUTPUT}" "${cache}/xray"
+  cp -- "${OUTPUT}.source.tar.gz" "${cache}/source.tar.gz"
+  cp -- "${OUTPUT}.LICENSE" "${cache}/LICENSE"
+  (cd "${cache}"; sha256sum xray source.tar.gz LICENSE >checksums.sha256)
+fi

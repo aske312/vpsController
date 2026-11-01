@@ -277,7 +277,8 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   ]);
   assert.match(builder, /Release must be built on Linux/);
   assert.match(builder, /release\.sha256/);
-  assert.match(builder, /npm install --include=optional/);
+  assert.match(builder, /scripts\/runtime\/package-lock\.json/);
+  assert.doesNotMatch(builder, /rm -f package-lock\.json/);
   assert.match(builder, /await import\('rolldown'\)/);
   assert.match(builder, /NEXT_PUBLIC_BUILD_COMMIT/);
   assert.doesNotMatch(builder, /npm install --omit=optional/);

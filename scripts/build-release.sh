@@ -17,6 +17,9 @@ if [[ "${RELEASE_SKIP_INSTALL:-0}" == "1" && ! -d "${ROOT_DIR}/node_modules" ]];
 fi
 
 mkdir -p "${STAGE}" "$(dirname -- "${OUTPUT}")"
+CACHE_DIR="${RELEASE_CACHE_DIR:-${WORK_DIR}/cache}"
+RUNTIME_DIR="${RELEASE_RUNTIME_DIR:-${WORK_DIR}/runtime}"
+mkdir -p "${CACHE_DIR}/downloads" "${RUNTIME_DIR}"
 rsync -a --delete \
   --exclude '.git/' --exclude '.idea/' --exclude '.runtime/' --exclude '.vinext/' \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
@@ -64,15 +67,19 @@ case "$(uname -m)" in
     ;;
 esac
 
-mihomo_archive="${WORK_DIR}/${mihomo_asset}"
-curl -fL --retry 4 --retry-all-errors \
-  -o "${mihomo_archive}" \
-  "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${mihomo_asset}"
+mihomo_archive="${CACHE_DIR}/downloads/${mihomo_asset}"
+if ! printf '%s  %s\n' "${mihomo_sha256}" "${mihomo_archive}" | sha256sum -c - >/dev/null 2>&1; then
+  curl -fL --retry 4 --retry-all-errors \
+    -o "${mihomo_archive}" \
+    "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${mihomo_asset}"
+fi
 printf '%s  %s\n' "${mihomo_sha256}" "${mihomo_archive}" | sha256sum -c -
 
 mkdir -p "${STAGE}/api/bin"
-bash "${ROOT_DIR}/scripts/build-xray.sh" "${STAGE}/api/bin/xray"
-python3 "${STAGE}/api/runtime_dependencies.py" download --directory "${STAGE}/api/packages"
+XRAY_CACHE_DIR="${CACHE_DIR}/xray" bash "${ROOT_DIR}/scripts/build-xray.sh" "${STAGE}/api/bin/xray"
+caddy_package="$(python3 "${STAGE}/api/runtime_dependencies.py" download --directory "${CACHE_DIR}/downloads")"
+mkdir -p "${STAGE}/api/packages"
+cp -- "${caddy_package}" "${STAGE}/api/packages/"
 gzip -dc "${mihomo_archive}" >"${STAGE}/api/bin/mihomo"
 chmod 0755 "${STAGE}/api/bin/mihomo"
 "${STAGE}/api/bin/mihomo" -v | grep -F "Mihomo Meta v${MIHOMO_VERSION} " >/dev/null
@@ -118,24 +125,23 @@ esac
 
 cp -a "${ROOT_DIR}/dist" "${STAGE}/dist"
 
-node - "${ROOT_DIR}/package.json" "${STAGE}/package.json" <<'NODE'
-const fs = require("fs");
-const source = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const runtimeNames = [
-  "next", "react", "react-dom", "vinext", "vite", "@cloudflare/vite-plugin",
-  "@vitejs/plugin-react", "@vitejs/plugin-rsc", "react-server-dom-webpack",
-];
-const all = { ...(source.dependencies || {}), ...(source.devDependencies || {}) };
-source.dependencies = Object.fromEntries(runtimeNames.map((name) => [name, all[name]]));
-delete source.devDependencies;
-fs.writeFileSync(process.argv[3], JSON.stringify(source, null, 2) + "\n");
-NODE
-
+node "${ROOT_DIR}/scripts/runtime-manifest.mjs"
+runtime_key="$(
+  { node --version; uname -sm; sha256sum "${ROOT_DIR}/scripts/runtime/package.json" "${ROOT_DIR}/scripts/runtime/package-lock.json" | awk '{print $1}'; } | sha256sum | awk '{print $1}'
+)"
+cp -- "${ROOT_DIR}/scripts/runtime/package.json" "${ROOT_DIR}/scripts/runtime/package-lock.json" "${RUNTIME_DIR}/"
+(
+  cd "${RUNTIME_DIR}"
+  if [[ ! -f install.key || "$(cat install.key)" != "${runtime_key}" || ! -d node_modules ]] || ! npm ls --omit=dev --depth=0 || ! node --input-type=module -e "await import('rolldown')"; then
+    npm ci --include=optional --ignore-scripts --no-audit --no-fund
+    printf '%s\n' "${runtime_key}" >install.key
+  fi
+)
+cp -- "${RUNTIME_DIR}/package.json" "${RUNTIME_DIR}/package-lock.json" "${STAGE}/"
+cp -a "${RUNTIME_DIR}/node_modules" "${STAGE}/node_modules"
 (
   cd "${STAGE}"
-  rm -f package-lock.json
-  npm install --include=optional --ignore-scripts
-  # Audit the actual runtime dependency tree shipped in the archive.
+  # Audit and import the actual runtime tree on every build, including cache hits.
   node "${ROOT_DIR}/scripts/audit-runtime.mjs"
   node --input-type=module -e "await import('rolldown')"
 )
