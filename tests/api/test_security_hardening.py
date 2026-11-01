@@ -14,6 +14,9 @@ BASH = shutil.which('bash') if os.name != 'nt' else next((str(p) for p in (Path(
 
 @unittest.skipUnless(BASH, 'Requires Bash')
 class SecurityHardeningTests(unittest.TestCase):
+    def setUp(self):
+        (ROOT / '.runtime').mkdir(exist_ok=True)
+
     def test_manual_recovery_preserves_marker_until_verified_and_rejects_foreign_paths(self):
         source = (ROOT / 'scripts/vps-control.sh').read_text(encoding='utf-8')
         function = re.search(r'(?ms)^recover_security\(\) \{.*?^\}', source).group()

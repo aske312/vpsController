@@ -16,6 +16,7 @@ OPENSSL = shutil.which('openssl') or next((str(p) for p in (Path('D:/Git/usr/bin
 
 class SecurityRecoveryTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / '.runtime').mkdir(exist_ok=True)
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory(dir=ROOT / '.runtime', prefix='hardening-state-')))
         self.units = {unit: {'present': True, 'active': True, 'enabled': 'enabled'} for unit in recovery.UNITS}
         self.units['auditd.service'] = {'present': True, 'active': False, 'enabled': 'disabled'}
