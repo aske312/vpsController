@@ -153,6 +153,40 @@ class ApplicationOperationTests(unittest.TestCase):
                 self.assertEqual(result["result"], "success")
                 self.assertEqual(operations.read(self.current)["state"], "succeeded")
 
+    def test_collected_worker_before_reboot_keeps_marker_until_new_boot_confirms_it(self):
+        value = {"id": "c" * 32, "action": "safe-update", "state": "rebooting", "boot_id": "previous",
+                 "unit": "vps-control-action-fixture.service", "progress": 100,
+                 "started_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat(),
+                 "updated_at": operations.timestamp()}
+        operations.save(self.root, self.current, value)
+        # This was the real VPS sequence: the worker was already collected,
+        # API polling happened on the old boot, and the reboot followed seconds later.
+        observe = Mock(return_value={"unit_present": False, "active": False, "state": "inactive"})
+        with patch.object(operations, "boot_id", return_value="previous"):
+            for _ in range(2):
+                pending = operations.reconcile(self.root, self.current, operations.read(self.current), observe)
+                self.assertEqual(pending["state"], "rebooting")
+                self.assertEqual(operations.read(self.current)["state"], "rebooting")
+                with self.assertRaises(operations.OperationConflict):
+                    operations.start(self.root, self.current, "safe-update", ["control"], self.launch,
+                                     request_id="d" * 32, observe=observe)
+        self.launch.assert_not_called()
+        with patch.object(operations, "boot_id", return_value="next"):
+            result = operations.reconcile(self.root, self.current, operations.read(self.current), observe)
+        self.assertEqual((result["state"], result["result"]), ("succeeded", "success"))
+
+    def test_reboot_wait_is_bounded_and_does_not_hide_rejected_or_unexpected_reboots(self):
+        old = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
+        base = {"id": "e" * 32, "boot_id": "previous", "updated_at": old}
+        with patch.object(operations, "boot_id", return_value="previous"):
+            timed_out = operations.reconcile(self.root, self.current, {**base, "state": "rebooting"}, Mock())
+        self.assertEqual((timed_out["state"], timed_out["result"]), ("failed", "reboot-timeout"))
+        with patch.object(operations, "boot_id", return_value="next"):
+            unexpected = operations.reconcile(self.root, self.current, {**base, "state": "running"}, Mock())
+            rejected = {**base, "state": "failed", "result": "reboot-rejected"}
+            self.assertEqual(operations.reconcile(self.root, self.current, rejected, Mock()), rejected)
+        self.assertEqual((unexpected["state"], unexpected["result"]), ("failed", "interrupted"))
+
     def test_cancel_does_not_interrupt_commands_without_supported_rollback(self):
         for action in ("protocol-install:wg", "cdn-security", "ech:example.com", "access-mode"):
             with self.subTest(action=action):

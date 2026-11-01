@@ -357,6 +357,20 @@ def reconcile(data_dir: Path, action_file: Path, value: dict, observe) -> dict:
                  "message": "Перезагрузка подтверждена" if expected_reboot else "Операция прервана перезагрузкой; проверьте фактическое состояние"}
         save(data_dir, action_file, value)
         return value
+    if value.get("state") == "rebooting":
+        # systemctl --no-block returns and the transient worker is collected
+        # before the machine actually reboots. Its absence is expected here.
+        # Keep the durable marker so a later boot_id can confirm this reboot.
+        try:
+            waiting = (datetime.now(timezone.utc) - datetime.fromisoformat(value["updated_at"])).total_seconds()
+        except (KeyError, ValueError, TypeError):
+            return {**value, "state": "unknown", "message": "Время ожидания перезагрузки не подтверждено"}
+        if waiting < 300:
+            return value
+        value = {**value, "state": "failed", "result": "reboot-timeout", "updated_at": timestamp(),
+                 "message": "Перезагрузка не подтверждена за 5 минут; проверьте состояние сервера без повторного запуска команды."}
+        save(data_dir, action_file, value)
+        return value
     snapshot = worker_observation(value, observe)
     if snapshot["unit_present"] is None:
         return {**value, "state": "unknown", "message": "Состояние процесса временно недоступно"}
