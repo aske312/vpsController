@@ -42,7 +42,8 @@ export function SubscriptionUsage({ status, traffic, label = "Использов
   const used = traffic?.stats_available && traffic.used_bytes != null ? `${traffic.stats_partial ? "≥ " : ""}${bytes(traffic.used_bytes)}` : "—";
   return <div className={styles.usage} role="status" data-state={status?.state}>
     <span>{label}</span><b>{used}</b>
-    {status?.expires_at != null && <span>до {new Date(status.expires_at * 1000).toLocaleDateString("ru-RU")}</span>}
+    <small className={styles.usagePeriod}>За всё время учёта · без сброса по дням и месяцам</small>
+    {status?.expires_at != null && <span>Подписка до {new Date(status.expires_at * 1000).toLocaleDateString("ru-RU")}</span>}
     {status?.state === "expired" && <strong>Срок подписки истёк. Доступ остановлен.</strong>}
     {status?.state === "exhausted" && <strong>Объём трафика исчерпан. Доступ остановлен.</strong>}
     {status?.state === "unknown" && <strong>Актуальность серверного контроля не подтверждена.</strong>}

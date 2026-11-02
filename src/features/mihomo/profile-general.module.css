@@ -1,5 +1,6 @@
 section.root {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   width: min(100%, 680px);
   min-width: 0;
   gap: 18px;
@@ -71,8 +72,9 @@ section.root input.limitInput {
 .facts dd, .sharedValues dd { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
 .editLink { padding: 4px 0; border: 0; background: none; color: var(--cyan); font-size: 12px; cursor: pointer; }
 .editLink:disabled { opacity: .5; cursor: default; }
-.usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.usage { display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; gap: 8px 16px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .usage > b { margin-left: auto; color: var(--text); font: 500 18px var(--font-mono); }
+.usage > .usagePeriod { flex-basis: 100%; min-width: 0; font-size: 12px; line-height: 1.5; white-space: normal; }
 .usage > strong { flex-basis: 100%; color: var(--amber); font-size: 12px; font-weight: 500; }
 .empty { margin: 0; color: var(--muted); font-size: 13px; }
 

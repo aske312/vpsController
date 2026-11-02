@@ -594,7 +594,7 @@
 .mihomoProfileDialog > header h2 { font-size:18px; }
 .mihomoProfileWorkspace { min-height:0; display:grid; grid-template-columns:190px minmax(0,1fr); }
 .mihomoProfileRail { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; padding:14px; border-right:1px solid var(--line); background:linear-gradient(180deg,rgba(10,20,31,.98),rgba(5,13,21,.98)); }
-.mihomoProfileCanvas { min-width:0; overflow-x:hidden; overflow-y:auto; display:grid; align-content:start; gap:10px; padding:16px 20px 22px; scrollbar-gutter:stable; background:linear-gradient(145deg,rgba(8,17,26,.98),rgba(5,12,19,.96)); }
+.mihomoProfileCanvas { min-width:0; overflow-x:hidden; overflow-y:auto; display:grid; grid-template-columns:minmax(0,1fr); align-content:start; gap:10px; padding:16px 20px 22px; scrollbar-gutter:stable; background:linear-gradient(145deg,rgba(8,17,26,.98),rgba(5,12,19,.96)); }
 .mihomoProfileCanvas > * { width:100%; max-width:none; margin:0; }
 .mihomoProfileDialog > footer { margin:0; padding:9px 16px; background:rgba(8,17,26,.98); }
 .mihomoProfileSteps { display:grid; gap:6px; margin:0; }
