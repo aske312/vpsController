@@ -17,7 +17,6 @@ import { ProfileGeneral } from "./profile-general";
 import type { SubscriptionLimits } from "./types";
 import { AccessReveal } from "../../shared/components/access-reveal";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
-import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, ProfileMutationSuperseded, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 import type { NetworkStatus } from "../../shared/types/control-plane";
 import { configuredCdnDomains, confirmedRouteAddresses, directRouteAddresses } from "../../shared/lib/network-readiness";
@@ -28,6 +27,8 @@ import { MihomoConnectionAddress } from "./connection-address-select";
 import { applyConnectionAddress } from "./connection-address";
 import { reorderDeviceConnections } from "./connection-order";
 import { ConnectionOrderNav } from "./connection-order-nav";
+import { connectionAppearance } from "./connection-status";
+import { ProfileConnectionCard } from "./profile-connection-card";
 
 import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -36,7 +37,7 @@ import { submitSystemOperation, systemActionSnapshot, systemActionNeedsPolling, 
 import { checkPolicySave, persistPendingPolicySave, POLICY_SAVE_CHANGED, PolicyResultUnknown, readPendingPolicySave, submitPolicySave, type PolicySave, type PresetsResult } from "./policy-operation";
 import { managerStatusSnapshot, moduleSnapshots, networkRoutesSnapshot, personalRuleSnapshot, policySnapshot, presetsSnapshot, profileSnapshots, profileStatsSnapshot, refreshWorkspaceSections } from "./workspace-refresh";
 import { profilePage, PROFILES_PER_PAGE } from "./profile-pagination";
-import { actionLabels, duration, connectionOnline, trafficBytes, aggregateTraffic } from "../../shared/lib/control-plane-ui";
+import { actionLabels, connectionOnline, trafficBytes, aggregateTraffic } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
@@ -1527,7 +1528,7 @@ export function MihomoPage({
                         <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b><DeviceClientBadge device={device} />{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : device.scope === "manual" ? "Общий YAML для клиентов" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals" title={deviceTraffic.stats_partial ? "Учтены доступные каналы; часть счётчиков недоступна" : undefined}><span><small>КАНАЛЫ</small><b>{deviceActivityKnown ? onlineCount : "—"}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {trafficBytes(deviceTraffic, "rx_bytes")} · ↑ {trafficBytes(deviceTraffic, "tx_bytes")}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
                         <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
                       </header>
-                    {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = connectionOnline(item); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /><i /></span><p><b>{connection.name}</b>{connection.route_state?.state === "stale" && <small title={connection.route_state.reason}>{connection.route_state.addresses.length ? `Stale · ${connection.route_state.addresses.join(", ")}` : connection.route_state.reason}</small>}<small>↓ {trafficBytes(item, "rx_bytes")} · ↑ {trafficBytes(item, "tx_bytes")}</small>{item?.stats_available === false && <em>Статистика недоступна</em>}{item?.traffic_scope === "observation" && <em>Учтённый трафик текущего наблюдения</em>}{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
+                    {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => <ProfileConnectionCard key={connection.id} connection={connection} stats={profileStats[profile.id]?.connections?.[connection.id]} status={connectionAppearance(connection, { profile, modules: modulesReadKnown ? modules : undefined, network: networkStatus })} />)}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
                   })}
                   {!devices.length && <p className="mihomoConnectionEmpty">Подключите приложение с HWID по ссылке профиля для отдельного устройства.</p>}
@@ -1796,7 +1797,7 @@ export function MihomoPage({
                 ))}
               </div>
               <div className="mihomoConnectionWorkspace">
-                {deviceConnections.length > 0 && <ConnectionOrderNav key={activeDeviceId} connections={deviceConnections} modules={modules} selectedId={selectedConnection?.id} disabled={Boolean(busy) || Boolean(pendingProfileSave)} onSelect={setSelectedConnectionId} onReorder={(sourceId, targetId) => setProfileConnections((current) => reorderDeviceConnections(current, sourceId, targetId))} />}
+                {deviceConnections.length > 0 && <ConnectionOrderNav key={activeDeviceId} connections={deviceConnections} modules={modules} states={Object.fromEntries(deviceConnections.map(connection => [connection.id, connectionAppearance(connection, { profile: latestEditProfile, modules: modulesReadKnown ? modules : undefined, network: networkStatus, draft: true })]))} selectedId={selectedConnection?.id} disabled={Boolean(busy) || Boolean(pendingProfileSave)} onSelect={setSelectedConnectionId} onReorder={(sourceId, targetId) => setProfileConnections((current) => reorderDeviceConnections(current, sourceId, targetId))} />}
                 <div className="mihomoConnectionList">
                 {(selectedConnection ? [selectedConnection] : []).map((connection) => {
                   const connectionIndex = deviceConnections.findIndex(item => item.id === connection.id);

@@ -1313,15 +1313,26 @@
 .mihomoConnectionCarousel { display:grid; grid-template-columns:28px minmax(0,1fr) 28px; align-items:stretch; gap:6px; }
 .mihomoConnectionArrow { padding:0; border:1px solid var(--line); border-radius:7px; background:var(--panel-soft); color:var(--text); font-size:24px; cursor:pointer; }
 .mihomoConnectionArrow:disabled { opacity:.3; cursor:default; }
-.mihomoConnectionArrow:focus-visible,.mihomoConnectionSelect:focus-visible { outline:2px solid #59c792; outline-offset:-2px; }
+.mihomoConnectionArrow:focus-visible,.mihomoConnectionSelect:focus-visible { outline:2px solid #dceaff; outline-offset:-2px; }
 .mihomoConnectionPosition { padding-top:3px; color:var(--muted); text-align:right; font:10px var(--font-mono); }
-.mihomoConnectionNav { display:flex; gap:5px; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; padding:2px; }
+.mihomoConnectionNav { display:flex; gap:8px; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; padding:10px 8px; }
 .mihomoConnectionNav::-webkit-scrollbar { display:none; }
 .mihomoConnectionOrder { min-width:0; }
 .mihomoConnectionTile { display:flex; flex:0 0 190px; align-items:stretch; position:relative; border:1px solid var(--line); border-radius:8px; background:rgba(8,17,26,.95); color:var(--text); min-width:0; }
-.mihomoConnectionTile.is-active { border-color:#59c792; background:var(--panel-soft); }
+.mihomoConnectionTile.is-active { outline:1px solid rgba(232,242,255,.75); outline-offset:-3px; }
 .mihomoConnectionTile.is-dragging { z-index:2; box-shadow:0 8px 24px #0008; opacity:.85; pointer-events:none; }
 .mihomoConnectionTile.is-drop-target { outline:2px dashed #59c792; outline-offset:2px; }
+.mihomoWorkspace [data-connection-status="unchecked"] { --connection-state-rgb:88,160,255; --connection-state-border:.42; --connection-state-glow:.09; --connection-state-radius:8px; }
+.mihomoWorkspace [data-connection-status="verified"] { --connection-state-rgb:75,204,157; --connection-state-border:.45; --connection-state-glow:.10; --connection-state-radius:8px; }
+.mihomoWorkspace [data-connection-status="warning"] { --connection-state-rgb:255,193,70; --connection-state-border:.8; --connection-state-glow:.24; --connection-state-radius:15px; }
+.mihomoWorkspace [data-connection-status="error"] { --connection-state-rgb:255,91,108; --connection-state-border:.85; --connection-state-glow:.29; --connection-state-radius:17px; }
+.mihomoConnectionTile[data-connection-status],.mihomoProfileProtocolStats > div[data-connection-status] { border-color:rgba(var(--connection-state-rgb),var(--connection-state-border)); background:linear-gradient(rgba(var(--connection-state-rgb),.075),rgba(var(--connection-state-rgb),.035)),#08111a; box-shadow:inset 0 0 0 1px rgba(var(--connection-state-rgb),.06),0 0 var(--connection-state-radius) rgba(var(--connection-state-rgb),var(--connection-state-glow)); }
+.mihomoConnectionTile.is-dragging[data-connection-status] { box-shadow:0 8px 24px #0008,0 0 var(--connection-state-radius) rgba(var(--connection-state-rgb),var(--connection-state-glow)); }
+.mihomoConnectionNav .mihomoConnectionStateLabel,.mihomoProfileProtocolStats .mihomoConnectionStateLabel { color:rgb(var(--connection-state-rgb)); font-size:11px; font-weight:600; line-height:1.35; white-space:normal; overflow:visible; }
+.mihomoProfileProtocolStats > div[data-connection-status] > span i { background:rgb(var(--connection-state-rgb)); box-shadow:0 0 5px rgba(var(--connection-state-rgb),.35); }
+.mihomoConnectionStatusNote { display:grid; gap:4px; margin:6px 0 0; padding:10px 12px; border:1px solid rgba(var(--connection-state-rgb),.55); border-radius:8px; background:rgba(var(--connection-state-rgb),.07); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.mihomoConnectionStatusNote b { color:rgb(var(--connection-state-rgb)); }
+.mihomoConnectionStatusNote span { color:var(--text); }
 .mihomoConnectionSelect { display:flex; flex:1; align-items:center; gap:6px; text-align:left; padding:7px; border:0; border-radius:8px; background:transparent; color:inherit; min-width:0; }
 .mihomoConnectionSelect > span:nth-child(2) { display:grid; gap:3px; min-width:0; flex:1; }
 .mihomoConnectionSelect > em { color:var(--muted); font:9px var(--font-mono); }

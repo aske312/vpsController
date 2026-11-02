@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Module, ProfileConnection } from "./types";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
+import { connectionAppearance, type ConnectionAppearance } from "./connection-status";
 
 function connectionLabel(connection: ProfileConnection, modules: Module[]) {
   const settings = connection.settings;
@@ -11,19 +12,22 @@ function connectionLabel(connection: ProfileConnection, modules: Module[]) {
   return [protocol, mode === "cdn" ? "CDN" : mode === "tls" ? "TLS" : mode === "both" ? "REALITY + CDN" : "REALITY", transport.toUpperCase(), settings.relay_host_id ? "Relay" : ""].filter(Boolean).join(" · ");
 }
 
-export function ConnectionOrderNav({ connections, modules, selectedId, disabled, onSelect, onReorder }: {
+export function ConnectionOrderNav({ connections, modules, selectedId, disabled, onSelect, onReorder, states }: {
   connections: ProfileConnection[];
   modules: Module[];
   selectedId?: string;
   disabled: boolean;
   onSelect: (id: string) => void;
   onReorder: (sourceId: string, targetId: string) => void;
+  states?: Record<string, ConnectionAppearance>;
 }) {
   const nav = useRef<HTMLElement>(null);
   const gesture = useRef<{ id: string; pointerId: number; x: number; y: number; targetId: string; rect: DOMRect } | null>(null);
   const [drag, setDrag] = useState<{ id: string; targetId: string; x: number; y: number } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const selectedIndex = Math.max(0, connections.findIndex(item => item.id === selectedId));
+  const statusFor = (connection: ProfileConnection) => states?.[connection.id] || connectionAppearance(connection, { modules });
+  const selectedStatus = connections[selectedIndex] ? statusFor(connections[selectedIndex]) : undefined;
 
   useEffect(() => {
     const list = nav.current;
@@ -50,7 +54,7 @@ export function ConnectionOrderNav({ connections, modules, selectedId, disabled,
     <div className="mihomoConnectionCarousel">
     <button type="button" className="mihomoConnectionArrow" aria-label="Предыдущее подключение" disabled={disabled || selectedIndex === 0} onClick={() => select(selectedIndex - 1)}><span aria-hidden="true">‹</span></button>
     <nav ref={nav} className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">
-      {connections.map((connection, index) => <div key={connection.id} data-connection-id={connection.id}
+      {connections.map((connection, index) => <div key={connection.id} data-connection-id={connection.id} data-connection-status={statusFor(connection).state}
         className={`mihomoConnectionTile${selectedId === connection.id ? " is-active" : ""}${drag?.id === connection.id ? " is-dragging" : ""}${drag && drag.id !== connection.id && drag.targetId === connection.id ? " is-drop-target" : ""}`}
         style={drag?.id === connection.id ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined}>
         <button type="button" className="mihomoConnectionSelect" disabled={disabled} aria-pressed={selectedId === connection.id} title={connection.name} onClick={() => select(index)}
@@ -63,7 +67,7 @@ export function ConnectionOrderNav({ connections, modules, selectedId, disabled,
             if (!disabled && connections[next]) nav.current?.querySelectorAll<HTMLButtonElement>(".mihomoConnectionSelect")[next]?.focus({ preventScroll: true });
           }}>
           <span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span>
-          <span><b>{connection.name}</b>{connection.route_state?.state === "stale" && <small title={connection.route_state.reason}>{connection.route_state.addresses.length ? `Stale · ${connection.route_state.addresses.join(", ")}` : connection.route_state.reason}</small>}
+          <span><b>{connection.name}</b><small className="mihomoConnectionStateLabel" title={statusFor(connection).reason}>{statusFor(connection).label}</small>
             <small title={connectionLabel(connection, modules)}>{connectionLabel(connection, modules)}</small>
             </span><em aria-label={`Приоритет ${index + 1}`}>{index + 1}</em>
         </button>
@@ -122,6 +126,7 @@ export function ConnectionOrderNav({ connections, modules, selectedId, disabled,
     <button type="button" className="mihomoConnectionArrow" aria-label="Следующее подключение" disabled={disabled || selectedIndex >= connections.length - 1} onClick={() => select(selectedIndex + 1)}><span aria-hidden="true">›</span></button>
     </div>
     <div className="mihomoConnectionPosition" aria-live="polite">{connections.length ? selectedIndex + 1 : 0} / {connections.length}</div>
+    {selectedStatus && ["warning", "error"].includes(selectedStatus.state) && <p className="mihomoConnectionStatusNote" data-connection-status={selectedStatus.state} role="status"><b>{selectedStatus.label}</b><span>{selectedStatus.reason}</span></p>}
     <span className="mihomoConnectionOrderStatus" role="status">{announcement}</span>
   </div>;
 }

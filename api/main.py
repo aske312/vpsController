@@ -2435,6 +2435,13 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
             result.update(check_id=saved.get("check_id"), checked_at=saved.get("checked_at"),
                           checked_revision=saved.get("checked_revision"),
                           failed_checks=int(saved.get("failed_checks", 0)) if network_routes.check_is_current(binding) else 0)
+            # Failed checks intentionally have no success proof. Preserve their
+            # exact consumer scope instead of coloring every sibling endpoint.
+            owners = [identity for identity, check in binding.get("consumer_checks", {}).items()
+                      if saved.get("check_id") and check.get("check_id") == saved["check_id"]
+                      and check.get("checked_revision") == saved.get("checked_revision")]
+            if consumer_id or len(owners) == 1:
+                result["consumer_id"] = consumer_id or owners[0]
         if proof:
             result["verified_connection"] = {key: proof[key] for key in ("consumer_id", "producer", "protocol", "transport", "vantage_point") if key in proof}
         result["consumers"] = [{"id": item["id"], "label": item.get("label", item["id"])} for item in network_consumers()
