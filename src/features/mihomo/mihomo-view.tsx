@@ -141,6 +141,7 @@ export function MihomoPage({
   const [pendingPolicySave, setPendingPolicySave] = useState<PolicySave | null>(null);
   const [pendingProfileSave, setPendingProfileSave] = useState<{ mutation: ProfileMutation; session: number; draft: string } | null>(null);
   const pendingPolicySaveRef = useRef<PolicySave | null>(null);
+  const pendingProfileRecheck = useRef<{ id: string; run: () => Promise<void> } | null>(null);
   const routingLeaveActions = useRef<{ canSave: () => boolean; save: () => Promise<boolean>; discard: () => void }>({ canSave: () => false, save: async () => false, discard: () => {} });
   const remainingDirtyRef = useRef(false);
   const [routingLeaveGuard] = useState(() => createRuleLeaveGuard({
@@ -374,6 +375,10 @@ export function MihomoPage({
 
   const recheckPolicySave = useCallback(async (save: PolicySave) => {
     if (policyChecking.current || pendingPolicySaveRef.current?.id !== save.id) return;
+    if (pendingProfileRecheck.current?.id === save.id) {
+      await pendingProfileRecheck.current.run();
+      return;
+    }
     policyChecking.current = true;
     try { await completePolicySave(save, await checkPolicySave(request, save, { validate: (value) => validatePolicyResult(save, value) })); }
     catch (cause) {
@@ -437,6 +442,7 @@ export function MihomoPage({
   }
 
   function clearProfileSaveGuard(identity: string) {
+    if (pendingProfileRecheck.current?.id === identity) pendingProfileRecheck.current = null;
     if (pendingPolicySaveRef.current?.id !== identity) return;
     const stored = readPendingPolicySave();
     if ((stored && stored.id !== identity) || (!pageActive.current && !stored)) return;
@@ -448,6 +454,7 @@ export function MihomoPage({
 
   async function finishProfileSave(result: Profile, pending: { mutation: ProfileMutation; session: number; draft: string }) {
     clearProfileSaveGuard(pending.mutation.payload.operation_id.replaceAll("-", ""));
+    setPendingProfileSave(null);
     await refresh();
     if (!pageActive.current || profileSession.current !== pending.session) return;
     profileMutationId.current = clientUuid();
@@ -1045,9 +1052,12 @@ export function MihomoPage({
       if (!(cause instanceof ProfileResultUnknown)) clearProfileSaveGuard(save.id);
       const stored = readPendingPolicySave();
       if (!pageActive.current && (!stored || stored.id !== save.id)) return;
-      if (cause instanceof ProfileResultUnknown) setPendingProfileSave({ mutation, session, draft: submittedDraft });
+      if (cause instanceof ProfileResultUnknown) {
+        const pending = { mutation, session, draft: submittedDraft };
+        setPendingProfileSave(pending);
+        pendingProfileRecheck.current = { id: save.id, run: () => recheckProfileSave(pending) };
+      }
       if (profileSession.current === session && !(cause instanceof ProfileResultUnknown)) profileMutationId.current = clientUuid();
-      notifyError(cause instanceof Error ? cause.message : "Профиль не сохранён");
       reportPolicySave(save, cause instanceof ProfileResultUnknown ? "unknown" : cause instanceof ProfileMutationSuperseded ? "success" : "error", cause instanceof Error ? cause.message : "Профиль не сохранён",
         cause instanceof ProfileResultUnknown ? () => { void recheckPolicySave(save); } : undefined);
       void refresh();
@@ -1065,23 +1075,26 @@ export function MihomoPage({
     }
   }
 
-  async function recheckProfileSave() {
-    if (!pendingProfileSave || requestBusy === "profile") return;
-    const pending = pendingProfileSave;
+  async function recheckProfileSave(pending = pendingProfileSave) {
+    if (!pending || policyChecking.current) return;
+    policyChecking.current = true;
+    const save: PolicySave = { id: pending.mutation.payload.operation_id.replaceAll("-", ""), kind: "operation", action: pending.mutation.profileId ? "mihomo-profile-update" : "mihomo-profile-create" };
+    reportPolicySave(save, "running", "Проверяем результат сохранения профиля…");
     setBusy("profile");
     try {
       const result = await checkProfileMutation(request, pending.mutation, () => {}, { onOperation: onSystemOperation, validateProfiles: profileSnapshots, validateOperation: systemActionSnapshot });
-      setPendingProfileSave(null);
       await finishProfileSave(result, pending);
+      reportPolicySave(save, "success", "Профиль сохранён");
     } catch (cause) {
       if (cause instanceof ProfileMutationFailed || cause instanceof ProfileMutationSuperseded) {
         clearProfileSaveGuard(pending.mutation.payload.operation_id.replaceAll("-", ""));
         setPendingProfileSave(null);
         if (profileSession.current === pending.session) profileMutationId.current = clientUuid();
-        if (cause instanceof ProfileMutationSuperseded) reportPolicySave({ id: pending.mutation.payload.operation_id.replaceAll("-", ""), kind: "operation", action: "mihomo-profile-update" }, "success", cause.message);
       }
-      notifyError(cause instanceof Error ? cause.message : "Не удалось проверить сохранение профиля");
-    } finally { setBusy(""); }
+      reportPolicySave(save, cause instanceof ProfileMutationSuperseded ? "success" : cause instanceof ProfileMutationFailed ? "error" : "unknown",
+        cause instanceof Error ? cause.message : "Не удалось проверить сохранение профиля",
+        cause instanceof ProfileMutationFailed || cause instanceof ProfileMutationSuperseded ? undefined : () => { void recheckPolicySave(save); });
+    } finally { policyChecking.current = false; setBusy(""); }
   }
 
   async function removeProfile(profile: Profile) {

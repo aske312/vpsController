@@ -61,7 +61,9 @@ export async function checkProfileMutation(request: Request, mutation: ProfileMu
   const identity = mutation.payload.operation_id.replace(/-/g, "");
   if (!options.systemOperationId && /^[a-f0-9]{32}$/.test(identity)) options = { ...options, systemOperationId: identity };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 45_000);
+  // Applying listeners and Relay rules can take over a minute. Keep following
+  // the admitted worker instead of treating a normal save as an unknown result.
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 10 * 60_000);
   report("Проверяем подтверждённый результат сохранения профиля…");
   try {
     while (!controller.signal.aborted) {

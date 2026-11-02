@@ -114,6 +114,30 @@ test("accepted profile mutation waits for worker success before returning persis
   assert.equal(profileReads, 1);
 });
 
+test("a worker taking over 45 seconds is followed to completion without repeating the save", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const id = "6".repeat(32);
+  let writes = 0, polls = 0;
+  const saved = { id: "profile-1", last_operation_id: id };
+  const result = submitProfileMutation(async (path, init) => {
+    if (init?.method) {
+      writes++;
+      return { id, action: "mihomo-profile-update", unit: "worker.service", state: "queued" };
+    }
+    if (path.startsWith("/application/operations/")) {
+      return { id, action: "mihomo-profile-update", unit: "worker.service", state: ++polls === 1 ? "running" : "succeeded" };
+    }
+    return { items: [saved] };
+  }, { profileId: "profile-1", payload: { operation_id: id } }, () => {});
+  // Flush admission and the first worker poll before advancing elapsed time.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(polls, 1);
+  t.mock.timers.tick(62_000);
+  assert.equal(await result, saved);
+  assert.equal(writes, 1);
+  assert.equal(polls, 2);
+});
+
 test("failed durable worker cannot be mistaken for saved profile", async () => {
   const id = "b".repeat(32);
   await assert.rejects(submitProfileMutation(async (path, init) => {
