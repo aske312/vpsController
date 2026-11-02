@@ -35,7 +35,7 @@ def free_port():
 class ValidationTests(unittest.TestCase):
     def test_only_dns_confirmed_domains_are_eligible(self):
         inventory = {'ipv4': ['8.8.8.8'], 'ipv6': [], 'domains': ['valid.example', 'mixed.example', 'empty.example', 'cdn.example'], 'cdn_domains': ['cdn.example']}
-        resolve = lambda name: {'valid.example': ['8.8.8.8'], 'mixed.example': ['8.8.8.8', '1.1.1.1'], 'empty.example': [], 'cdn.example': ['1.1.1.1']}[name]
+        resolve = lambda name: {'valid.example': ['8.8.8.8'], 'mixed.example': ['8.8.8.8', '1.1.1.1'], 'empty.example': [], 'cdn.example': ['104.16.0.1']}[name]
         value = addresses.verify_domains(inventory, resolve)
         self.assertEqual(value['domains'], ['valid.example', 'cdn.example'])
         self.assertEqual(value['cdn_domains'], ['cdn.example'])
@@ -55,7 +55,7 @@ class ValidationTests(unittest.TestCase):
         self.assertNotIn('private-payload', json.dumps(status))
         self.assertNotIn('secret operating', json.dumps(status))
 
-    def test_inventory_collects_all_public_addresses_and_configured_names_without_dns(self):
+    def test_inventory_collects_transport_names_but_not_panel_hostname_or_web_aliases(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nCDN_DOMAIN=edge.example\nADMIN_PASSWORD=never-publish\n')
@@ -66,10 +66,58 @@ class ValidationTests(unittest.TestCase):
                 value = addresses.discover({'public_ip':'8.8.8.8','domains':['manual.example']}, addresses=['8.8.8.8','8.8.4.4','2606:4700::1111','fe80::1','10.0.0.1'], environment_paths=[root/'environment'],caddy_root=root,hostname_path=root/'hostname',hosts_path=root/'hosts')
             self.assertEqual(value['ipv4'],['8.8.8.8','8.8.4.4'])
             self.assertEqual(value['ipv6'],['2606:4700::1111'])
-            self.assertEqual(set(value['domains']),{'panel.example','relay.example','alias.example','web.example','other.example','manual.example','edge.example'})
+            self.assertEqual(set(value['domains']),{'manual.example','edge.example'})
             self.assertEqual(value['cdn_domains'], ['edge.example'])
             self.assertNotIn('never-publish',json.dumps(value))
             self.assertNotIn('hidden.example',json.dumps(value))
+
+    def test_transport_sources_include_real_environment_and_active_network_bindings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); data=root/'data';data.mkdir()
+            (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nVLESS_CDN_DOMAIN=edge.example\nCDN_DOMAIN=retired.example\nTLS_DOMAIN="broken\nDATA_DIR="'+str(data).replace('\\','/')+'"\n')
+            settings={'cdn_domains':['stale-legacy.example'],'route_registry':{'schema':1,'bindings':[
+                {'address':'cdn.example','kind':'cdn','state':'active'},
+                {'address':'tls.example','kind':'tls_relay','state':'active'},
+                {'address':'udp.example','kind':'udp_relay','state':'active'},
+                {'address':'retired.example','kind':'cdn','state':'retired'},
+                {'address':'remote.example','kind':'cdn','state':'active','relay_host_id':'other'},
+            ]}}
+            (data/'network-endpoints.json').write_text(json.dumps(settings))
+            value=addresses.discover({'public_ip':'8.8.8.8'},addresses=['8.8.8.8'],environment_paths=[root/'environment'])
+            self.assertEqual(set(value['domains']),{'edge.example','cdn.example','tls.example','udp.example'})
+            self.assertEqual(set(value['cdn_domains']),{'edge.example','cdn.example'})
+            (data/'network-endpoints.json').write_text(json.dumps({'cdn_domain':'old-cdn.example','tls_relay_domains':['old-tls.example'],'udp_relay_domain':'old-udp.example'}))
+            value=addresses.discover({},addresses=[],environment_paths=[],endpoint_paths=[data/'network-endpoints.json'])
+            self.assertEqual(set(value['domains']),{'old-cdn.example','old-tls.example','old-udp.example'})
+
+    def test_cdn_requires_supported_ipv4_proxy_and_direct_dns_is_not_a_cdn(self):
+        names={'proxy.example':['104.16.0.1','2606:4700::1'],'foreign.example':['1.1.1.1'],
+               'direct.example':['8.8.8.8'],'mixed.example':['104.16.0.1','1.1.1.1'],
+               'ipv6.example':['2606:4700::1'],'private.example':['127.0.0.1']}
+        value=addresses.verify_domains({'ipv4':['8.8.8.8'],'ipv6':[],'domains':list(names),'cdn_domains':list(names)},names.__getitem__)
+        self.assertEqual(value['domains'],['proxy.example','direct.example'])
+        self.assertEqual(value['cdn_domains'],['proxy.example'])
+
+    def test_export_never_falls_back_to_unverified_or_stale_domain_names(self):
+        import datetime
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);config={'public_ip':'8.8.8.8','domains':['manual.example'],'cdn_domains':['cdn.example']}
+            for invalid in (None,'{broken','[]'):
+                file=root/'addresses.json'
+                if invalid is None:file.unlink(missing_ok=True)
+                else:file.write_text(invalid)
+                value=addresses.read_inventory(root,config)
+                self.assertEqual(value['domains'],[]);self.assertEqual(value['cdn_domains'],[])
+                self.assertEqual(value['ipv4'],['8.8.8.8'])
+            receipt=addresses.verify_domains({'ipv4':['8.8.8.8'],'ipv6':[],'domains':['manual.example','cdn.example'],'cdn_domains':['cdn.example']},lambda name:['8.8.8.8'] if name=='manual.example' else ['104.16.0.1'])
+            now=datetime.datetime.now(datetime.timezone.utc)
+            for seconds,eligible in ((0,True),(901,False),(-120,False)):
+                value={**receipt,'updated_at':(now-datetime.timedelta(seconds=seconds)).isoformat()}
+                (root/'addresses.json').write_text(json.dumps(value))
+                self.assertEqual(bool(addresses.read_inventory(root,config)['domains']),eligible)
+            receipt['updated_at']=now.isoformat();receipt.pop('eligibility_schema')
+            (root/'addresses.json').write_text(json.dumps(receipt))
+            self.assertEqual(addresses.read_inventory(root,config)['domains'],[])
 
     def test_client_accepts_selected_api_port_but_rejects_route_and_invalid_ports(self):
         for port in (9443, 9444, 19443, 65535):
@@ -100,6 +148,16 @@ class ValidationTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bad_address_and_update_caches_do_not_break_status_or_disable_enabled_updates(self):
+        (self.agent.config_dir/'updates.json').write_text('{"enabled":true}')
+        for invalid in ('[]','{broken','{"state":{}}'):
+            (self.agent.config_dir/'addresses.json').write_text(invalid)
+            (self.agent.config_dir/'update-status.json').write_text(invalid)
+            status=await self.agent.dispatch('GET','/v1/status',self.headers,{})
+            self.assertEqual(status['address_checks'],[])
+            self.assertEqual(status['addresses']['domains'],[])
+            self.assertEqual(status['updates'],{'enabled':True,'interval_hours':24,'state':'unknown'})
+
     async def test_one_way_tcp_stream_outlives_idle_timeout_in_both_directions(self):
         for direction in ('upload', 'download'):
             with self.subTest(direction=direction), patch.object(relay, 'TCP_IDLE_TIMEOUT', .15):
@@ -245,6 +303,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         item.deadline=0
         item.datagram_received(relay.packet(identity,key,2),('127.0.0.1',1234))
         self.assertEqual(item.ingress,{1})
+        item.transport=Mock();item.reply(packet)
+        self.assertEqual(item.returned,set());item.transport.sendto.assert_not_called()
 
     async def test_no_return_traffic_is_observed_per_active_session(self):
         route=relay.RelayRoute({**self.body,'id':'test'})

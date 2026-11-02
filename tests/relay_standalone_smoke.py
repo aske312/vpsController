@@ -136,7 +136,7 @@ if sys.argv[1] in ('restart', 'disable'):
     assert connection['addresses']['domains'] == []
     assert connection['addresses']['cdn_domains'] == []
     checks = json.loads((config_root/'addresses.json').read_text())['domain_checks']
-    assert {'relay.example', 'manual.example', 'edge.example'} <= {item['domain'] for item in checks}
+    assert {'manual.example', 'edge.example'} == {item['domain'] for item in checks}
     assert all(item['state'] == 'unresolved' for item in checks)
     assert config['api_port'] == expected_port
     if blocker: assert blocker.getsockname()[1] == 9443

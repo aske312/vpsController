@@ -13,10 +13,10 @@ import socket
 import ssl
 import tempfile
 import time
-from addresses import read_inventory, dual_stack_available
+from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
 
-VERSION = '1.4.1'
+VERSION = '1.4.2'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -428,7 +428,7 @@ class Measurement(asyncio.DatagramProtocol):
         self.forwarded.add(number)
 
     def reply(self, data):
-        if self.closed: return
+        if self.closed or time.monotonic() >= self.deadline: return
         number = sequence(data, self.id, self.key)
         if number is None or number not in self.forwarded or number in self.returned: return
         self.returned.add(number)
@@ -582,17 +582,26 @@ class Agent:
             return {'revision': self.revision, 'item': route.status()}
 
     def update_status(self):
+        enabled = False
         try:
-            enabled = json.loads((self.config_dir / 'updates.json').read_text()).get('enabled') is True
+            settings = read_json(self.config_dir / 'updates.json')
+            if not isinstance(settings, dict) or type(settings.get('enabled')) is not bool:
+                raise ValueError('Invalid update settings')
+            enabled = settings['enabled']
             path = self.config_dir / 'update-status.json'
-            value = json.loads(path.read_text()) if path.exists() else {'state': 'unchecked'}
+            value = read_json(path) if path.exists() else {'state': 'unchecked'}
+            if not isinstance(value, dict) or value.get('state') not in ('unchecked', 'current', 'updated', 'disabled', 'failed', 'unknown'):
+                raise ValueError('Invalid update status')
+            if any(key in value and not isinstance(value[key], str) for key in ('checked_at', 'version')):
+                raise ValueError('Invalid update metadata')
             result = {'enabled': enabled, 'interval_hours': 24,
                       **{key: value[key] for key in ('state', 'checked_at', 'version') if key in value}}
             manual = self.manual_update_status()
+            if manual is not None and not isinstance(manual, dict): raise ValueError('Invalid manual update status')
             if manual: result['manual'] = manual
             return result
-        except (OSError, ValueError, TypeError):
-            return {'enabled': False, 'interval_hours': 24, 'state': 'unknown'}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {'enabled': enabled, 'interval_hours': 24, 'state': 'unknown'}
 
     def manual_update_status(self):
         path = self.state_dir/'update-request.json'
@@ -651,7 +660,7 @@ class Agent:
 
     def address_checks(self):
         try:
-            return json.loads((self.config_dir / 'addresses.json').read_text()).get('domain_checks', [])
+            return fresh_checks(read_json(self.config_dir / 'addresses.json'))
         except (OSError, ValueError):
             return []
 
