@@ -1,8 +1,8 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 import { bytes } from "../../shared/lib/control-plane-ui";
-import type { ProfileStats, SubscriptionLimits, SubscriptionLimitsStatus, TrafficUsage } from "./types";
+import type { ProfileStats, SubscriptionLimits, SubscriptionLimitsStatus, TrafficPeriod, TrafficUsage } from "./types";
 import styles from "./profile-general.module.css";
 
 export const unlimitedSubscription: SubscriptionLimits = { speed_mbps: null, traffic_gb: null, days: null };
@@ -23,6 +23,18 @@ export function subscriptionTraffic(stats: ProfileStats | undefined, deviceId?: 
   return deviceId === undefined ? stats?.usage?.summary : stats?.usage?.devices[deviceId];
 }
 
+/** Never substitute an all-time total for missing period history. */
+export function periodTraffic(traffic: SubscriptionTraffic | undefined, period: TrafficPeriod) {
+  return period === "all" ? traffic : traffic?.periods?.[period];
+}
+
+function utcDate(timestamp: number, withTime = false) {
+  return new Date(timestamp * 1000).toLocaleString("ru-RU", {
+    timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } as const : {}),
+  });
+}
+
 export function SubscriptionLimitsFields({ value, status, traffic, disabled, onChange }: { value: SubscriptionLimits; status?: SubscriptionLimitsStatus; traffic?: SubscriptionTraffic; disabled: boolean; onChange: (value: SubscriptionLimits) => void }) {
   const id = useId();
   return <section className={styles.panel} aria-label="Контроль подписки">
@@ -39,10 +51,21 @@ export function SubscriptionLimitsFields({ value, status, traffic, disabled, onC
 }
 
 export function SubscriptionUsage({ status, traffic, label = "Использовано" }: { status?: SubscriptionLimitsStatus; traffic?: SubscriptionTraffic; label?: string }) {
-  const used = traffic?.stats_available && traffic.used_bytes != null ? `${traffic.stats_partial ? "≥ " : ""}${bytes(traffic.used_bytes)}` : "—";
+  const [period, setPeriod] = useState<TrafficPeriod>("all");
+  const selected = periodTraffic(traffic, period);
+  const window = period !== "all" ? traffic?.periods?.[period] : undefined;
+  const used = selected?.stats_available && selected.used_bytes != null ? `${selected.stats_partial ? "≥ " : ""}${bytes(selected.used_bytes)}` : "—";
   return <div className={styles.usage} role="status" data-state={status?.state}>
+    <label className={styles.usageFilter}><span>Период</span><select aria-label="Период трафика" value={period} onChange={event => setPeriod(event.target.value as TrafficPeriod)}>
+      <option value="day">За день</option><option value="week">За 7 дней</option><option value="month">За 30 дней</option><option value="all">За всё время</option>
+    </select></label>
     <span>{label}</span><b>{used}</b>
-    <small className={styles.usagePeriod}>За всё время учёта · без сброса по дням и месяцам</small>
+    <small className={styles.usagePeriod}>{period === "all" ? "За всё время учёта · без сброса по дням и месяцам"
+      : window ? `${utcDate(window.started_at)} — ${utcDate(window.ended_at)} · дни по UTC, включая сегодня` : "История за выбранный период пока недоступна"}</small>
+    {window && !selected?.stats_available && <small className={styles.usagePeriod}>За выбранный период пока нет доступных измерений.</small>}
+    {period !== "all" && traffic?.history_started_at != null && <small className={styles.usagePeriod}>
+      История собирается с {utcDate(traffic.history_started_at, true)} UTC. {window && traffic.history_started_at > window.started_at ? "Период учтён частично. Ранние данные доступны в итоге за всё время." : "Учтённый объём отмечен знаком ≥."}
+    </small>}
     {status?.expires_at != null && <span>Подписка до {new Date(status.expires_at * 1000).toLocaleDateString("ru-RU")}</span>}
     {status?.state === "expired" && <strong>Срок подписки истёк. Доступ остановлен.</strong>}
     {status?.state === "exhausted" && <strong>Объём трафика исчерпан. Доступ остановлен.</strong>}

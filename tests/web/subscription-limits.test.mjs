@@ -7,9 +7,9 @@ import react from '@vitejs/plugin-react';
 
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
-const { SubscriptionLimitsFields, unlimitedSubscription, subscriptionLimitChange, subscriptionTraffic } = await loader.ssrLoadModule('/src/features/mihomo/subscription-limits.tsx');
+const { SubscriptionLimitsFields, unlimitedSubscription, subscriptionLimitChange, subscriptionTraffic, periodTraffic } = await loader.ssrLoadModule('/src/features/mihomo/subscription-limits.tsx');
 const { ProfileGeneral } = await loader.ssrLoadModule('/src/features/mihomo/profile-general.tsx');
-const { profileSnapshots } = await loader.ssrLoadModule('/src/features/mihomo/workspace-refresh.ts');
+const { profileSnapshots, profileStatsSnapshot } = await loader.ssrLoadModule('/src/features/mihomo/workspace-refresh.ts');
 const render = props => renderToStaticMarkup(createElement(SubscriptionLimitsFields, { value: unlimitedSubscription, disabled: false, onChange() {}, ...props }));
 
 test('general settings isolate subscription editing from device identity and preserve shared limit warnings', () => {
@@ -28,7 +28,8 @@ test('general settings isolate subscription editing from device identity and pre
       assert.equal((html.match(/type="number"/g) || []).length, 3);
       assert.match(html, /value="Family"/);
     } else {
-      assert.doesNotMatch(html, /<select\b|type="number"/);
+      assert.doesNotMatch(html, /type="number"/);
+      assert.match(html, /aria-label="Период трафика"/);
       assert.match(html, /value="Laptop"/);
       assert.match(html, /Koala Clash 1.0/);
       assert.match(html, /50 Мбит\/с/);
@@ -93,6 +94,38 @@ test('general uses persisted device usage and subscription sum, never transient 
   assert.match(render({ traffic: subscriptionTraffic(stats, 'phone') }), /≥ 4 KB/);
   assert.match(render({ traffic: subscriptionTraffic(stats) }), /≥ 13 KB/);
   assert.match(render({ status: { state: 'active', used_bytes: 999999999, expires_at: null } }), />—</);
+});
+
+test('traffic periods select their own totals and never substitute all-time or another device', () => {
+  const amount = used_bytes => ({ used_bytes, stats_available: true, stats_partial: true });
+  const window = used_bytes => ({ ...amount(used_bytes), started_at: 0, ended_at: 100 });
+  const device = { ...amount(1000), history_started_at: 50, periods: { day: window(10), week: window(20), month: window(30) } };
+  const stats = { usage: { summary: amount(9000), devices: { phone: device } } };
+  for (const [period, bytes] of [['day', 10], ['week', 20], ['month', 30], ['all', 1000]]) {
+    assert.equal(periodTraffic(subscriptionTraffic(stats, 'phone'), period).used_bytes, bytes);
+  }
+  assert.equal(periodTraffic(amount(9000), 'week'), undefined);
+  assert.equal(periodTraffic(subscriptionTraffic(stats, 'missing'), 'day'), undefined);
+  const html = render({ traffic: device });
+  assert.match(html, /aria-label="Период трафика"/);
+  for (const label of ['За день', 'За 7 дней', 'За 30 дней', 'За всё время']) assert.ok(html.includes(label));
+});
+
+test('traffic history snapshots reject malformed counters and reversed or missing windows', () => {
+  const amount = { used_bytes: 1000, stats_available: true, stats_partial: true };
+  const window = { ...amount, started_at: 0, ended_at: 100 };
+  const row = { ...amount, history_started_at: 50, periods: { day: window, week: window, month: window } };
+  const snapshot = usage => ({ summary: { configured: 0, active: 0 }, connections: {}, usage: { summary: usage, devices: { phone: usage } } });
+  assert.deepEqual(profileStatsSnapshot(snapshot(row)), snapshot(row));
+  assert.deepEqual(profileStatsSnapshot(snapshot(amount)), snapshot(amount));
+  for (const invalid of [
+    { ...row, history_started_at: -1 },
+    { ...row, history_started_at: 'yesterday' },
+    { ...row, periods: { day: window, week: window } },
+    { ...row, periods: { ...row.periods, day: { ...window, started_at: 101 } } },
+    { ...row, periods: { ...row.periods, week: { ...window, used_bytes: -1 } } },
+    { ...row, periods: { ...row.periods, month: { ...window, used_bytes: null } } },
+  ]) assert.throws(() => profileStatsSnapshot(snapshot(invalid)));
 });
 
 test('exhaustion and unknown enforcement are visible instead of appearing active', () => {

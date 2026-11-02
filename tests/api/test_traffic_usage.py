@@ -57,6 +57,85 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(self.sample({}, changed)["summary"]["used_bytes"], 430)
         self.assertTrue(result["summary"]["stats_partial"])
 
+    def at(self, timestamp, rows, profile=None):
+        with patch.object(traffic_usage.time, 'time', return_value=timestamp):
+            return self.sample(rows, profile)
+
+    def test_history_migration_keeps_old_total_out_of_new_periods(self):
+        now = 20000 * 86400 + 3600
+        self.at(now - 30, {'a': {'used_bytes': 100}})
+        path = next((manager.DATA_ROOT / 'usage').glob('*.json'))
+        legacy = manager.load_json(path, {})
+        legacy.pop('history')
+        for source in legacy['sources'].values():source.pop('sampled_at')
+        manager.atomic_json(path, legacy)
+        migrated = self.at(now, {'a': {'used_bytes': 130}})
+        self.assertEqual(migrated['summary']['used_bytes'], 130)
+        self.assertEqual(migrated['summary']['periods']['month']['used_bytes'], 0)
+        self.assertEqual(migrated['devices']['phone']['history_started_at'], now)
+        self.assertEqual(self.at(now + 30, {'a': {'used_bytes': 150}})['summary']['periods']['day']['used_bytes'], 20)
+
+    def test_calendar_windows_include_today_and_six_or_twenty_nine_previous_days(self):
+        first = 20000 * 86400 + 3600
+        total = 0
+        for day in range(36):
+            stamp = first + day * 86400
+            self.at(stamp, {'a': {'used_bytes': total}, 'b': {'used_bytes': total}})
+            total += 10
+            result = self.at(stamp + 30, {'a': {'used_bytes': total}, 'b': {'used_bytes': total}})
+        for name, count in [('day', 1), ('week', 7), ('month', 30)]:
+            self.assertEqual(result['devices']['phone']['periods'][name]['used_bytes'], count * 10)
+            self.assertEqual(result['summary']['periods'][name]['used_bytes'], count * 20)
+            self.assertEqual(result['summary']['periods'][name]['started_at'], (20035 - count + 1) * 86400)
+        self.assertEqual(result['summary']['used_bytes'], 720)
+        stored = manager.load_json(next((manager.DATA_ROOT / 'usage').glob('*.json')), {})
+        self.assertEqual(len(stored['history']['days']), 30)
+        self.assertEqual(result['summary']['history_started_at'], first)
+
+    def test_midnight_and_new_source_do_not_assign_undated_old_bytes_to_today(self):
+        midnight = 20001 * 86400
+        self.at(midnight - 30, {'a': {'used_bytes': 100}})
+        result = self.at(midnight + 30, {'a': {'used_bytes': 150}, 'b': {'used_bytes': 900}})
+        self.assertEqual(result['summary']['used_bytes'], 1050)
+        self.assertEqual(result['summary']['periods']['day']['used_bytes'], 0)
+        self.assertEqual(result['devices']['laptop']['history_started_at'], midnight + 30)
+        result = self.at(midnight + 60, {'a': {'used_bytes': 170}, 'b': {'used_bytes': 930}})
+        self.assertEqual(result['summary']['periods']['day']['used_bytes'], 50)
+        self.assertEqual(result['summary']['used_bytes'], 1100)
+
+    def test_periods_distinguish_missing_measurements_from_observed_zero(self):
+        now = 20000 * 86400
+        result = self.at(now, {'a': {'stats_available': False}})
+        self.assertIsNone(result['summary']['history_started_at'])
+        self.assertIsNone(result['summary']['periods']['day']['used_bytes'])
+        result = self.at(now + 30, {'a': {'used_bytes': 0}})
+        self.assertEqual(result['devices']['phone']['periods']['day']['used_bytes'], 0)
+        self.assertTrue(result['devices']['phone']['periods']['day']['stats_available'])
+        self.assertIsNone(result['devices']['laptop']['periods']['day']['used_bytes'])
+
+    def test_period_history_survives_new_reader_and_replay_without_double_counting(self):
+        now = 20000 * 86400 + 3600
+        def row(value, epoch):return {'used_bytes': value, 'traffic_scope': 'observation', 'observed_since': epoch}
+        self.at(now, {'a': row(100, 1)})
+        self.at(now + 30, {'a': row(150, 1)})
+        self.at(now + 60, {'a': row(120, 2)})
+        self.at(now + 90, {'a': row(140, 2)})
+        result = self.at(now + 120, {'a': row(140, 2)})
+        self.assertEqual(result['summary']['periods']['day']['used_bytes'], 70)
+        self.assertEqual(result['summary']['used_bytes'], 170)
+        self.assertTrue(result['summary']['periods']['day']['stats_partial'])
+
+    def test_day_without_measurements_is_unknown_and_does_not_erase_past_usage(self):
+        now = 20000 * 86400 + 3600
+        self.at(now, {'a': {'used_bytes': 100}})
+        self.at(now + 30, {'a': {'used_bytes': 110}})
+        next_day = self.at(now + 86400, {})
+        self.assertIsNone(next_day['summary']['periods']['day']['used_bytes'])
+        self.assertEqual(next_day['summary']['periods']['week']['used_bytes'], 10)
+        expired = self.at(now + 31 * 86400, {})
+        self.assertIsNone(expired['summary']['periods']['month']['used_bytes'])
+        self.assertEqual(expired['summary']['used_bytes'], 110)
+
     def test_unknown_and_invalid_samples_are_not_zero_or_fake_totals(self):
         result = self.sample({"a": {"rx_bytes": None, "tx_bytes": None}})
         self.assertIsNone(result["summary"]["used_bytes"])

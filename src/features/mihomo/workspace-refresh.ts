@@ -265,6 +265,16 @@ export function policySnapshot(value: unknown, kind: "dns" | "routing"): PolicyS
 }
 
 /** Reject broken telemetry instead of rendering it as live activity or zeroes. */
+function trafficAmount(value: unknown): value is Record<string, unknown> {
+  return record(value) && typeof value.stats_available === "boolean" && typeof value.stats_partial === "boolean"
+    && (value.used_bytes === null || typeof value.used_bytes === "number" && Number.isSafeInteger(value.used_bytes) && value.used_bytes >= 0)
+    && (!value.stats_available || value.used_bytes !== null);
+}
+
+function trafficTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 253402300799;
+}
+
 export function profileStatsSnapshot(value: unknown): ProfileStats {
   if (!record(value) || !record(value.summary)) throw new Error("Некорректный ответ статистики профиля");
   const summary = value.summary;
@@ -277,9 +287,16 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
   if (value.usage != null) {
     if (!record(value.usage) || !record(value.usage.devices)) throw new Error("Некорректный учёт трафика");
     for (const row of [value.usage.summary, ...Object.values(value.usage.devices)]) {
-      if (!record(row) || typeof row.stats_available !== "boolean" || typeof row.stats_partial !== "boolean"
-        || (row.used_bytes !== null && (typeof row.used_bytes !== "number" || !Number.isSafeInteger(row.used_bytes) || row.used_bytes < 0))
-        || (row.stats_available && row.used_bytes === null)) throw new Error("Некорректный расход трафика");
+      if (!trafficAmount(row)) throw new Error("Некорректный расход трафика");
+      if (row.history_started_at != null && !trafficTimestamp(row.history_started_at)) throw new Error("Некорректное начало истории трафика");
+      if (row.periods !== undefined) {
+        if (!record(row.periods)) throw new Error("Некорректные периоды трафика");
+        for (const name of ["day", "week", "month"]) {
+          const period = row.periods[name];
+          if (!trafficAmount(period) || !trafficTimestamp(period.started_at) || !trafficTimestamp(period.ended_at)
+            || period.started_at > period.ended_at) throw new Error("Некорректный период трафика");
+        }
+      }
     }
   }
   for (const row of [summary, ...Object.values(connections)]) {

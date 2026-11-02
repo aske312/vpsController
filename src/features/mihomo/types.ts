@@ -115,7 +115,10 @@ export type ProfilePreset = { id: string; name: string; description: string; str
 
 export type ConnectionStats = { active?: boolean | null; stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; activity_source?: string; traffic_scope?: string; observed_since?: number | null; endpoint?: string | null; active_connections?: number | null; rx_bytes?: number | null; tx_bytes?: number | null; handshake_age_s?: number | null; latency_ms?: number | null };
 
-export type TrafficUsage = { used_bytes: number | null; stats_available: boolean; stats_partial: boolean };
+export type TrafficPeriod = "day" | "week" | "month" | "all";
+export type TrafficAmount = { used_bytes: number | null; stats_available: boolean; stats_partial: boolean };
+export type TrafficWindow = TrafficAmount & { started_at: number; ended_at: number };
+export type TrafficUsage = TrafficAmount & { history_started_at?: number | null; periods?: Record<Exclude<TrafficPeriod, "all">, TrafficWindow> };
 
 export type ProfileStats = { usage?: { summary: TrafficUsage; devices: Record<string, TrafficUsage> } | null; summary: { stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }; connections: Record<string, ConnectionStats>; devices?: Record<string, { stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }> };
 
