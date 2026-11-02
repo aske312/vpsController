@@ -113,7 +113,7 @@ export type PolicySettings = {
 
 export type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; xray_protocol?: "vless" | "vmess" | "trojan"; cdn?: boolean; tls?: boolean; transport?: string; label?: string }> };
 
-export type ConnectionStats = { active?: boolean | null; stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; activity_source?: string; traffic_scope?: string; observed_since?: number | null; endpoint?: string | null; active_connections?: number | null; rx_bytes?: number | null; tx_bytes?: number | null; handshake_age_s?: number | null; latency_ms?: number | null };
+export type ConnectionStats = { active?: boolean | null; service_active?: boolean; stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; activity_source?: string; traffic_scope?: string; observed_since?: number | null; traffic_verified_at?: number; traffic_observed_at?: number; endpoint?: string | null; active_connections?: number | null; rx_bytes?: number | null; tx_bytes?: number | null; handshake_age_s?: number | null; latency_ms?: number | null };
 
 export type TrafficPeriod = "day" | "week" | "month" | "all";
 export type TrafficAmount = { used_bytes: number | null; stats_available: boolean; stats_partial: boolean };

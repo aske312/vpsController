@@ -101,3 +101,33 @@ test('carousel and profile cards expose readable status labels without changing 
   assert.match(card, /Требует внимания/);
   assert.deepEqual(items, before);
 });
+
+test('current measured transfer turns raw direct connections green without a manual route check', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const connection = { ...checkedConnection, settings: { route_mode: 'direct' } };
+  const profile = { ...checkedProfile, updated_at: new Date((now - 3600) * 1000).toISOString(), connections: [connection] };
+  const stats = { stats_available: true, traffic_verified_at: now - 5, traffic_observed_at: now };
+  const current = connectionAppearance(connection, { profile, stats });
+  assert.equal(current.state, 'verified');
+  assert.equal(current.label, 'Работает');
+  const historical = connectionAppearance(connection, { profile, stats: { ...stats, traffic_verified_at: now - 600 } });
+  assert.equal(historical.state, 'verified');
+  assert.equal(historical.label, 'Проверено');
+  for (const observation of [{ active: true, rx_bytes: 999999, tx_bytes: 999999 }, { active_connections: 2 }, { ...stats, stats_available: false }]) {
+    assert.equal(connectionAppearance(connection, { profile, stats: observation }).state, 'unchecked');
+  }
+  assert.equal(connectionAppearance(connection, { profile, stats: { ...stats, service_active: false } }).state, 'error');
+  assert.equal(connectionAppearance(connection, { profile: { ...profile, updated_at: new Date(now * 1000).toISOString() }, stats }).state, 'unchecked');
+});
+
+test('newer failed checks and saved route warnings outrank transfer evidence', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const profile = { ...checkedProfile, updated_at: new Date((now - 3600) * 1000).toISOString() };
+  const stats = { stats_available: true, traffic_verified_at: now - 30, traffic_observed_at: now };
+  const failed = { ...readyCheck, status: 'error', ready: false, checked_at: new Date(now * 1000).toISOString() };
+  assert.equal(connectionAppearance(checkedConnection, { ...context(failed), profile, stats }).state, 'error');
+  failed.checked_at = new Date((now - 60) * 1000).toISOString();
+  assert.equal(connectionAppearance(checkedConnection, { ...context(failed), profile, stats }).label, 'Работает');
+  const stale = { ...checkedConnection, route_state: { state: 'stale', reason: 'Relay отключён', addresses: [], bindings: [] } };
+  assert.equal(connectionAppearance(stale, { profile, stats }).state, 'warning');
+});

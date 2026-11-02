@@ -3834,6 +3834,8 @@ def collect_profile_stats(item: dict[str, Any], *, collect_latency: bool = True)
     latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
     try:
         usage = traffic_usage.snapshot(normalize_profile(item), connections, DATA_ROOT / "traffic-usage", load_json, atomic_json)
+        for identity, evidence in usage.pop("traffic_evidence", {}).items():
+            connections[identity].update(evidence)
     except (OSError, ValueError, KeyError, TypeError):
         usage = None
     return {"id": profile_id, "usage": usage, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": not values or any(directional(value) for value in values), "stats_partial": any(not directional(value) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}

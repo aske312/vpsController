@@ -136,6 +136,71 @@ class UsageTests(unittest.TestCase):
         self.assertIsNone(expired['summary']['periods']['month']['used_bytes'])
         self.assertEqual(expired['summary']['used_bytes'], 110)
 
+    def test_transfer_evidence_requires_new_bidirectional_payload_for_exact_connection(self):
+        now = 20000 * 86400 + 3600
+        baseline = {'a': {'rx_bytes': 1000, 'tx_bytes': 500}, 'b': {'rx_bytes': 9000, 'tx_bytes': 8000}}
+        self.assertEqual(self.at(now, baseline)['traffic_evidence'], {})
+        baseline['a']['rx_bytes'] += 100
+        self.assertEqual(self.at(now + 30, baseline)['traffic_evidence'], {})
+        baseline['a']['tx_bytes'] += 50
+        result = self.at(now + 60, baseline)
+        self.assertEqual(result['traffic_evidence'], {'a': {'traffic_verified_at': now + 30, 'traffic_observed_at': now + 60}})
+        later = self.at(now + 300, baseline)
+        self.assertEqual(later['traffic_evidence']['a']['traffic_verified_at'], now + 30)
+        self.assertNotIn('b', later['traffic_evidence'])
+
+    def test_shadowsocks_sessions_are_not_evidence_but_native_payload_growth_is(self):
+        now = 20000 * 86400
+        profile = deepcopy(self.profile);profile['connections'] = [profile['connections'][0]]
+        profile['connections'][0]['component'] = 'transport-shadowsocks'
+        row = {'used_bytes': 1000, 'active': True, 'active_connections': 2, 'counter_epoch': 'one', 'service_active': True}
+        self.assertEqual(self.at(now, {'a': row}, profile)['traffic_evidence'], {})
+        self.assertEqual(self.at(now + 30, {'a': row}, profile)['traffic_evidence'], {})
+        row['used_bytes'] = 1100
+        self.assertEqual(self.at(now + 60, {'a': row}, profile)['traffic_evidence']['a']['traffic_verified_at'], now + 60)
+        row['service_active'] = False
+        self.assertEqual(self.at(now + 90, {'a': row}, profile)['traffic_evidence'], {})
+        row['service_active'] = True
+        self.assertEqual(self.at(now + 120, {'a': row}, profile)['traffic_evidence'], {})
+
+    def test_transfer_confirmation_does_not_survive_settings_credentials_or_epoch_changes(self):
+        now = 20000 * 86400
+        for name in ('settings', 'credential', 'counter_epoch', 'observation'):
+            with self.subTest(name=name):
+                profile = deepcopy(self.profile);profile['id'] = name;profile['connections'] = [profile['connections'][0]]
+                row = {'rx_bytes': 100, 'tx_bytes': 100, 'counter_epoch': 'one'}
+                self.at(now, {'a': row}, profile)
+                row.update(rx_bytes=200, tx_bytes=200)
+                self.assertIn('a', self.at(now + 30, {'a': row}, profile)['traffic_evidence'])
+                if name == 'settings':profile['connections'][0]['settings'] = {'transport': 'grpc'}
+                elif name == 'credential':profile['connections'][0]['credential']['uuid'] = 'new-uuid'
+                elif name == 'counter_epoch':row['counter_epoch'] = 'two'
+                else:row.update(traffic_scope='observation', observed_since=now + 60)
+                row.update(rx_bytes=300, tx_bytes=300)
+                self.assertEqual(self.at(now + 60, {'a': row}, profile)['traffic_evidence'], {})
+                row.update(rx_bytes=400, tx_bytes=400)
+                self.assertIn('a', self.at(now + 90, {'a': row}, profile)['traffic_evidence'])
+
+    def test_long_observation_gap_does_not_turn_old_growth_into_fresh_working_status(self):
+        now = 20000 * 86400
+        self.at(now, {'a': {'rx_bytes': 100, 'tx_bytes': 100}})
+        delayed = self.at(now + 3600, {'a': {'rx_bytes': 10000, 'tx_bytes': 10000}})
+        self.assertEqual(delayed['traffic_evidence'], {})
+        fresh = self.at(now + 3630, {'a': {'rx_bytes': 10100, 'tx_bytes': 10100}})
+        self.assertEqual(fresh['traffic_evidence']['a']['traffic_verified_at'], now + 3630)
+
+    def test_manager_exposes_connection_evidence_without_changing_usage_contract(self):
+        now = 20000 * 86400
+        with patch.object(manager, 'normalize_profile', side_effect=lambda value: value), \
+             patch.object(manager, 'reality_profile_stats', return_value={'rx_bytes': 100, 'tx_bytes': 50}) as measure, \
+             patch.object(traffic_usage.time, 'time', return_value=now) as clock:
+            manager.profile_stats_payload(self.profile, collect_latency=False)
+            measure.return_value = {'rx_bytes': 120, 'tx_bytes': 70}
+            clock.return_value = now + 30
+            result = manager.profile_stats_payload(self.profile, collect_latency=False)
+        self.assertEqual(result['connections']['a']['traffic_verified_at'], now + 30)
+        self.assertNotIn('traffic_evidence', result['usage'])
+
     def test_unknown_and_invalid_samples_are_not_zero_or_fake_totals(self):
         result = self.sample({"a": {"rx_bytes": None, "tx_bytes": None}})
         self.assertIsNone(result["summary"]["used_bytes"])

@@ -301,13 +301,17 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
   }
   for (const row of [summary, ...Object.values(connections)]) {
     if (!record(row)) throw new Error("Некорректная статистика подключения");
-    for (const key of ["stats_available", "stats_partial", "activity_available"]) {
+    for (const key of ["stats_available", "stats_partial", "activity_available", "service_active"]) {
       if (row[key] !== undefined && typeof row[key] !== "boolean") throw new Error("Некорректная доступность статистики профиля");
     }
     for (const key of ["rx_bytes", "tx_bytes", "used_bytes", "handshake_age_s", "last_handshake_age_s", "latency_ms"]) {
       if (row[key] != null && (typeof row[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0)) throw new Error("Некорректные значения статистики профиля");
     }
     if (row !== summary && row.active != null && typeof row.active !== "boolean") throw new Error("Некорректное состояние подключения");
+    for (const key of ["traffic_verified_at", "traffic_observed_at"]) {
+      if (row[key] !== undefined && !trafficTimestamp(row[key])) throw new Error("Некорректное подтверждение передачи данных");
+    }
+    if (row.traffic_verified_at !== undefined && (!trafficTimestamp(row.traffic_observed_at) || Number(row.traffic_verified_at) > row.traffic_observed_at)) throw new Error("Противоречивое подтверждение передачи данных");
   }
   return { ...value, connections } as ProfileStats;
 }

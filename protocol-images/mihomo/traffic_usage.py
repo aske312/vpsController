@@ -29,6 +29,7 @@ def snapshot(profile, rows, root, read, atomic):
     with LOCK:
         state = read(path, {"devices": {}, "sources": {}})
         before = json.dumps(state, sort_keys=True)
+        traffic_evidence = {}
         history = state.setdefault("history", {"schema": 1, "started_at": {}, "days": {}})
         if history.get("schema") != 1 or not isinstance(history.get("started_at"), dict) or not isinstance(history.get("days"), dict):
             raise ValueError("Invalid traffic history")
@@ -60,12 +61,44 @@ def snapshot(profile, rows, root, read, atomic):
             daily = history["days"].setdefault(str(today), {})
             daily.setdefault(device, 0)
             sampled_at = previous.get("sampled_at") if previous else None
+            traffic_signature = hashlib.sha256(json.dumps([connection.get("settings", {}), credential], sort_keys=True).encode()).hexdigest()
+            directions = [row.get("rx_bytes"), row.get("tx_bytes")]
+            directional = all(type(value) in (int, float) and math.isfinite(value) and value >= 0 for value in directions)
+            same_source = bool(previous and previous.get("traffic_signature") == traffic_signature
+                               and previous.get("epoch") == epoch and previous.get("counter_epoch") == row.get("counter_epoch")
+                               and current >= previous["last"])
+            if directional and same_source and any(previous.get(key) is not None and directions[index] < previous[key]
+                                                   for index, key in enumerate(("last_rx", "last_tx"))):
+                same_source = False
+            verified_at = previous.get("traffic_verified_at") if same_source else None
+            rx_at = previous.get("rx_at") if same_source else None
+            tx_at = previous.get("tx_at") if same_source else None
+            fresh = type(sampled_at) is int and 0 <= now - sampled_at <= 120
+            if same_source and fresh and row.get("service_active") is not False:
+                if directional:
+                    for index, direction_key in enumerate(("last_rx", "last_tx")):
+                        old = previous.get(direction_key)
+                        if old is not None and directions[index] > old:
+                            if index == 0: rx_at = now
+                            else: tx_at = now
+                    if all(type(at) is int and 0 <= now - at <= 120 for at in (rx_at, tx_at)):
+                        verified_at = max(verified_at or 0, min(rx_at, tx_at))
+                elif connection.get("component") == "transport-shadowsocks" and "used_bytes" in row and current > previous["last"]:
+                    # libev's native payload counter, never merely TCP sessions.
+                    verified_at = now
+            if row.get("service_active") is False:
+                verified_at = rx_at = tx_at = None
+            if type(verified_at) is int and verified_at <= now and row.get("service_active") is not False:
+                traffic_evidence[str(connection["id"])] = {"traffic_verified_at": verified_at, "traffic_observed_at": now}
             # Initial counters can include old traffic. A delta crossing
             # midnight cannot be split honestly; retain it only in all-time
             # accounting. Period values remain measured lower bounds.
             if type(sampled_at) is int and sampled_at <= now and sampled_at // 86400 == today:
                 daily[device] += delta
-            state["sources"][key] = {"last": current, "epoch": epoch, "counter_epoch": row.get("counter_epoch"), "sampled_at": now}
+            state["sources"][key] = {"last": current, "epoch": epoch, "counter_epoch": row.get("counter_epoch"), "sampled_at": now,
+                                     "traffic_signature": traffic_signature, "traffic_verified_at": verified_at,
+                                     "last_rx": int(directions[0]) if directional else None, "last_tx": int(directions[1]) if directional else None,
+                                     "rx_at": rx_at, "tx_at": tx_at}
         if json.dumps(state, sort_keys=True) != before:
             atomic(path, state)
         def usage(value, device=None):
@@ -85,4 +118,4 @@ def snapshot(profile, rows, root, read, atomic):
         devices = {key: usage(value, key) for key, value in state["devices"].items()}
         for device in profile.get("devices", []):
             devices.setdefault(str(device["id"]), usage(None, str(device["id"])))
-        return {"summary": usage(sum(state["devices"].values()) if state["devices"] else None), "devices": devices}
+        return {"summary": usage(sum(state["devices"].values()) if state["devices"] else None), "devices": devices, "traffic_evidence": traffic_evidence}
