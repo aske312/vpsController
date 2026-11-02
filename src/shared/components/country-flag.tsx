@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
+import { countryFlagAssets } from "./country-flag-assets";
 
 export function CountryFlag({ code, label, fallback }: { code: string; label: string; fallback?: ReactNode }) {
   const clipId = useId();
@@ -63,6 +64,9 @@ export function CountryFlag({ code, label, fallback }: { code: string; label: st
     flag = <><rect width="27" height="18" fill="#ffffff" /><path d="M13.5 5a4 4 0 0 1 0 8 2 2 0 0 0 0-4 2 2 0 0 1 0-4Z" fill="#cd2e3a" /><path d="M13.5 13a4 4 0 0 1 0-8 2 2 0 0 0 0 4 2 2 0 0 1 0 4Z" fill="#0047a0" /></>;
   } else if (normalized === "au") {
     flag = <><rect width="27" height="18" fill="#012169" /><path d="M0 0 12 8M12 0 0 8" stroke="#ffffff" strokeWidth="2" /><path d="M5 0h2v8H5zM0 3h12v2H0z" fill="#ffffff" /><path d="M5.5 0h1v8h-1zM0 3.5h12v1H0z" fill="#c8102e" />{[[19, 4], [22, 9], [17, 13], [23, 15]].map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r=".8" fill="#ffffff" />)}</>;
+  }
+  if (!flag && countryFlagAssets.has(normalized)) {
+    flag = <image href={`/flags/${normalized}.svg`} width="27" height="18" preserveAspectRatio="none" />;
   }
   if (!flag) return <span className="gateCountryFlag unknown" role="img" aria-label={label}>{fallback ?? "◎"}</span>;
   return <span className="gateCountryFlag" role="img" aria-label={label}><svg viewBox="0 0 27 18" aria-hidden="true"><g clipPath={`url(#${clipId})`}>{flag}</g><defs><clipPath id={clipId}><rect width="27" height="18" rx="2" /></clipPath></defs></svg></span>;
