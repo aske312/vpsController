@@ -100,6 +100,73 @@ class ValidationTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_one_way_tcp_stream_outlives_idle_timeout_in_both_directions(self):
+        for direction in ('upload', 'download'):
+            with self.subTest(direction=direction), patch.object(relay, 'TCP_IDLE_TIMEOUT', .15):
+                async def origin_handler(reader, writer):
+                    try:
+                        if direction == 'download':
+                            await reader.readexactly(1)
+                            for _ in range(25):
+                                writer.write(b'x' * 1024); await writer.drain(); await asyncio.sleep(.02)
+                        else:
+                            payload = await reader.read()
+                            writer.write(str(len(payload)).encode()); await writer.drain()
+                    finally: writer.close()
+                origin = await asyncio.start_server(origin_handler, '127.0.0.1', 0)
+                route = relay.RelayRoute({**self.body, 'target_ip': '127.0.0.1', 'target_port': origin.sockets[0].getsockname()[1]}, '127.0.0.1')
+                await route.start()
+                try:
+                    reader, writer = await asyncio.open_connection('127.0.0.1', self.body['listen_port'])
+                    if direction == 'download':
+                        writer.write(b'!'); await writer.drain()
+                        self.assertEqual(len(await asyncio.wait_for(reader.read(), 3)), 25 * 1024)
+                    else:
+                        for _ in range(25):
+                            writer.write(b'x' * 1024); await writer.drain(); await asyncio.sleep(.02)
+                        writer.write_eof()
+                        self.assertEqual(await asyncio.wait_for(reader.read(), 3), str(25 * 1024).encode())
+                    self.assertEqual(route.errors, 0)
+                    writer.close(); await writer.wait_closed()
+                finally:
+                    await route.close(); origin.close(); await origin.wait_closed()
+
+    async def test_truly_idle_tcp_session_is_still_closed(self):
+        async def idle(reader, writer):
+            try: await reader.read()
+            finally: writer.close()
+        origin = await asyncio.start_server(idle, '127.0.0.1', 0)
+        route = relay.RelayRoute({**self.body, 'target_ip': '127.0.0.1', 'target_port': origin.sockets[0].getsockname()[1]}, '127.0.0.1')
+        await route.start()
+        try:
+            with patch.object(relay, 'TCP_IDLE_TIMEOUT', .05):
+                reader, writer = await asyncio.open_connection('127.0.0.1', self.body['listen_port'])
+                self.assertEqual(await asyncio.wait_for(reader.read(), 2), b'')
+                self.assertEqual(route.error_counts, {'tcp_transfer_timeout': 1})
+                writer.close(); await writer.wait_closed()
+        finally:
+            await route.close(); origin.close(); await origin.wait_closed()
+
+    async def test_udp_receive_budget_rejects_excess_sessions_and_releases_on_close(self):
+        route = relay.RelayRoute({**self.body, 'transport': 'udp', 'target_ip': '127.0.0.1'}, '127.0.0.1')
+        route.buffer_budget = relay.UDPReceiveBudget(128 * 1024)
+        await route.start()
+        try:
+            allocated = route.receive_buffer_bytes
+            self.assertGreater(allocated, 0)
+            self.assertLessEqual(allocated, route.buffer_budget.limit)
+            client = ('127.0.0.1', 12345)
+            route.pending[client] = [b'fixture']
+            await route.new_udp_session(client)
+            await asyncio.sleep(0)
+            self.assertNotIn(client, route.sessions)
+            self.assertNotIn(client, route.pending)
+            self.assertEqual(route.error_counts, {'udp_receive_buffer_unavailable': 1})
+            self.assertEqual(route.buffer_budget.used, allocated)
+        finally:
+            await route.close(); await asyncio.sleep(0)
+        self.assertEqual(route.buffer_budget.used, 0)
+
     async def test_update_command_is_authenticated_idempotent_and_does_not_change_routes(self):
         identity = 'a'*32; body = {'version': '9.0.0', 'digest': 'sha256:'+'b'*64}
         before = self.agent.revision
@@ -316,6 +383,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         origin, _ = await loop.create_datagram_endpoint(Echo, local_addr=('127.0.0.1', 0))
         route = relay.RelayRoute({**self.body, 'id': 'udp', 'transport': 'udp', 'target_ip': '127.0.0.1', 'target_port': origin.get_extra_info('sockname')[1]}, '127.0.0.1')
         await route.start()
+        allocated = route.buffer_budget.used - route.receive_buffer_bytes
         clients = [socket.socket(socket.AF_INET, socket.SOCK_DGRAM) for _ in range(2)]
         try:
             for index, sock in enumerate(clients):
@@ -328,9 +396,14 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(route.status()['diagnostics']['sent_packets'], 4)
             self.assertEqual(route.status()['diagnostics']['received_packets'], 4)
             self.assertEqual(route.status()['diagnostics']['dropped_packets'], 0)
+            listener = route.transport.get_extra_info('socket')
+            self.assertEqual(route.receive_buffer_bytes, listener.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
+            self.assertGreater(route.buffer_budget.used, allocated + route.receive_buffer_bytes)
+            self.assertLessEqual(route.buffer_budget.used, route.buffer_budget.limit)
         finally:
             for sock in clients: sock.close()
-            await route.close(); origin.close()
+            await route.close(); origin.close(); await asyncio.sleep(0)
+        self.assertEqual(route.buffer_budget.used, allocated)
 
 
 if __name__ == '__main__': unittest.main()

@@ -16,12 +16,37 @@ import time
 from addresses import read_inventory, dual_stack_available
 import struct
 
-VERSION = '1.4.0'
+VERSION = '1.4.1'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
 PORT_MIN, PORT_MAX = 20000, 20999
 MAX_ROUTES, MAX_SESSIONS = 64, 128
+TCP_IDLE_TIMEOUT = 300
+UDP_RECEIVE_BUFFER = 1024 * 1024
+
+
+class UDPReceiveBudget:
+    """Bound aggregate kernel receive allocations, including Linux's doubling."""
+    def __init__(self, limit=64 * 1024 * 1024):
+        self.limit, self.used = limit, 0
+
+    def reserve(self, sock, desired=UDP_RECEIVE_BUFFER):
+        remaining = self.limit - self.used
+        if remaining < 128 * 1024:
+            raise OSError('UDP receive buffer budget exhausted')
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, min(desired, remaining // 2))
+        actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+        if actual > remaining:
+            raise OSError('UDP receive buffer budget exhausted')
+        self.used += actual
+        return actual
+
+    def release(self, size):
+        self.used -= size
+
+
+UDP_BUFFERS = UDPReceiveBudget()
 
 
 class RelayError(ValueError):
@@ -72,9 +97,27 @@ class UpstreamUDP(asyncio.DatagramProtocol):
         self.route, self.client, self.transport = route, client, None
         self.touched = time.monotonic()
         self.awaiting_since = None
+        self.receive_buffer_bytes = 0
+        self.buffer_error = None
+        self.closed_future = None
+
+    def release_buffer(self):
+        self.route.buffer_budget.release(self.receive_buffer_bytes)
+        self.receive_buffer_bytes = 0
+
+    def connection_lost(self, _exc):
+        self.release_buffer()
+        if self.closed_future is not None and not self.closed_future.done():
+            self.closed_future.set_result(None)
 
     def connection_made(self, transport):
         self.transport = transport
+        self.closed_future = asyncio.get_running_loop().create_future()
+        try:
+            self.receive_buffer_bytes = self.route.buffer_budget.reserve(transport.get_extra_info('socket'))
+        except OSError as exc:
+            self.buffer_error = exc
+            transport.close()
 
     def datagram_received(self, data, _addr):
         self.touched = time.monotonic()
@@ -103,6 +146,9 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.last_sent_at = self.last_received_at = None
         self.tcp_waiting = {}
         self.closed = False
+        self.buffer_budget = UDP_BUFFERS
+        self.receive_buffer_bytes = 0
+        self.closed_future = None
 
     def failure(self, code, *, dropped=False):
         self.errors += 1
@@ -129,6 +175,8 @@ class RelayRoute(asyncio.DatagramProtocol):
             # Rebind after restart despite TIME_WAIT; no SO_REUSEPORT or shared listener.
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
+            if self.config['transport'] == 'udp':
+                self.receive_buffer_bytes = self.buffer_budget.reserve(sock, 256 * 1024)
             sock.bind((self.listen_host, self.config['listen_port']))
             sock.setblocking(False)
             if self.config['transport'] == 'tcp':
@@ -139,7 +187,17 @@ class RelayRoute(asyncio.DatagramProtocol):
                 self.track(self.expire_sessions())
         except BaseException:
             sock.close()
+            self.release_buffer()
             raise
+
+    def release_buffer(self):
+        self.buffer_budget.release(self.receive_buffer_bytes)
+        self.receive_buffer_bytes = 0
+
+    def connection_lost(self, _exc):
+        self.release_buffer()
+        if self.closed_future is not None and not self.closed_future.done():
+            self.closed_future.set_result(None)
 
     def track(self, coroutine):
         task = asyncio.create_task(coroutine)
@@ -162,14 +220,23 @@ class RelayRoute(asyncio.DatagramProtocol):
             incoming, upstream = await asyncio.wait_for(asyncio.open_connection(self.config['target_ip'], self.config['target_port']), 10)
             self.writers.add(upstream)
             phase = 'tcp_transfer'
+            last_activity = time.monotonic()
 
             async def pump(source, destination, direction):
+                nonlocal last_activity
                 while True:
-                    data = await asyncio.wait_for(source.read(65536), 300)
+                    remaining = max(0.001, TCP_IDLE_TIMEOUT - (time.monotonic() - last_activity))
+                    try:
+                        data = await asyncio.wait_for(source.read(65536), remaining)
+                    except asyncio.TimeoutError:
+                        if time.monotonic() - last_activity >= TCP_IDLE_TIMEOUT:
+                            raise
+                        continue  # The opposite direction is still transferring.
                     if not data:
                         if destination.can_write_eof():
                             destination.write_eof()
                         return
+                    last_activity = time.monotonic()
                     destination.write(data)
                     await asyncio.wait_for(destination.drain(), 30)
                     if direction == 'sent':
@@ -198,6 +265,7 @@ class RelayRoute(asyncio.DatagramProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
+        self.closed_future = asyncio.get_running_loop().create_future()
 
     def datagram_received(self, data, client):
         if self.closed: return
@@ -222,13 +290,19 @@ class RelayRoute(asyncio.DatagramProtocol):
             self.failure('session_limit', dropped=True)
 
     async def new_udp_session(self, client):
+        session = UpstreamUDP(self, client)
+        retained = False
         try:
             _transport, session = await asyncio.get_running_loop().create_datagram_endpoint(
-                lambda: UpstreamUDP(self, client), remote_addr=(self.config['target_ip'], self.config['target_port']), family=socket.AF_INET)
+                lambda: session, remote_addr=(self.config['target_ip'], self.config['target_port']), family=socket.AF_INET)
+            if session.buffer_error:
+                self.failure('udp_receive_buffer_unavailable', dropped=True)
+                return
             if self.closed:
                 session.transport.close()
                 return
             self.sessions[client] = session
+            retained = True
             for data in self.pending[client]:
                 session.transport.sendto(data)
                 self.sent += len(data)
@@ -238,6 +312,8 @@ class RelayRoute(asyncio.DatagramProtocol):
         except OSError:
             self.failure('udp_session_error')
         finally:
+            if not retained and session.transport is not None:
+                session.transport.close()
             self.pending.pop(client, None)
 
     async def expire_sessions(self):
@@ -253,12 +329,14 @@ class RelayRoute(asyncio.DatagramProtocol):
         if self.server:
             self.server.close()
             await self.server.wait_closed()
-        if self.transport: self.transport.close()
-        for session in self.sessions.values(): session.transport.close()
+        if self.transport: self.transport.abort()
+        for session in self.sessions.values(): session.transport.abort()
         for writer in self.writers: writer.close()
         tasks = list(self.tasks)
         for task in tasks: task.cancel()
         if tasks: await asyncio.gather(*tasks, return_exceptions=True)
+        closed = [getattr(item, 'closed_future', None) for item in (self, *self.sessions.values())]
+        if any(closed): await asyncio.gather(*(future for future in closed if future is not None))
         self.sessions.clear()
 
     def status(self):
@@ -270,6 +348,9 @@ class RelayRoute(asyncio.DatagramProtocol):
                 'sessions': len(self.sessions) if self.transport else len(self.writers) // 2, 'errors': self.errors,
                 'target_verified': False,
                 'diagnostics': {'sent_packets': self.sent_packets, 'received_packets': self.received_packets,
+                    'udp_receive_buffer_bytes': self.receive_buffer_bytes,
+                    'udp_receive_allocated_bytes': self.receive_buffer_bytes + sum(getattr(item, 'receive_buffer_bytes', 0) for item in self.sessions.values()),
+                    'udp_receive_budget_bytes': self.buffer_budget.limit,
                     'return_state': return_state, 'no_return_sessions': unanswered,
                     'dropped_packets': self.dropped_packets, 'error_counts': dict(self.error_counts),
                     'last_error': self.last_error, 'last_error_at': self.last_error_at,
