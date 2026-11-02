@@ -1,9 +1,23 @@
 import { networkRoutesSnapshot } from "../mihomo/workspace-refresh";
+import { SystemOperationUnknown } from "../../control-panel/system-operation";
 import { dnsChecksSnapshot, dnsStatusSnapshot, networkEndpointSnapshot, networkPageSnapshot } from "./network-snapshot";
 import type { DnsCheck, DnsSettings, DnsStatus, NetworkEndpointCheck, NetworkEndpointSettings, NetworkStatus, SystemAction } from "../../shared/types/control-plane";
 
 export type NetworkRequest = <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
 export type NetworkAdmission = (path: string, init: RequestInit) => Promise<SystemAction>;
+
+async function startNetworkMutation(admit: NetworkAdmission, path: string, init: RequestInit) {
+  const id = crypto.randomUUID().replaceAll("-", "");
+  const headers = new Headers(init.headers);
+  headers.set("X-Operation-ID", id);
+  try { return await admit(path, { ...init, headers }); }
+  catch (cause) {
+    // Keep the form tied to its worker even if the admission response was lost.
+    // An earlier command blocking admission belongs to a different form.
+    if (cause instanceof SystemOperationUnknown && cause.id === id) return { id, state: "unknown", message: cause.message };
+    throw cause;
+  }
+}
 
 /** Все сетевые чтения и изменения страницы «Сеть» проходят через один feature API. */
 export async function readNetworkControl(request: NetworkRequest) {
@@ -16,11 +30,11 @@ export async function readNetworkControl(request: NetworkRequest) {
 }
 
 export function saveNetworkDns(admit: NetworkAdmission, settings: DnsSettings) {
-  return admit("/dns/settings", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
+  return startNetworkMutation(admit, "/dns/settings", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
 }
 
 export function saveNetworkEndpoints(admit: NetworkAdmission, settings: NetworkEndpointSettings) {
-  return admit("/network/endpoints", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
+  return startNetworkMutation(admit, "/network/endpoints", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
 }
 
 export async function checkNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string, consumerId?: string) {
@@ -33,11 +47,11 @@ export async function checkNetworkEndpoint(request: NetworkRequest, kind: Networ
 }
 
 export function deleteNetworkEndpoint(admit: NetworkAdmission, kind: NetworkEndpointCheck["kind"], domain: string, revision?: string) {
-  return admit(`/network/endpoints/${kind}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: revision ? { "If-Match": revision } : undefined });
+  return startNetworkMutation(admit, `/network/endpoints/${kind}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: revision ? { "If-Match": revision } : undefined });
 }
 
 export function recoverNetworkDns(admit: NetworkAdmission) {
-  return admit("/dns/recover", { method: "POST" });
+  return startNetworkMutation(admit, "/dns/recover", { method: "POST" });
 }
 
 export async function probeNetworkDns(request: NetworkRequest, providerId?: string) {

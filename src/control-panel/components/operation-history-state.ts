@@ -8,7 +8,7 @@ export function historyEntries(value: unknown): HistoryEntry[] {
   return value.items.map((entry: unknown) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw Error("Invalid operation");
     const item = entry as Record<string, unknown>;
-    for (const key of ["id", "unit", "action", "source", "message", "state", "started_at", "updated_at"]) {
+    for (const key of ["id", "unit", "action", "source", "message", "state", "result", "started_at", "updated_at"]) {
       if (item[key] != null && typeof item[key] !== "string") throw Error("Invalid operation field");
     }
     if (!item.id && !item.unit && !item.started_at && !item.updated_at) throw Error("Missing operation identity");
@@ -17,7 +17,7 @@ export function historyEntries(value: unknown): HistoryEntry[] {
   });
 }
 const active = new Set(["queued", "running", "active", "activating", "rebooting", "powering-off"]);
-const completed = new Set(["succeeded", "done", "cancelled"]);
+const completed = new Set(["succeeded", "finished", "done", "cancelled"]);
 const states: Record<string, string> = { queued: "В очереди", running: "Выполняется", active: "Выполняется", activating: "Запускается", unknown: "Результат неизвестен", succeeded: "Завершена", done: "Завершена", failed: "Ошибка", cancelled: "Отменена", rebooting: "Перезагрузка", "powering-off": "Выключение" };
 const sources: Record<string, string> = { system: "Система", mihomo: "Mihomo", cdn: "CDN" };
 export function historyKey(entry: HistoryEntry) { return `${entry.source || "system"}:${entry.id || entry.unit || entry.started_at || entry.updated_at}`; }
@@ -27,11 +27,17 @@ export function historyTitle(entry: HistoryEntry) {
   return actionLabels[entry.action || ""] || `${actionLabels[kind] || kind || "Операция"}${component.length ? ` · ${component.join(" · ")}` : ""}`;
 }
 export function historyState(entry: HistoryEntry) {
-  const state = entry.state || "unknown";
+  const state = historyResultState(entry);
   return { label: states[state] || states.unknown, tone: active.has(state) ? "active" : state === "succeeded" || state === "done" ? "success" : state === "failed" ? "error" : state === "cancelled" ? "neutral" : "unknown" };
 }
+function historyResultState(entry: HistoryEntry) {
+  if (entry.state === "cancelled") return "cancelled";
+  if (entry.state === "failed" || entry.result && !["success", "unknown"].includes(entry.result)) return "failed";
+  if (["succeeded", "finished", "done"].includes(entry.state || "")) return entry.result === "unknown" ? "unknown" : entry.state === "finished" ? "succeeded" : entry.state!;
+  return entry.state || "unknown";
+}
 export function historyMatches(entry: HistoryEntry, filter: HistoryFilter, query: string) {
-  const state = entry.state || "unknown";
+  const state = historyResultState(entry);
   if (filter === "active" && !active.has(state) || filter === "completed" && !completed.has(state) || filter === "attention" && (active.has(state) || completed.has(state))) return false;
   const text = [historyTitle(entry), historySource(entry), historyState(entry).label, entry.action, entry.id, entry.unit, entry.message].join(" ").toLocaleLowerCase();
   return query.trim().toLocaleLowerCase().split(/\s+/).every(word => text.includes(word));

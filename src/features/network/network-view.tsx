@@ -242,11 +242,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       setPending({ id: started.id, kind: "endpoints", draft: settings });
       onOperation(started);
     } catch (cause) {
-      if (cause instanceof SystemOperationUnknown) {
-        setEndpointDraft(settings);
-        setPending({ id: cause.id, kind: "endpoints", draft: settings });
-        return;
-      }
+      if (cause instanceof SystemOperationUnknown) return;
       notifyError(
         cause instanceof Error
           ? cause.message
