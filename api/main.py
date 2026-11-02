@@ -2841,8 +2841,11 @@ def reconnect_relay_host(payload: RelayHostSettings, _: None = Depends(require_t
 
 
 @app.delete('/api/network/relays/{host_id}', status_code=202, dependencies=[Depends(require_mutation_admission)])
-def delete_relay_host(host_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
-    return start_relay_mutation('relay-host-delete', {'host_id': host_id, 'expected_revision': expected_revision}, operation_id)
+def delete_relay_host(host_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match'), local_only: bool = False):
+    payload = {'host_id': host_id, 'expected_revision': expected_revision}
+    if local_only:
+        payload['local_only'] = True
+    return start_relay_mutation('relay-host-delete', payload, operation_id)
 
 
 @app.delete('/api/network/relays/{host_id}/address', status_code=202, dependencies=[Depends(require_mutation_admission)])

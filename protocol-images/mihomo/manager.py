@@ -4728,8 +4728,19 @@ def with_relay_labels(connections):
     """Use current ROUTES names only in the exported copy of each connection."""
     selected = {relay_connections.host_id(item.get('settings', {})) for item in connections} - {''}
     names = {host['id']: host['name'] for host in relay_connection_control().read()['hosts']} if selected else {}
-    return [{**item, '_relay_name': names.get(item.get('settings', {}).get('relay_host_id'), '')}
-            for item in connections]
+    result = []
+    for item in connections:
+        settings = item.get('settings', {})
+        selected = relay_connections.host_id(settings)
+        if selected and selected not in names:
+            # An after-CDN route also needs a Cloudflare origin change. It
+            # cannot be turned into a direct route by changing client fields.
+            if relay_cdn.after(settings):
+                continue
+            settings = {key: value for key, value in settings.items()
+                        if key not in {'relay_host_id', 'relay_address', 'relay_cdn', 'relay_cdn_mode'}}
+        result.append({**item, 'settings': settings, '_relay_name': names.get(selected, '')})
+    return result
 
 
 def prepare_profile_relays(item, identity=None, previous=(), *, partial=False):
@@ -4911,9 +4922,10 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     normalized["connections"] = subscription_limits.client_connections(normalized, effective_client_connections(normalized.get("connections", [])))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
+    configured_connections = bool(connections)
     connections = with_relay_labels(connections) if resolve_relays else connections
     redirect = relay_client_lines if resolve_relays else lambda connection, lines: lines
-    if not connections:
+    if not connections and not configured_connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     profile_routing = device_routing(normalized, selected_device)
     privacy = bool(profile_routing.get("tunnel_privacy", False))
@@ -4961,6 +4973,11 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     tun_enabled = connection_mode(routing) == 'tun'
     explicit_proxy = routing.get('connection_mode') == 'proxy'
     rules = profile_final_rules(routing)
+    if not connections:
+        # A valid replacement must revoke old subscription nodes on refresh.
+        # Returning an error would leave the client's previous nodes in use.
+        rules = ["MATCH,REJECT"]
+        mode = "rule"
     dns = client_dns_settings(profile_routing, ech_enabled)
     if explicit_proxy:
         dns = {**dns, 'enhanced_mode': 'redir-host'}
@@ -5039,7 +5056,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         if fake_ip_filter:
             lines.append("  fake-ip-filter:")
             lines.extend(f"    - {q(line)}" for line in fake_ip_filter)
-    lines.append("proxies:")
+    lines.append("proxies:" if rendered else "proxies: []")
     for connection, name, cdn_name, tls_name in rendered:
         if name:
             lines.extend(redirect(connection, render_proxy(str(connection["component"]), connection.get("credential", {}), name)))
@@ -5048,7 +5065,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             lines.extend(redirect(connection, render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name)))
         if tls_name:
             lines.extend(redirect(connection, render_vless_tls(connection.get("credential", {}), tls_name)))
-    group_type = str(routing.get("strategy", "fallback"))
+    group_type = str(routing.get("strategy", "fallback")) if rendered else "select"
     lines += [
         "proxy-groups:",
         f"  - name: {q(MIHOMO_PROXY_GROUP)}",
@@ -5062,6 +5079,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             lines.append(f"      - {q(cdn_name)}")
         if tls_name:
             lines.append(f"      - {q(tls_name)}")
+    if not rendered:
+        lines.append('      - "REJECT"')
     if group_type in ("fallback", "url-test"):
         lines += [
             f"    url: {q(routing.get('test_url', 'https://www.gstatic.com/generate_204'))}",

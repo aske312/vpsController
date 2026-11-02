@@ -342,6 +342,13 @@ class RelayManager:
         registry = self.checked(payload['expected_revision'])
         host = self.host(registry, payload['host_id'])
         owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
+        if payload.get('local_only') is True:
+            # Disconnect all local endpoints in one registry commit, without
+            # depending on an unavailable agent or claiming remote cleanup.
+            registry['routes'] = [item for item in registry['routes'] if item['host_id'] != host['id']]
+            registry['hosts'] = [item for item in registry['hosts'] if item['id'] != host['id']]
+            self.write(registry)
+            return
         if owned:
             client = self.client(host)
             remote = route_snapshot(client.request('GET', '/v1/routes'))

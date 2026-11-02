@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from tests.api.support import api
-from tests.api.support import manager
+from tests.api.support import manager, ROOT
 from relay_manager import RelayManager, route_snapshot, status_snapshot
 from relay_client import RelayClient, AgentAPIError
 from application_operation import OperationConflict, require_recovery_clear
@@ -825,6 +825,127 @@ class RelayManagementTests(unittest.TestCase):
         self.delete_host()
         self.assertEqual(self.control.read()['hosts'], [])
 
+    def test_local_disconnect_cascades_offline_without_touching_remote_routes(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.control.mutate_route(self.payload(20002), 'c'*32)
+        remote = copy.deepcopy(self.agent.items)
+        self.agent.offline = True
+        self.agent.calls.clear()
+        settings = {'relay_host_id': self.host_id, 'relay_address': AGENT}
+        original = copy.deepcopy(settings)
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        self.assertEqual(self.control.read()['hosts'], [])
+        self.assertEqual(self.control.read()['routes'], [])
+        self.assertEqual(self.agent.calls, [])
+        self.assertEqual(self.agent.items, remote)
+        state = relay_connections.consumer_state(self.control, settings, {'state': 'current'})
+        self.assertEqual(state['state'], 'stale')
+        self.assertIn('Требует внимания', state['reason'])
+        self.assertEqual(settings, original)
+        with self.assertRaises(ValueError):
+            self.control.endpoint(self.host_id, 'tcp', 443)
+
+    def test_local_disconnect_checks_revision_and_unresolved_remote_intent(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        before = self.control.read()
+        payload = {'host_id': self.host_id, 'expected_revision': '0'*32, 'local_only': True}
+        with self.assertRaises(OperationConflict):
+            self.control.delete_host(payload, 'e'*32)
+        self.assertEqual(self.control.read(), before)
+        self.control.pending.write_text('{}')
+        with self.assertRaises(OperationConflict):
+            self.control.delete_host({**payload, 'expected_revision': before['revision']}, 'e'*32)
+        self.assertEqual(self.control.read(), before)
+
+    def test_local_disconnect_commit_failure_keeps_valid_host_and_routes(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        before = self.control.read()
+        with patch('relay_manager.atomic_json', side_effect=OSError('disk full')), self.assertRaises(OSError):
+            self.control.delete_host({'host_id': self.host_id, 'expected_revision': before['revision'], 'local_only': True}, 'e'*32)
+        self.assertEqual(self.control.read(), before)
+
+    def test_local_disconnect_preserves_other_hosts_and_their_routes(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        registry = self.control.read()
+        other = {**registry['hosts'][0], 'id': 'f'*32, 'agent_url': 'https://8.8.4.4:9443', 'name': 'Other'}
+        route = {**registry['routes'][0], 'id': 'pro-'+'f'*32, 'host_id': other['id']}
+        registry['hosts'].append(other)
+        registry['routes'].append(route)
+        self.control.write(registry)
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        self.assertEqual(self.control.read()['hosts'], [other])
+        self.assertEqual(self.control.read()['routes'], [route])
+
+    def test_detached_relay_uses_direct_export_copy_without_modifying_connections(self):
+        connections = [{'id': 'direct', 'settings': {}}, {'id': 'relay', 'settings': {'relay_host_id': self.host_id}}]
+        original = copy.deepcopy(connections)
+        with patch.object(manager, 'relay_connection_control', return_value=self.control):
+            self.assertEqual(len(manager.with_relay_labels(connections)), 2)
+            self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+            exported = manager.with_relay_labels(connections)
+            self.assertEqual([item['id'] for item in exported], ['direct', 'relay'])
+            self.assertNotIn('relay_host_id', exported[1]['settings'])
+        self.assertEqual(connections, original)
+
+    def test_detached_relay_blocks_persisted_native_download(self):
+        identity = 'd'*32
+        adapter = SimpleNamespace(DATA_DIR=self.root, relay_control=lambda: self.control)
+        path = relay_client_creation.result_path(adapter, identity)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({'stage': 'ready', 'settings': {'relay_host_id': self.host_id}, 'result': {'config': 'private'}}))
+        self.assertEqual(relay_client_creation.read_result(adapter, identity)['state'], 'ready')
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        with self.assertRaises(ValueError):
+            relay_client_creation.read_result(adapter, identity)
+
+    def test_detached_relay_native_download_uses_captured_direct_result(self):
+        identity = 'd'*32
+        adapter = SimpleNamespace(DATA_DIR=self.root, relay_control=lambda: self.control)
+        path = relay_client_creation.result_path(adapter, identity)
+        path.parent.mkdir(parents=True)
+        native = {'config': f'[Peer]\nEndpoint = {ORIGIN}:51820\n', 'filename': 'client.conf'}
+        path.write_text(json.dumps({'stage': 'ready', 'protocol': 'wg', 'settings': {'relay_host_id': self.host_id},
+                                   'native_result': native, 'result': {'config': f'Endpoint = {AGENT}:20001'}}))
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        result = relay_client_creation.read_result(adapter, identity)
+        self.assertEqual(result['result'], {**native, 'protocol': 'wg'})
+        self.assertNotIn(AGENT, json.dumps(result))
+
+    def test_disconnected_subscription_keeps_healthy_nodes_and_exports_direct_fallback(self):
+        direct = {'id': 'direct', 'name': 'Direct', 'component': 'transport-shadowsocks', 'device_id': 'common',
+                  'settings': {}, 'credential': {'port': 31000, 'password': 'private-value', 'method': 'aes-128-gcm'}}
+        via_relay = {**copy.deepcopy(direct), 'id': 'relay', 'name': 'Relay', 'settings': {'relay_host_id': self.host_id}}
+        item = {'id': 'profile', 'name': 'Profile', 'common_device_id': 'common',
+                'devices': [{'id': 'common', 'name': 'Common', 'scope': 'common'}], 'connections': [direct, via_relay]}
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        with (patch.object(manager, 'relay_connection_control', return_value=self.control),
+              patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules')):
+            config = yaml.safe_load(manager.render_profile(item))
+            self.assertEqual(len(config['proxies']), 2)
+            self.assertNotIn(AGENT, json.dumps(config))
+            item['connections'] = [via_relay]
+            config = yaml.safe_load(manager.render_profile(item))
+            self.assertEqual(len(config['proxies']), 1)
+            self.assertEqual(config['proxies'][0]['port'], 31000)
+            self.assertEqual(config['proxies'][0]['password'], 'private-value')
+            self.assertNotIn(AGENT, json.dumps(config))
+        self.assertEqual(item['connections'][0]['settings']['relay_host_id'], self.host_id)
+
+    def test_after_cdn_disconnect_does_not_keep_routing_through_old_origin(self):
+        connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'device_id': 'common',
+                      'settings': {'relay_host_id': self.host_id, 'relay_cdn': True, 'relay_cdn_mode': 'after_cdn', 'route_mode': 'cdn'},
+                      'credential': {'cdn_enabled': True, 'cdn_domain': 'cdn.example'}}
+        item = {'id': 'profile', 'name': 'Profile', 'common_device_id': 'common',
+                'devices': [{'id': 'common', 'name': 'Common', 'scope': 'common'}], 'connections': [connection]}
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        with (patch.object(manager, 'relay_connection_control', return_value=self.control),
+              patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules')):
+            config = yaml.safe_load(manager.render_profile(item))
+        self.assertEqual(config['proxies'], [])
+        self.assertEqual(config['rules'], ['MATCH,REJECT'])
+        self.assertEqual(config['proxy-groups'][0]['proxies'], ['REJECT'])
+        self.assertEqual(config['proxy-groups'][0]['type'], 'select')
+
     def test_rejected_cascade_retains_host_and_route_without_claiming_success(self):
         self.control.mutate_route(self.payload(), 'b'*32)
         self.agent.reject = True
@@ -937,6 +1058,15 @@ class RelayAPITests(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.request(method, '/api'+path)
                 self.assertEqual(response.status_code, 401)
+
+    def test_local_disconnect_is_explicit_and_uses_normal_operation_admission(self):
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        api.app.dependency_overrides[api.require_mutation_admission] = lambda: None
+        with patch.object(api, 'start_relay_mutation', return_value={'state': 'queued'}) as start:
+            response = self.client.delete('/api/network/relays/host?local_only=true', headers={'If-Match': 'a'*32, 'X-Operation-ID': 'b'*32})
+            self.assertEqual(response.status_code, 202)
+            start.assert_called_once_with('relay-host-delete', {'host_id': 'host', 'expected_revision': 'a'*32, 'local_only': True}, 'b'*32)
+            self.assertEqual(self.client.delete('/api/network/relays/host?local_only=invalid').status_code, 422)
 
     def test_inventory_skips_live_collectors_and_is_not_cached(self):
         api.app.dependency_overrides[api.require_token] = lambda: None
