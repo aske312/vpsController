@@ -56,10 +56,10 @@ export function SubscriptionUsage({ status, traffic, label = "Использов
   const window = period !== "all" ? traffic?.periods?.[period] : undefined;
   const used = selected?.stats_available && selected.used_bytes != null ? `${selected.stats_partial ? "≥ " : ""}${bytes(selected.used_bytes)}` : "—";
   return <div className={styles.usage} role="status" data-state={status?.state}>
+    <span>{label}</span><b>{used}</b>
     <label className={styles.usageFilter}><span>Период</span><select aria-label="Период трафика" value={period} onChange={event => setPeriod(event.target.value as TrafficPeriod)}>
       <option value="day">За день</option><option value="week">За 7 дней</option><option value="month">За 30 дней</option><option value="all">За всё время</option>
     </select></label>
-    <span>{label}</span><b>{used}</b>
     <small className={styles.usagePeriod}>{period === "all" ? "За всё время учёта · без сброса по дням и месяцам"
       : window ? `${utcDate(window.started_at)} — ${utcDate(window.ended_at)} · дни по UTC, включая сегодня` : "История за выбранный период пока недоступна"}</small>
     {window && !selected?.stats_available && <small className={styles.usagePeriod}>За выбранный период пока нет доступных измерений.</small>}
