@@ -40,6 +40,8 @@ class RouteDnsTests(unittest.TestCase):
         self.enterContext(patch.object(manager, 'public_endpoint', return_value='192.0.2.1'))
         self.enterContext(patch.object(manager, 'module_is_installed', return_value=True))
         self.settings = manager.dns_defaults()
+        self.enterContext(patch.object(manager, 'dns_settings', side_effect=lambda: deepcopy(self.settings)))
+        self.enterContext(patch.object(manager, 'profiles', return_value=[]))
 
     def test_schema_safe_defaults_and_validation(self):
         self.assertFalse(self.settings['route_dns'])

@@ -25,12 +25,12 @@ import urllib.request
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager, ExitStack, nullcontext
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -414,8 +414,11 @@ class ProfileDeviceInput(BaseModel):
     personal_rule_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
+ProfileName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+
+
 class ProfileCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
+    name: ProfileName
     channels: list[str] = Field(default_factory=list)
     connections: list[ProfileConnectionInput] | None = None
     devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="profile-common", name="Общие настройки профиля")], min_length=1)
@@ -425,7 +428,7 @@ class ProfileCreate(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=80)
+    name: ProfileName | None = None
     channels: list[str] | None = None
     connections: list[ProfileConnectionInput] | None = None
     devices: list[ProfileDeviceInput] | None = Field(default=None, min_length=1)

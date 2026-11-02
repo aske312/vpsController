@@ -1407,7 +1407,7 @@ export function MihomoPage({
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
       {readOnly && <p role="status">Только просмотр и диагностика. Для изменения Mihomo примите его под управление в разделе «Обзор».</p>}
       {status?.recovery_required && <p role="alert">Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы. <button type="button" disabled={Boolean(busy) || readOnly} onClick={() => void recoverProfiles()}>Восстановить Mihomo</button></p>}
-      {pendingProfileSave && <p role="status">Результат сохранения профиля пока неизвестен. Перед следующей записью проверьте прежнюю операцию. <button type="button" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button></p>}
+      {pendingProfileSave && !profileDialog && <p role="status">Результат сохранения профиля пока неизвестен. Перед следующей записью проверьте прежнюю операцию. <button type="button" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button></p>}
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
@@ -1850,7 +1850,13 @@ export function MihomoPage({
                 <aside className="mihomoProfileTechnicalNote">Настройки применяются к выбранному подключению. Порты общих серверов, подсети и серверная обфускация задаются в Компонентах. После сохранения обновите подписку на устройстве.</aside>
               </main>
             </div>
-            <footer><button type="button" className="ghostButton" onClick={() => void closeProfile()}>Отмена</button><span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span><button type="submit" className="primaryButton" disabled={Boolean(busy) || Boolean(pendingProfileSave) || profileRevisionConflict || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button></footer>
+            <footer>
+              <button type="button" className="ghostButton" onClick={() => void closeProfile()}>Отмена</button>
+              <span>{pendingProfileSave ? "Результат сохранения пока неизвестен. Проверьте прежнюю операцию перед новой записью." : profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span>
+              {pendingProfileSave
+                ? <button type="button" className="primaryButton" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button>
+                : <button type="submit" className="primaryButton" disabled={Boolean(busy) || profileRevisionConflict || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button>}
+            </footer>
           </form>
         </div>
       )}
