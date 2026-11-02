@@ -136,7 +136,7 @@ def discover(config, *, addresses=None, environment_paths=None, endpoint_paths=N
                 continue
             key, raw = line.split('=', 1)
             key = key.strip()
-            if key not in ('VLESS_CDN_DOMAIN', 'CDN_DOMAIN', 'CF_DOMAIN', 'TLS_DOMAIN', 'DATA_DIR'):
+            if key not in ('VLESS_CDN_DOMAIN', 'CDN_DOMAIN', 'CF_DOMAIN', 'TLS_DOMAIN', 'PUBLIC_ENDPOINT', 'DATA_DIR'):
                 continue
             try: values = shlex.split(raw, comments=True)
             except ValueError: continue

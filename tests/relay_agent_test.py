@@ -74,7 +74,7 @@ class ValidationTests(unittest.TestCase):
     def test_transport_sources_include_real_environment_and_active_network_bindings(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder); data=root/'data';data.mkdir()
-            (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nVLESS_CDN_DOMAIN=edge.example\nCDN_DOMAIN=retired.example\nTLS_DOMAIN="broken\nDATA_DIR="'+str(data).replace('\\','/')+'"\n')
+            (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nPUBLIC_ENDPOINT=endpoint.example\nVLESS_CDN_DOMAIN=edge.example\nCDN_DOMAIN=retired.example\nTLS_DOMAIN="broken\nDATA_DIR="'+str(data).replace('\\','/')+'"\n')
             settings={'cdn_domains':['stale-legacy.example'],'route_registry':{'schema':1,'bindings':[
                 {'address':'cdn.example','kind':'cdn','state':'active'},
                 {'address':'tls.example','kind':'tls_relay','state':'active'},
@@ -84,7 +84,7 @@ class ValidationTests(unittest.TestCase):
             ]}}
             (data/'network-endpoints.json').write_text(json.dumps(settings))
             value=addresses.discover({'public_ip':'8.8.8.8'},addresses=['8.8.8.8'],environment_paths=[root/'environment'])
-            self.assertEqual(set(value['domains']),{'edge.example','cdn.example','tls.example','udp.example'})
+            self.assertEqual(set(value['domains']),{'edge.example','cdn.example','tls.example','udp.example','endpoint.example'})
             self.assertEqual(set(value['cdn_domains']),{'edge.example','cdn.example'})
             (data/'network-endpoints.json').write_text(json.dumps({'cdn_domain':'old-cdn.example','tls_relay_domains':['old-tls.example'],'udp_relay_domain':'old-udp.example'}))
             value=addresses.discover({},addresses=[],environment_paths=[],endpoint_paths=[data/'network-endpoints.json'])

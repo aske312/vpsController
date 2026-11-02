@@ -16,7 +16,7 @@ import time
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
 
-VERSION = '1.4.2'
+VERSION = '1.4.3'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
