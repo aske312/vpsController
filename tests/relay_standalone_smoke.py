@@ -175,11 +175,14 @@ if sys.argv[1] in ('restart', 'disable'):
     assert state.read_bytes() == saved_routes
     Path('/etc/caddy/Caddyfile').write_text('changed.example {\n respond "ok"\n}\n')
     Path('/etc/hosts').write_text('127.0.0.1 localhost\n::1 localhost\n8.8.8.8 manual.example edge.example changed.example\n')
+    transport_root = Path('/var/lib/vps-control')
+    transport_root.mkdir(exist_ok=True)
+    (transport_root/'network-endpoints.json').write_text(json.dumps({'cdn_domain':'configured-cdn.example','tls_relay_domains':['configured-tls.example']}))
     run('python3', '/usr/local/lib/vps-control-relay-agent/addresses.py')
     refreshed = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
     assert refreshed['addresses']['domains'] == []
     assert refreshed['addresses']['cdn_domains'] == []
-    assert {item['domain'] for item in json.loads((config_root/'addresses.json').read_text())['domain_checks']} == {'manual.example', 'changed.example', 'edge.example'}
+    assert {item['domain'] for item in json.loads((config_root/'addresses.json').read_text())['domain_checks']} == {'manual.example', 'edge.example', 'configured-cdn.example', 'configured-tls.example'}
     assert refreshed['token'] == connection['token']
     with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
     if Path('/qa/light').exists():
