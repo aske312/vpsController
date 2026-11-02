@@ -52,6 +52,22 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(row["rx_bytes"], 1024)
             self.assertEqual(row["tx_bytes"], 256)
 
+    def test_device_counters_are_isolated_and_profile_sums_all_devices(self):
+        profile = {"id": "separate", "devices": [{"id": key} for key in ("common", "phone", "laptop")], "connections": [
+            {"id": key, "device_id": device, "component": "transport-reality", "credential": {}}
+            for key, device in (("pool", "common"), ("phone-a", "phone"), ("phone-b", "phone"), ("laptop-a", "laptop"))
+        ]}
+        counters = {"pool": (10, 20), "phone-a": (100, 200), "phone-b": (300, 400), "laptop-a": (1000, 2000)}
+        def sample(_, connection_id):
+            rx, tx = counters[connection_id]
+            return {"rx_bytes": rx, "tx_bytes": tx, "stats_available": True}
+        with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "reality_profile_stats", side_effect=sample):
+            stats = manager.profile_stats_payload(profile)
+        self.assertEqual((stats["devices"]["phone"]["rx_bytes"], stats["devices"]["phone"]["tx_bytes"]), (400, 600))
+        self.assertEqual((stats["devices"]["laptop"]["rx_bytes"], stats["devices"]["laptop"]["tx_bytes"]), (1000, 2000))
+        for direction in ("rx_bytes", "tx_bytes"):
+            self.assertEqual(stats["summary"][direction], sum(row[direction] for row in stats["devices"].values()))
+
     def test_maintenance_failure_does_not_disable_other_protocols(self):
         stopped = threading.Event()
         with patch.object(stopped, "wait", side_effect=lambda _: stopped.set()), patch.object(manager, "cleanup_profile_transitions"), patch.object(manager, "ensure_reality_telemetry", side_effect=RuntimeError("unavailable")), patch.object(manager, "ensure_quic_telemetry") as quic, patch.object(manager.logger, "error"):
@@ -101,17 +117,15 @@ class TelemetryTests(unittest.TestCase):
 class QuicTrafficTests(unittest.TestCase):
     def test_hysteria2_and_tuic_report_authenticated_user_traffic(self):
         for module in ("hysteria2", "tuic"):
-            for client_format in ("mihomo", "singbox"):
-                with self.subTest(module=module, client=client_format):
-                    self.probe(module, client_format)
+            with self.subTest(module=module):
+                self.probe(module)
 
     def test_settings_apply_preserves_authenticated_user_traffic(self):
         for module in ("hysteria2", "tuic"):
-            for client_format in ("mihomo", "singbox"):
-                with self.subTest(module=module, client=client_format):
-                    self.probe(module, client_format, edit_settings=True)
+            with self.subTest(module=module):
+                self.probe(module, edit_settings=True)
 
-    def probe(self, module, client_format, *, edit_settings=False):
+    def probe(self, module, *, edit_settings=False):
         with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness_port:
             root = Path(folder)
             self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", root / "data"))
@@ -172,22 +186,17 @@ class QuicTrafficTests(unittest.TestCase):
                     self.assertEqual(denied.exception.code(), grpc.StatusCode.UNAUTHENTICATED)
                 collector = ConnectionTelemetry(f"127.0.0.1:{api_port}", "test-secret")
                 collector.start()
-                with patch.object(manager, "public_endpoint", return_value="127.0.0.1"):
+                # Export against the same isolated listener as the server. The
+                # installed host may have its own QUIC certificate to pin.
+                with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "public_endpoint", return_value="127.0.0.1"):
                     proxy = yaml.safe_load("proxies:\n" + "\n".join(manager.render_proxy("transport-" + module, credential, "test")))["proxies"][0]
+                self.assertTrue(proxy.get("fingerprint"), "The fixture listener must retain certificate pinning")
                 client_file = root / "client.yaml"
                 client_file.write_text(yaml.safe_dump({"mixed-port": proxy_port, "proxies": [proxy],
                     "rules": [f"DST-PORT,{readiness_port},DIRECT", "MATCH,test"]}), encoding="utf-8")
-                if client_format == "singbox":
-                    config = manager.build_singbox_config([{"id": "a", "component": "transport-" + module, "credential": credential}], {}, {"nameserver": "1.1.1.1", "fallback": "8.8.8.8"}, [], "127.0.0.1", lambda: {}, None)
-                    config["inbounds"] = [{"type": "mixed", "listen": "127.0.0.1", "listen_port": proxy_port}]
-                    client_file = root / "client.json"
-                    client_file.write_text(json.dumps(config), encoding="utf-8")
-                    client = start([os.environ["PRIVACY_SINGBOX_BIN"], "run", "-c", str(client_file)])
-                else:
-                    client = start([os.environ["PRIVACY_MIHOMO_BIN"], "-d", str(root), "-f", str(client_file)])
+                client = start([os.environ["PRIVACY_MIHOMO_BIN"], "-d", str(root), "-f", str(client_file)])
                 wait_port(proxy_port, client)
-                if client_format == "mihomo":
-                    wait_http_proxy(proxy_port, client, readiness_port)
+                wait_http_proxy(proxy_port, client, readiness_port)
                 connection = socket.create_connection(("127.0.0.1", proxy_port), timeout=5)
                 connection.settimeout(5)
                 connection.sendall(f"GET http://127.0.0.1:{origin.server_port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.server_port}\r\nConnection: close\r\n\r\n".encode())
@@ -205,6 +214,11 @@ class QuicTrafficTests(unittest.TestCase):
                 self.assertGreater(stats["tx_bytes"], 0)
                 self.assertEqual(collector.snapshot("b")["rx_bytes"], 0)
                 self.assertFalse(collector.snapshot("b")["active"])
+                profile = {"id": "quic-usage", "devices": [{"id": "phone"}], "connections": [
+                    {"id": "a", "device_id": "phone", "component": f"transport-{module}", "credential": {"instance_id": "a"}}]}
+                for _ in range(2):
+                    usage = manager.traffic_usage.snapshot(profile, {"a": stats}, root / "usage", manager.load_json, manager.atomic_json)
+                    self.assertEqual(usage["devices"]["phone"]["used_bytes"], stats["rx_bytes"] + stats["tx_bytes"])
                 release.set()
                 while connection.recv(8192):
                     pass

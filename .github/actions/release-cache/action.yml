@@ -1,0 +1,26 @@
+name: Release build caches
+description: Restore caches for pinned native cores and the locked runtime tree
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/node-dependencies
+      id: node
+    - uses: actions/setup-go@v6
+      id: go
+      with:
+        go-version: '1.26.10'
+        cache: false
+    - uses: actions/cache@v4
+      with:
+        path: .runtime/release-cache/xray
+        key: xray-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('scripts/build-xray.sh', 'scripts/xray/**') }}
+    - uses: actions/cache@v4
+      with:
+        path: |
+          .runtime/release-runtime/node_modules
+          .runtime/release-runtime/install.key
+        key: runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('scripts/runtime/package.json', 'scripts/runtime/package-lock.json') }}
+    - uses: actions/cache@v4
+      with:
+        path: .runtime/release-cache/downloads
+        key: release-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-release.sh', 'api/runtime-dependencies.json', 'api/runtime_dependencies.py') }}

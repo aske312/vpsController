@@ -72,14 +72,16 @@ test("unknown system cards offer readback and withhold an unconfirmed rollback a
 
 test("rollback control needs a supported action, exact ID and no previous stop intent", () => {
   const cancel = () => {};
-  for (const action of ["update", "test-rollback", "safe-update", "kernel-update"]) {
+  for (const action of ["update", "test-rollback"]) {
     const running = { id: "a".repeat(32), unit: "vps-control-action-123.service", action, state: "running" };
     assert.equal(systemOperationNotification(running, "Worker", true, cancel).onCancel, cancel);
     assert.equal(systemOperationNotification({ ...running, cancel_requested: true }, "Worker", true, cancel).onCancel, undefined);
     assert.equal(systemOperationNotification({ ...running, id: undefined }, "Worker", true, cancel).onCancel, undefined);
     assert.equal(systemOperationNotification({ ...running, unit: "foreign.service" }, "Worker", true, cancel).onCancel, undefined);
   }
-  assert.equal(systemOperationNotification({ id: "a".repeat(32), action: "test-update", state: "running" }, "Worker", true, cancel).onCancel, undefined);
+  for (const action of ["test-update", "safe-update", "kernel-update", "auto-safe-update"]) {
+    assert.equal(systemOperationNotification({ id: "a".repeat(32), unit: "vps-control-action-123.service", action, state: "running" }, "Worker", true, cancel).onCancel, undefined);
+  }
 });
 
 test("cancelled commands are terminal without success, progress or another action", () => {

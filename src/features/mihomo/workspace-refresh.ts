@@ -182,7 +182,7 @@ function deviceRow(value: unknown) {
     || (value.manual !== undefined && typeof value.manual !== "boolean")
     || (value.routing !== undefined && !scalarRecord(value.routing))
     || (value.personal_rule_ids !== undefined && !stringList(value.personal_rule_ids))) return false;
-  const formats = ["mihomo", "singbox", "xray", "uri"];
+  const formats = ["mihomo"];
   if ((value.subscription_format !== undefined && !formats.includes(String(value.subscription_format)))
     || (value.supported_formats !== undefined && (!stringList(value.supported_formats) || value.supported_formats.some((format) => !formats.includes(format))))) return false;
   return value.verified_clients === undefined || (uniqueRows(value.verified_clients) && value.verified_clients.every((client) =>
@@ -211,6 +211,7 @@ function presetRows(value: unknown): ProfilePreset[] {
     if (typeof row.name !== "string" || (row.description !== undefined && typeof row.description !== "string") || !["fallback", "url-test", "select"].includes(String(row.strategy))
       || !Array.isArray(row.components) || row.components.some((component) => !record(component) || typeof component.id !== "string"
         || ["label", "transport"].some((key) => component[key] !== undefined && typeof component[key] !== "string")
+        || (component.xray_protocol !== undefined && !["vless", "vmess", "trojan"].includes(String(component.xray_protocol)))
         || ["cdn", "tls"].some((key) => component[key] !== undefined && typeof component[key] !== "boolean"))) {
       throw new Error("Некорректный пресет Mihomo");
     }
@@ -264,6 +265,16 @@ export function policySnapshot(value: unknown, kind: "dns" | "routing"): PolicyS
 }
 
 /** Reject broken telemetry instead of rendering it as live activity or zeroes. */
+function trafficAmount(value: unknown): value is Record<string, unknown> {
+  return record(value) && typeof value.stats_available === "boolean" && typeof value.stats_partial === "boolean"
+    && (value.used_bytes === null || typeof value.used_bytes === "number" && Number.isSafeInteger(value.used_bytes) && value.used_bytes >= 0)
+    && (!value.stats_available || value.used_bytes !== null);
+}
+
+function trafficTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 253402300799;
+}
+
 export function profileStatsSnapshot(value: unknown): ProfileStats {
   if (!record(value) || !record(value.summary)) throw new Error("Некорректный ответ статистики профиля");
   const summary = value.summary;
@@ -273,15 +284,34 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
   }
   const connections = value.connections === undefined ? {} : value.connections;
   if (!record(connections)) throw new Error("Некорректная статистика подключений профиля");
+  if (value.usage != null) {
+    if (!record(value.usage) || !record(value.usage.devices)) throw new Error("Некорректный учёт трафика");
+    for (const row of [value.usage.summary, ...Object.values(value.usage.devices)]) {
+      if (!trafficAmount(row)) throw new Error("Некорректный расход трафика");
+      if (row.history_started_at != null && !trafficTimestamp(row.history_started_at)) throw new Error("Некорректное начало истории трафика");
+      if (row.periods !== undefined) {
+        if (!record(row.periods)) throw new Error("Некорректные периоды трафика");
+        for (const name of ["day", "week", "month"]) {
+          const period = row.periods[name];
+          if (!trafficAmount(period) || !trafficTimestamp(period.started_at) || !trafficTimestamp(period.ended_at)
+            || period.started_at > period.ended_at) throw new Error("Некорректный период трафика");
+        }
+      }
+    }
+  }
   for (const row of [summary, ...Object.values(connections)]) {
     if (!record(row)) throw new Error("Некорректная статистика подключения");
-    for (const key of ["stats_available", "stats_partial", "activity_available"]) {
+    for (const key of ["stats_available", "stats_partial", "activity_available", "service_active"]) {
       if (row[key] !== undefined && typeof row[key] !== "boolean") throw new Error("Некорректная доступность статистики профиля");
     }
-    for (const key of ["rx_bytes", "tx_bytes", "handshake_age_s", "last_handshake_age_s", "latency_ms"]) {
+    for (const key of ["rx_bytes", "tx_bytes", "used_bytes", "handshake_age_s", "last_handshake_age_s", "latency_ms"]) {
       if (row[key] != null && (typeof row[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0)) throw new Error("Некорректные значения статистики профиля");
     }
     if (row !== summary && row.active != null && typeof row.active !== "boolean") throw new Error("Некорректное состояние подключения");
+    for (const key of ["traffic_verified_at", "traffic_observed_at"]) {
+      if (row[key] !== undefined && !trafficTimestamp(row[key])) throw new Error("Некорректное подтверждение передачи данных");
+    }
+    if (row.traffic_verified_at !== undefined && (!trafficTimestamp(row.traffic_observed_at) || Number(row.traffic_verified_at) > row.traffic_observed_at)) throw new Error("Противоречивое подтверждение передачи данных");
   }
   return { ...value, connections } as ProfileStats;
 }

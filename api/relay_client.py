@@ -6,7 +6,12 @@ import ipaddress
 import json
 import re
 import ssl
+from copy import deepcopy
 from urllib.parse import urlsplit
+from read_cache import InFlightReads
+
+MAX_RESPONSE_BYTES = 256 * 1024
+_reads = InFlightReads()
 
 
 class AgentAPIError(RuntimeError):
@@ -35,6 +40,12 @@ class RelayClient:
     def request(self, method, path, body=None, revision=None):
         if method not in ('GET', 'PUT', 'DELETE') or (path not in ('/v1/status', '/v1/routes') and not re.fullmatch(r'/v1/routes/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', path) and not re.fullmatch(r'/v1/measurements/[0-9a-f]{32}', path) and not re.fullmatch(r'/v1/updates/[0-9a-f]{32}', path)):
             raise ValueError('Invalid agent request')
+        if method == 'GET' and body is None and revision is None:
+            key = (self.host, self.port, self.fingerprint, hashlib.sha256(self.token.encode()).digest(), self.timeout, path)
+            return deepcopy(_reads.run(key, lambda: self._request(method, path, body, revision)))
+        return self._request(method, path, body, revision)
+
+    def _request(self, method, path, body, revision):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
@@ -50,8 +61,9 @@ class RelayClient:
                 headers['If-Match'] = str(revision)
             connection.request(method, path, json.dumps(body) if body is not None else None, headers)
             response = connection.getresponse()
-            raw = response.read(65537)
-            if len(raw) > 65536:
+            # A full 64-route inventory includes diagnostics and may exceed 64 KiB.
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
                 raise AgentAPIError(502, 'Слишком большой ответ агента')
             # Never reflect arbitrary remote text into UI, logs or operation history.
             if response.status != 200:

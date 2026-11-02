@@ -1,4 +1,6 @@
 import json
+import errno
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -36,6 +38,17 @@ class ApplicationOperationTests(unittest.TestCase):
         operations.write_status(self.root, self.current, started["action"], "succeeded", 100, "Done", started["started_at"], started["id"])
         self.assertEqual(self.start()["state"], "succeeded")
         self.launch.assert_called_once()
+
+    def test_failed_payload_flush_leaves_identity_available_for_explicit_retry(self):
+        identity, payload = 'f' * 32, {'private': 'fixture-only', 'settings': {'enabled': True}}
+        with patch.object(operations.os, 'fsync', side_effect=OSError(errno.ENOSPC, 'Fixture storage full')):
+            with self.assertRaises(OSError):
+                operations.persist_payload(self.root, identity, payload)
+        self.assertFalse((self.root / 'operation-inputs' / (identity + '.json')).exists())
+        path, digest = operations.persist_payload(self.root, identity, payload)
+        self.assertEqual(json.loads(path.read_text()), payload)
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+        self.assertEqual(operations.persist_payload(self.root, identity, payload), (path, digest))
 
     def test_concurrent_requests_only_admit_one_worker(self):
         def attempt(number):
@@ -129,6 +142,51 @@ class ApplicationOperationTests(unittest.TestCase):
         with patch.object(operations, "boot_id", return_value="current"), patch.object(operations, "process_start", observe):
             self.assertEqual(operations.reconcile(self.root, self.current, value, observe), value)
 
+    def test_system_updates_finish_only_after_expected_reboot_is_observed(self):
+        for action in ("safe-update", "auto-safe-update", "kernel-update"):
+            with self.subTest(action=action):
+                value = {"id": "b" * 32, "action": action, "state": "rebooting", "boot_id": "previous"}
+                observe = Mock(side_effect=AssertionError("Do not observe a worker from another boot"))
+                with patch.object(operations, "boot_id", return_value="current"):
+                    result = operations.reconcile(self.root, self.current, value, observe)
+                self.assertEqual(result["state"], "succeeded")
+                self.assertEqual(result["result"], "success")
+                self.assertEqual(operations.read(self.current)["state"], "succeeded")
+
+    def test_collected_worker_before_reboot_keeps_marker_until_new_boot_confirms_it(self):
+        value = {"id": "c" * 32, "action": "safe-update", "state": "rebooting", "boot_id": "previous",
+                 "unit": "vps-control-action-fixture.service", "progress": 100,
+                 "started_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat(),
+                 "updated_at": operations.timestamp()}
+        operations.save(self.root, self.current, value)
+        # This was the real VPS sequence: the worker was already collected,
+        # API polling happened on the old boot, and the reboot followed seconds later.
+        observe = Mock(return_value={"unit_present": False, "active": False, "state": "inactive"})
+        with patch.object(operations, "boot_id", return_value="previous"):
+            for _ in range(2):
+                pending = operations.reconcile(self.root, self.current, operations.read(self.current), observe)
+                self.assertEqual(pending["state"], "rebooting")
+                self.assertEqual(operations.read(self.current)["state"], "rebooting")
+                with self.assertRaises(operations.OperationConflict):
+                    operations.start(self.root, self.current, "safe-update", ["control"], self.launch,
+                                     request_id="d" * 32, observe=observe)
+        self.launch.assert_not_called()
+        with patch.object(operations, "boot_id", return_value="next"):
+            result = operations.reconcile(self.root, self.current, operations.read(self.current), observe)
+        self.assertEqual((result["state"], result["result"]), ("succeeded", "success"))
+
+    def test_reboot_wait_is_bounded_and_does_not_hide_rejected_or_unexpected_reboots(self):
+        old = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
+        base = {"id": "e" * 32, "boot_id": "previous", "updated_at": old}
+        with patch.object(operations, "boot_id", return_value="previous"):
+            timed_out = operations.reconcile(self.root, self.current, {**base, "state": "rebooting"}, Mock())
+        self.assertEqual((timed_out["state"], timed_out["result"]), ("failed", "reboot-timeout"))
+        with patch.object(operations, "boot_id", return_value="next"):
+            unexpected = operations.reconcile(self.root, self.current, {**base, "state": "running"}, Mock())
+            rejected = {**base, "state": "failed", "result": "reboot-rejected"}
+            self.assertEqual(operations.reconcile(self.root, self.current, rejected, Mock()), rejected)
+        self.assertEqual((unexpected["state"], unexpected["result"]), ("failed", "interrupted"))
+
     def test_cancel_does_not_interrupt_commands_without_supported_rollback(self):
         for action in ("protocol-install:wg", "cdn-security", "ech:example.com", "access-mode"):
             with self.subTest(action=action):
@@ -154,6 +212,28 @@ class ApplicationOperationTests(unittest.TestCase):
             self.assertEqual(first.json()["id"], second.json()["id"])
             self.assertEqual(client.get("/api/application/operations/" + "1" * 32).json()["state"], "unknown")
             self.launch.assert_called_once()
+
+    def test_history_shows_delegated_mihomo_operation_once_with_parent_result(self):
+        from fastapi.testclient import TestClient
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        self.addCleanup(api.app.dependency_overrides.clear)
+        parent = {'id': 'a' * 32, 'action': 'mihomo-profile-update', 'state': 'failed',
+                  'message': 'Parent rollback failed', 'started_at': '2026-10-29T10:00:00+00:00'}
+        child = {**parent, 'state': 'succeeded', 'message': 'Child completed'}
+        independent = {**child, 'id': 'b' * 32}
+        operations.atomic_json(self.root / 'operations' / (parent['id'] + '.json'), parent)
+        for item in (child, independent):
+            operations.atomic_json(self.root / 'mihomo' / 'operations' / (item['id'] + '.json'), item)
+        with patch.object(api, 'DATA_DIR', self.root), patch.object(api, 'ACTION_FILE', self.current), \
+             patch.object(api.cdn_operation, 'DIRECTORY', self.root / 'cdn'):
+            response = TestClient(api.app).get('/api/application/operations')
+        self.assertEqual(response.status_code, 200, response.text)
+        items = response.json()['items']
+        self.assertEqual(len(items), 2)
+        combined = next(item for item in items if item['id'] == parent['id'])
+        self.assertEqual((combined['source'], combined['state'], combined['message']),
+                         ('system', 'failed', 'Parent rollback failed'))
+        self.assertEqual(next(item for item in items if item['id'] == independent['id'])['source'], 'mihomo')
 
     def test_panel_modes_are_durable_nonblocking_and_reject_identity_reuse(self):
         from fastapi.testclient import TestClient

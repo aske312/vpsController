@@ -1,19 +1,14 @@
-"""Capabilities of our exporters, shared with the profile editor."""
+"""Mihomo YAML capabilities shared with the profile editor."""
 import json
 from pathlib import Path
 
 CAPABILITIES = json.loads(Path(__file__).with_name("client-capabilities.json").read_text(encoding="utf-8"))
-CLIENT_EXTENSIONS = json.loads(Path(__file__).with_name("client-extensions.json").read_text(encoding="utf-8"))
 FEATURES = {key for caps in CAPABILITIES.values() for key in caps["features"]}
 RULES = set(CAPABILITIES["mihomo"]["rules"])
 
 
-def device_capabilities(format, os=None, client=None):
-    caps = {key: list(value) if isinstance(value, list) else value for key, value in CAPABILITIES[format].items()}
-    extension = CLIENT_EXTENSIONS.get(client, {})
-    if extension.get("format") == format:
-        for key in ("components", "transports", "features"):
-            caps[key] += extension.get(key, [])
+def device_capabilities(os=None):
+    caps = {key: list(value) if isinstance(value, list) else value for key, value in CAPABILITIES["mihomo"].items()}
     if os is not None and os != "windows":
         caps["rules"] = [key for key in caps["rules"] if key != "windows_geolocation"]
     if os is not None and os not in {"windows", "macos", "linux"}:
@@ -21,22 +16,19 @@ def device_capabilities(format, os=None, client=None):
     return caps
 
 
-def compatible_routing(routing, format, os=None, client=None):
+def compatible_routing(routing, os=None):
     result = dict(routing)
-    if format == "uri":
-        result["rules"] = ""
-    caps = device_capabilities(format, os, client)
+    caps = device_capabilities(os)
     for key in FEATURES | RULES:
         if key in result and key not in caps["features"] + caps["rules"]:
             result[key] = False
     if "strategy" in result and result.get("strategy", "") not in caps["strategies"]:
         result["strategy"] = next(iter(caps["strategies"]), "")
-    result["client_config_format"] = format
     return result
 
 
-def connection_supported(connection, format, direct_settings=None, client=None):
-    caps = device_capabilities(format, client=client)
+def connection_supported(connection, direct_settings=None):
+    caps = device_capabilities()
     if connection.get("component") not in caps["components"]:
         return False
     if connection.get("component") != "transport-reality":

@@ -12,13 +12,35 @@ const { routeEntries, filterEntries } = await loader.ssrLoadModule("/src/feature
 const { relayMatches } = await loader.ssrLoadModule("/src/features/network/network-relays.tsx");
 const { connectionAddressModes } = await loader.ssrLoadModule("/src/features/mihomo/connection-address.ts");
 const { MihomoConnectionAddress } = await loader.ssrLoadModule("/src/features/mihomo/connection-address-select.tsx");
+const { ConnectionRouteMap, profileConnectionRoute } = await loader.ssrLoadModule("/src/features/mihomo/connection-route-map.tsx");
 const host = { id: "b".repeat(32), name: "Amsterdam", client_address: "relay.example", agent_url: "https://85.209.155.229:9443", state: "unknown", routes: [] };
 
-const mihomoAddress = (component, settings = {}, props = {}) => renderToStaticMarkup(createElement(MihomoConnectionAddress, {
+const mihomoAddress = (component, settings = {}, props = {}) => {
+  const addressProps = {
   connection: { id: 'fixture', name: 'fixture', device_id: 'phone', component, settings },
   inventory: { status: { hosts: [{ ...host, addresses: { ipv4: ['85.209.155.229'], ipv6: [], domains: ['relay.example', 'cdn-relay.example'], cdn_domains: ['cdn-relay.example'] } }] }, failed: false },
   tlsDomains: ['origin-tls.example'], udpDomains: ['origin-udp.example'], cdnDomains: ['origin-cdn.example'], webTransports: ['websocket'], supported: true, disabled: false, onChange: () => {}, ...props,
-}));
+  };
+  return renderToStaticMarkup([
+    createElement(MihomoConnectionAddress, { ...addressProps, key: 'settings' }),
+    createElement(ConnectionRouteMap, { route: profileConnectionRoute(addressProps.connection, addressProps.inventory), key: 'route' }),
+  ]);
+};
+
+test('every connection path ends at the Internet resource, including both legacy branches', () => {
+  for (const mode of ['direct', 'tls', 'cdn', 'udp', 'both']) {
+    for (const relay of [undefined, { address: 'relay.example', port: 20001 }, { address: 'relay.example', afterCdn: true }]) {
+      const html = renderToStaticMarkup(createElement(ConnectionRouteMap, { route: { mode, domain: 'cdn.example', originAddress: '203.0.113.10', originPort: 443, relay } }));
+      const paths = html.match(/role="img" aria-label="([^"]+)"/)[1].split('; ');
+      assert.equal(paths.length, mode === 'both' ? 2 : 1);
+      for (const path of paths) {
+        assert.ok(path.startsWith('Клиент → '));
+        assert.ok(path.endsWith(' → Интернет'));
+        assert.equal(path.split('Интернет').length, 2);
+      }
+    }
+  }
+});
 
 test('Mihomo separates protocol mode from Relay endpoint and keeps TLS identity visible', () => {
   const settings = { route_mode: 'tls', tls_domain: 'origin-tls.example', relay_host_id: host.id, relay_address: 'relay.example' };
@@ -107,7 +129,9 @@ test('Mihomo retains excluded or unavailable saved Relay endpoints and allows di
   assert.doesNotMatch(html, /<select[^>]*disabled=/);
   assert.match(html, /origin-udp.example/);
   assert.doesNotMatch(mihomoAddress('transport-reality', {}, {webTransports:[]}), /<button[^>]*>(TLS|CDN)<\/button>/);
-  assert.doesNotMatch(mihomoAddress('unknown'), /<button[^>]*>|через Relay/);
+  assert.deepEqual(connectionAddressModes('unknown'), { tls: false, cdn: false, udp: false, relay: false });
+  const unknown = mihomoAddress('unknown');
+  assert.deepEqual([...unknown.matchAll(/<option\b[^>]*value="([^"]*)"/g)].map(match => match[1]), ['']);
   const excluded = mihomoAddress('transport-wg', {}, {inventory:{status:{hosts:[{...host,excluded_addresses:['relay.example']}]},failed:false}});
   assert.doesNotMatch(excluded, /relay.example/);
 });

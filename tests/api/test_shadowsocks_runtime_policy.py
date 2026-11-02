@@ -24,7 +24,7 @@ class RuntimePolicyTests(unittest.TestCase):
                 script = script.replace("/etc/systemd/system/vps-control-mihomo-ss@.service.d", str(root / "unit"))
                 script = script.replace("/usr/local/lib/vps-control-mihomo-ss/guard.py", str(guard))
                 (source / "protect-runtime.sh").write_text(script)
-                for name in ("guard.py", "empty_connections.py"):
+                for name in ("guard.py", "empty_connections.py", "traffic.py"):
                     (source / name).write_text((MODULE / name).read_text())
                 command = [sys.executable, "-c", "import time; time.sleep(30)"]
                 if protected:
@@ -48,6 +48,7 @@ esac
                     calls = log.read_text()
                     self.assertIn("daemon-reload", calls)
                     self.assertEqual("try-restart" in calls, not protected)
+                    self.assertEqual((guard.parent / "traffic.py").read_bytes(), (source / "traffic.py").read_bytes())
                     self.assertIsNone(child.poll())
                     unit = (root / "unit/resource-guard.conf").read_text()
                     self.assertIn("RestartPreventExitStatus=78", unit)

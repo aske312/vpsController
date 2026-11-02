@@ -53,10 +53,21 @@ class ShellGatewayTests(unittest.TestCase):
             (root / "scripts").mkdir()
             script = root / "scripts/build-release.sh"
             script.write_text((ROOT / "scripts/build-release.sh").read_text())
-            result = subprocess.run(["bash", str(script), str(root / "output/release.tar.gz")], capture_output=True, text=True, timeout=20)
+            # This gate precedes downloads and compilation; it must not require
+            # Go/Node or a full release toolchain on an API test machine.
+            tools = root / 'bin'
+            tools.mkdir()
+            calls = root / 'tool-calls'
+            for name in ('curl', 'go', 'gzip', 'node', 'npm', 'openssl', 'rsync', 'sha256sum', 'tar'):
+                tool = tools / name
+                tool.write_text(f'#!/bin/sh\nprintf "%s\\n" {shlex.quote(name)} >> {shlex.quote(str(calls))}\n')
+                tool.chmod(0o755)
+            env = {**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH']}
+            result = subprocess.run(["bash", str(script), str(root / "output/release.tar.gz")], capture_output=True, text=True, timeout=20, env=env)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Missing public Cloudflare origin-pull CA in release", result.stderr)
             self.assertFalse((root / "output/release.tar.gz").exists())
+            self.assertEqual(calls.read_text().splitlines(), ['rsync'])
 
     @unittest.skipUnless(os.getenv("PRIVACY_CADDY_BIN"), "Requires Caddy")
     def test_aop_candidate_loads_certificate_from_release(self):

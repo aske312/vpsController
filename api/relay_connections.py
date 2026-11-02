@@ -82,7 +82,7 @@ def consumer_state(control, settings, fallback):
     except (OSError, ValueError, KeyError, TypeError):
         return {'state': 'unknown', 'reason': 'Реестр Relay недоступен', 'addresses': [], 'bindings': []}
     if not exists:
-        return {'state': 'stale', 'reason': 'Relay недоступен: узел удалён', 'addresses': [], 'bindings': []}
+        return {'state': 'stale', 'reason': 'Требует внимания: Relay отключён; обновите конфигурацию подключения', 'addresses': [], 'bindings': []}
     return fallback
 
 

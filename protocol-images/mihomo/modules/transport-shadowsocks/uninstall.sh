@@ -42,6 +42,7 @@ rm -f /etc/systemd/system/vps-control-mihomo-ss@.service.d/resource-guard.conf
 rmdir /etc/systemd/system/vps-control-mihomo-ss@.service.d 2>/dev/null || true
 rm -f /usr/local/lib/vps-control-mihomo-ss/guard.py
 rm -f /usr/local/lib/vps-control-mihomo-ss/empty_connections.py
+rm -f /usr/local/lib/vps-control-mihomo-ss/traffic.py
 rmdir /usr/local/lib/vps-control-mihomo-ss 2>/dev/null || true
 [[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -rf -- "${CONFIG_DIR}"
 if [[ ! -f /etc/systemd/system/vps-control-shadowsocks.target ]] && ! find /etc/vps-control/shadowsocks/clients -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then

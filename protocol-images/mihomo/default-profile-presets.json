@@ -1,0 +1,75 @@
+[
+  {
+    "id": "direct-bundle",
+    "name": "Без CDN",
+    "description": "TUIC → Hysteria2 → AWG → REALITY",
+    "strategy": "fallback",
+    "components": [
+      {
+        "id": "transport-tuic",
+        "label": "TUIC"
+      },
+      {
+        "id": "transport-hysteria2",
+        "label": "Hysteria2"
+      },
+      {
+        "id": "transport-awg",
+        "label": "AWG"
+      },
+      {
+        "id": "transport-reality",
+        "xray_protocol": "vless",
+        "transport": "xhttp",
+        "label": "VLESS REALITY · XHTTP"
+      },
+      {
+        "id": "transport-reality",
+        "xray_protocol": "vless",
+        "transport": "raw",
+        "label": "VLESS REALITY · RAW"
+      }
+    ]
+  },
+  {
+    "id": "cdn-bundle",
+    "name": "С CDN",
+    "description": "TUIC → Hysteria2 → AWG → CDN",
+    "strategy": "fallback",
+    "components": [
+      {
+        "id": "transport-tuic",
+        "label": "TUIC"
+      },
+      {
+        "id": "transport-hysteria2",
+        "label": "Hysteria2"
+      },
+      {
+        "id": "transport-awg",
+        "label": "AWG"
+      },
+      {
+        "id": "transport-reality",
+        "xray_protocol": "vless",
+        "cdn": true,
+        "transport": "websocket",
+        "label": "VLESS CDN · WebSocket"
+      },
+      {
+        "id": "transport-reality",
+        "xray_protocol": "vless",
+        "cdn": true,
+        "transport": "xhttp",
+        "label": "VLESS CDN · XHTTP"
+      },
+      {
+        "id": "transport-reality",
+        "xray_protocol": "vless",
+        "cdn": true,
+        "transport": "httpupgrade",
+        "label": "VLESS CDN · HTTPUpgrade"
+      }
+    ]
+  }
+]

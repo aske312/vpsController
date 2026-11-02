@@ -122,7 +122,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   function removeConfirmed(confirmed: boolean) {
     const selected = confirmation; setConfirmation(null);
     if (!confirmed || !selected || locked || !status || status.pending) return;
-    void submit(`/network/relays/${selected.id}`, { method: "DELETE", headers: { "If-Match": status.revision } });
+    void submit(`/network/relays/${selected.id}?local_only=true`, { method: "DELETE", headers: { "If-Match": status.revision } });
   }
   async function downloadTest(hostId: string, routeId: string, testId: string) {
     try {
@@ -190,7 +190,7 @@ export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
       <NetworkRelayForm relay={relay} />
     </section></div>}
     {relay.discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения подключения к Relay будут потеряны.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={confirmed => { relay.setDiscard(false); if (confirmed) relay.resetDialog(); }} />}
-    {relay.confirmation && <ConfirmationDialog request={{ title: "Удалить Relay?", message: `Узел ${relay.confirmation.name} и его управляемые пересылки (${relay.confirmation.routes.length}) будут удалены. Настройки клиентов и профилей сохранятся, Relay станет недоступен. Сам агент и чужие маршруты сохранятся.`, confirmLabel: "Удалить", danger: true }} onClose={relay.removeConfirmed} />}
+    {relay.confirmation && <ConfirmationDialog request={{ title: "Отключить Relay в приложении?", message: `Узел ${relay.confirmation.name} и его пересылки (${relay.confirmation.routes.length}) будут отключены в приложении. Настройки связанных соединений сохранятся со статусом «Требует внимания». После обновления конфигурации совместимые соединения пойдут напрямую к этому VPS, остальные потребуют перенастройки. Другие соединения профиля продолжат работать. Связь с агентом не требуется; пересылки на самом агенте сохранятся.`, confirmLabel: "Отключить Relay", danger: true }} onClose={relay.removeConfirmed} />}
   </>;
 }
 

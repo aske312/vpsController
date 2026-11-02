@@ -96,8 +96,8 @@ export type ProfileConnection = {
 
 export type PersonalRule = { id: string; revision?: string; last_operation_id?: string; code: string; title: string; description: string; kind: "domain" | "process"; entries: string[]; target: "GATE.312" | "DIRECT" | "REJECT" };
 
-export type VerifiedClient = { id: string; client_name: string; client_version: string; core_name: string; core_version: string; os: string; os_version: string; format: "mihomo" | "singbox" | "xray" | "uri"; app_url: string };
-export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; subscription_format?: "mihomo" | "singbox" | "xray" | "uri"; verified_clients?: VerifiedClient[]; supported_formats?: ("mihomo" | "singbox" | "xray" | "uri")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; core_name?: string; core_version?: string; user_agent?: string; personal_rule_ids?: string[]; routing?: Record<string, string | number | boolean> };
+export type VerifiedClient = { id: string; client_name: string; client_version: string; core_name: string; core_version: string; os: string; os_version: string; format: "mihomo"; app_url: string };
+export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; subscription_format?: "mihomo"; verified_clients?: VerifiedClient[]; supported_formats?: ("mihomo")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; core_name?: string; core_version?: string; user_agent?: string; personal_rule_ids?: string[]; routing?: Record<string, string | number | boolean> };
 
 export type PolicySettings = {
   last_operation_id?: string;
@@ -111,10 +111,15 @@ export type PolicySettings = {
   personal_rules?: PersonalRule[];
 };
 
-export type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; tls?: boolean; transport?: string; label?: string }> };
+export type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; xray_protocol?: "vless" | "vmess" | "trojan"; cdn?: boolean; tls?: boolean; transport?: string; label?: string }> };
 
-export type ConnectionStats = { active?: boolean | null; stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; activity_source?: string; traffic_scope?: string; observed_since?: number | null; endpoint?: string | null; active_connections?: number | null; rx_bytes?: number | null; tx_bytes?: number | null; handshake_age_s?: number | null; latency_ms?: number | null };
+export type ConnectionStats = { active?: boolean | null; service_active?: boolean; stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; activity_source?: string; traffic_scope?: string; observed_since?: number | null; traffic_verified_at?: number; traffic_observed_at?: number; endpoint?: string | null; active_connections?: number | null; rx_bytes?: number | null; tx_bytes?: number | null; handshake_age_s?: number | null; latency_ms?: number | null };
 
-export type ProfileStats = { summary: { stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }; connections: Record<string, ConnectionStats>; devices?: Record<string, { stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }> };
+export type TrafficPeriod = "day" | "week" | "month" | "all";
+export type TrafficAmount = { used_bytes: number | null; stats_available: boolean; stats_partial: boolean };
+export type TrafficWindow = TrafficAmount & { started_at: number; ended_at: number };
+export type TrafficUsage = TrafficAmount & { history_started_at?: number | null; periods?: Record<Exclude<TrafficPeriod, "all">, TrafficWindow> };
+
+export type ProfileStats = { usage?: { summary: TrafficUsage; devices: Record<string, TrafficUsage> } | null; summary: { stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }; connections: Record<string, ConnectionStats>; devices?: Record<string, { stats_available?: boolean; stats_partial?: boolean; activity_available?: boolean; configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }> };
 
 export type RuleIconGroup = { id: string; code: string; name: string; tokens: string[] };

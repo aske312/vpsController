@@ -43,18 +43,6 @@ export function registeredProfileDevices(profile: Profile) {
   return (profile.devices || []).filter((device) => device.scope !== "common" && device.id !== profile.common_device_id);
 }
 
-export function clientConfigFormat(profile: Profile, device?: ProfileDevice) {
-  const selected = device || profile.devices?.find((item) => item.id === profile.common_device_id || item.scope === "common");
-  const format = (selected?.routing || profile.routing)?.client_config_format;
-  return format === "uri" || format === "xray" || format === "singbox" ? format : "mihomo";
-}
-
-export function clientImportUrl(url: string, name: string, format: string, client = "") {
-  if (/karing/i.test(client)) return `karing://install-config?url=${encodeURIComponent(url)}&name=${encodeURIComponent(name)}&x-hwid=true`;
-  if (/hiddify/i.test(client)) return `hiddify://import?url=${encodeURIComponent(url)}&name=${encodeURIComponent(name)}`;
-  return format === "singbox" ? `sing-box://import-remote-profile?url=${encodeURIComponent(url)}#${encodeURIComponent(name)}` : url;
-}
-
 export function selectedGameIds(value: unknown, defaults: Set<string>) {
   const raw = String(value ?? "").trim();
   return !raw || raw === "@default" ? new Set(defaults) : new Set(raw.split(",").map((item) => item.trim()).filter(Boolean));

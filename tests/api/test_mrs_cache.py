@@ -112,7 +112,7 @@ class MrsExportTests(unittest.TestCase):
             compact = yaml.safe_load(manager.render_profile(deepcopy(item)))
             self.assertEqual(compact['rules'], legacy['rules'])
             self.assertEqual(compact['proxies'], legacy['proxies'])
-            self.assertEqual(len(compact['rule-providers']), 3)
+            self.assertEqual(len(compact['rule-providers']), 2)
             for name, definition in compact['rule-providers'].items():
                 self.assertEqual(definition['format'], 'mrs')
                 self.assertEqual(definition['url'], f'https://panel.example/s/rules/{name}.mrs')
@@ -131,18 +131,6 @@ class MrsExportTests(unittest.TestCase):
                 self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), legacy)
         self.assertTrue(manager.validate_routing({'mrs_rule_sets': True}, current={})['mrs_rule_sets'])
 
-    def test_singbox_keeps_its_native_binary_rule_sets(self):
-        item = profile()
-        item['devices'][0]['routing'] = {'block_ads': True, 'block_malware': True}
-        with patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'), \
-                patch.object(manager, 'public_endpoint', return_value='127.0.0.1'), \
-                patch.object(manager, 'module_is_installed', return_value=True):
-            import json
-            config = json.loads(manager.render_client_profile(item, 'common', 'singbox')[0])
-        self.assertEqual(len(config['route']['rule_set']), 3)
-        for definition in config['route']['rule_set']:
-            self.assertEqual(definition['format'], 'binary')
-            self.assertTrue(definition['url'].endswith('.srs'))
 
     def test_export_waits_for_first_successful_build(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'PUBLIC_DOMAIN': 'panel.example'}), \

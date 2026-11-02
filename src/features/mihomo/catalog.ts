@@ -1,26 +1,13 @@
+import connectionVariants from "../../../protocol-images/mihomo/connection-variants.json" with { type: "json" };
 import type { ProfilePreset, RuleIconGroup } from "./types";
 import ruServices from "../../../protocol-images/mihomo/ru-service-domains.json" with { type: "json" };
 
-export const presetConnectionOptions: ProfilePreset["components"] = [
-  { id: "transport-reality", transport: "xhttp", label: "VLESS · XHTTP" },
-  { id: "transport-reality", transport: "raw", label: "VLESS · RAW" },
-  { id: "transport-reality", transport: "grpc", label: "VLESS · gRPC" },
-  { id: "transport-reality", tls: true, transport: "xhttp", label: "VLESS TLS · XHTTP" },
-  { id: "transport-reality", tls: true, transport: "websocket", label: "VLESS TLS · WS" },
-  { id: "transport-reality", tls: true, transport: "httpupgrade", label: "VLESS TLS · HTTPUpgrade" },
-  { id: "transport-reality", tls: true, transport: "grpc", label: "VLESS TLS · gRPC" },
-  { id: "transport-reality", cdn: true, transport: "xhttp", label: "VLESS CDN · XHTTP" },
-  { id: "transport-reality", cdn: true, transport: "websocket", label: "VLESS CDN · WS" },
-  { id: "transport-reality", cdn: true, transport: "httpupgrade", label: "VLESS CDN · HTTPUpgrade" },
-  { id: "transport-reality", cdn: true, transport: "grpc", label: "VLESS CDN · gRPC" },
-  { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" },
-  { id: "transport-hysteria2", label: "Hysteria2" }, { id: "transport-tuic", label: "TUIC v5" },
-];
+export const presetConnectionOptions = connectionVariants as ProfilePreset["components"];
 
 export const presetOptionGroups = [
   { id: "direct", title: "VLESS REALITY", note: "Прямое подключение", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && !item.cdn && !item.tls) },
-  { id: "tls", title: "VLESS TLS", note: "Прямой TLS-домен", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.tls) },
-  { id: "cdn", title: "VLESS через CDN", note: "TLS завершается на CDN", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.cdn) },
+  { id: "tls", title: "Xray TLS", note: "Прямой TLS-домен", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.tls) },
+  { id: "cdn", title: "Xray через CDN", note: "TLS завершается на CDN", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.cdn) },
   { id: "tunnels", title: "Туннели и QUIC", note: "Независимые каналы", options: presetConnectionOptions.filter((item) => item.id !== "transport-reality") },
 ];
 
@@ -183,11 +170,10 @@ export const p2pClientCatalog = [
 ];
 
 export const profileDirectRules = [
-  { key: "block_malware", code: "SAFE", title: "Фишинг и вредоносные сайты", text: "Опасные домены и фишинг.", group: "Защита" },
-  { key: "quic_compatibility", code: "QUIC", title: "Совместимость QUIC", text: "TCP вместо QUIC для выбранных сайтов.", group: "Сеть" },
+  { key: "block_malware", code: "SAFE", title: "Фишинг и вредоносные сайты", text: "Опасные домены и фишинг.", group: "Функции" },
+  { key: "quic_compatibility", code: "QUIC", title: "Совместимость QUIC", text: "TCP вместо QUIC для выбранных сайтов.", group: "Функции" },
   { key: "direct_ru_services", code: "GOS", title: "Госуслуги и операторы", text: "Госуслуги и связь напрямую.", group: "Напрямую" },
-  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
-  { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
+  { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Функции" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы.", group: "Напрямую" },
@@ -226,23 +212,6 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "t2", code: "T2", name: "T2 / Tele2", tokens: ["t2.ru", "tele2.ru"] },
     { id: "rostelecom", code: "RT", name: "Ростелеком", tokens: ["rt.ru", "rostelecom.ru", "onlime.ru"] },
     { id: "providers", code: "ISP", name: "Дом.ру и ТТК", tokens: ["domru.ru", "ertelecom.ru", "ttk.ru"] },
-  ],
-  block_ads: [
-    { id: "base", code: "AD", name: "Другие сети · обновляемая база", tokens: ["category-ads-all"] },
-    { id: "google", code: "G ADS", name: "Google Ads", tokens: ["doubleclick", "googlesyndication", "googleadservices", "googletagservices", "adservice.google.", "ads.youtube.com"] },
-    { id: "yandex", code: "YA AD", name: "Яндекс Реклама", tokens: ["yandexadexchange", "an.yandex.ru", "adfox"] },
-    { id: "vk_ads", code: "VK AD", name: "VK / myTarget", tokens: ["mytarget"] },
-    { id: "native", code: "NATIVE", name: "Taboola и Outbrain", tokens: ["taboola", "outbrain"] },
-    { id: "criteo", code: "CRITEO", name: "Criteo", tokens: ["criteo"] },
-    { id: "amazon", code: "AMZ", name: "Amazon Ads", tokens: ["amazon-adsystem"] },
-    { id: "global_rtb", code: "RTB", name: "Международные RTB-сети", tokens: ["adnxs", "adsrvr", "adform", "adroll", "openx", "pubmatic", "rubiconproject", "casalemedia", "serving-sys", "smartadserver", "smaato", "yieldmo", "lijit", "media.net", "DOMAIN-SUFFIX,advertising.com,"] },
-    { id: "ru_rtb", code: "RU RTB", name: "Российские RTB-сети", tokens: ["between.digital", "adriver", "soloway", "buzzoola", "hybrid.ai", "otm-r", "videonow"] },
-    { id: "mobile", code: "APP", name: "Реклама в приложениях", tokens: ["applovin", "applvn", "vungle", "ironsrc", "chartboost", "inmobi", "adcolony", "startappservice", "mintegral", "unityads", "admob", "bidmachine", "adsmoloco", "pangle", "pglstatp", "inmobicdn", "tapjoy", "supersonicads", "inner-active", "appnext", "appodeal", "mtgglobals", "rayjump", "adfurikun", "gmossp", "admost", "adxcorp", "aaxads", "admixer", "adtelligent", "adzerk", "admanmedia", "undertone", "yieldlab", "zemanta"] },
-    { id: "video", code: "VIDEO", name: "Реклама в видео", tokens: ["springserve", "spotx", "freewheel", "fwmrm", "innovid", "tremorhub", "unrulymedia", "cedato", "connatix", "aniview", "teads", "smartclip", "lkqd", "vidoomy"] },
-    { id: "adult_video", code: "18+ AD", name: "18+", tokens: ["trafficjunky", "exoclick", "exosrv", "juicyads", "tsyndicate", "trafficstars", "trafficfactory", "ero-advertising", "eroadvertising", "realsrv", "adsco.re"] },
-    { id: "popups", code: "POP AD", name: "Рекламные всплывающие окна", tokens: ["popads", "popcash", "propellerads"] },
-    { id: "metrics", code: "TRACK", name: "Рекламные измерения", tokens: ["scorecardresearch", "moatads", "adsafeprotected"] },
-    { id: "extended", code: "AD+", name: "Дополнительные рекламные сети", tokens: [] },
   ],
   block_privacy: [
     { id: "google", code: "GA", name: "Google Analytics", tokens: ["google-analytics"] },
@@ -356,7 +325,7 @@ for (const entry of ruServices.groups) {
 
 export const profileStrategies = [
   { value: "", code: "AUTO", title: "Общие", text: "Наследовать стратегию маршрутизации." },
-  { value: "fallback", code: "SAFE", title: "Резерв", text: "Переключаться при недоступности канала." },
-  { value: "url-test", code: "FAST", title: "Автовыбор", text: "Автоматически выбирать самый быстрый канал." },
+  { value: "fallback", code: "SAFE", title: "Резерв", text: "Первое доступное подключение в порядке приоритета 1 → последнее." },
+  { value: "url-test", code: "FAST", title: "Автовыбор", text: "Новые соединения — через канал с минимальной задержкой; открытые потоки сохраняются." },
   { value: "select", code: "MAN", title: "Вручную", text: "Выбирать канал в приложении." },
 ];

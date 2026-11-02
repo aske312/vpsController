@@ -232,7 +232,7 @@ export function ServicesDashboard({
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={serviceBusy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
-            <ScheduleRow title="Безопасные автообновления" value={automationDraft?.update} timer={services?.timers.update} busy={serviceBusy} onChange={(patch) => onAutomationChange("update", patch)} />
+            <ScheduleRow title="Полное обновление и перезагрузка" value={automationDraft?.update} timer={services?.timers.update} busy={serviceBusy} onChange={(patch) => onAutomationChange("update", patch)} />
           </div>
           <div className="servicesLogActions">
             <button type="button" className="servicePrimary" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить</button>

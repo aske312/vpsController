@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from request_limits import RequestBodyLimit
 import cdn_security
 import port_allocation
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
@@ -61,11 +62,12 @@ import relay_client_creation
 import native_client_creation
 import xray_native
 import xray_core
+from version_comparison import newer_release
 from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
-from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count, observation_scope
+from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count, observation_scope, prime_services
 from component_state import image_files, component_state
 from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
 from system_metrics import CpuSampler, collect_resources
@@ -156,6 +158,7 @@ async def recover_relay_tests():
 
 
 app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app.add_middleware(RequestBodyLimit)
 logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
@@ -2432,6 +2435,13 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
             result.update(check_id=saved.get("check_id"), checked_at=saved.get("checked_at"),
                           checked_revision=saved.get("checked_revision"),
                           failed_checks=int(saved.get("failed_checks", 0)) if network_routes.check_is_current(binding) else 0)
+            # Failed checks intentionally have no success proof. Preserve their
+            # exact consumer scope instead of coloring every sibling endpoint.
+            owners = [identity for identity, check in binding.get("consumer_checks", {}).items()
+                      if saved.get("check_id") and check.get("check_id") == saved["check_id"]
+                      and check.get("checked_revision") == saved.get("checked_revision")]
+            if consumer_id or len(owners) == 1:
+                result["consumer_id"] = consumer_id or owners[0]
         if proof:
             result["verified_connection"] = {key: proof[key] for key in ("consumer_id", "producer", "protocol", "transport", "vantage_point") if key in proof}
         result["consumers"] = [{"id": item["id"], "label": item.get("label", item["id"])} for item in network_consumers()
@@ -2838,8 +2848,11 @@ def reconnect_relay_host(payload: RelayHostSettings, _: None = Depends(require_t
 
 
 @app.delete('/api/network/relays/{host_id}', status_code=202, dependencies=[Depends(require_mutation_admission)])
-def delete_relay_host(host_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
-    return start_relay_mutation('relay-host-delete', {'host_id': host_id, 'expected_revision': expected_revision}, operation_id)
+def delete_relay_host(host_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match'), local_only: bool = False):
+    payload = {'host_id': host_id, 'expected_revision': expected_revision}
+    if local_only:
+        payload['local_only'] = True
+    return start_relay_mutation('relay-host-delete', payload, operation_id)
 
 
 @app.delete('/api/network/relays/{host_id}/address', status_code=202, dependencies=[Depends(require_mutation_admission)])
@@ -3537,12 +3550,11 @@ def security(_: None = Depends(require_token)) -> dict:
             "active": observed_active(observation),
         }
     auditd_active = observed_active(observe_service("auditd.service"))
-    upgrades_observation = observe_service("unattended-upgrades.service")
-    upgrades_active = observed_active(upgrades_observation)
-    upgrades_enabled = observed_enabled(upgrades_observation)
-    automatic_updates = True if upgrades_active is True or upgrades_enabled is True else (
-        False if upgrades_active is False and upgrades_enabled is False else None
-    )
+    update_timers = [observe_service(unit) for unit in ("apt-daily-upgrade.timer", "vps-control-auto-update.timer")]
+    update_states = [True if observed_active(item) is True or observed_enabled(item) is True else (
+        False if observed_active(item) is False and observed_enabled(item) is False else None
+    ) for item in update_timers]
+    automatic_updates = True if True in update_states else False if all(item is False for item in update_states) else None
     env_file = ENV_FILE
     control_file = Path(CONTROL_COMMAND)
     env_mode = env_file.stat().st_mode & 0o777 if env_file.exists() else None
@@ -3927,6 +3939,8 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
         available_version = github_latest_tag(SING_BOX_GITHUB_REPO)
     else:
         installed_version = available_version = ""
+    if not package and image_id in {"mihomo", "hysteria2", "tuic", "trojan"}:
+        update_available_override = newer_release(installed_version, available_version)
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
     update_breaking = update_available and version_major(installed_version) != version_major(available_version)
     return {
@@ -3942,6 +3956,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
 @observation_scope()
 def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict]:
     images: dict[str, dict] = {}
+    candidates = []
     if not PROTOCOL_IMAGES_DIR.exists():
         return images
     try:
@@ -3975,6 +3990,9 @@ def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict
         # Stream proxies do not create a tunnel interface. Their manifests use a
         # fixed systemd unit, while WG-like images may still interpolate one.
         service = service_template.replace("{interface}", interface) if service_template else ""
+        candidates.append((manifest, image_id, uninstaller, installable, interface, service, service_template))
+    prime_services([item[5] for item in candidates])
+    for manifest, image_id, uninstaller, installable, interface, service, service_template in candidates:
         # Shared wg/awg templates alone do not prove a Direct instance exists.
         # Legacy installed means detected; component_state carries the full
         # installation proof, and management separately controls mutations.
@@ -4201,7 +4219,11 @@ def application_operations(_: None = Depends(require_token)) -> dict:
             current = get_application_operation(current["id"], None)
         items = [{**item, "source": "system"} for item in application_operation.history(DATA_DIR)]
         items = [{**item, **current} if item.get("id") == current.get("id") else item for item in items]
-        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo"))
+        delegated = {(item.get("id"), item.get("action")) for item in items if item.get("id")}
+        # A delegated worker shares its parent's identity. The parent owns the
+        # final result, including failures after the Mihomo phase completed.
+        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo")
+                     if (item.get("id"), item.get("action")) not in delegated)
         for path in sorted(cdn_operation.DIRECTORY.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:100]:
             if not re.fullmatch(r"[0-9a-f]{32}", path.stem):
                 continue
@@ -4485,7 +4507,7 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (["/bin/bash", str(bundled_command), payload.action] if bundled_command.exists() else [CONTROL_COMMAND, payload.action])
     action = start_application_operation(payload.action, command, operation_id=operation_id,
-        properties=(f"--property=RuntimeMaxSec={'60min' if payload.action == 'safe-update' else '20min'}", "--property=TimeoutStopSec=45s"))
+        properties=(f"--property=RuntimeMaxSec={'60min' if payload.action in {'safe-update', 'kernel-update'} else '20min'}", "--property=TimeoutStopSec=45s"))
     return action
 
 
@@ -4506,7 +4528,7 @@ def cancel_application_action(_: None = Depends(require_token), expected_operati
                     raise HTTPException(status_code=409, detail="Данные выбранной операции не подтверждены; остановка не запускалась")
                 action = durable  # History remains authoritative after a partial pointer write.
             unit = str(action.get("unit", ""))
-            if not isinstance(action.get("action"), str) or action["action"] not in {"update", "test-rollback", "safe-update", "kernel-update"}:
+            if not isinstance(action.get("action"), str) or action["action"] not in {"update", "test-rollback"}:
                 raise HTTPException(status_code=409, detail="Эта операция не поддерживает безопасную остановку из панели")
             if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
                 raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")
@@ -4621,7 +4643,7 @@ def managed_services() -> dict[str, dict]:
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
-            "name": "Автоматические обновления ОС", "unit": "unattended-upgrades.service",
+            "name": "Автоматические обновления ОС", "unit": "apt-daily-upgrade.timer",
             "controls": ["start", "stop", "restart"],
         },
         "ssh": {
@@ -4693,22 +4715,26 @@ def refresh_application_version_cache() -> None:
 
 def application_version_status() -> dict:
     cached: dict = {}
+    age = float("inf")
     try:
         cached = json.loads(APP_VERSION_FILE.read_text(encoding="utf-8"))
+        age = time.time() - APP_VERSION_FILE.stat().st_mtime
     except (OSError, json.JSONDecodeError):
         pass
-    age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
+    if (not isinstance(cached, dict)
+            or any(not isinstance(cached.get(key), str) for key in ("branch", "current_commit", "latest_commit", "error"))
+            or not (cached.get("outdated") is None or type(cached["outdated"]) is bool)
+            or cached.get("checked_at") is not None and not isinstance(cached["checked_at"], str)):
+        cached = {}
     expected_branch = expected_application_branch()
     installed_commit = installed_build_commit()
-    refreshing = (
-        age > 600
-        or cached.get("branch") != expected_branch
-        or cached.get("current_commit") != installed_commit
-    )
+    if cached.get("branch") != expected_branch or cached.get("current_commit") != installed_commit:
+        cached = {}  # A comparison for another installation cannot describe this one.
+    refreshing = not cached or not 0 <= age <= 600
     if refreshing and not app_version_refresh_lock.locked():
         threading.Thread(target=refresh_application_version_cache, daemon=True).start()
     if cached:
-        return {**cached, "refreshing": refreshing}
+        return {**cached, "outdated": None if refreshing else cached.get("outdated"), "refreshing": refreshing}
     return {
         "branch": expected_branch, "current_commit": installed_commit, "latest_commit": "",
         "outdated": None, "checked_at": None, "error": "", "refreshing": True,
@@ -4828,7 +4854,10 @@ def update_operation_history_settings(payload: OperationHistorySettings, _: None
 def services_status(_: None = Depends(require_token)) -> dict:
     failed = failed_unit_count()
     items = []
-    for service_id, definition in managed_services().items():
+    definitions = managed_services()
+    prime_services([definition["unit"] for definition in definitions.values()] + ["ssh.socket"],
+                   timers=[f"vps-control-auto-{name}.timer" for name in ("reboot", "cleanup", "update")])
+    for service_id, definition in definitions.items():
         details = service_details(service_id, definition)
         # "monitor" is direct WG/AWG CSV logging specifically; hide it until
         # a direct tunnel exists for it to record. Protocol and Mihomo rows

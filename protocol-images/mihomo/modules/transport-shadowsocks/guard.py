@@ -103,7 +103,19 @@ def main():
         port = int(json.load(source)["server_port"])
     if not 1 <= port <= 65535:
         return 2
-    return supervise(command, stop, monitor_factory=lambda pid: EmptyConnections(pid, port))
+    from pathlib import Path
+    from contextlib import ExitStack
+    from traffic import Traffic
+    instance = Path(command[command.index("-c") + 1]).stem
+    path = Path("/var/lib/vps-control/mihomo/shadowsocks-traffic") / f"{instance}.json"
+    with ExitStack() as stack:
+        try:
+            traffic = stack.enter_context(Traffic(port, path))
+        except OSError:
+            print("Shadowsocks traffic telemetry unavailable", flush=True)
+        else:
+            command = [*command, "--manager-address", traffic.address]
+        return supervise(command, stop, monitor_factory=lambda pid: EmptyConnections(pid, port))
 
 
 if __name__ == "__main__":

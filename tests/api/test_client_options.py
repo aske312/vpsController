@@ -1,13 +1,11 @@
-"""Client format selection and sing-box TLS fragmentation."""
+"""Mihomo YAML exports and safe migration of saved profile settings."""
 from copy import deepcopy
-import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
 import yaml
 from unittest.mock import Mock, patch
-from urllib.parse import unquote
 
 from tests.api.support import manager, managed_mihomo_fixture
 
@@ -29,16 +27,11 @@ class ClientOptionsTests(unittest.TestCase):
         self.enterContext(patch.object(manager, "module_is_installed", return_value=True))
         self.enterContext(patch.object(manager, "public_endpoint", return_value="192.0.2.1"))
 
-    def test_default_mihomo_and_device_scoped_singbox_export(self):
-        self.assertEqual(manager.render_client_profile(self.profile, "common")[1], "yaml")
-        self.profile["devices"][1]["routing"] = {"client_config_format": "singbox", "tunnel_fragment": True}
-        data, extension = manager.render_client_profile(self.profile, "phone")
-        self.assertEqual(extension, "json")
-        config = json.loads(data)
-        tls = config["outbounds"][0]["tls"]
-        self.assertTrue(tls["fragment"])
-        self.assertTrue(tls["record_fragment"])
-        self.assertEqual(manager.render_client_profile(self.profile, "common")[1], "yaml")
+    def test_legacy_device_format_is_migrated_to_yaml(self):
+        for device in ('common', 'phone'):
+            text, extension = manager.render_client_profile(self.profile, device)
+            self.assertEqual(extension, 'yaml')
+            self.assertIn('proxies', yaml.safe_load(text))
 
     @unittest.skipUnless(os.getenv("PRIVACY_MIHOMO_BIN"), "Set Mihomo binary for offline configuration validation")
     def test_basic_profile_validates_without_downloading_geographic_databases(self):
@@ -47,30 +40,18 @@ class ClientOptionsTests(unittest.TestCase):
             manager.validate_rendered_profile(config)
             self.assertFalse(any(path.suffix in {".dat", ".mmdb", ".metadb"} for path in Path(folder).rglob("*")))
 
-    def test_validation_rejects_unknown_format_and_invalid_fragment_ranges(self):
-        for key, value in (("client_config_format", "unknown"),
-                           ("tunnel_fragment", "true"), ("tunnel_fragment_size", "200-100"), ("tunnel_fragment_interval", "1001")):
-            with self.subTest(key=key, value=value), self.assertRaises(manager.HTTPException):
-                manager.validate_routing({key: value}, current={})
+    def test_retired_format_fragment_and_ad_settings_are_discarded(self):
+        self.assertEqual(manager.validate_routing({'client_config_format':'singbox', 'tunnel_fragment':True,
+            'tunnel_fragment_size':'200-100', 'block_ads':True, 'block_ads_rules':'@default'}, current={}), {})
 
-    def test_singbox_does_not_misrepresent_amnezia_wireguard(self):
-        profile = deepcopy(self.profile)
-        profile["devices"][1]["routing"] = {"client_config_format": "singbox"}
-        profile["connections"].append({"id": "awg", "component": "transport-awg", "device_id": "phone", "credential": {
-            "port": 51820, "private_key": "key", "server_public_key": "public", "ip": "10.0.0.2/32", "mtu": 1420,
-            "amnezia": {"jc": 4, "jmin": 40, "jmax": 70, "s1": 1, "s2": 2, "h1": 3, "h2": 4, "h3": 5, "h4": 6},
-        }})
-        config = json.loads(manager.render_client_profile(profile, "phone")[0])
-        self.assertFalse(any(item["type"] == "wireguard" for item in config["outbounds"]))
-        with self.assertRaises(manager.HTTPException):
-            manager.validate_client_capabilities(profile)
 
-    def test_requested_format_overrides_device_default(self):
-        data, extension = manager.render_client_profile(self.profile, "phone", "singbox")
-        self.assertEqual(extension, "json")
-        self.assertIn('"outbounds"', data)
+    def test_non_yaml_explicit_exports_are_rejected(self):
+        for format in ('singbox', 'xray', 'uri', 'invalid'):
+            with self.subTest(format=format), self.assertRaises(manager.HTTPException) as rejected:
+                manager.render_client_profile(self.profile, 'phone', format)
+            self.assertEqual(rejected.exception.status_code, 422 if format == "invalid" else 410)
 
-    def test_subscription_names_follow_routes_relay_name_in_every_format(self):
+    def test_subscription_names_follow_routes_relay_name_in_yaml(self):
         connection = self.profile['connections'][0]
         connection['settings'].update(relay_host_id='a'*32, relay_cdn=True, cdn_domain='example.com')
         source = deepcopy(self.profile)
@@ -79,27 +60,17 @@ class ClientOptionsTests(unittest.TestCase):
         with patch.object(manager, 'relay_connection_control', return_value=control):
             for name in ['Relay West', 'Москва · "CDN"']:
                 control.read.return_value = {'hosts': [{'id': 'a'*32, 'name': name}]}
-                for format in ['mihomo', 'singbox', 'xray', 'uri']:
-                    with self.subTest(name=name, format=format):
-                        control.read.reset_mock()
-                        data, _ = manager.render_client_profile(self.profile, 'common', format)
-                        if format == 'mihomo':
-                            config = yaml.safe_load(data)
-                            label = config['proxies'][0]['name']
-                            group = config['proxy-groups'][0]
-                            self.assertEqual(group['name'], '312node.net')
-                            self.assertEqual(group['proxies'], [label])
-                            self.assertEqual(config['rules'][-1], 'MATCH,312node.net')
-                        elif format == 'singbox':
-                            config = json.loads(data)
-                            label = config['outbounds'][0]['tag']
-                            self.assertEqual(config['route']['final'], label)
-                        elif format == 'xray':
-                            label = json.loads(data)[0]['remarks']
-                        else:
-                            label = unquote(data.strip().rsplit('#', 1)[1])
-                        self.assertEqual(label, f'1 · VLESS · WebSocket · TLS · CDN · Relay: {name}')
-                        control.read.assert_called_once_with()
+                with self.subTest(name=name):
+                    control.read.reset_mock()
+                    data, _ = manager.render_client_profile(self.profile, 'common')
+                    config = yaml.safe_load(data)
+                    label = config['proxies'][0]['name']
+                    group = config['proxy-groups'][0]
+                    self.assertEqual(group['name'], '312node.net')
+                    self.assertEqual(group['proxies'], [label])
+                    self.assertEqual(config['rules'][-1], 'MATCH,312node.net')
+                    self.assertEqual(label, f'1 \u00b7 VLESS \u00b7 WebSocket \u00b7 TLS \u00b7 CDN \u00b7 Relay: {name}')
+                    control.read.assert_called_once_with()
         self.assertEqual(self.profile, source)
 
     def test_relay_labels_keep_protocol_details_for_all_components_and_modes(self):
@@ -120,7 +91,7 @@ class ClientOptionsTests(unittest.TestCase):
         self.profile["devices"][1] = device.model_dump()
         normalized = manager.normalize_profile(self.profile)
         self.assertEqual(normalized["devices"][1]["scope"], "manual")
-        self.assertEqual(manager.device_routing(normalized, "phone")["client_config_format"], "singbox")
+        self.assertNotIn("client_config_format", manager.device_routing(normalized, "phone"))
         self.assertEqual(normalized["common_device_id"], "common")
 
     def test_shared_singbox_creation_is_disabled_but_existing_remain_editable(self):
@@ -156,7 +127,7 @@ class ClientOptionsTests(unittest.TestCase):
                                            "headers": [(b"x-hwid", hwid.encode())] if hwid else []})
                 response = manager.public_profile_subscription(token, request)
                 bodies.append(response.body)
-                self.assertEqual(response.media_type, "application/json")
+                self.assertTrue(response.media_type.startswith("text/yaml"))
                 self.assertFalse(store[0]["devices"][1].get("hwid_hash"))
             self.assertTrue(all(body == bodies[0] for body in bodies))
             self.assertEqual(len(store[0]["devices"]), 2)
@@ -183,7 +154,7 @@ class ClientOptionsTests(unittest.TestCase):
             self.assertTrue(saved["devices"][1]["hwid_hash"])
             self.assertEqual(saved["devices"][1]["scope"], "hwid")
             self.assertEqual(saved["devices"][1]["name"], "phone")
-            self.assertEqual(saved["devices"][1]["routing"]["client_config_format"], "singbox")
+            self.assertNotIn("client_config_format", saved["devices"][1]["routing"])
 
     def test_device_binding_allows_same_hwid_and_rejects_other_or_missing(self):
         self.profile["subscription_token"] = "test-profile-token"
@@ -248,13 +219,11 @@ class ClientOptionsTests(unittest.TestCase):
                 manager.profile_subscription("profile", "missing")
             self.assertEqual(error.exception.status_code, 404)
 
-    def test_download_device_json(self):
-        self.profile["devices"][1]["routing"] = {"client_config_format": "singbox"}
-        with patch.object(manager, "profiles", return_value=[self.profile]):
-            response = manager.profile_config("profile", "phone")
-            self.assertIn("outbounds", json.loads(response.body))
-            self.assertIn('attachment;', response.headers["content-disposition"])
-            self.assertIn('.json', response.headers["content-disposition"])
+    def test_download_device_yaml(self):
+        with patch.object(manager, 'profiles', return_value=[self.profile]):
+            response = manager.profile_config('profile', 'phone')
+        self.assertIn('proxies', yaml.safe_load(response.body))
+        self.assertIn('.yaml', response.headers['content-disposition'])
 
 
 if __name__ == "__main__":

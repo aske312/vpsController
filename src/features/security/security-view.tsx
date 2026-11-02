@@ -23,7 +23,7 @@ type SecurityViewProps = {
   firewall?: FirewallView; ssh?: SshView; updates?: UpdatesView; applicationVersion?: AppVersionView; securitySystem?: SystemView; fail2ban?: Fail2banView; listeners: string[]; listenerSummary?: ListenerSummary;
   legacy: Record<string, { active?: boolean | null; enabled?: string }>; applicationSecurity?: AppSecurity; panelSecurity?: PanelSecurity; panelAccessHealthy: boolean; sshProtected: boolean; failedSshRecords24h: string;
   autoRefresh: boolean; securityLogsOpen: boolean; securityLogSource: LogSource; securityLogs: string[]; securityLogsUpdatedAt: Date | null; securityNewLogCount: number;
-  fixSecurity: (action: "secure" | "kernel-update" | "vpn-firewall") => Promise<void> | void; onOpenApplication: () => void;
+  fixSecurity: (action: "secure" | "safe-update" | "vpn-firewall") => Promise<void> | void; onOpenApplication: () => void;
   setPasswordDialog: Dispatch<SetStateAction<boolean>>; openSshAdminDialog: () => void; setSecurityLogsOpen: Dispatch<SetStateAction<boolean>>; setSecurityLogSource: Dispatch<SetStateAction<LogSource>>; setSecurityLogs: Dispatch<SetStateAction<string[]>>;
   loadSecurityLogs: () => Promise<void> | void; downloadLogs: (filename: string, lines: string[]) => void;
 };
@@ -98,8 +98,8 @@ export function SecurityView(props: SecurityViewProps) {
             <section className="securityDomain system">
               <header><div><p className="eyebrow">SYSTEM HARDENING</p><h3>Ядро и операционная система</h3></div><strong>{checkCount(securitySystemChecks)}</strong></header>
               <div className="securityRows">
-                <SecurityActionRow ok={updatesKnown && updates?.available === 0 && updates.reboot_required === false} title="Обновления системы" text={updatesKnown ? `${updates?.available} пакетов${updates?.reboot_required ? "  нужен reboot" : ""}` : "UNKNOWN — сведения об обновлениях не подтверждены"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
-                <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={`Unattended upgrades  ${updates?.automatic === true ? "ON" : updates?.automatic === false ? "OFF" : "UNKNOWN"}`} onAction={() => void fixSecurity("secure")} />
+                <SecurityActionRow ok={updatesKnown && updates?.available === 0 && updates.reboot_required === false} title="Обновления системы" text={updatesKnown ? `${updates?.available} пакетов${updates?.reboot_required ? "  нужен reboot" : ""}` : "UNKNOWN — сведения об обновлениях не подтверждены"} onAction={() => void fixSecurity("safe-update")} actionLabel="Обновить" />
+                <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={`Полное обновление · точка восстановления · перезагрузка  ${updates?.automatic === true ? "ON" : updates?.automatic === false ? "OFF" : "UNKNOWN"}`} onAction={() => void fixSecurity("secure")} />
                 <SecurityActionRow ok={Boolean(securitySystem?.apparmor?.active && (securitySystem.apparmor.profiles ?? 0) > 0)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles ?? "—"} профилей  ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} onAction={() => void fixSecurity("secure")} />
                 <SecurityActionRow ok={Boolean(securitySystem?.auditd_active)} title="Аудит действий" text={`auditd  ${securitySystem?.auditd_active === true ? "активен" : securitySystem?.auditd_active === false ? "остановлен" : "UNKNOWN"}`} onAction={() => void fixSecurity("secure")} />
                 <SecurityActionRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"}  Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} onAction={() => void fixSecurity("secure")} />

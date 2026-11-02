@@ -1,0 +1,38 @@
+{
+  "all-vless": [
+    "65c3dc174a5caea3ffa1395913047af5aa1eeddcdd9b64ac7636d75634cf92b8",
+    "5a111f7d305a15db4985e46165070e04d74295c68dc15987e145ea18ce54f8c9"
+  ],
+  "direct-fallback": [
+    "6739bf8ee4fb4b0a2856077d858a1bb640ce75fc3658de06a7ddfcb3af2a6142",
+    "42be8c808015c5e8acf4c96a2828d60c4ed6cb2defd575bd5b5783ab10189b8e"
+  ],
+  "cdn-first": [
+    "32bb03c92ee53840356295c471b0d369e88b45f6b9b0ede2811f911ecd367d1c",
+    "8245dce49721da6e3298208608712216a9acccc941a2b0682bf7979db8573fa5"
+  ],
+  "all-vmess": [
+    "18a16d8cefea4a5bd7b552cf1bd1c80a68314804dfe2835bcd26f7168c187cf3"
+  ],
+  "all-trojan": [
+    "f27ddb930bff2cf9e6b71adab9dd01a35c35842d7397f9ee8f67c0a7d2ab6f7c"
+  ],
+  "all-tls": [
+    "81bb1da931d432390be90cf884cad6fbbd3d79c39012f29fdf4650111edd398c"
+  ],
+  "all-cdn": [
+    "01386bcf9faccc849e93f2ffab262962238da50b3d13e585c60cbf4d104264dd"
+  ],
+  "all-tunnels": [
+    "944a555d5042010b0a30e300bbc4a57b6213fda6b0f9c58a82fb215615a0c5ee"
+  ],
+  "all-connections": [
+    "6db12946bf56a7177f9f5722cb1baf0c34f18f81c1286ba57f3a3164ea944d31"
+  ],
+  "all-fast": [
+    "f19c939a2e0d8f5089bb1aab994084e73c9cc2059394e063fcab3f263eaf378d"
+  ],
+  "all-reserve": [
+    "4fcd9cbd8d3c1b63590523046c48711fbc0e3eb8525e2894e443cf4c9c713dc9"
+  ]
+}

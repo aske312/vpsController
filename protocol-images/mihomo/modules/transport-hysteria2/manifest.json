@@ -76,7 +76,7 @@
       "key": "sni",
       "label": "TLS SNI",
       "type": "text",
-      "default": "gate.312",
+      "default": "www.microsoft.com",
       "help": "Имя TLS-сервера. При проверке сертификата должно совпадать с его именем."
     },
     {

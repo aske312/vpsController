@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.api.support import api
-from service_state import observe_service, ssh_observation, observed_enabled, failed_unit_count
+from service_state import observe_service, ssh_observation, observed_enabled, failed_unit_count, observation_scope, prime_services
 
 
 def output(active="active", enabled="disabled", load="loaded", **extra):
@@ -13,6 +13,31 @@ def output(active="active", enabled="disabled", load="loaded", **extra):
 
 
 class ServiceObservationTests(unittest.TestCase):
+    def test_batch_preserves_service_timer_and_missing_states_without_cross_request_cache(self):
+        text = ('Id=one.service\n' + output() + '\n\nId=gone.service\n' + output('inactive', load='not-found')
+                + '\n\nId=auto.timer\n' + output(LastTriggerUSec='yesterday', NextElapseUSecRealtime='tomorrow'))
+        with patch('service_state.subprocess.run', return_value=subprocess.CompletedProcess([], 0, text, '')) as run:
+            with observation_scope():
+                prime_services(['one.service', 'gone.service'], timers=['auto.timer'])
+                one = observe_service('one.service')
+                one['runtime']['state'] = 'draft'
+                self.assertEqual(observe_service('one.service')['runtime']['state'], 'running')
+                self.assertIs(observe_service('gone.service')['unit_present'], False)
+                self.assertEqual(observe_service('auto.timer', timer=True)['last_trigger'], 'yesterday')
+                self.assertEqual(run.call_count, 1)
+            run.return_value = subprocess.CompletedProcess([], 0, output('inactive'), '')
+            self.assertEqual(observe_service('one.service')['runtime']['state'], 'stopped')
+            self.assertEqual(run.call_count, 2)
+
+    def test_incomplete_batch_and_aliases_fall_back_to_individual_observation(self):
+        for first in (subprocess.CompletedProcess([], 1, '', ''),
+                      subprocess.CompletedProcess([], 0, 'Id=canonical.service\n'+output(), '')):
+            with self.subTest(first=first), observation_scope(), patch('service_state.subprocess.run',
+                    side_effect=[first, subprocess.CompletedProcess([], 0, output('failed'), '')]) as run:
+                prime_services(['alias.service'])
+                self.assertEqual(observe_service('alias.service')['runtime']['state'], 'error')
+                self.assertEqual(run.call_count, 2)
+
     def test_autostart_observation_distinguishes_unknown_static_and_enabled(self):
         for state, expected in (("enabled", True), ("enabled-runtime", True), ("disabled", False),
                                  ("static", False), ("unknown", None), ("unexpected", None)):

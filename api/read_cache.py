@@ -1,10 +1,39 @@
-"""Bounded, single-flight cache for file-stamped version metadata, not runtime."""
+"""Coalesce concurrent reads; cache only file-stamped version metadata."""
 from __future__ import annotations
 
 import threading
 import time
 from concurrent.futures import Future
 from pathlib import Path
+
+
+class InFlightReads:
+    """Join overlapping reads only; completed results and failures are never cached."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pending = {}
+
+    def run(self, key, read):
+        with self._lock:
+            future = self._pending.get(key)
+            owner = future is None
+            if owner:
+                future = Future()
+                self._pending[key] = future
+        if not owner:
+            return future.result()
+        try:
+            value = read()
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        else:
+            future.set_result(value)
+            return value
+        finally:
+            with self._lock:
+                if self._pending.get(key) is future:
+                    self._pending.pop(key)
 
 
 def file_stamp(path: Path):
@@ -16,6 +45,7 @@ def file_stamp(path: Path):
 
 
 class StampedReadCache:
+    """Bounded metadata cache, not a cache of live runtime observations."""
     def __init__(self, capacity: int = 128):
         self._lock = threading.Lock()
         self._entries = {}

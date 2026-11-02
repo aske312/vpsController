@@ -203,6 +203,33 @@ class NetworkRouteTests(unittest.TestCase):
         self.assertEqual(result["status"], "unchecked")
         self.assertFalse(result["ready"])
 
+    def test_failed_check_keeps_exact_consumer_scope_without_success_proof(self):
+        import copy
+        registry = routes.migrate({'cdn_domains': ['route.example']})
+        binding = registry['bindings'][0]
+        for number in range(10):
+            routes.record_check(registry, 'cdn', 'route.example', {
+                'status': 'error', 'ready': False, 'verification': 'end_to_end',
+                'binding_id': binding['id'], 'checked_revision': binding['desired_revision'],
+                'check_id': 'failed-'+str(number), 'checked_at': '2026-11-02T12:00:00+00:00',
+                'consumer_id': 'mihomo:profile:one', 'message': 'Проверка завершилась ошибкой',
+            })
+        probe = {'resolved': ['203.0.113.10'], 'matches_origin': False, 'route': 'proxy_or_cdn'}
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(api, 'NETWORK_ENDPOINTS_FILE', Path(temporary) / 'network.json'), \
+             patch.object(api, 'network_domain_probe', return_value=probe), \
+             patch.object(api, 'network_consumers', return_value=[]):
+            api.NETWORK_ENDPOINTS_FILE.write_text(json.dumps({'route_registry': registry}))
+            result = api.network_endpoint_check('cdn', 'route.example')
+            self.assertEqual(result['status'], 'error')
+            self.assertEqual(result['consumer_id'], 'mihomo:profile:one')
+            self.assertNotIn('verified_connection', result)
+            self.assertFalse(result['ready'])
+            binding['consumer_checks']['mihomo:profile:neighbor'] = copy.deepcopy(binding['check'])
+            api.NETWORK_ENDPOINTS_FILE.write_text(json.dumps({'route_registry': registry}))
+            ambiguous = api.network_endpoint_check('cdn', 'route.example')
+            self.assertNotIn('consumer_id', ambiguous)
+
     def test_ready_requires_end_to_end_verification(self):
         registry = routes.migrate({"tls_relay_domains": ["relay.example"]})
         routes.record_check(registry, "tls_relay", "relay.example", {

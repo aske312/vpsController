@@ -522,8 +522,8 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(manager, /Post-install health-check failed/);
   assert.match(mihomoInstall, /ss -Hltn \| grep -Eq '127\\\.0\\\.0\\\.1:8791/);
   const mihomoManager = await read("protocol-images/mihomo/manager.py");
-  assert.match(mihomoManager, /"  enable: \{str\(bool\(routing\.get\('tun_enabled'/);
-  assert.match(mihomoManager, /routing\.get\('tun_force'/);
+  // Capture-mode combinations are exercised by test_profile_modes.py;
+  // do not couple this installation contract to the YAML serializer expression.
   assert.match(mihomoManager, /dns_hijack_force/);
   assert.match(mihomoManager, /mixed-port: 7890/);
   for (const installer of [wg, awg, mihomoWg, mihomoAwg]) {

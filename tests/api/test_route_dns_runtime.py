@@ -21,7 +21,7 @@ import unittest
 module_root = Path(__file__).resolve().parents[2] / 'protocol-images/mihomo'
 if module_root.is_dir():
     sys.path.insert(0, str(module_root))
-from dns_routing import mihomo_route_dns, singbox_route_dns, xray_route_dns
+from dns_routing import mihomo_route_dns
 
 
 def free_port():
@@ -239,42 +239,22 @@ RULES = ['DOMAIN-SUFFIX,parent.test,GATE.312', 'DOMAIN,child.parent.test,DIRECT'
 
 
 @contextlib.contextmanager
-def core(lab, engine, *, vpn_down=False):
-    binary = os.environ[{'mihomo': 'PRIVACY_MIHOMO_BIN', 'singbox': 'PRIVACY_SINGBOX_BIN', 'xray': 'PRIVACY_XRAY_BIN'}[engine]]
+def core(lab, *, vpn_down=False):
+    binary = os.environ['PRIVACY_MIHOMO_BIN']
     dns_port = free_port()
     socks_port = free_port() if vpn_down else lab.proxy.server_address[1]
     settings = lab.settings()
-    if engine == 'mihomo':
-        config = {'mixed-port': free_port(), 'mode': 'rule', 'log-level': 'warning',
-                  'dns': {'enable': True, 'listen': f'127.0.0.1:{dns_port}', 'enhanced-mode': 'redir-host',
-                          **mihomo_route_dns(settings, RULES, 'VPN')},
-                  'proxies': [{'name': 'VPN', 'type': 'socks5', 'server': 'vpn-node.test', 'port': socks_port, 'udp': True}],
-                  'rules': [*[rule.replace(',GATE.312', ',VPN') for rule in RULES], 'MATCH,VPN']}
-    elif engine == 'singbox':
-        config = {'log': {'level': 'error'}, 'dns': singbox_route_dns(settings, RULES, 'VPN'),
-                  'inbounds': [{'type': 'direct', 'tag': 'dns-in', 'listen': '127.0.0.1', 'listen_port': dns_port, 'network': 'udp'}],
-                  'outbounds': [{'type': 'socks', 'tag': 'VPN', 'server': 'vpn-node.test', 'server_port': socks_port,
-                                 'version': '5', 'domain_resolver': 'bootstrap'}, {'type': 'direct', 'tag': 'direct', 'domain_resolver': 'direct-dns'}],
-                  'route': {'rules': [{'inbound': ['dns-in'], 'action': 'hijack-dns'}], 'final': 'VPN', 'default_domain_resolver': 'remote'}}
-    else:
-        node = {'tag': 'proxy', 'protocol': 'socks', 'settings': {'servers': [{'address': 'vpn-node.test', 'port': socks_port}]},
-                'streamSettings': {'sockopt': {'domainStrategy': 'UseIP'}}}
-        config = {'log': {'loglevel': 'warning'}, 'dns': xray_route_dns(settings, RULES, node),
-                  'inbounds': [{'protocol': 'dokodemo-door', 'tag': 'dns-in', 'listen': '127.0.0.1', 'port': dns_port,
-                                'settings': {'network': 'udp', 'address': '1.1.1.1', 'port': 53}}],
-                  'outbounds': [node, {'tag': 'direct', 'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIP'}},
-                                {'tag': 'dns-out', 'protocol': 'dns'}],
-                  'routing': {'domainStrategy': 'AsIs', 'rules': [
-                      {'type': 'field', 'inboundTag': ['dns-in'], 'outboundTag': 'dns-out'},
-                      {'type': 'field', 'inboundTag': ['route-dns-bootstrap', 'route-dns-direct'], 'outboundTag': 'direct'},
-                      {'type': 'field', 'inboundTag': ['route-dns-vpn'], 'outboundTag': 'proxy'}]}}
+    config = {'mixed-port': free_port(), 'mode': 'rule', 'log-level': 'warning',
+              'dns': {'enable': True, 'listen': f'127.0.0.1:{dns_port}', 'enhanced-mode': 'redir-host',
+                      **mihomo_route_dns(settings, RULES, 'VPN')},
+              'proxies': [{'name': 'VPN', 'type': 'socks5', 'server': 'vpn-node.test', 'port': socks_port, 'udp': True}],
+              'rules': [*[rule.replace(',GATE.312', ',VPN') for rule in RULES], 'MATCH,VPN']}
     with tempfile.TemporaryDirectory(prefix='route-dns-') as folder:
         if hasattr(lab, 'configure'):
-            lab.configure(config, engine)
+            lab.configure(config)
         path = Path(folder) / 'config.json'
         path.write_text(json.dumps(config), encoding='utf-8')
-        args = ['-d', folder, '-f', str(path)] if engine == 'mihomo' else (
-            ['run', '-c', str(path)] if engine == 'singbox' else ['run', '-config', str(path)])
+        args = ['-d', folder, '-f', str(path)]
         with open(Path(folder) / 'core.log', 'w', encoding='utf-8') as log:
             process = subprocess.Popen([binary, *args], stdout=log, stderr=subprocess.STDOUT,
                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
@@ -303,9 +283,9 @@ def core(lab, engine, *, vpn_down=False):
 
 
 class RouteDnsRuntimeTests(unittest.TestCase):
-    def exercise(self, engine):
+    def exercise(self):
         with DnsLab() as lab:
-            with core(lab, engine) as port:
+            with core(lab) as port:
                 for domain, role, expected in [
                     ('one.direct.test', 'direct', '198.51.100.11'),
                     ('one.proxy.test', 'vpn', '198.51.100.21'),
@@ -313,9 +293,9 @@ class RouteDnsRuntimeTests(unittest.TestCase):
                     ('exact.test', 'vpn', '198.51.100.21'),
                     ('child.exact.test', 'direct', '198.51.100.11'),
                     ('router.lan', 'local', '198.51.100.41')]:
-                    with self.subTest(engine=engine, domain=domain):
+                    with self.subTest(domain=domain):
                         _, address = query(port, domain)
-                        if role == 'vpn' and engine == 'mihomo':
+                        if role == 'vpn':
                             self.assertIn(address, ['198.51.100.21', '198.51.100.22'])
                         else:
                             self.assertEqual(address, expected)
@@ -335,7 +315,7 @@ class RouteDnsRuntimeTests(unittest.TestCase):
                 except socket.timeout:
                     pass
                 self.assertFalse(lab.saw('all-failed.proxy.test', 'direct'))
-            with core(lab, engine, vpn_down=True) as port:
+            with core(lab, vpn_down=True) as port:
                 self.assertEqual(query(port, 'vpn-down.direct.test')[1], '198.51.100.11')
                 try:
                     _, answer = query(port, 'vpn-down.proxy.test', timeout=5)
@@ -346,15 +326,7 @@ class RouteDnsRuntimeTests(unittest.TestCase):
 
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires Mihomo')
     def test_mihomo_dns_network_paths(self):
-        self.exercise('mihomo')
-
-    @unittest.skipUnless(os.getenv('PRIVACY_SINGBOX_BIN'), 'Requires sing-box 1.14')
-    def test_singbox_dns_network_paths(self):
-        self.exercise('singbox')
-
-    @unittest.skipUnless(os.getenv('PRIVACY_XRAY_BIN'), 'Requires Xray')
-    def test_xray_dns_network_paths(self):
-        self.exercise('xray')
+        self.exercise()
 
 
 if __name__ == '__main__':

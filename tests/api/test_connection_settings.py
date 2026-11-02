@@ -26,7 +26,56 @@ class ConnectionSettingsTests(unittest.TestCase):
             with self.subTest(module=module), self.assertRaises(manager.HTTPException):
                 manager.validate_connection("transport-" + module, values)
 
-    def test_per_user_quic_settings_override_shared_defaults_in_both_exports(self):
+    def test_sni_defaults_and_pki_names_have_separate_sources(self):
+        self.assertTrue(5 <= len(manager.MIHOMO_REALITY_SNI_POOL) <= 10)
+        for module in ("transport-hysteria2", "transport-tuic"):
+            with self.subTest(module=module):
+                automatic = manager.validate_connection(module, {"sni": ""})
+                self.assertIn(automatic["sni"], manager.MIHOMO_REALITY_SNI_POOL)
+                self.assertEqual(manager.validate_connection(module, {"sni": "gate.312"})["sni"], automatic["sni"])
+                with self.assertRaises(manager.HTTPException):
+                    manager.validate_connection(module, {"sni": automatic["sni"], "skip_cert_verify": False})
+                custom = manager.validate_connection(module, {"sni": "owned.example", "skip_cert_verify": False})
+                self.assertEqual(custom["sni"], "owned.example")
+                self.assertFalse(custom["skip_cert_verify"])
+
+    def test_preset_catalog_covers_protocol_mode_transport_matrix(self):
+        presets = manager.default_profile_presets()
+        checked = manager.validate_profile_presets(presets)
+        self.assertEqual([row["id"] for row in checked], ["direct-bundle", "cdn-bundle"])
+        matrix = json.loads((ROOT / "protocol-images/mihomo/connection-variants.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(matrix), 32)
+        for protocol in ("vless", "vmess", "trojan"):
+            for mode in ("tls", "cdn"):
+                transports = {row["transport"] for row in matrix if row.get("xray_protocol") == protocol and row.get(mode)}
+                self.assertEqual(transports, {"xhttp", "websocket", "httpupgrade", "grpc"})
+        self.assertEqual({row["id"] for row in matrix if row["id"] != "transport-reality"},
+                         {"transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"})
+        invalid = {"id": "bad", "name": "Invalid", "components": [{"id": "transport-reality", "xray_protocol": "vmess"}]}
+        with self.assertRaises(manager.HTTPException):
+            manager.validate_profile_presets([invalid])
+        custom = {"id": "owner", "name": "Owner preset", "components": [{"id": "transport-wg"}]}
+        with patch.object(manager, "atomic_json") as write:
+            saved = manager.profile_presets([custom])
+        self.assertEqual([row["id"] for row in saved], ["owner"])
+        write.assert_not_called()
+
+    def test_retired_builtins_are_replaced_but_user_edits_and_receipts_are_preserved(self):
+        old = {"id": "direct-fallback", "name": "VLESS + резерв", "description": "VLESS REALITY, затем AWG", "strategy": "fallback", "components": [
+            {"id": "transport-reality", "xray_protocol": "vless", "transport": "xhttp", "label": "VLESS REALITY · XHTTP"},
+            {"id": "transport-awg", "label": "AWG"}]}
+        old["_mutation"] = {"id": "a" * 32, "hash": "b" * 64}
+        custom = {"id": "owner", "name": "Owner", "components": [{"id": "transport-wg"}]}
+        with patch.object(manager, "atomic_json") as write:
+            migrated = manager.profile_presets([old, custom])
+        self.assertEqual([row["id"] for row in migrated], ["owner", "direct-bundle", "cdn-bundle"])
+        self.assertEqual(manager.mutation_record([old])["id"], "a" * 32)
+        self.assertEqual(manager.profile_presets(migrated), migrated)
+        write.assert_not_called()
+        edited = {**old, "name": "My edited preset"}
+        self.assertEqual([row["id"] for row in manager.profile_presets([edited])], ["direct-fallback"])
+
+    def test_per_user_quic_settings_override_shared_defaults_in_yaml_export(self):
         for module, values, expected in (
             ("tuic", {"congestion_control": "cubic", "heartbeat": "30s", "udp_relay_mode": "quic"}, {"congestion-controller": "cubic", "heartbeat-interval": 30000, "udp-relay-mode": "quic"}),
             ("hysteria2", {"up_mbps": 23, "down_mbps": 45}, {"up": "23 Mbps", "down": "45 Mbps"}),
@@ -40,9 +89,6 @@ class ConnectionSettingsTests(unittest.TestCase):
                     exported = yaml.safe_load("proxies:\n" + "\n".join(manager.render_proxy(row["component"], result["credential"], "test")))["proxies"][0]
                 for key, value in expected.items():
                     self.assertEqual(exported[key], value)
-                config = manager.build_singbox_config([result], {}, {"nameserver": "1.1.1.1", "fallback": "8.8.8.8"}, [], "127.0.0.1", lambda: {}, None)
-                for key, value in values.items():
-                    self.assertEqual(config["outbounds"][0][key], value)
                 self.assertEqual(exported["port"], 5678)
                 self.assertEqual(credential["port"], 1234)
 

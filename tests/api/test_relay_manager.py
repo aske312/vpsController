@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from tests.api.support import api
-from tests.api.support import manager
+from tests.api.support import manager, ROOT
 from relay_manager import RelayManager, route_snapshot, status_snapshot
 from relay_client import RelayClient, AgentAPIError
 from application_operation import OperationConflict, require_recovery_clear
@@ -65,9 +65,7 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
-    def test_first_hop_cdn_keeps_protocol_transport_and_tls_in_every_export(self):
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+    def test_first_hop_cdn_keeps_protocol_transport_and_tls_in_yaml_export(self):
         for kind in ('vless', 'vmess', 'trojan'):
             for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
                 with self.subTest(protocol=kind, transport=transport):
@@ -82,19 +80,10 @@ class RelayManagementTests(unittest.TestCase):
                     self.assertEqual([(row['target_ip'],row['target_port'],row['cdn_domain']) for row in routes], [('104.16.1.2',443,'cdn.example')])
                     port = routes[0]['listen_port']
                     original = copy.deepcopy(connection)
-                    node = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)[0]['outbounds'][0]
-                    endpoint = node['settings']['servers' if kind == 'trojan' else 'vnext'][0]
-                    self.assertEqual((endpoint['address'],endpoint['port']), (AGENT,port))
-                    self.assertEqual(node['protocol'],kind)
-                    self.assertEqual(node['streamSettings']['tlsSettings']['serverName'],'cdn.example')
-                    self.assertEqual(node['streamSettings']['network'],'ws' if transport == 'websocket' else transport)
                     lines = relay_connections.redirect_mihomo_lines(self.control, 'transport-reality', settings, manager.render_vless_cdn(credential, 'CDN'))
                     proxy = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
                     self.assertEqual((proxy['server'],proxy['port'],proxy['servername']), (AGENT,port,'cdn.example'))
                     self.assertEqual(proxy['type'], kind)
-                    if transport != 'xhttp':
-                        proxy = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)['outbounds'][0]
-                        self.assertEqual((proxy['server'],proxy['server_port'],proxy['tls']['server_name']), (AGENT,port,'cdn.example'))
                     self.assertEqual(connection,original)
 
     def test_cdn_target_is_validated_pinned_and_does_not_reuse_origin_socket(self):
@@ -182,10 +171,8 @@ class RelayManagementTests(unittest.TestCase):
         self.assertEqual(native.call_count,1)
         self.assertEqual(len(self.control.read()['routes']),1)
 
-    def test_cdn_relay_preserves_each_transport_in_client_exports(self):
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        for transport, key in [('websocket', 'wsSettings'), ('xhttp', 'xhttpSettings'), ('grpc', 'grpcSettings'), ('httpupgrade', 'httpupgradeSettings')]:
+    def test_cdn_relay_preserves_each_transport_in_yaml_export(self):
+        for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
             with self.subTest(transport=transport):
                 credential = {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'cdn.example',
                               'cdn_path': '/private', 'cdn_transport': transport, 'cdn_xhttp_mode': 'packet-up'}
@@ -202,20 +189,6 @@ class RelayManagementTests(unittest.TestCase):
                 if transport == 'httpupgrade': self.assertTrue(node['ws-opts']['v2ray-http-upgrade'])
                 if transport == 'xhttp': self.assertEqual(node['xhttp-opts'], {'path':'/private', 'mode':'packet-up'})
                 if transport == 'grpc': self.assertEqual(node['grpc-opts']['grpc-service-name'], 'private')
-                xray = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)[0]['outbounds'][0]
-                endpoint = xray['settings']['vnext'][0]
-                self.assertEqual((endpoint['address'], endpoint['port']), ('cdn.example', 443))
-                stream = xray['streamSettings']
-                self.assertEqual(stream['network'], 'ws' if transport == 'websocket' else transport)
-                self.assertEqual(stream['tlsSettings']['serverName'], 'cdn.example')
-                self.assertEqual(stream[key]['serviceName' if transport == 'grpc' else 'path'], 'private' if transport == 'grpc' else '/private')
-                if transport == 'xhttp': self.assertEqual(stream[key]['mode'], 'packet-up')
-                if transport != 'xhttp':
-                    exported = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
-                    node = next(item for item in exported['outbounds'] if item['type'] == 'vless')
-                    self.assertEqual((node['server'], node['server_port'], node['tls']['server_name']), ('cdn.example', 443, 'cdn.example'))
-                    self.assertEqual(node['transport']['type'], 'ws' if transport == 'websocket' else transport)
-                    self.assertEqual(node['transport']['service_name' if transport == 'grpc' else 'path'], 'private' if transport == 'grpc' else '/private')
                 self.assertEqual(connection, source)
 
     def test_cdn_relay_reuses_https_and_acme_ingress_and_rejects_other_port80_consumers(self):
@@ -486,32 +459,21 @@ class RelayManagementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             relay_connections.direct_groups('ikev2', settings, {'config': ''})
 
-    def test_mihomo_native_formats_redirect_only_selected_socket_preserving_host_and_sni(self):
+    def test_mihomo_yaml_redirect_only_selected_socket_preserving_host_and_sni(self):
         connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'settings': {'relay_host_id': self.host_id, 'route_mode': 'cdn'}, 'credential': {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'origin.example', 'cdn_path': '/private', 'cdn_transport': 'websocket'}}
         relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        configs = manager.build_xray_configs([connection], {}, {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}, [], ORIGIN, lambda: {}, redirect)
-        node = configs[0]['outbounds'][0]
-        self.assertEqual(node['settings']['vnext'][0]['address'], AGENT)
-        self.assertEqual(node['streamSettings']['tlsSettings']['serverName'], 'origin.example')
-        self.assertEqual(node['streamSettings']['wsSettings']['headers']['Host'], 'origin.example')
         lines = manager.render_vless_cdn(connection['credential'], 'CDN')
         changed = relay_connections.redirect_mihomo_lines(self.control, connection['component'], connection['settings'], lines)
         self.assertIn('    server: "'+AGENT+'"', changed)
         self.assertIn('    servername: "origin.example"', changed)
         self.assertIn('        Host: "origin.example"', changed)
-        singbox = manager.build_singbox_config([connection], {}, {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}, [], ORIGIN, lambda: {}, False, redirect=redirect)
-        node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
-        self.assertEqual((node['server'], node['server_port']), (AGENT, 20000))
-        self.assertEqual(node['tls']['server_name'], 'origin.example')
-        self.assertEqual(node['transport']['headers']['Host'], 'origin.example')
         before = sum(method == 'PUT' for method, _ in self.agent.calls)
         self.agent.offline = True
         relay_connections.prepare_mihomo(self.control, [{**connection, 'name': 'Renamed'}], 'd'*32, previous=[connection])
         self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), before)
 
     @patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (AGENT, 0))])
-    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_all_exports(self, _dns):
+    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_yaml_export(self, _dns):
         self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example', 'backup.example']}
         self.control.public()
         credential = {'uuid': 'key-value', 'route_mode': 'tls', 'tls_enabled': True, 'tls_domain': 'origin.example',
@@ -521,8 +483,6 @@ class RelayManagementTests(unittest.TestCase):
                       'credential': credential}
         original = copy.deepcopy(connection)
         relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
         for address in ('relay.example', 'backup.example'):
             selected = {**connection, 'settings': {**connection['settings'], 'relay_address': address}}
             with self.subTest(address=address):
@@ -531,15 +491,6 @@ class RelayManagementTests(unittest.TestCase):
                 self.assertEqual((node['server'], node['port']), (address, 20000))
                 self.assertEqual(node['servername'], 'origin.example')
                 self.assertEqual(node['ws-opts']['headers']['Host'], 'origin.example')
-                singbox = manager.build_singbox_config([selected], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
-                node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
-                self.assertEqual((node['server'], node['server_port']), (address, 20000))
-                self.assertEqual(node['tls']['server_name'], 'origin.example')
-                self.assertEqual(node['transport']['headers']['Host'], 'origin.example')
-                xray = manager.build_xray_configs([selected], {}, dns, [], ORIGIN, lambda: {}, redirect)
-                node = xray[0]['outbounds'][0]
-                self.assertEqual(node['settings']['vnext'][0]['address'], address)
-                self.assertEqual(node['streamSettings']['tlsSettings']['serverName'], 'origin.example')
                 self.agent.calls.clear()
                 relay_connections.prepare_mihomo(self.control, [selected], 'd'*32, previous=[connection])
                 self.assertEqual(self.agent.calls, [])
@@ -874,6 +825,127 @@ class RelayManagementTests(unittest.TestCase):
         self.delete_host()
         self.assertEqual(self.control.read()['hosts'], [])
 
+    def test_local_disconnect_cascades_offline_without_touching_remote_routes(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.control.mutate_route(self.payload(20002), 'c'*32)
+        remote = copy.deepcopy(self.agent.items)
+        self.agent.offline = True
+        self.agent.calls.clear()
+        settings = {'relay_host_id': self.host_id, 'relay_address': AGENT}
+        original = copy.deepcopy(settings)
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        self.assertEqual(self.control.read()['hosts'], [])
+        self.assertEqual(self.control.read()['routes'], [])
+        self.assertEqual(self.agent.calls, [])
+        self.assertEqual(self.agent.items, remote)
+        state = relay_connections.consumer_state(self.control, settings, {'state': 'current'})
+        self.assertEqual(state['state'], 'stale')
+        self.assertIn('Требует внимания', state['reason'])
+        self.assertEqual(settings, original)
+        with self.assertRaises(ValueError):
+            self.control.endpoint(self.host_id, 'tcp', 443)
+
+    def test_local_disconnect_checks_revision_and_unresolved_remote_intent(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        before = self.control.read()
+        payload = {'host_id': self.host_id, 'expected_revision': '0'*32, 'local_only': True}
+        with self.assertRaises(OperationConflict):
+            self.control.delete_host(payload, 'e'*32)
+        self.assertEqual(self.control.read(), before)
+        self.control.pending.write_text('{}')
+        with self.assertRaises(OperationConflict):
+            self.control.delete_host({**payload, 'expected_revision': before['revision']}, 'e'*32)
+        self.assertEqual(self.control.read(), before)
+
+    def test_local_disconnect_commit_failure_keeps_valid_host_and_routes(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        before = self.control.read()
+        with patch('relay_manager.atomic_json', side_effect=OSError('disk full')), self.assertRaises(OSError):
+            self.control.delete_host({'host_id': self.host_id, 'expected_revision': before['revision'], 'local_only': True}, 'e'*32)
+        self.assertEqual(self.control.read(), before)
+
+    def test_local_disconnect_preserves_other_hosts_and_their_routes(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        registry = self.control.read()
+        other = {**registry['hosts'][0], 'id': 'f'*32, 'agent_url': 'https://8.8.4.4:9443', 'name': 'Other'}
+        route = {**registry['routes'][0], 'id': 'pro-'+'f'*32, 'host_id': other['id']}
+        registry['hosts'].append(other)
+        registry['routes'].append(route)
+        self.control.write(registry)
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        self.assertEqual(self.control.read()['hosts'], [other])
+        self.assertEqual(self.control.read()['routes'], [route])
+
+    def test_detached_relay_uses_direct_export_copy_without_modifying_connections(self):
+        connections = [{'id': 'direct', 'settings': {}}, {'id': 'relay', 'settings': {'relay_host_id': self.host_id}}]
+        original = copy.deepcopy(connections)
+        with patch.object(manager, 'relay_connection_control', return_value=self.control):
+            self.assertEqual(len(manager.with_relay_labels(connections)), 2)
+            self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+            exported = manager.with_relay_labels(connections)
+            self.assertEqual([item['id'] for item in exported], ['direct', 'relay'])
+            self.assertNotIn('relay_host_id', exported[1]['settings'])
+        self.assertEqual(connections, original)
+
+    def test_detached_relay_blocks_persisted_native_download(self):
+        identity = 'd'*32
+        adapter = SimpleNamespace(DATA_DIR=self.root, relay_control=lambda: self.control)
+        path = relay_client_creation.result_path(adapter, identity)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({'stage': 'ready', 'settings': {'relay_host_id': self.host_id}, 'result': {'config': 'private'}}))
+        self.assertEqual(relay_client_creation.read_result(adapter, identity)['state'], 'ready')
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        with self.assertRaises(ValueError):
+            relay_client_creation.read_result(adapter, identity)
+
+    def test_detached_relay_native_download_uses_captured_direct_result(self):
+        identity = 'd'*32
+        adapter = SimpleNamespace(DATA_DIR=self.root, relay_control=lambda: self.control)
+        path = relay_client_creation.result_path(adapter, identity)
+        path.parent.mkdir(parents=True)
+        native = {'config': f'[Peer]\nEndpoint = {ORIGIN}:51820\n', 'filename': 'client.conf'}
+        path.write_text(json.dumps({'stage': 'ready', 'protocol': 'wg', 'settings': {'relay_host_id': self.host_id},
+                                   'native_result': native, 'result': {'config': f'Endpoint = {AGENT}:20001'}}))
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        result = relay_client_creation.read_result(adapter, identity)
+        self.assertEqual(result['result'], {**native, 'protocol': 'wg'})
+        self.assertNotIn(AGENT, json.dumps(result))
+
+    def test_disconnected_subscription_keeps_healthy_nodes_and_exports_direct_fallback(self):
+        direct = {'id': 'direct', 'name': 'Direct', 'component': 'transport-shadowsocks', 'device_id': 'common',
+                  'settings': {}, 'credential': {'port': 31000, 'password': 'private-value', 'method': 'aes-128-gcm'}}
+        via_relay = {**copy.deepcopy(direct), 'id': 'relay', 'name': 'Relay', 'settings': {'relay_host_id': self.host_id}}
+        item = {'id': 'profile', 'name': 'Profile', 'common_device_id': 'common',
+                'devices': [{'id': 'common', 'name': 'Common', 'scope': 'common'}], 'connections': [direct, via_relay]}
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        with (patch.object(manager, 'relay_connection_control', return_value=self.control),
+              patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules')):
+            config = yaml.safe_load(manager.render_profile(item))
+            self.assertEqual(len(config['proxies']), 2)
+            self.assertNotIn(AGENT, json.dumps(config))
+            item['connections'] = [via_relay]
+            config = yaml.safe_load(manager.render_profile(item))
+            self.assertEqual(len(config['proxies']), 1)
+            self.assertEqual(config['proxies'][0]['port'], 31000)
+            self.assertEqual(config['proxies'][0]['password'], 'private-value')
+            self.assertNotIn(AGENT, json.dumps(config))
+        self.assertEqual(item['connections'][0]['settings']['relay_host_id'], self.host_id)
+
+    def test_after_cdn_disconnect_does_not_keep_routing_through_old_origin(self):
+        connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'device_id': 'common',
+                      'settings': {'relay_host_id': self.host_id, 'relay_cdn': True, 'relay_cdn_mode': 'after_cdn', 'route_mode': 'cdn'},
+                      'credential': {'cdn_enabled': True, 'cdn_domain': 'cdn.example'}}
+        item = {'id': 'profile', 'name': 'Profile', 'common_device_id': 'common',
+                'devices': [{'id': 'common', 'name': 'Common', 'scope': 'common'}], 'connections': [connection]}
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision'], 'local_only': True}, 'e'*32)
+        with (patch.object(manager, 'relay_connection_control', return_value=self.control),
+              patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules')):
+            config = yaml.safe_load(manager.render_profile(item))
+        self.assertEqual(config['proxies'], [])
+        self.assertEqual(config['rules'], ['MATCH,REJECT'])
+        self.assertEqual(config['proxy-groups'][0]['proxies'], ['REJECT'])
+        self.assertEqual(config['proxy-groups'][0]['type'], 'select')
+
     def test_rejected_cascade_retains_host_and_route_without_claiming_success(self):
         self.control.mutate_route(self.payload(), 'b'*32)
         self.agent.reject = True
@@ -911,6 +983,32 @@ class RelayManagementTests(unittest.TestCase):
                 RelayClient(f'https://{AGENT}:9443', TOKEN, hashlib.sha256(b'certificate').hexdigest()).request('GET', '/v1/status')
         self.assertEqual(connection.request.call_count, 1)
         self.assertEqual(connection.request.call_args.args[3]['Authorization'], 'Bearer '+TOKEN)
+
+    def test_all_64_routes_with_diagnostics_fit_bounded_agent_response(self):
+        from relay_diagnostics import ERROR_CODES
+        counter = 2**53 - 1
+        diagnostics = {'sent_packets': counter, 'received_packets': counter, 'dropped_packets': counter,
+                       'error_counts': {key: counter for key in ERROR_CODES}, 'last_error': 'udp_buffer_full',
+                       'last_error_at': 1793300000, 'last_sent_at': 1793300000, 'last_received_at': 1793300000,
+                       'return_state': 'flowing', 'no_return_sessions': 0}
+        routes = [{'id': f'foreign-route-{index:050d}', 'transport': 'udp', 'listen_port': 20000 + index,
+                   'target_ip': ORIGIN, 'target_port': 443, 'state': 'listening', 'target_verified': False,
+                   'sent_bytes': counter, 'received_bytes': counter, 'errors': counter, 'sessions': 128,
+                   'diagnostics': diagnostics} for index in range(64)]
+        raw = json.dumps({'revision': 64, 'items': routes}).encode()
+        self.assertGreater(len(raw), 65536)
+        connection = Mock()
+        connection.sock.getpeercert.return_value = b'certificate'
+        response = connection.getresponse.return_value
+        response.status = 200
+        response.read.side_effect = lambda limit: raw[:limit]
+        with patch('relay_client.http.client.HTTPSConnection', return_value=connection):
+            client = RelayClient(f'https://{AGENT}:9443', TOKEN, hashlib.sha256(b'certificate').hexdigest())
+            self.assertEqual(len(route_snapshot(client.request('GET', '/v1/routes'))['items']), 64)
+            response.read.side_effect = lambda limit: b' ' * limit
+            with self.assertRaises(AgentAPIError):
+                client.request('GET', '/v1/routes')
+        connection.close.assert_called()
 
     def test_nonpublic_agent_and_invalid_urls_rejected(self):
         for url in ('http://'+AGENT+':9443', 'https://127.0.0.1:9443', 'https://10.0.0.1:9443', 'https://example.com:9443', f'https://{AGENT}:9443/path'):
@@ -960,6 +1058,15 @@ class RelayAPITests(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.request(method, '/api'+path)
                 self.assertEqual(response.status_code, 401)
+
+    def test_local_disconnect_is_explicit_and_uses_normal_operation_admission(self):
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        api.app.dependency_overrides[api.require_mutation_admission] = lambda: None
+        with patch.object(api, 'start_relay_mutation', return_value={'state': 'queued'}) as start:
+            response = self.client.delete('/api/network/relays/host?local_only=true', headers={'If-Match': 'a'*32, 'X-Operation-ID': 'b'*32})
+            self.assertEqual(response.status_code, 202)
+            start.assert_called_once_with('relay-host-delete', {'host_id': 'host', 'expected_revision': 'a'*32, 'local_only': True}, 'b'*32)
+            self.assertEqual(self.client.delete('/api/network/relays/host?local_only=invalid').status_code, 422)
 
     def test_inventory_skips_live_collectors_and_is_not_cached(self):
         api.app.dependency_overrides[api.require_token] = lambda: None

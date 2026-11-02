@@ -29,3 +29,17 @@ test("corrupt traffic and timing do not get coerced to plausible display values"
     }
   }
 });
+
+test("transfer evidence requires valid ordered timestamps and an explicit service state", () => {
+  const withRow = row => ({...snapshot, connections: {one: row}});
+  const valid = withRow({traffic_verified_at: 100, traffic_observed_at: 120, service_active: true});
+  assert.deepEqual(profileStatsSnapshot(valid), valid);
+  for (const row of [
+    {traffic_verified_at: 100}, {traffic_verified_at: 121, traffic_observed_at: 120},
+    {traffic_verified_at: "100", traffic_observed_at: 120},
+    {traffic_verified_at: -1, traffic_observed_at: 120},
+    {traffic_verified_at: 100.5, traffic_observed_at: 120},
+    {traffic_observed_at: Infinity}, {traffic_observed_at: 253402300800},
+    {service_active: "false"},
+  ]) assert.throws(() => profileStatsSnapshot(withRow(row)), Error);
+});

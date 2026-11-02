@@ -61,7 +61,9 @@ def perform(api, payload, identity, *, resume_id=None):
             if profile.get('id') == 'cdn':
                 effective = direct_cdn_settings(settings, profile)
                 control.ensure_cdn(settings['relay_host_id'], effective['cdn_domain'], identity)
-    result = {**direct_result(control, protocol, settings, stored['result']), 'protocol': protocol}
+    native_result = stored.get('native_result', stored['result'])
+    stored['native_result'] = native_result
+    result = {**direct_result(control, protocol, settings, native_result), 'protocol': protocol}
     # Persist the download before reporting success. A lost response is a GET.
     stored.update(stage='ready', result=result)
     atomic_json(path, stored)
@@ -73,5 +75,11 @@ def read_result(api, identity):
         return {'state': 'pending'}
     stored = json.loads(path.read_text())
     if stored.get('stage') == 'ready':
+        # A persisted download must not outlive its configured Relay binding.
+        control = api.relay_control()
+        if not any(host['id'] == stored['settings']['relay_host_id'] for host in control.read()['hosts']):
+            if isinstance(stored.get('native_result'), dict):
+                return {'state': 'ready', 'result': {**stored['native_result'], 'protocol': stored['protocol']}}
+            raise ValueError('Требует внимания: Relay отключён; создайте прямую конфигурацию подключения')
         return {'state': 'ready', 'result': stored['result']}
     return {'state': 'pending', 'can_resume': stored.get('stage') == 'native-created'}

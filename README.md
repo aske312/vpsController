@@ -1,25 +1,14 @@
 # 312node.net PRO
 
-312node.net PRO — self-hosted панель управления Linux VPS для мониторинга сервера, управления защищёнными подключениями и настройки сетевых маршрутов.
-
-## Возможности
-
-- мониторинг ресурсов, сети, служб и событий безопасности;
-- WireGuard, AmneziaWG, Shadowsocks, VLESS, Hysteria2, TUIC, Trojan, OpenVPN и IKEv2;
-- создание конфигураций, ссылок и QR-кодов для клиентских устройств;
-- Mihomo, DNS-политики и маршрутизация трафика;
-- relay-маршруты и дополнительные средства защиты;
-- диагностика, обновление и восстановление приложения.
+Панель управления Linux VPS: мониторинг, защищённые подключения, DNS,
+маршрутизация и подписки Mihomo. Поддерживает WireGuard, AmneziaWG, Shadowsocks,
+Xray, Hysteria2, TUIC, OpenVPN и IKEv2.
 
 ## Требования
 
 - Ubuntu Server 22.04, 24.04, 26.04 или Debian 12/13;
-- архитектура `amd64` или `arm64` и systemd;
-- от 1 ГБ оперативной памяти и 5 ГБ свободного места;
-- root-доступ или пользователь с `sudo`;
-- доступ сервера к GitHub и системным репозиториям.
-
-Для новой установки рекомендуется Debian 13. Доступность отдельных протоколов зависит от ОС, архитектуры и ядра сервера и проверяется перед установкой модуля.
+- `amd64` или `arm64`, systemd, от 1 ГБ RAM и 5 ГБ свободного места;
+- root или `sudo`, доступ к GitHub и системным репозиториям.
 
 ## Установка
 
@@ -28,42 +17,32 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
   | sudo bash -s -- --edition pro
 ```
 
-Для работы панели по доменному имени заранее направьте A-запись на IPv4 сервера и откройте TCP-порты 80 и 443:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
-  | sudo bash -s -- --edition pro --domain vpn.example.com
-```
-
-После завершения установки в терминале будут показаны адрес панели и данные для входа. Повторно вывести их можно командой:
-
-```bash
-sudo vps-control credentials
-```
+Для доступа по домену добавьте `--domain vpn.example.com`. Заранее направьте
+A-запись на IP сервера и откройте TCP-порты 80 и 443.
+Адрес панели и данные для входа появятся после установки.
 
 ## Управление
 
 ```bash
-sudo vps-control status
-sudo vps-control restart
-sudo vps-control verify
-sudo vps-control update
+sudo vps-control credentials  # данные для входа
+sudo vps-control status       # состояние
+sudo vps-control verify       # проверка установки
+sudo vps-control update       # обновление
+sudo vps-control restart      # перезапуск
 ```
 
-## Удаление
-
-Команда удаляет панель, её настройки и данные. Установленные системные пакеты сохраняются.
+Удаление панели, настроек и данных:
 
 ```bash
 sudo vps-control uninstall --yes
 ```
 
-## Документы
+## Документация
 
 - [Подключение клиентских устройств](docs/CONNECTION_GUIDE.md)
-- [Уведомление о приватности](docs/PRIVACY_POLICY.md)
-- [Условия использования](docs/TERMS_OF_USE.md)
+- [Лимиты подписок](docs/SUBSCRIPTION_LIMITS.md)
+- [Диагностика Relay](docs/RELAY_DIAGNOSTICS.md)
+- [Восстановление настроек защиты](docs/SECURITY_RECOVERY.md)
+- [Приватность](docs/PRIVACY_POLICY.md) · [Условия использования](docs/TERMS_OF_USE.md)
 
-## Лицензия
-
-312node.net PRO распространяется по лицензии [MIT](LICENSE).
+Лицензия [MIT](LICENSE).

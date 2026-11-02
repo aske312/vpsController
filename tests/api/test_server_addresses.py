@@ -134,7 +134,7 @@ class ServerAddressesTests(unittest.TestCase):
         self.assertEqual(saved['server'],B); self.assertEqual(legacy['server'],A)
         self.assertEqual(original,{'port':1234,'method':'aes-128-gcm','password':'retained'})
 
-    def test_mihomo_checks_address_before_provisioning_and_preserves_all_export_formats(self):
+    def test_mihomo_checks_address_before_provisioning_and_preserves_yaml_endpoint(self):
         self.configure(B,'primary')
         self.found = {A:['ens3']}
         with patch.object(manager,'add_ss_credential') as provision:
@@ -142,12 +142,10 @@ class ServerAddressesTests(unittest.TestCase):
                 manager.provision('profile','transport-shadowsocks','new')
             self.assertEqual(raised.exception.status_code,409)
             provision.assert_not_called()
-        row={'id':'one','component':'transport-shadowsocks','name':'Saved','settings':{},'credential':{'server_address':B,'port':1234,'method':'aes-128-gcm','password':'retained'}}
-        dns={'nameserver':'1.1.1.1','fallback':'8.8.8.8'}
-        singbox=manager.build_singbox_config([row],{},dns,[],C,lambda:{},None)
-        xray=manager.build_xray_configs([row],{},dns,[],C,lambda:{})
-        self.assertEqual(singbox['outbounds'][0]['server'],B)
-        self.assertEqual(xray[0]['outbounds'][0]['settings']['servers'][0]['address'],B)
+        import yaml
+        credential={'server_address':B,'port':1234,'method':'aes-128-gcm','password':'retained'}
+        proxy=yaml.safe_load('proxies:\n'+'\n'.join(manager.render_proxy('transport-shadowsocks',credential,'Saved')))['proxies'][0]
+        self.assertEqual((proxy['server'],proxy['password']),(B,'retained'))
 
     def test_new_wg_awg_exports_use_primary_without_rewriting_existing_clients(self):
         import ipaddress
@@ -181,16 +179,8 @@ class ServerAddressesTests(unittest.TestCase):
             self.assertEqual(api.new_client_endpoint(''),A)
         self.assertIn(B,api.relay_origin_hosts())
 
-    def test_saved_reality_ip_does_not_replace_tls_identity_in_any_export(self):
+    def test_saved_reality_ip_does_not_replace_tls_identity_in_yaml_export(self):
         import yaml
         credential={'server_address':B,'port':1234,'uuid':'00000000-0000-4000-8000-000000000001','direct_tag':'owned','transport':'raw','servername':'cover.example','public_key':'public-key','short_id':'0123456789abcdef'}
-        row={'id':'one','name':'Saved','component':'transport-reality','settings':{'route_mode':'direct'},'credential':credential}
-        dns={'nameserver':'1.1.1.1','fallback':'8.8.8.8'}
         proxy=yaml.safe_load('proxies:\n'+'\n'.join(manager.render_proxy('transport-reality',credential,'test')))['proxies'][0]
         self.assertEqual((proxy['server'],proxy['servername']),(B,'cover.example'))
-        config=manager.build_singbox_config([row],{},dns,[],C,lambda:{},None)
-        node=config['outbounds'][0]
-        self.assertEqual((node['server'],node['tls']['server_name']),(B,'cover.example'))
-        node=manager.build_xray_configs([row],{},dns,[],C,lambda:{})[0]['outbounds'][0]
-        self.assertEqual(node['settings']['vnext'][0]['address'],B)
-        self.assertEqual(node['streamSettings']['realitySettings']['serverName'],'cover.example')

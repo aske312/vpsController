@@ -1,5 +1,6 @@
 """Real TLS/DoH through an observable local proxy, without public DNS or TUN."""
 import base64
+import http.client
 import http.server
 import os
 from pathlib import Path
@@ -79,8 +80,7 @@ class DohLab(DnsLab):
             return f'https://{host}:{self.https[name].server_address[1]}/dns-query'
         return super().resolver(name, host)
 
-    def configure(self, config, engine):
-        assert engine == 'mihomo'
+    def configure(self, config):
         # This is the spelling accepted by Mihomo 1.19.31. Trust only the lab CA;
         # keep normal certificate and hostname verification enabled.
         config['tls'] = {'custom-certifactes': [self.cert.read_text()]}
@@ -102,6 +102,7 @@ class WebHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.send_response(200)
+        self.send_header('Content-Length', str(len(b'local-route-ok')))
         self.end_headers()
         self.wfile.write(b'local-route-ok')
 
@@ -118,7 +119,7 @@ class RouteDnsDohTests(unittest.TestCase):
             lab.fake_ip = True
             for server in lab.https.values():
                 server.answer = '127.0.0.1'
-            with core(lab, 'mihomo') as port:
+            with core(lab) as port:
                 for domain in ('fake.direct.test', 'fake.proxy.test'):
                     with self.subTest(domain=domain):
                         address = query(port, domain)[1]
@@ -130,10 +131,12 @@ class RouteDnsDohTests(unittest.TestCase):
                             reply = read_exact(client, 10)
                             self.assertEqual(reply[1], 0)
                             client.sendall(b'GET / HTTP/1.0\r\nHost: local.test\r\n\r\n')
-                            result = b''
-                            while chunk := client.recv(4096):
-                                result += chunk
-                            self.assertIn(b'local-route-ok', result)
+                            # A proxy may keep TCP open after the complete HTTP
+                            # response. Verify HTTP framing rather than TCP EOF.
+                            with http.client.HTTPResponse(client) as response:
+                                response.begin()
+                                self.assertEqual(response.status, 200)
+                                self.assertEqual(response.read(), b'local-route-ok')
                         if domain == 'fake.direct.test':
                             self.assertIn(domain, lab.https['direct'].queries)
                         else:
@@ -148,7 +151,7 @@ class RouteDnsDohTests(unittest.TestCase):
 
     def test_mihomo_https_paths_fallback_and_tunnel_failure(self):
         with DohLab() as lab:
-            with core(lab, 'mihomo') as port:
+            with core(lab) as port:
                 self.assertEqual(query(port, 'secure.direct.test')[1], '198.51.100.11')
                 self.assertIn('secure.direct.test', lab.https['direct'].queries)
                 self.assertIn(query(port, 'secure.proxy.test')[1], ('198.51.100.21', '198.51.100.22'))
@@ -171,7 +174,7 @@ class RouteDnsDohTests(unittest.TestCase):
                 self.assertNotIn('both-failed.proxy.test', lab.https['direct'].queries)
                 for server in lab.servers.values():
                     self.assertNotIn('both-failed.proxy.test', server.queries)
-            with core(lab, 'mihomo', vpn_down=True) as port:
+            with core(lab, vpn_down=True) as port:
                 self.assertEqual(query(port, 'disconnected.direct.test')[1], '198.51.100.11')
                 try:
                     self.assertIsNone(query(port, 'disconnected.proxy.test', timeout=5)[1])

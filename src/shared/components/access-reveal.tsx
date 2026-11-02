@@ -3,7 +3,7 @@
 import { useId, useState, type ReactNode } from "react";
 
 export function AccessReveal({ children }: { children: ReactNode }) {
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(true);
   const id = useId();
   return <div className="accessReveal">
     <p>QR-код содержит данные доступа. Показывайте его только владельцу устройства.</p>
