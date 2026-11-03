@@ -4685,19 +4685,24 @@ def refresh_application_version_cache() -> None:
     try:
         current = installed_build_commit()
         branch = expected_application_branch()
+        release_tag = "pro-test-latest" if branch == "test-pro" else "pro-latest"
         repository = application_repository_url()
         latest = ""
         error = ""
         if not repository:
             error = "Источник обновлений не настроен"
         else:
-            output = run("git", "ls-remote", repository, f"refs/heads/{branch}", timeout=15)
-            latest = output.split()[0] if output else ""
+            reference = f"refs/tags/{release_tag}"
+            output = run("git", "ls-remote", repository, reference, reference + "^{}", timeout=15)
+            revisions = {parts[1]: parts[0] for line in output.splitlines()
+                         if len(parts := line.split()) == 2 and re.fullmatch(r"[0-9a-f]{40}", parts[0])}
+            latest = revisions.get(reference + "^{}", revisions.get(reference, ""))
             if not latest:
-                error = f"Не удалось проверить ветку {branch}"
+                error = f"Не удалось проверить опубликованный релиз {release_tag}"
         current_known = bool(current and current != "unknown")
         status = {
             "branch": branch,
+            "release_tag": release_tag,
             "current_commit": current,
             "latest_commit": latest[:12],
             "outdated": (not latest.startswith(current)) if latest and current_known else None,
@@ -4727,8 +4732,10 @@ def application_version_status() -> dict:
             or cached.get("checked_at") is not None and not isinstance(cached["checked_at"], str)):
         cached = {}
     expected_branch = expected_application_branch()
+    expected_release_tag = "pro-test-latest" if expected_branch == "test-pro" else "pro-latest"
     installed_commit = installed_build_commit()
-    if cached.get("branch") != expected_branch or cached.get("current_commit") != installed_commit:
+    if (cached.get("branch") != expected_branch or cached.get("current_commit") != installed_commit
+            or cached.get("release_tag") != expected_release_tag):
         cached = {}  # A comparison for another installation cannot describe this one.
     refreshing = not cached or not 0 <= age <= 600
     if refreshing and not app_version_refresh_lock.locked():

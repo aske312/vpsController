@@ -14,10 +14,11 @@ class ApplicationVersionStatusTests(unittest.TestCase):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.cache = self.root / 'version.json'
         self.enterContext(patch.object(api, 'APP_VERSION_FILE', self.cache))
+        self.enterContext(patch.object(api, 'DATA_DIR', self.root))
         self.enterContext(patch.object(api, 'installed_build_commit', return_value='b' * 40))
         self.enterContext(patch.object(api, 'expected_application_branch', return_value='test-pro'))
         self.thread = self.enterContext(patch.object(api.threading, 'Thread'))
-        self.valid = {'branch': 'test-pro', 'current_commit': 'b' * 40, 'latest_commit': 'b' * 12,
+        self.valid = {'branch': 'test-pro', 'release_tag': 'pro-test-latest', 'current_commit': 'b' * 40, 'latest_commit': 'b' * 12,
                       'outdated': False, 'checked_at': '2026-10-29T12:00:00+00:00', 'error': ''}
 
     def test_installed_identity_is_current_while_obsolete_comparison_refreshes(self):
@@ -51,3 +52,34 @@ class ApplicationVersionStatusTests(unittest.TestCase):
         self.assertFalse(value['refreshing'])
         self.assertIs(value['outdated'], False)
         self.thread.return_value.start.assert_not_called()
+
+    def test_unreleased_branch_commits_do_not_advertise_an_update(self):
+        output = 'a' * 40 + '\trefs/heads/test-pro\n' + 'b' * 40 + '\trefs/tags/pro-test-latest\n'
+        with patch.object(api, 'application_repository_url', return_value='https://example.invalid/repo.git'), patch.object(api, 'run', return_value=output) as run:
+            api.refresh_application_version_cache()
+        value = json.loads(self.cache.read_text())
+        self.assertIs(value['outdated'], False)
+        self.assertEqual(value['latest_commit'], 'b' * 12)
+        self.assertNotIn('refs/heads/test-pro', run.call_args.args)
+
+    def test_annotated_release_uses_commit_not_tag_object(self):
+        output = 'a' * 40 + '\trefs/tags/pro-test-latest\n' + 'c' * 40 + '\trefs/tags/pro-test-latest^{}\n'
+        with patch.object(api, 'application_repository_url', return_value='https://example.invalid/repo.git'), patch.object(api, 'run', return_value=output):
+            api.refresh_application_version_cache()
+        value = json.loads(self.cache.read_text())
+        self.assertIs(value['outdated'], True)
+        self.assertEqual(value['latest_commit'], 'c' * 12)
+
+    def test_missing_release_remains_unknown_even_if_branch_exists(self):
+        with patch.object(api, 'application_repository_url', return_value='https://example.invalid/repo.git'), patch.object(api, 'run', return_value='a' * 40 + '\trefs/heads/test-pro\n'):
+            api.refresh_application_version_cache()
+        value = json.loads(self.cache.read_text())
+        self.assertIsNone(value['outdated'])
+        self.assertTrue(value['error'])
+
+    def test_old_branch_based_cache_is_not_reused(self):
+        value = {k: v for k, v in self.valid.items() if k != 'release_tag'}
+        self.cache.write_text(json.dumps(value))
+        result = api.application_version_status()
+        self.assertTrue(result['refreshing'])
+        self.assertIsNone(result['outdated'])

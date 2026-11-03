@@ -2987,7 +2987,7 @@ install_prebuilt_release() {
 update_prebuilt_branch() {
   local branch="$1" release_tag="$2" expected_channel="${3:-production}" preserve_previous="${4:-no}"
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
-  local latest current current_channel repository_path release_url archive release_commit release_revision ready attempt
+  local latest current current_channel repository_path release_url archive release_commit ready attempt
 
   if [[ "${remote}" =~ ^git@github\.com:(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
@@ -3001,32 +3001,28 @@ update_prebuilt_branch() {
     [[ "${expected_channel}" == "production" && "${branch}" == "${PRODUCTION_BRANCH}" && "${release_tag}" == "${PRODUCTION_RELEASE_TAG}" ]] \
       || die "production-релиз разрешён только из ветки ${PRODUCTION_BRANCH}."
   fi
-  latest="$(git ls-remote "${remote}" "refs/heads/${branch}" 2>/dev/null | awk 'NR == 1 {print $1}')"
-  [[ "${latest}" =~ ^[0-9a-f]{40}$ ]] || die "не удалось получить актуальную ревизию ветки ${branch}."
   current="$(cat "${INSTALL_DIR}/.build-commit" 2>/dev/null || true)"
   current_channel="$(release_metadata_value "${INSTALL_DIR}/.prebuilt-release" channel 2>/dev/null || true)"
-  if [[ -n "${current}" && "${latest}" == "${current}" && "${current_channel}" == "${expected_channel}" ]]; then
-    ok "установлена актуальная версия ветки ${branch} (${current})."
-    return 0
-  fi
 
   ready="no"
   for attempt in $(seq 1 "${STABL_RELEASE_WAIT_ATTEMPTS}"); do
-    release_revision="$(git ls-remote "${remote}" "refs/tags/${release_tag}^{}" 2>/dev/null | awk 'NR == 1 {print $1}')"
-    if [[ -z "${release_revision}" ]]; then
-      release_revision="$(git ls-remote "${remote}" "refs/tags/${release_tag}" 2>/dev/null | awk 'NR == 1 {print $1}')"
-    fi
-    if [[ "${release_revision}" == "${latest}" ]]; then
+    latest="$(git ls-remote "${remote}" "refs/tags/${release_tag}" "refs/tags/${release_tag}^{}" 2>/dev/null \
+      | awk -v ref="refs/tags/${release_tag}" '$2 == ref {direct=$1} $2 == ref "^{}" {peeled=$1} END {print peeled ? peeled : direct}')"
+    if [[ "${latest}" =~ ^[0-9a-f]{40}$ ]]; then
       ready="yes"
       break
     fi
     if (( attempt == 1 || attempt % 6 == 0 )); then
-      info "Релиз ${branch} ${latest:0:7} ещё не опубликован; ожидание готового архива (статус сборки — в GitHub Actions)"
+      info "Релиз канала ${branch} ещё не опубликован; ожидание готового архива (статус сборки — в GitHub Actions)"
     fi
     sleep 10
   done
   [[ "${ready}" == "yes" ]] \
-    || die "релиз для актуальной версии ${branch} не опубликован; проверьте GitHub Actions."
+    || die "релиз канала ${branch} не опубликован; проверьте GitHub Actions."
+  if [[ -n "${current}" && "${latest}" == "${current}" && "${current_channel}" == "${expected_channel}" ]]; then
+    ok "установлен актуальный опубликованный релиз канала ${branch} (${current})."
+    return 0
+  fi
 
   release_url="${APP_RELEASE_URL:-}"
   if [[ -z "${release_url}" && "${remote}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
@@ -3045,7 +3041,7 @@ update_prebuilt_branch() {
   release_commit="$(tar -xOf "${archive}" vps-control-release/.prebuilt-release 2>/dev/null \
     | awk -F= '$1 == "commit" {print $2}')"
   [[ "${release_commit}" =~ ^[0-9a-f]{40}$ && "${latest}" == "${release_commit}" ]] \
-    || die "подготовленный релиз не соответствует актуальной ревизии ветки ${branch}."
+    || die "подготовленный архив не соответствует опубликованному релизу канала ${branch}."
 
   install_prebuilt_release install-release "${archive}" "${preserve_previous}" "${expected_channel}"
   ok "приложение обновлено до ${branch} ${release_commit}."

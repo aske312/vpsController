@@ -61,7 +61,7 @@ class TestReleaseSelectionTests(unittest.TestCase):
                 "TEST_BRANCH=test-pro; TEST_RELEASE_TAG=pro-test-latest; PRODUCTION_BRANCH=pro; PRODUCTION_RELEASE_TAG=pro-latest; PRODUCT_EDITION=pro",
                 "STABL_RELEASE_WAIT_ATTEMPTS=1; UPDATE_DOWNLOAD_TIMEOUT=5; APP_RELEASE_URL=https://example.invalid/release",
                 "die() { echo \"$*\" >&2; exit 17; }; ok() { :; }; info() { :; }",
-                "git() { printf '%040d\\n' 0 | tr 0 a; }; system_architecture() { echo amd64; }",
+                "git() { printf '%s\\t%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \"${@: -1}\"; }; system_architecture() { echo amd64; }",
                 "install() { :; }; python3() { :; }; mktemp() { echo .; }; curl() { :; }",
                 "tar() { echo commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }",
                 "write_action_status() { :; }; install_prebuilt_release() { printf 'INSTALL %s %s %s\\n' \"$1\" \"$3\" \"$4\"; }",
@@ -95,3 +95,33 @@ class TestReleaseSelectionTests(unittest.TestCase):
         result = self.run_shell("update_test_app test-update /tmp/local.tar.gz")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("INSTALL install-release yes test", result.stdout)
+
+    def test_unreleased_branch_head_does_not_wait_or_install(self):
+        body = '''
+git() {
+  case "$*" in *refs/heads/*) printf '%s\\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; return;; esac
+  printf '%s\\t%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "${@: -1}"
+}
+sleep() { echo UNEXPECTED_WAIT; exit 23; }
+update_prebuilt_branch pro pro-latest
+'''
+        result = self.run_shell(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('UNEXPECTED_WAIT', result.stdout)
+        self.assertNotIn('INSTALL', result.stdout)
+
+    def test_published_archive_is_checked_against_release_not_branch_head(self):
+        body = '''
+git() {
+  case "$*" in *refs/heads/*) printf '%s\\n' cccccccccccccccccccccccccccccccccccccccc; return;; esac
+  printf '%s\\t%s\\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb "${@: -1}"
+}
+tar() { echo commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; }
+update_prebuilt_branch pro pro-latest
+'''
+        result = self.run_shell(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('INSTALL install-release no production', result.stdout)
+        result = self.run_shell(body.replace('tar() { echo commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; }', ''))
+        self.assertEqual(result.returncode, 17, result.stderr)
+        self.assertNotIn('INSTALL', result.stdout)
