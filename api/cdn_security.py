@@ -165,7 +165,13 @@ def render_routes(routes: list[dict], policy: dict | None = None, protected: boo
                 # request is rejected. A successful CDN probe must traverse it.
                 allowed = ' '.join(allowed_relay) if allowed_relay else ranges
                 lines += [f"                @outsideCF{index} not remote_ip {allowed}", f"                respond @outsideCF{index} 403"]
-            lines += [f"                reverse_proxy {upstream}", "            }", "        }"]
+            # A stalled WebSocket can block its best-effort close frame during
+            # handler cleanup. Defer stream cleanup so reload can acknowledge
+            # the new config without waiting on that peer, and keep existing
+            # tunnels alive while clients adopt the updated profile.
+            lines += [f"                reverse_proxy {upstream} {{",
+                      "                    stream_close_delay 5m",
+                      "                }", "            }", "        }"]
         lines += ["        respond 404", "    }", "}"]
     return "\n".join(lines) + ("\n" if lines else "")
 

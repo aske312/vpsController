@@ -88,6 +88,15 @@ class ProfileModeProtocolMatrixTests(unittest.TestCase):
     def test_all_connections_survive_capture_scope_dns_and_strategy_changes(self):
         self.assertEqual(sum(1 for _ in self.configs()), 32)
 
+    def test_tls_exports_keep_protocol_specific_server_identity(self):
+        config = yaml.safe_load(manager.render_profile(connection_fixture()))
+        for node in config['proxies']:
+            if node['type'] not in ('vless', 'vmess', 'trojan') or not node.get('tls'):
+                continue
+            with self.subTest(type=node['type'], network=node.get('network')):
+                identity_key = 'sni' if node['type'] == 'trojan' else 'servername'
+                self.assertEqual(node[identity_key], 'example.com')
+
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires real Mihomo')
     def test_real_core_accepts_every_mode_with_all_connection_types(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -4888,7 +4888,7 @@ def _render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         f"    uuid: {q(credential['uuid'])}",
         "    udp: true",
         "    tls: true",
-        f"    servername: {q(credential['cdn_domain'])}",
+        f"    {'sni' if kind == 'trojan' else 'servername'}: {q(credential['cdn_domain'])}",
         f"    client-fingerprint: {q(credential.get('fingerprint', 'chrome'))}",
         f"    network: {'ws' if transport in {'websocket', 'httpupgrade'} else transport}",
     ]

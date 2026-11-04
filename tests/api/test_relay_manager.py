@@ -82,7 +82,8 @@ class RelayManagementTests(unittest.TestCase):
                     original = copy.deepcopy(connection)
                     lines = relay_connections.redirect_mihomo_lines(self.control, 'transport-reality', settings, manager.render_vless_cdn(credential, 'CDN'))
                     proxy = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
-                    self.assertEqual((proxy['server'],proxy['port'],proxy['servername']), (AGENT,port,'cdn.example'))
+                    tls_identity = proxy['sni' if kind == 'trojan' else 'servername']
+                    self.assertEqual((proxy['server'],proxy['port'],tls_identity), (AGENT,port,'cdn.example'))
                     self.assertEqual(proxy['type'], kind)
                     self.assertEqual(connection,original)
 
