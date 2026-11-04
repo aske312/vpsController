@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Module, ProfileConnection } from "./types";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { connectionAppearance, type ConnectionAppearance } from "./connection-status";
+import { isRelayOriginTls } from "./connection-address";
 
 function connectionLabel(connection: ProfileConnection, modules: Module[]) {
   const settings = connection.settings;
@@ -9,7 +10,7 @@ function connectionLabel(connection: ProfileConnection, modules: Module[]) {
   if (connection.component !== "transport-reality") return `${modules.find(module => module.id === connection.component)?.name || connection.component.replace("transport-", "")} · ${settings.relay_host_id ? "Relay" : "Прямое"}`;
   const protocol = ({ vless: "VLESS", vmess: "VMess", trojan: "Trojan" } as Record<string, string>)[String(settings.xray_protocol || "vless")] || "Xray";
   const transport = String(settings[mode === "cdn" ? "cdn_transport" : mode === "tls" ? "tls_transport" : "transport"] || "");
-  return [protocol, mode === "cdn" ? "CDN" : mode === "tls" ? "TLS" : mode === "both" ? "REALITY + CDN" : "REALITY", transport.toUpperCase(), settings.relay_host_id ? "Relay" : ""].filter(Boolean).join(" · ");
+  return [protocol, isRelayOriginTls(settings) ? "TLS" : mode === "cdn" ? "CDN" : mode === "tls" ? "TLS" : mode === "both" ? "REALITY + CDN" : "REALITY", transport.toUpperCase(), settings.relay_host_id ? "Relay" : ""].filter(Boolean).join(" · ");
 }
 
 export function ConnectionOrderNav({ connections, modules, selectedId, disabled, onSelect, onReorder, states }: {

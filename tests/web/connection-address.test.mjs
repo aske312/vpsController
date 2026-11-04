@@ -1,8 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyConnectionAddress, connectionAddressModes, xrayProtocolSettings } from '../../src/features/mihomo/connection-address.ts';
+import { applyConnectionAddress, connectionAddressModes, isRelayOriginTls, relayOriginTlsSettings, xrayProtocolSettings } from '../../src/features/mihomo/connection-address.ts';
 
 const connection = (id, component, settings = {}, device_id = 'phone') => ({ id, component, device_id, name: id, settings });
+
+test('origin TLS Relay selection keeps protocol options and can be copied between Xray protocols', () => {
+  const base = {xray_protocol:'vmess',route_mode:'cdn',cdn_transport:'websocket',cdn_xhttp_mode:'packet-up',relay_cdn:true};
+  const settings = relayOriginTlsSettings(base,'cert.example','relay-id','relay.example');
+  assert.equal(isRelayOriginTls(settings),true);
+  assert.equal(settings.cdn_domain,'cert.example');
+  assert.equal(settings.relay_host_id,'relay-id');
+  assert.equal(settings.relay_address,'relay.example');
+  assert.equal(settings.cdn_transport,base.cdn_transport);
+  assert.equal(settings.cdn_xhttp_mode,base.cdn_xhttp_mode);
+  assert.equal(base.relay_cdn,true);
+  assert.equal(isRelayOriginTls({...settings,relay_cdn:true}),false);
+  const source=connection('source','transport-reality',settings);
+  const target=connection('target','transport-reality',{xray_protocol:'trojan',cdn_transport:'grpc',relay_cdn:true});
+  const result=applyConnectionAddress([target],source)[0];
+  assert.equal(result.settings.xray_protocol,'trojan');
+  assert.equal(result.settings.cdn_transport,'grpc');
+  assert.equal(result.settings.cdn_domain,'cert.example');
+  assert.equal(isRelayOriginTls(result.settings),true);
+});
 
 test('Xray protocol selection retains transport options and uses compatible modes', () => {
   const settings = {route_mode:'direct', port:12000, target:'sni.example:443', transport:'xhttp', xpadding:'100-200',

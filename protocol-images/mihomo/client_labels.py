@@ -26,7 +26,8 @@ def _protocol_label(connection, index, variant, direct_settings):
         security = "REALITY"
     else:
         transport = credential.get(f"{variant}_transport", "websocket" if variant == "cdn" else "xhttp")
-        security = "TLS · CDN" if variant == "cdn" else "TLS"
+        origin_relay = connection.get("settings", {}).get("relay_host_id") and connection.get("settings", {}).get("relay_cdn") is not True
+        security = "TLS · CDN" if variant == "cdn" and not origin_relay else "TLS"
     transport = {"tcp": "TCP", "raw": "TCP", "websocket": "WebSocket", "grpc": "gRPC", "xhttp": "XHTTP", "httpupgrade": "HTTPUpgrade"}.get(transport, transport)
     name = {'vless': 'VLESS', 'vmess': 'VMess', 'trojan': 'Trojan'}[xray_protocols.protocol(credential)]
     return f"{index} · {name} · {transport} · {security}"

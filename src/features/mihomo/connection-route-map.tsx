@@ -1,5 +1,5 @@
 import type { RelayHost, RelayStatus } from "../network/relay-state";
-import { connectionAddressModes } from "./connection-address";
+import { connectionAddressModes, isRelayOriginTls } from "./connection-address";
 import type { ProfileConnection } from "./types";
 
 type HopKind = "client" | "relay" | "cdn" | "vps" | "internet";
@@ -25,7 +25,7 @@ export function profileConnectionRoute(connection: ProfileConnection, inventory:
   const transports = connection.component === "transport-shadowsocks" ? ["tcp", "udp"] : modes.udp ? ["udp"] : ["tcp"];
   const cdnRelay = mode === "cdn" && settings.relay_cdn === true;
   const afterCdn = cdnRelay && settings.relay_cdn_mode !== "before_cdn";
-  return { mode, originAddress: origin, originPort: port, domain,
+  return { mode: modes.tls && isRelayOriginTls(settings) ? "tls" : mode, originAddress: origin, originPort: port, domain,
     ...(relay ? { relay: { address, port: relayListenPort(host, inventory.status?.origin_ip, port, transports, cdnRelay && !afterCdn ? domain : undefined), afterCdn } } : {}) };
 }
 

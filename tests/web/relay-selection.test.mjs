@@ -76,6 +76,19 @@ test('Mihomo offers Relay before CDN and retains saved legacy choices', () => {
   assert.match(saved, /сохранённый адрес/);
 });
 
+test('origin TLS can be selected without a separate TLS domain and its route bypasses CDN', () => {
+  const settings={xray_protocol:'vmess',route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_address:'relay.example',relay_cdn:false};
+  const route=profileConnectionRoute({component:'transport-reality',settings},{status:{hosts:[host],origin_ip:'203.0.113.10'}});
+  assert.equal(route.mode,'tls');
+  assert.equal(route.domain,'origin-cdn.example');
+  assert.equal(route.relay.address,'relay.example');
+  const html=mihomoAddress('transport-reality',settings,{tlsDomains:[]});
+  assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>TLS через Relay<\/button>/);
+  assert.match(html,/aria-label="TLS-имя сервиса VPS через Relay"/);
+  assert.match(html,/Клиент → Relay[^;]* → VPS/);
+  assert.doesNotMatch(html,/aria-label="Вход в CDN"|→ CDN/);
+});
+
 test('legacy CDN Relay stays explicit and can be moved before CDN', () => {
   const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_cdn:true});
   assert.match(html, /origin-cdn.example.*selected=""/);

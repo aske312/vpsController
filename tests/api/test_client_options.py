@@ -83,6 +83,7 @@ class ClientOptionsTests(unittest.TestCase):
                     connection.update(_relay_name='North')
                     self.assertEqual(manager.connection_label(connection, 1, variant), original)
                     connection['settings']['relay_host_id'] = 'a'*32
+                    connection['settings']['relay_cdn'] = variant == 'cdn'
                     self.assertEqual(manager.connection_label(connection, 1, variant), original + ' · Relay: North')
 
     def test_manual_device_settings_survive_input_and_normalization(self):

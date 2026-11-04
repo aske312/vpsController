@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { relayAddresses, type RelayStatus } from "../network/relay-state";
-import { connectionAddressModes, xrayProtocolSettings } from "./connection-address";
+import { connectionAddressModes, isRelayOriginTls, relayOriginTlsSettings, xrayProtocolSettings } from "./connection-address";
 import type { ProfileConnection } from "./types";
 
 /** Protocol mode and the address of the next hop are independent choices. */
@@ -21,6 +21,7 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
   const mode = modes.tls ? String(settings.route_mode || (settings.cdn_enabled ? "both" : "direct")) : modes.udp ? "udp" : "direct";
   const relay = String(settings.relay_host_id || "");
   const cdnRelay = mode === "cdn" && settings.relay_cdn === true;
+  const originTls = modes.tls && isRelayOriginTls(settings);
   const legacyCdnRelay = cdnRelay && settings.relay_cdn_mode !== "before_cdn";
   const tlsDomain = String(settings.tls_domain || "");
   const domain = String(mode === "tls" ? tlsDomain : mode === "cdn" || mode === "both" ? settings.cdn_domain || "" : mode === "udp" ? settings.udp_domain || "" : "");
@@ -32,7 +33,7 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
   const savedHost = inventory.status?.hosts.find(host => host.id === relay);
   const relayAddress = String(settings.relay_address || savedHost?.client_address || (savedHost ? new URL(savedHost.agent_url).hostname.replace(/^\[|\]$/g, "") : ""));
   const selected = relay && !cdnRelay ? JSON.stringify(["relay", relay, relayAddress]) : domain ? JSON.stringify(["direct", domain]) : "";
-  const canRelay = modes.relay && mode !== "cdn" && mode !== "both";
+  const canRelay = modes.relay && (originTls || mode !== "cdn" && mode !== "both");
   const savedOnly = Boolean(relay && !cdnRelay && (!canRelay || !choices.some(choice => choice.key === selected)));
   const locked = disabled || !supported;
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase());
@@ -58,7 +59,11 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
         {xrayProtocol === "vless" && <button type="button" aria-pressed={mode === "direct"} disabled={locked} onClick={() => selectMode("direct")}>REALITY</button>}
         {webTransports.length > 0 && <>
           <button type="button" aria-pressed={mode === "tls"} disabled={locked || !tlsServices.length} onClick={() => selectMode("tls")}>TLS</button>
-          <button type="button" aria-pressed={mode === "cdn"} disabled={locked || !cdnDomains.length && !settings.cdn_domain} onClick={() => selectMode("cdn")}>CDN</button>
+          <button type="button" aria-pressed={mode === "cdn" && !originTls} disabled={locked || !cdnDomains.length && !settings.cdn_domain} onClick={() => selectMode("cdn")}>CDN</button>
+          <button type="button" aria-pressed={originTls} disabled={locked || !choices.length || !cdnDomains.length && !settings.cdn_domain} onClick={() => {
+            const choice = choices.find(item => item.host.id === relay && item.address === relayAddress) || choices[0];
+            if (choice) onChange(relayOriginTlsSettings(settings, String(settings.cdn_domain || cdnDomains[0] || ""), choice.host.id, choice.address));
+          }}>TLS через Relay</button>
         </>}
     </span></>}
     <label className="mihomoConnectionEndpoint"><span>Адрес</span><select aria-label="Адрес подключения" value={selected} disabled={locked} onChange={event => {
@@ -72,13 +77,13 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
     }}>
       {(mode === "direct" || mode === "udp") && <option value="">IP этого VPS · напрямую</option>}
       {savedOnly && <option value={selected}>{relayAddress || "Сохранённый Relay"} · через Relay · сохранённый адрес</option>}
-      {domains.filter(item => selected === JSON.stringify(["direct", item]) || matches(item)).map(item => <option key={item} value={JSON.stringify(["direct", item])}>{item} · {cdnRelay ? `CDN через Relay · ${savedHost?.name || "сохранённый узел"}` : mode === "cdn" ? "CDN" : "напрямую"}</option>)}
+      {!originTls && domains.filter(item => selected === JSON.stringify(["direct", item]) || matches(item)).map(item => <option key={item} value={JSON.stringify(["direct", item])}>{item} · {cdnRelay ? `CDN через Relay · ${savedHost?.name || "сохранённый узел"}` : mode === "cdn" ? "CDN" : "напрямую"}</option>)}
       {canRelay && choices.filter(choice => choice.key === selected || matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.key} value={choice.key}>{choice.address} · через Relay · {choice.host.name}</option>)}
     </select></label>
     <button type="button" className="mihomoConnectionSearch" aria-label="Поиск адреса подключения" title="Найти адрес" aria-expanded={searchOpen} aria-controls={searchId} disabled={locked} onClick={() => { setSearchOpen(!searchOpen); setQuery(""); }}><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5" /><path d="m12 12 5 5" /></svg></button>
     </div>
     <input id={searchId} hidden={!searchOpen} type="search" aria-label="Поиск адреса подключения" placeholder="Поиск адреса…" value={query} onChange={event => setQuery(event.target.value)} disabled={locked} />
-    {mode === "cdn" && (webTransports.length > 0 || cdnRelay) && <><label><span>Вход в CDN</span><select aria-label="Вход в CDN" value={relay ? JSON.stringify(["relay", relay, relayAddress]) : ""} disabled={locked} onChange={event => {
+    {mode === "cdn" && !originTls && (webTransports.length > 0 || cdnRelay) && <><label><span>Вход в CDN</span><select aria-label="Вход в CDN" value={relay ? JSON.stringify(["relay", relay, relayAddress]) : ""} disabled={locked} onChange={event => {
       const choice = choices.find(item => item.key === event.target.value);
       change({ relay_host_id: choice?.host.id || "", relay_address: choice?.address || "", relay_cdn: Boolean(choice), relay_cdn_mode: "before_cdn" });
     }}>
@@ -91,8 +96,9 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
       <small>Для перехода направьте CDN на VPS и уберите прежние Origin Rules этого подключения.</small>
     </>}</>}
     {mode === "tls" && relay && <><label><span>TLS-сервис VPS</span><select aria-label="TLS-сервис основного VPS" value={tlsDomain} disabled={locked} onChange={event => change({ tls_domain: event.target.value })}>{tlsServices.map(item => <option key={item} value={item}>{item}</option>)}</select></label><small>Имя TLS-сервиса сохраняется для SNI и проверки сертификата; подключение идёт на адрес Relay.</small></>}
+    {originTls && <><label><span>TLS-имя сервиса VPS</span><select aria-label="TLS-имя сервиса VPS через Relay" value={String(settings.cdn_domain || "")} disabled={locked} onChange={event => change({ cdn_domain: event.target.value })}>{domains.map(item => <option key={item} value={item}>{item}</option>)}</select></label><small>Клиент подключается к Relay, который передаёт TLS на основной VPS. Выбранное имя используется для сертификата; CDN не участвует. При включённой CDN-защите используйте отдельный TLS-домен или маршрут через CDN.</small></>}
     {savedOnly && <small>Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес.</small>}
-    {modes.tls && webTransports.length > 0 && !tlsServices.length && <small>Для TLS через Relay сначала добавьте рабочий TLS-домен основного VPS в Сеть → ROUTES.</small>}
+    {modes.tls && webTransports.length > 0 && !tlsServices.length && !originTls && <small>Для отдельного TLS-сервиса сначала добавьте TLS-домен основного VPS в Сеть → ROUTES.</small>}
     {canRelay && (inventory.failed || !inventory.status) && <small>{inventory.failed ? "Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." : "Обновляем адреса подключённых Relay…"}</small>}
   </div>;
 }

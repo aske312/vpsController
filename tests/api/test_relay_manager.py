@@ -65,6 +65,31 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
+    def test_origin_tls_relay_cannot_bypass_active_cdn_protection(self):
+        settings={'relay_host_id':self.host_id,'route_mode':'cdn','cdn_domain':'cdn.example','relay_cdn':False,'xray_protocol':'vmess'}
+        with patch.object(manager,'SUBMODULE_ROOT',ROOT/'protocol-images/mihomo/modules'), patch.object(manager,'module_is_installed',return_value=True), patch.object(manager,'module_is_ready',return_value=True), patch.object(manager,'relay_connection_control',return_value=self.control):
+            for policy,mode in (({'authenticated_origin_pulls':True},'external'), ({'authenticated_origin_pulls':False},'vpn')):
+                with self.subTest(policy=policy,mode=mode), patch.object(manager.cdn_security,'settings',return_value=policy), patch.object(manager.cdn_security,'read_env',return_value={'ACCESS_MODE':mode}):
+                    with self.assertRaises(manager.HTTPException) as error:
+                        manager.validate_connection('transport-reality',settings)
+                    self.assertEqual(error.exception.status_code,409)
+            with patch.object(manager.cdn_security,'settings',return_value={'authenticated_origin_pulls':False}), patch.object(manager.cdn_security,'read_env',return_value={'ACCESS_MODE':'external'}), patch.object(manager,'mihomo_route_endpoint_selectable',return_value=True):
+                selected=manager.validate_connection('transport-reality',settings)
+                self.assertEqual(selected['relay_host_id'],self.host_id)
+                self.assertEqual(selected['cdn_domain'],'cdn.example')
+                self.assertFalse(selected['relay_cdn'])
+
+    def test_origin_tls_export_keeps_sni_and_does_not_claim_cdn_delivery(self):
+        credential={'xray_protocol':'vmess','uuid':'fixture','cdn_enabled':True,'cdn_domain':'cdn.example','cdn_path':'/fixture','cdn_transport':'websocket'}
+        connection={'component':'transport-reality','settings':{'route_mode':'cdn','relay_host_id':self.host_id,'relay_cdn':False},'credential':credential,'_relay_name':'Relay'}
+        from client_labels import connection_label
+        self.assertNotIn('CDN',connection_label(connection,1,'cdn'))
+        self.control.ensure(self.host_id,[[('tcp',443)]],'c'*32)
+        lines=relay_connections.redirect_mihomo_lines(self.control,'transport-reality',connection['settings'],manager.render_vless_cdn(credential,'TLS'))
+        node=yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
+        self.assertEqual(node['server'],AGENT)
+        self.assertEqual(node['servername'],'cdn.example')
+
     def test_first_hop_cdn_keeps_protocol_transport_and_tls_in_yaml_export(self):
         for kind in ('vless', 'vmess', 'trojan'):
             for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):

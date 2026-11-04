@@ -3060,6 +3060,9 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
         raise HTTPException(status_code=422, detail='Некорректное положение Relay в цепочке CDN')
     if relay_cdn and (component != 'transport-reality' or not selected_relay or result.get('route_mode') != 'cdn' or result.get('cdn_transport', 'websocket') not in {'websocket', 'xhttp', 'grpc', 'httpupgrade'}):
         raise HTTPException(status_code=422, detail='CDN через Relay требует отдельного Xray CDN с транспортом WebSocket, XHTTP, gRPC или HTTPUpgrade')
+    if component == 'transport-reality' and selected_relay and result.get('route_mode') == 'cdn' and not relay_cdn and not allow_unverified_network_route:
+        if cdn_security.settings().get('authenticated_origin_pulls') or cdn_security.read_env(cdn_security.ENV).get('ACCESS_MODE') == 'vpn':
+            raise HTTPException(status_code=409, detail='CDN-защита запрещает прямой TLS через Relay к этому сервису. Выберите отдельный TLS-домен или Relay перед CDN.')
     # Derived from the authenticated agent inventory, never trust supplied ACLs.
     result.pop('cdn_relay_ips', None)
     if relay_cdn and result.get('relay_cdn_mode') != 'before_cdn':
