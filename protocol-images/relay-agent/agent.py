@@ -16,14 +16,16 @@ import time
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
 
-VERSION = '1.4.3'
+VERSION = '1.4.4'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
 PORT_MIN, PORT_MAX = 20000, 20999
 MAX_ROUTES, MAX_SESSIONS = 64, 128
 TCP_IDLE_TIMEOUT = 300
-UDP_RECEIVE_BUFFER = 1024 * 1024
+# Linux doubles this allocation. Keep room for concurrent sessions even on
+# hosts whose raised rmem_max would otherwise allow 2 MiB per upstream socket.
+UDP_RECEIVE_BUFFER = 256 * 1024
 
 
 class UDPReceiveBudget:

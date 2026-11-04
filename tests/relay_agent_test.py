@@ -33,6 +33,25 @@ def free_port():
 
 
 class ValidationTests(unittest.TestCase):
+    def test_large_kernel_receive_limit_still_allows_64_udp_sessions(self):
+        # Linux doubles SO_RCVBUF. On hosts with a raised rmem_max the
+        # requested size, rather than the usual kernel clamp, determines use.
+        class LinuxSocket:
+            def setsockopt(self, level, option, size):
+                self.allocated = size * 2
+
+            def getsockopt(self, level, option):
+                return self.allocated
+
+        budget = relay.UDPReceiveBudget()
+        listener = budget.reserve(LinuxSocket(), 256 * 1024)
+        sessions = [budget.reserve(LinuxSocket()) for _ in range(64)]
+        self.assertTrue(all(size >= 256 * 1024 for size in sessions))
+        self.assertLessEqual(budget.used, budget.limit)
+        for size in [listener, *sessions]:
+            budget.release(size)
+        self.assertEqual(budget.used, 0)
+
     def test_only_dns_confirmed_domains_are_eligible(self):
         inventory = {'ipv4': ['8.8.8.8'], 'ipv6': [], 'domains': ['valid.example', 'mixed.example', 'empty.example', 'cdn.example'], 'cdn_domains': ['cdn.example']}
         resolve = lambda name: {'valid.example': ['8.8.8.8'], 'mixed.example': ['8.8.8.8', '1.1.1.1'], 'empty.example': [], 'cdn.example': ['104.16.0.1']}[name]
