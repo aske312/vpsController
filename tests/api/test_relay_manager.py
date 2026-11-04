@@ -562,6 +562,23 @@ class RelayManagementTests(unittest.TestCase):
         with self.assertRaises(OperationConflict):
             relay_client_creation.perform(adapter, {'expected_revision': self.control.read()['revision']}, 'd'*32, resume_id='c'*32)
 
+    def test_receive_buffer_diagnostics_preserve_live_host_inventory(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        diagnostics = {'sent_packets': 100, 'received_packets': 90, 'dropped_packets': 3,
+                       'last_sent_at': 100, 'last_received_at': 100, 'last_error_at': 99,
+                       'last_error': 'udp_receive_buffer_unavailable',
+                       'error_counts': {'udp_receive_buffer_unavailable': 3}}
+        self.agent.items[0].update(errors=3, diagnostics=diagnostics)
+        host = self.control.public()['hosts'][0]
+        self.assertEqual(host['state'], 'connected')
+        self.assertEqual(host['routes'][0]['state'], 'listening')
+        self.assertEqual(host['routes'][0]['diagnostics'], diagnostics)
+        for field in ('last_error', 'error_counts'):
+            invalid = copy.deepcopy(self.agent.items[0])
+            invalid['diagnostics'][field] = 'unknown_code' if field == 'last_error' else {'unknown_code': 1}
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                route_snapshot({'revision': 1, 'items': [invalid]})
+
     def test_create_readback_delete_and_foreign_inventory(self):
         self.agent.items.append({'id': 'foreign', 'transport': 'udp', 'listen_port': 20001, 'target_ip': ORIGIN,
                                  'target_port': 51820, 'state': 'listening', 'target_verified': False})

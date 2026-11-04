@@ -1,6 +1,7 @@
 """Validated optional Agent 1.2 status, compatible with older Agents."""
 ERROR_CODES = {'tcp_connect_timeout', 'tcp_connect_error', 'tcp_transfer_timeout', 'tcp_transfer_error',
-               'udp_upstream_error', 'udp_listener_error', 'udp_buffer_full', 'udp_pending_full', 'udp_session_error', 'session_limit'}
+               'udp_upstream_error', 'udp_listener_error', 'udp_buffer_full', 'udp_receive_buffer_unavailable',
+               'udp_pending_full', 'udp_session_error', 'session_limit'}
 
 
 def diagnostics(value):
