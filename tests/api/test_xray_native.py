@@ -117,7 +117,7 @@ class NativeXrayTests(unittest.TestCase):
                         self.assertEqual(plan.client['protocol'], kind)
                         self.assertEqual(plan.consumer_id, 'direct:'+saved['id'])
                         self.assertNotIn(config['outbounds'][0]['settings'].get('servers',[{}])[0].get('password','UNUSED'), json.dumps(plan.summary()))
-                    control = Mock()
+                    control = Mock(root=self.root / 'relays')
                     control.endpoint.return_value = ('relay.example', 20000)
                     control.cdn_endpoint.return_value = ('relay.example', 20001)
                     settings = {**saved['settings'], 'relay_host_id':'b'*32}

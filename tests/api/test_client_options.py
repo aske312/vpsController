@@ -55,7 +55,7 @@ class ClientOptionsTests(unittest.TestCase):
         connection = self.profile['connections'][0]
         connection['settings'].update(relay_host_id='a'*32, relay_cdn=True, cdn_domain='example.com')
         source = deepcopy(self.profile)
-        control = Mock()
+        control = Mock(root=manager.DATA_ROOT / 'relays')
         control.endpoint.return_value = ('example.com', 443)
         with patch.object(manager, 'relay_connection_control', return_value=control):
             for name in ['Relay West', 'Москва · "CDN"']:
