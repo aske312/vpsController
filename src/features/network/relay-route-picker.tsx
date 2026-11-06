@@ -84,7 +84,7 @@ export function RelayRoutePicker({ host, selected, onChange }: { host: RelayHost
     {choices.visible.map(route => {
       const current = host.state === "connected";
       const attention = current && routeNeedsAttention(route);
-      const sessions = current && route.sessions !== undefined ? route.sessions.toLocaleString("ru-RU") : "—";
+      const sessions = current && route.sessions !== undefined ? route.sessions.toLocaleString("ru-RU") : "Нет данных";
       return <button type="button" key={route.id} className="relayRouteChoice" aria-pressed={selected === route.id} onClick={() => onChange(route.id)}>
         <span className="relayRouteChoiceIdentity"><strong>{route.transport.toUpperCase()} · {route.listen_port}</strong><small>VPS · {route.target_port}</small></span>
         <span className="relayRouteChoiceStatus" data-state={!current ? "unknown" : attention ? "warning" : route.state}>{!current ? "Нет связи с Agent" : attention ? "Требует внимания" : routeStates[route.state]}</span>

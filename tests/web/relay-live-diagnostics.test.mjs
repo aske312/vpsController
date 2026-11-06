@@ -24,9 +24,14 @@ test('card separates minute errors from old totals and displays shared resource 
 
 test('unavailable and legacy observations never become healthy zero-minute statistics', () => {
   const stale = renderToStaticMarkup(createElement(RelayLiveDiagnostics, { route, stale: true }));
-  assert.match(stale, /недоступна/);
+  assert.match(stale, /Нет данных/);
   assert.doesNotMatch(stale, /Ошибок: 0|25%/);
   const legacy = renderToStaticMarkup(createElement(RelayLiveDiagnostics, { route: { ...route, diagnostics: {} }, stale: false }));
-  assert.match(legacy, /после обновления Agent/);
+  assert.match(legacy, /нет данных/);
   assert.doesNotMatch(legacy, /Ошибок: 0|За последние 60 с/);
+  assert.doesNotMatch(legacy, /undefined|NaN/);
+  const missing = renderToStaticMarkup(createElement(RelayLiveDiagnostics, { route: { ...route, diagnostics: undefined }, stale: false }));
+  assert.doesNotMatch(missing, /Ошибок: 0|25%/);
+  const partial = renderToStaticMarkup(createElement(RelayLiveDiagnostics, { route: { ...route, errors: undefined, diagnostics: { statistics_since: 100, session_budget_used: 5 } }, stale: false }));
+  assert.doesNotMatch(partial, /undefined|NaN|: 0\./);
 });
