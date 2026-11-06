@@ -140,6 +140,8 @@ for line in (env_path.read_text().splitlines() if env_path.exists() else []):
         parsed = shlex.split(value)
         values[key] = parsed[0] if parsed else ''
 existing = json.loads((root / 'config.json').read_text()) if (root / 'config.json').exists() else {}
+from agent import resource_limits
+resource_limits(existing.get('limits'))
 ip = str(ipaddress.ip_address(os.environ.get('RELAY_PUBLIC_IP') or values.get('PUBLIC_IP') or existing.get('public_ip')))
 token_path = root / 'token'
 if not token_path.exists():
@@ -159,7 +161,7 @@ for address in addresses:
     try: own_ips.add(str(ipaddress.ip_address(address)))
     except ValueError: pass
 config = root / 'config.json'
-previous = json.loads(config.read_text()) if config.exists() else {}
+previous = existing
 domains = json.loads(os.environ.get('RELAY_DOMAINS_JSON', '[]')) or previous.get('domains', [])
 cdn_domains = json.loads(os.environ.get('RELAY_CDN_DOMAINS_JSON', '[]')) or previous.get('cdn_domains', [])
 if not isinstance(cdn_domains, list) or len(cdn_domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in cdn_domains):
@@ -167,7 +169,7 @@ if not isinstance(cdn_domains, list) or len(cdn_domains) > 64 or any(not isinsta
 if not isinstance(domains, list) or len(domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in domains):
     raise SystemExit('Invalid Relay domain list')
 temporary = root / 'config.json.new'
-temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT']), 'domains': sorted({domain(value) for value in domains}), 'cdn_domains': sorted({domain(value) for value in cdn_domains})}))
+temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT']), 'domains': sorted({domain(value) for value in domains}), 'cdn_domains': sorted({domain(value) for value in cdn_domains}), 'limits': previous.get('limits', {})}))
 os.chown(temporary, 0, gid); os.chmod(temporary, 0o640); os.replace(temporary, config)
 for name in ('server.crt', 'server.key'):
     os.chown(root / name, 0, gid); os.chmod(root / name, 0o640)
@@ -234,9 +236,9 @@ RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ReadWritePaths=/var/lib/vps-control-relay-agent
 UMask=0077
-LimitNOFILE=32768
-MemoryMax=768M
-TasksMax=128
+LimitNOFILE=131072
+MemoryMax=infinity
+TasksMax=infinity
 IPAccounting=true
 [Install]
 WantedBy=multi-user.target

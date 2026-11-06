@@ -33,6 +33,84 @@ def free_port():
 
 
 class ValidationTests(unittest.TestCase):
+    def test_tcp_and_udp_admission_share_memory_without_evicting_active_slots(self):
+        buffers = relay.UDPReceiveBudget(4*1048576)
+        buffers.used = 3*1048576
+        pool = relay.SessionBudget(20, 4*1048576, buffers)
+        tcp = relay.RelayRoute({'transport':'tcp'}, session_budget=pool)
+        udp = relay.RelayRoute({'transport':'udp'}, session_budget=pool)
+        first, second = tcp.admit(), tcp.admit()
+        self.assertIsNotNone(first);self.assertIsNotNone(second)
+        self.assertIsNone(tcp.admit());self.assertIsNone(udp.admit())
+        first.release()
+        third = udp.admit();self.assertIsNotNone(third)
+        self.assertEqual(pool.memory_used,512*1024+65536)
+        second.release();third.release()
+        self.assertEqual((pool.used,pool.memory_used),(0,0))
+
+    def test_memory_sizing_observes_own_cgroup_and_parent_in_both_linux_layouts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary);proc=root/'proc';groups=root/'cgroup'
+            (proc/'self').mkdir(parents=True);(proc/'meminfo').write_text('MemTotal: 4194304 kB\n')
+            (proc/'self/cgroup').write_text('0::/parent/agent')
+            (groups/'parent/agent').mkdir(parents=True)
+            (groups/'memory.max').write_text('max')
+            (groups/'parent/memory.max').write_text(str(1024**3))
+            (groups/'parent/agent/memory.max').write_text(str(512*1048576))
+            self.assertEqual(relay.available_memory(proc,groups),512*1048576)
+            (proc/'self/cgroup').write_text('4:memory:/parent/agent')
+            (groups/'memory/parent/agent').mkdir(parents=True)
+            (groups/'memory/parent/memory.limit_in_bytes').write_text(str(768*1048576))
+            (groups/'memory/parent/agent/memory.limit_in_bytes').write_text(str(512*1048576))
+            self.assertEqual(relay.available_memory(proc,groups),512*1048576)
+
+    def test_resource_auto_limits_scale_with_ram_and_respect_descriptor_reserve(self):
+        small = relay.resource_limits(memory=1024**3, descriptors=131072)
+        large = relay.resource_limits(memory=4*1024**3, descriptors=131072)
+        self.assertGreater(small['max_sessions'], 128)
+        self.assertGreater(large['max_sessions'], small['max_sessions'])
+        self.assertGreater(large['udp_budget_mib'], small['udp_budget_mib'])
+        self.assertEqual(small['max_sessions_per_route'], small['max_sessions'])
+        self.assertEqual(small['statistics_reset_seconds'], 86400)
+        self.assertEqual(relay.resource_limits(memory=4*1024**3, descriptors=1024)['max_sessions'], 384)
+        for value in ({'max_sessions': True}, {'udp_budget_mib': -1}, {'udp_budget_mib': 65000},
+                      {'max_sessions': 65536}, {'tcp_idle_seconds': 0}, {'udp_idle_seconds': 9},
+                      {'statistics_reset_seconds': 1}, {'max_sessions': 200, 'max_sessions_per_route': 201}, {'unknown': 1}):
+            with self.subTest(value=value), self.assertRaises(relay.RelayError):
+                relay.resource_limits(value, memory=1024**3, descriptors=131072)
+
+    def test_recent_counters_expire_without_polling_and_daily_reset_preserves_window(self):
+        with patch.object(relay.time, 'monotonic', return_value=1000):
+            route = relay.RelayRoute({'id':'stats'})
+            route.failure('udp_buffer_full', dropped=True)
+        with patch.object(relay.time, 'monotonic', return_value=1059):
+            route.failure('tcp_connect_error')
+            self.assertEqual(route.recent.snapshot()['errors'], 2)
+            route.last_reset = 1059-86400
+            route.sent = 12345
+            route.reset_statistics_if_due()
+            self.assertEqual(route.errors, 0)
+            self.assertEqual(route.sent, 12345)
+            self.assertEqual(route.recent.snapshot()['errors'], 2)
+        with patch.object(relay.time, 'monotonic', return_value=1060):
+            self.assertEqual(route.recent.snapshot()['errors'], 1)
+            self.assertEqual(route.recent.snapshot()['dropped_packets'], 0)
+        with patch.object(relay.time, 'monotonic', return_value=1120):
+            self.assertEqual(route.recent.snapshot()['errors'], 0)
+
+    def test_shared_session_pool_borrows_capacity_and_releases_idempotently(self):
+        pool = relay.SessionBudget(300)
+        first, second = [relay.RelayRoute({'id': str(index)}, session_budget=pool) for index in range(2)]
+        slots = [first.admit() for _ in range(299)]
+        self.assertTrue(all(slots))
+        other = second.admit();self.assertIsNotNone(other)
+        self.assertIsNone(first.admit())
+        slots[0].release();slots[0].release()
+        self.assertEqual(pool.used, 299)
+        again = second.admit();self.assertIsNotNone(again)
+        for slot in [*slots, other, again]: slot.release()
+        self.assertEqual(pool.used, 0)
+
     def test_large_kernel_receive_limit_still_allows_64_udp_sessions(self):
         # Linux doubles SO_RCVBUF. On hosts with a raised rmem_max the
         # requested size, rather than the usual kernel clamp, determines use.
@@ -53,14 +131,14 @@ class ValidationTests(unittest.TestCase):
             budget.release(sock)
         self.assertEqual(budget.used, 0)
 
-    def test_three_full_udp_routes_share_budget_without_evicting_clients(self):
+    def test_384_udp_sessions_share_budget_without_evicting_clients(self):
         class LinuxSocket:
             def setsockopt(self, level, option, size): self.size = size * 2
             def getsockopt(self, level, option): return self.size
 
         budget = relay.UDPReceiveBudget(64 * 1024 * 1024)
         listeners = [LinuxSocket() for _ in range(3)]
-        clients = [LinuxSocket() for _ in range(3 * relay.MAX_SESSIONS)]
+        clients = [LinuxSocket() for _ in range(3 * 128)]
         for sock in listeners: budget.reserve(sock, shared=True)
         for sock in clients:
             budget.reserve(sock)
@@ -86,7 +164,7 @@ class ValidationTests(unittest.TestCase):
         listeners = [LinuxSocket() for _ in range(16)]
         for sock in listeners: budget.reserve(sock, shared=True)
         clients = []
-        for index in range(16 * relay.MAX_SESSIONS):
+        for index in range(16 * 128):
             sock = LinuxSocket(); budget.reserve(sock); clients.append(sock)
             self.assertLessEqual(budget.used, budget.limit)
             if index == 383:
@@ -226,6 +304,77 @@ class ValidationTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_over_128_udp_clients_share_real_pool_and_close_frees_every_slot(self):
+        class Echo(asyncio.DatagramProtocol):
+            def connection_made(self, transport): self.transport = transport
+            def datagram_received(self, data, peer): self.transport.sendto(data, peer)
+        loop = asyncio.get_running_loop()
+        origin, _ = await loop.create_datagram_endpoint(Echo, local_addr=('127.0.0.1',0))
+        pool = relay.SessionBudget(302)
+        budget = relay.UDPReceiveBudget(64*1024*1024)
+        routes = [relay.RelayRoute({**self.body, 'id':str(n), 'transport':'udp', 'listen_port':0,
+                  'target_ip':'127.0.0.1','target_port':origin.get_extra_info('sockname')[1]},
+                  '127.0.0.1', session_budget=pool, buffer_budget=budget) for n in range(2)]
+        clients = []
+        try:
+            for route in routes: await route.start()
+            for index in range(300):
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);clients.append(sock)
+                sock.setblocking(False);sock.bind(('127.0.0.1',0))
+                body = str(index).encode()
+                await loop.sock_sendto(sock, body, routes[0].transport.get_extra_info('sockname'))
+                self.assertEqual(await asyncio.wait_for(loop.sock_recv(sock,128),3),body)
+            await loop.sock_sendto(clients[0],b'other',routes[1].transport.get_extra_info('sockname'))
+            self.assertEqual(await asyncio.wait_for(loop.sock_recv(clients[0],128),3),b'other')
+            self.assertEqual(pool.used,301)
+            status = routes[0].status()
+            self.assertEqual(status['sessions'],300)
+            self.assertEqual(status['diagnostics']['interval']['new_sessions'],300)
+            self.assertEqual(status['diagnostics']['session_budget_used'],301)
+        finally:
+            for sock in clients: sock.close()
+            for route in routes: await route.close()
+            origin.close();await asyncio.sleep(0)
+        self.assertEqual(pool.used,0)
+        self.assertEqual(budget.used,0)
+
+    async def test_daily_error_reset_preserves_live_udp_peer_and_recent_failures(self):
+        class Echo(asyncio.DatagramProtocol):
+            def connection_made(self, transport): self.transport=transport
+            def datagram_received(self, data, peer): self.transport.sendto(data,peer)
+        loop=asyncio.get_running_loop()
+        origin,_=await loop.create_datagram_endpoint(Echo,local_addr=('127.0.0.1',0))
+        route=relay.RelayRoute({**self.body,'transport':'udp','target_ip':'127.0.0.1','target_port':origin.get_extra_info('sockname')[1]},'127.0.0.1')
+        await route.start()
+        try:
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as client:
+                client.setblocking(False);client.bind(('127.0.0.1',0))
+                await loop.sock_sendto(client,b'before',route.transport.get_extra_info('sockname'))
+                self.assertEqual(await asyncio.wait_for(loop.sock_recv(client,128),3),b'before')
+                peer=next(iter(route.sessions.values()))
+                route.failure('udp_upstream_error');route.last_reset-=86400
+                status=route.status()
+                self.assertEqual(status['errors'],0)
+                self.assertEqual(status['diagnostics']['interval']['errors'],1)
+                self.assertIs(next(iter(route.sessions.values())),peer)
+                await loop.sock_sendto(client,b'after',route.transport.get_extra_info('sockname'))
+                self.assertEqual(await asyncio.wait_for(loop.sock_recv(client,128),3),b'after')
+                self.assertEqual(route.recent.snapshot()['new_sessions'],1)
+        finally:
+            await route.close();origin.close();await asyncio.sleep(0)
+
+    async def test_pending_udp_jumbo_packets_have_bounded_memory_and_cancelled_tasks_free_slots(self):
+        route=relay.RelayRoute({**self.body,'transport':'udp'})
+        peer=('127.0.0.1',1)
+        with patch.object(route,'track') as track:
+            route.datagram_received(bytes(65000),peer)
+            track.call_args.args[0].close()
+            route.datagram_received(bytes(65000),peer)
+        self.assertEqual(len(route.pending[peer]),1)
+        self.assertEqual(route.error_counts,{'udp_pending_full':1})
+        await route.close()
+        self.assertEqual(route.session_budget.used,0)
+
     def private_profile(self, identity):
         return {'schema':1,'transport':'hysteria2','generation':identity,'relay_ip':'8.8.8.8','listen_port':20099,
                 'ingress_password':'a'*48,'ingress_certificate':'synthetic-certificate-'+'c'*128,
@@ -394,7 +543,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(client, route.pending)
         self.assertNotIn('session_limit', route.error_counts)
 
-    async def test_three_full_udp_routes_keep_independent_bidirectional_traffic(self):
+    async def test_three_udp_routes_keep_384_independent_bidirectional_paths(self):
         class Echo(asyncio.DatagramProtocol):
             def connection_made(self, transport): self.transport = transport
             def datagram_received(self, data, addr): self.transport.sendto(data, addr)
@@ -408,7 +557,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 route.buffer_budget = budget
                 await route.start(); routes.append(route)
                 route.config['listen_port'] = route.transport.get_extra_info('sockname')[1]
-                for number in range(relay.MAX_SESSIONS):
+                for number in range(128):
                     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     sock.setblocking(False); sock.bind(('127.0.0.1', 0));clients.append((sock, route, f'{index}:{number}:'.encode() + bytes(1000)))
             # Complete one round-trip per client while keeping every socket open:
@@ -420,7 +569,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 except TimeoutError:
                     self.fail(f'No reply for {body[:12]!r}: {[r.status() for r in routes]} used={budget.used}')
                 self.assertEqual(reply, body)
-            self.assertEqual([len(route.sessions) for route in routes], [relay.MAX_SESSIONS] * 3)
+            self.assertEqual([len(route.sessions) for route in routes], [128] * 3)
             for sock, route, body in clients:
                 await loop.sock_sendto(sock, body[::-1], ('127.0.0.1', route.config['listen_port']))
                 self.assertEqual(await asyncio.wait_for(loop.sock_recv(sock, 2048), 3), body[::-1])

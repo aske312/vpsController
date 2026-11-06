@@ -16,16 +16,16 @@ import time
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
 import platform
-import subprocess
 import tarfile
 import urllib.request
+from collections import deque
 
-VERSION = '1.5.0'
+VERSION = '1.5.1'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
 PORT_MIN, PORT_MAX = 20000, 20999
-MAX_ROUTES, MAX_SESSIONS = 64, 128
+MAX_ROUTES, MAX_SESSIONS = 64, 4096
 TCP_IDLE_TIMEOUT = 300
 # Linux doubles this allocation. Keep room for concurrent sessions even on
 # hosts whose raised rmem_max would otherwise allow 2 MiB per upstream socket.
@@ -34,20 +34,144 @@ UDP_MIN_RECEIVE_BUFFER = 64 * 1024
 UDP_SESSION_IDLE_TIMEOUT = 60
 
 
+def available_memory(proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
+    """Total RAM constrained by this cgroup and its parents, not transient free RAM."""
+    total = 1024 * 1024 * 1024
+    try:
+        line = next(line for line in (proc/'meminfo').read_text().splitlines() if line.startswith('MemTotal:'))
+        total = int(line.split()[1]) * 1024
+    except (OSError, ValueError, StopIteration): pass
+    base = cgroups
+    folders = [base]
+    try:
+        group = next(line.split(':', 2)[2] for line in (proc/'self/cgroup').read_text().splitlines() if line.startswith('0::'))
+        folder = (base/group.lstrip('/')).resolve()
+        while folder.is_relative_to(base.resolve()):
+            folders.append(folder)
+            if folder == base.resolve(): break
+            folder = folder.parent
+    except (OSError, StopIteration): pass
+    for folder in folders:
+        try:
+            value = (folder/'memory.max').read_text().strip()
+            if value != 'max': total = min(total, int(value))
+        except (OSError, ValueError): pass
+    try:
+        group = next(line.split(':', 2)[2] for line in (proc/'self/cgroup').read_text().splitlines() if 'memory' in line.split(':', 2)[1].split(','))
+        base = (cgroups/'memory').resolve();folder = (base/group.lstrip('/')).resolve()
+        while folder.is_relative_to(base):
+            try: total = min(total, int((folder/'memory.limit_in_bytes').read_text()))
+            except (OSError, ValueError): pass
+            if folder == base: break
+            folder = folder.parent
+    except (OSError, StopIteration): pass
+    return total
+
+
+def resource_limits(value=None, *, memory=None, descriptors=None):
+    value = {} if value is None else value
+    ranges = {'udp_budget_mib': (0, 65536), 'max_sessions': (0, 65536),
+              'max_sessions_per_route': (0, 65536), 'tcp_idle_seconds': (30, 86400),
+              'udp_idle_seconds': (10, 3600), 'tcp_connect_seconds': (1, 120),
+              'tcp_drain_seconds': (1, 300), 'statistics_reset_seconds': (0, 2592000)}
+    if not isinstance(value, dict) or set(value)-set(ranges): raise RelayError('Invalid resource settings')
+    for key, number in value.items():
+        low, high = ranges[key]
+        if type(number) is not int or not low <= number <= high or key == 'statistics_reset_seconds' and 0 < number < 300 or key == 'udp_budget_mib' and 0 < number < 32:
+            raise RelayError('Invalid resource setting: '+key)
+    memory = available_memory() if memory is None else memory
+    if descriptors is None:
+        try:
+            import resource
+            descriptors = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+            if descriptors == resource.RLIM_INFINITY: descriptors = 131072
+        except ImportError: descriptors = 131072
+    usable = memory-max(128 * 1024 * 1024, memory//8)
+    if usable < 32*1048576: raise RelayError('Insufficient memory for Relay and the OS reserve')
+    udp_mib = value.get('udp_budget_mib') or max(32, min(65536, usable*2//3//1048576))
+    if udp_mib*1048576 > usable: raise RelayError('UDP budget exceeds available server memory')
+    capacity = min(65536, max(1, (descriptors-256)//2), max(128, (usable-udp_mib*1048576)//65536))
+    sessions = value.get('max_sessions') or capacity
+    if sessions > capacity: raise RelayError('Session limit exceeds available server resources')
+    per_route = value.get('max_sessions_per_route') or sessions
+    if per_route > sessions: raise RelayError('Route session limit exceeds the shared limit')
+    return {'udp_budget_mib': udp_mib, 'max_sessions': sessions, 'max_sessions_per_route': per_route,
+            'memory_budget_bytes': usable,
+            **{key: value.get(key, default) for key, default in (
+                ('tcp_idle_seconds', 300), ('udp_idle_seconds', 60), ('tcp_connect_seconds', 10),
+                ('tcp_drain_seconds', 30), ('statistics_reset_seconds', 86400))}}
+
+
+class RecentCounters:
+    """Sixty one-second aggregate buckets. No peer addresses or flow identities."""
+    def __init__(self):
+        self.started = time.monotonic()
+        self.buckets = deque(maxlen=60)
+
+    def add(self, key, code=None):
+        second = int(time.monotonic())
+        if not self.buckets or self.buckets[-1]['second'] != second:
+            self.buckets.append({'second': second, 'errors': 0, 'dropped_packets': 0, 'new_sessions': 0, 'error_counts': {}})
+        bucket = self.buckets[-1];bucket[key] += 1
+        if code: bucket['error_counts'][code] = bucket['error_counts'].get(code, 0)+1
+
+    def snapshot(self):
+        now = time.monotonic()
+        result = {'seconds': min(60, max(0, int(now-self.started))), 'errors': 0,
+                  'dropped_packets': 0, 'new_sessions': 0, 'error_counts': {}}
+        for row in self.buckets:
+            if row['second'] <= int(now)-60: continue
+            for key in ('errors', 'dropped_packets', 'new_sessions'): result[key] += row[key]
+            for key, count in row['error_counts'].items(): result['error_counts'][key] = result['error_counts'].get(key, 0)+count
+        return result
+
+
+class SessionBudget:
+    def __init__(self, limit, memory_limit=None, udp_buffers=None):
+        self.limit, self.used = limit, 0
+        self.memory_limit, self.memory_used = memory_limit, 0
+        self.udp_buffers = udp_buffers
+
+    def fits(self, cost):
+        if self.used >= self.limit: return False
+        if self.memory_limit is None: return True
+        if self.memory_used + cost + self.udp_buffers.used > self.memory_limit:
+            self.udp_buffers.rebalance()
+        return self.memory_used + cost + self.udp_buffers.used <= self.memory_limit
+
+
+class SessionSlot:
+    def __init__(self, route):
+        self.route = route
+        # Kernel UDP receives are accounted separately, by their actual size.
+        # TCP must leave room for both directions' readers, pumps and writers.
+        self.cost = 65536 if route.config.get('transport') == 'udp' else 512*1024
+        route.session_budget.used += 1
+        route.session_budget.memory_used += self.cost
+        route.slots.add(self)
+
+    def release(self):
+        if self in self.route.slots:
+            self.route.slots.remove(self)
+            self.route.session_budget.used -= 1
+            self.route.session_budget.memory_used -= self.cost
+
+
 class UDPReceiveBudget:
     """Bound aggregate kernel receive allocations, including Linux's doubling."""
     def __init__(self, limit=512 * 1024 * 1024):
         self.limit, self.used = limit, 0
         self.allocations = {}
         self.session_buffer = UDP_RECEIVE_BUFFER
+        self.headroom = lambda: self.limit
 
     def reserve(self, sock, desired=UDP_RECEIVE_BUFFER, *, shared=False):
         if sock in self.allocations:
             raise ValueError('UDP socket already reserved')
-        remaining = self.limit - self.used
+        remaining = min(self.limit, self.headroom()) - self.used
         if remaining < 128 * 1024:
             self.rebalance()
-            remaining = self.limit - self.used
+            remaining = min(self.limit, self.headroom()) - self.used
         if remaining < 128 * 1024:
             raise OSError('UDP receive buffer budget exhausted')
         if not shared:
@@ -134,8 +258,9 @@ def validate_route(route_id, body, own_ips=()):
 
 
 class UpstreamUDP(asyncio.DatagramProtocol):
-    def __init__(self, route, client):
+    def __init__(self, route, client, slot=None):
         self.route, self.client, self.transport = route, client, None
+        self.slot = slot
         self.touched = time.monotonic()
         self.awaiting_since = None
         self.receive_socket = None
@@ -152,6 +277,7 @@ class UpstreamUDP(asyncio.DatagramProtocol):
 
     def connection_lost(self, _exc):
         self.release_buffer()
+        if self.slot: self.slot.release()
         if self.route.sessions.get(self.client) is self:
             del self.route.sessions[self.client]
         if self.closed_future is not None and not self.closed_future.done():
@@ -182,8 +308,14 @@ class UpstreamUDP(asyncio.DatagramProtocol):
 
 
 class RelayRoute(asyncio.DatagramProtocol):
-    def __init__(self, config, listen_host='0.0.0.0'):
+    def __init__(self, config, listen_host='0.0.0.0', limits=None, session_budget=None, buffer_budget=None):
         self.config, self.listen_host = config, listen_host
+        self.limits = limits or {}
+        self.session_budget = session_budget or SessionBudget(65536)
+        self.slots = set()
+        self.recent = RecentCounters()
+        self.last_reset = time.monotonic()
+        self.statistics_since = int(time.time())
         self.server = self.transport = None
         self.sessions, self.pending = {}, {}
         self.tasks, self.writers = set(), set()
@@ -194,15 +326,35 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.last_sent_at = self.last_received_at = None
         self.tcp_waiting = {}
         self.closed = False
-        self.buffer_budget = UDP_BUFFERS
+        self.buffer_budget = buffer_budget or UDP_BUFFERS
         self.receive_socket = None
         self.closed_future = None
 
     def failure(self, code, *, dropped=False):
+        self.reset_statistics_if_due()
         self.errors += 1
+        self.recent.add('errors', code)
         self.error_counts[code] = self.error_counts.get(code, 0) + 1
         self.last_error, self.last_error_at = code, int(time.time())
-        if dropped: self.dropped_packets += 1
+        if dropped:
+            self.dropped_packets += 1
+            self.recent.add('dropped_packets')
+
+    def reset_statistics_if_due(self):
+        period = self.limits.get('statistics_reset_seconds', 86400)
+        if period and time.monotonic()-self.last_reset >= period:
+            self.errors = self.dropped_packets = 0
+            self.error_counts.clear()
+            self.last_error = self.last_error_at = None
+            self.last_reset = time.monotonic()
+            self.statistics_since = int(time.time())
+
+    def admit(self):
+        cost = 65536 if self.config.get('transport') == 'udp' else 512*1024
+        if self.closed or len(self.slots) >= self.limits.get('max_sessions_per_route', MAX_SESSIONS) or not self.session_budget.fits(cost):
+            return None
+        self.recent.add('new_sessions')
+        return SessionSlot(self)
 
     def packet_received(self):
         self.received_packets += 1
@@ -259,7 +411,8 @@ class RelayRoute(asyncio.DatagramProtocol):
         return task
 
     async def tcp_client(self, reader, writer):
-        if self.closed or len(self.tasks) >= MAX_SESSIONS:
+        slot = self.admit()
+        if slot is None:
             if not self.closed: self.failure('session_limit')
             writer.close()
             return
@@ -270,7 +423,7 @@ class RelayRoute(asyncio.DatagramProtocol):
         pumps = []
         phase = 'tcp_connect'
         try:
-            incoming, upstream = await asyncio.wait_for(asyncio.open_connection(self.config['target_ip'], self.config['target_port']), 10)
+            incoming, upstream = await asyncio.wait_for(asyncio.open_connection(self.config['target_ip'], self.config['target_port']), self.limits.get('tcp_connect_seconds', 10))
             self.writers.add(upstream)
             phase = 'tcp_transfer'
             last_activity = time.monotonic()
@@ -278,11 +431,11 @@ class RelayRoute(asyncio.DatagramProtocol):
             async def pump(source, destination, direction):
                 nonlocal last_activity
                 while True:
-                    remaining = max(0.001, TCP_IDLE_TIMEOUT - (time.monotonic() - last_activity))
+                    remaining = max(0.001, self.limits.get('tcp_idle_seconds', TCP_IDLE_TIMEOUT) - (time.monotonic() - last_activity))
                     try:
                         data = await asyncio.wait_for(source.read(65536), remaining)
                     except asyncio.TimeoutError:
-                        if time.monotonic() - last_activity >= TCP_IDLE_TIMEOUT:
+                        if time.monotonic() - last_activity >= self.limits.get('tcp_idle_seconds', TCP_IDLE_TIMEOUT):
                             raise
                         continue  # The opposite direction is still transferring.
                     if not data:
@@ -291,7 +444,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                         return
                     last_activity = time.monotonic()
                     destination.write(data)
-                    await asyncio.wait_for(destination.drain(), 30)
+                    await asyncio.wait_for(destination.drain(), self.limits.get('tcp_drain_seconds', 30))
                     if direction == 'sent':
                         self.sent += len(data)
                         self.last_sent_at = int(time.time())
@@ -315,6 +468,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                     item.close()
             self.tasks.discard(task)
             self.tcp_waiting.pop(task, None)
+            slot.release()
 
     def connection_made(self, transport):
         self.transport = transport
@@ -322,7 +476,7 @@ class RelayRoute(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, client):
         if self.closed: return
-        if client not in self.sessions and len(self.sessions) + len(self.pending) >= MAX_SESSIONS:
+        if client not in self.sessions and (len(self.sessions) + len(self.pending) >= self.limits.get('max_sessions_per_route', MAX_SESSIONS) or self.session_budget.used >= self.session_budget.limit):
             self.expire_idle_sessions()
         session = self.sessions.get(client)
         if session:
@@ -336,16 +490,23 @@ class RelayRoute(asyncio.DatagramProtocol):
             else:
                 self.failure('udp_buffer_full', dropped=True)
         elif client in self.pending:
-            if len(self.pending[client]) < 8: self.pending[client].append(data)
+            if len(self.pending[client]) < 8 and sum(map(len, self.pending[client])) + len(data) <= 65536: self.pending[client].append(data)
             else: self.failure('udp_pending_full', dropped=True)
-        elif client not in self.pending and len(self.sessions) + len(self.pending) < MAX_SESSIONS:
-            self.pending[client] = [data]
-            self.track(self.new_udp_session(client))
         else:
-            self.failure('session_limit', dropped=True)
+            slot = self.admit()
+            if slot is None:
+                self.failure('session_limit', dropped=True)
+            else:
+                self.pending[client] = [data]
+                self.track(self.new_udp_session(client, slot))
 
-    async def new_udp_session(self, client):
-        session = UpstreamUDP(self, client)
+    async def new_udp_session(self, client, slot=None):
+        slot = slot or self.admit()
+        if slot is None:
+            self.pending.pop(client, None)
+            self.failure('session_limit', dropped=True)
+            return
+        session = UpstreamUDP(self, client, slot)
         retained = False
         try:
             _transport, session = await asyncio.get_running_loop().create_datagram_endpoint(
@@ -369,6 +530,7 @@ class RelayRoute(asyncio.DatagramProtocol):
         finally:
             if not retained and session.transport is not None:
                 session.transport.close()
+            if not retained: slot.release()
             self.pending.pop(client, None)
 
     async def expire_sessions(self):
@@ -379,7 +541,7 @@ class RelayRoute(asyncio.DatagramProtocol):
     def expire_idle_sessions(self):
         now = time.monotonic()
         for client, session in list(self.sessions.items()):
-            if now - session.touched > UDP_SESSION_IDLE_TIMEOUT:
+            if now - session.touched > self.limits.get('udp_idle_seconds', UDP_SESSION_IDLE_TIMEOUT):
                 del self.sessions[client]
                 session.transport.close()
 
@@ -398,19 +560,26 @@ class RelayRoute(asyncio.DatagramProtocol):
         closed = [getattr(item, 'closed_future', None) for item in (self, *sessions)]
         if any(closed): await asyncio.gather(*(future for future in closed if future is not None))
         self.sessions.clear()
+        self.pending.clear()
+        for slot in list(self.slots): slot.release()
 
     def status(self):
+        self.reset_statistics_if_due()
         now = time.monotonic()
         waiting = list(self.tcp_waiting.values()) + [item.awaiting_since for item in self.sessions.values() if getattr(item, 'awaiting_since', None) is not None]
         unanswered = sum(now - value >= 5 for value in waiting)
         return_state = 'no_return' if unanswered else 'waiting' if waiting else 'flowing' if self.last_received_at and time.time() - self.last_received_at < 30 else 'idle'
         return {**self.config, 'state': 'listening', 'sent_bytes': self.sent, 'received_bytes': self.received,
-                'sessions': len(self.sessions) if self.transport else len(self.writers) // 2, 'errors': self.errors,
+                'sessions': len(self.slots), 'errors': self.errors,
                 'target_verified': False,
                 'diagnostics': {'sent_packets': self.sent_packets, 'received_packets': self.received_packets,
+                    'interval': self.recent.snapshot(), 'statistics_since': self.statistics_since,
+                    'session_budget_used': self.session_budget.used, 'session_budget_limit': self.session_budget.limit,
+                    'route_session_limit': self.limits.get('max_sessions_per_route', MAX_SESSIONS),
                     'udp_receive_buffer_bytes': self.receive_buffer_bytes,
                     'udp_receive_allocated_bytes': self.receive_buffer_bytes + sum(getattr(item, 'receive_buffer_bytes', 0) for item in self.sessions.values()),
                     'udp_receive_budget_bytes': self.buffer_budget.limit,
+                    'udp_receive_budget_used_bytes': self.buffer_budget.used,
                     'return_state': return_state, 'no_return_sessions': unanswered,
                     'dropped_packets': self.dropped_packets, 'error_counts': dict(self.error_counts),
                     'last_error': self.last_error, 'last_error_at': self.last_error_at,
@@ -653,7 +822,7 @@ class PrivateTransport:
             atomic_json(folder/'config.json', self.config(value, folder))
             async with self.runtime_lock:
                 binary = await asyncio.to_thread(self.binary)
-            environment = {**os.environ, 'GOMAXPROCS': '2'}
+            environment = dict(os.environ)  # Let Go use the available Relay CPUs/cgroup quota.
             check = await asyncio.create_subprocess_exec(str(binary), 'check', '-c', str(folder/'config.json'), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=environment)
             self.processes[identity] = check
             if await check.wait(): raise RuntimeError('runtime_config_invalid')
@@ -664,7 +833,7 @@ class PrivateTransport:
                 await asyncio.sleep(.5)
                 if process.returncode is None:
                     atomic_json(folder/'status.json', {'state': 'listening', 'restarts': attempt})
-                result = await process.wait()
+                await process.wait()
                 if identity not in self.tasks: return
                 atomic_json(folder/'status.json', {'state': 'preparing', 'restarts': attempt+1})
                 await asyncio.sleep(2 ** attempt)
@@ -747,6 +916,11 @@ class Agent:
     def __init__(self, config_dir=CONFIG_DIR, state_dir=STATE_DIR, listen_host=None):
         listen_host = listen_host or ('::' if dual_stack_available() else '0.0.0.0')
         self.config_dir, self.state_dir, self.listen_host = Path(config_dir), Path(state_dir), listen_host
+        settings = read_json(self.config_dir/'config.json')
+        self.limits = resource_limits(settings.get('limits'))
+        self.buffer_budget = UDPReceiveBudget(self.limits['udp_budget_mib'] * 1048576)
+        self.session_budget = SessionBudget(self.limits['max_sessions'], self.limits['memory_budget_bytes'], self.buffer_budget)
+        self.buffer_budget.headroom = lambda: self.limits['memory_budget_bytes'] - self.session_budget.memory_used
         self.routes, self.failed = {}, {}
         self.revision = 0
         self.lock = asyncio.Lock()
@@ -777,7 +951,7 @@ class Agent:
         for config in stored['items']:
             route_id = config['id']
             config = validate_route(route_id, {k: v for k, v in config.items() if k != 'id'}, self.settings()['own_ips'])
-            route = RelayRoute(config, self.listen_host)
+            route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
             try:
                 await route.start()
                 self.routes[route_id] = route
@@ -800,7 +974,8 @@ class Agent:
                     'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
                     'addresses': read_inventory(self.config_dir, self.settings()),
                     'updates': self.update_status(),
-                    'capabilities': ['udp-measurement-v1', 'manual-update-v1', 'private-transport-v1'],
+                    'capabilities': ['udp-measurement-v1', 'manual-update-v1', 'private-transport-v1', 'interval-diagnostics-v1'],
+                    'limits': dict(self.limits),
                     'address_checks': self.address_checks(),
                     'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
@@ -845,7 +1020,7 @@ class Agent:
                 raise RelayError('UDP listener reserved by protected transport', 409)
             if any(item['listen_port'] == config['listen_port'] and item['transport'] == config['transport'] for item in self.configs()):
                 raise RelayError('Listener already reserved', 409)
-            route = RelayRoute(config, self.listen_host)
+            route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
             try:
                 await route.start()
             except OSError:

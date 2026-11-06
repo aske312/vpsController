@@ -17,6 +17,32 @@ spec.loader.exec_module(credentials)
 
 
 class StandaloneTests(unittest.TestCase):
+    @unittest.skipUnless(__import__('os').name == 'posix', 'Installer config uses Unix ownership')
+    def test_installer_preserves_valid_limits_and_rejects_invalid_before_replacing_config(self):
+        import grp
+        import os
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        source=(ROOT/'protocol-images/relay-agent/install.sh').read_text().split('python3 - "${ROOT}" "${ENV_FILE:-/etc/vps-control.env}" "${SOURCE}"',1)[1]
+        script=source.split("<<'PY'\n",1)[1].split('\nPY\n',1)[0]
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            limits={'udp_budget_mib':64,'max_sessions':256,'max_sessions_per_route':192,'statistics_reset_seconds':86400}
+            (root/'config.json').write_text(json.dumps({'public_ip':'8.8.8.8','limits':limits}))
+            for name in ('server.crt','server.key','token'): (root/name).write_text('synthetic')
+            with patch.object(sys,'argv',['config',str(root),str(root/'missing-env'),str(ROOT/'protocol-images/relay-agent')]), \
+                 patch.dict(os.environ,{'RELAY_PUBLIC_IP':'8.8.8.8','RELAY_API_PORT':'9443','RELAY_DOMAINS_JSON':'[]','RELAY_CDN_DOMAINS_JSON':'[]'}), \
+                 patch.object(grp,'getgrnam',return_value=SimpleNamespace(gr_gid=0)),patch.object(os,'chown'), \
+                 patch.object(subprocess,'run',return_value=SimpleNamespace(stdout='8.8.8.8')):
+                exec(compile(script,'installer-config','exec'),{})
+                saved=json.loads((root/'config.json').read_text())
+                self.assertEqual(saved['limits'],limits)
+                saved['limits']={'max_sessions':'invalid'}
+                (root/'config.json').write_text(json.dumps(saved));before=(root/'config.json').read_bytes()
+                with self.assertRaises(ValueError):exec(compile(script,'installer-config','exec'),{})
+                self.assertEqual((root/'config.json').read_bytes(),before)
+                self.assertEqual((root/'token').read_text(),'synthetic')
+
     def test_connection_export_matches_certificate_and_saved_identity(self):
         # A syntactically valid PEM with synthetic DER checks the hash contract.
         with tempfile.TemporaryDirectory() as folder:
