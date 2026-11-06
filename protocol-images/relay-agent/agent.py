@@ -16,7 +16,7 @@ import time
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
 
-VERSION = '1.4.4'
+VERSION = '1.4.5'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -26,26 +26,61 @@ TCP_IDLE_TIMEOUT = 300
 # Linux doubles this allocation. Keep room for concurrent sessions even on
 # hosts whose raised rmem_max would otherwise allow 2 MiB per upstream socket.
 UDP_RECEIVE_BUFFER = 256 * 1024
+UDP_MIN_RECEIVE_BUFFER = 64 * 1024
+UDP_SESSION_IDLE_TIMEOUT = 60
 
 
 class UDPReceiveBudget:
     """Bound aggregate kernel receive allocations, including Linux's doubling."""
-    def __init__(self, limit=64 * 1024 * 1024):
+    def __init__(self, limit=512 * 1024 * 1024):
         self.limit, self.used = limit, 0
+        self.allocations = {}
+        self.session_buffer = UDP_RECEIVE_BUFFER
 
-    def reserve(self, sock, desired=UDP_RECEIVE_BUFFER):
+    def reserve(self, sock, desired=UDP_RECEIVE_BUFFER, *, shared=False):
+        if sock in self.allocations:
+            raise ValueError('UDP socket already reserved')
         remaining = self.limit - self.used
         if remaining < 128 * 1024:
+            self.rebalance()
+            remaining = self.limit - self.used
+        if remaining < 128 * 1024:
             raise OSError('UDP receive buffer budget exhausted')
+        if not shared:
+            desired = min(desired, self.session_buffer)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, min(desired, remaining // 2))
         actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
         if actual > remaining:
             raise OSError('UDP receive buffer budget exhausted')
         self.used += actual
+        self.allocations[sock] = (actual, shared)
         return actual
 
-    def release(self, size):
-        self.used -= size
+    def rebalance(self):
+        # Only shrink upstream sockets, never the listener shared by all clients.
+        # Reserve by the actual kernel allocation, not the requested SO_RCVBUF.
+        # Reclaim capacity within the configured budget without evicting
+        # established flows, including installations with a smaller budget.
+        target = max(UDP_MIN_RECEIVE_BUFFER, self.session_buffer // 2)
+        self.session_buffer = target
+        for sock, (previous, shared) in list(self.allocations.items()):
+            if shared or previous <= target:
+                continue
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, target)
+                actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+            except OSError:
+                continue  # Keep its reservation until connection_lost releases it.
+            self.used += actual - previous
+            self.allocations[sock] = (actual, shared)
+
+    def allocated(self, sock):
+        return self.allocations.get(sock, (0, False))[0]
+
+    def release(self, sock):
+        self.used -= self.allocations.pop(sock, (0, False))[0]
+        if not any(not shared for _, shared in self.allocations.values()):
+            self.session_buffer = UDP_RECEIVE_BUFFER
 
 
 UDP_BUFFERS = UDPReceiveBudget()
@@ -99,16 +134,22 @@ class UpstreamUDP(asyncio.DatagramProtocol):
         self.route, self.client, self.transport = route, client, None
         self.touched = time.monotonic()
         self.awaiting_since = None
-        self.receive_buffer_bytes = 0
+        self.receive_socket = None
         self.buffer_error = None
         self.closed_future = None
 
     def release_buffer(self):
-        self.route.buffer_budget.release(self.receive_buffer_bytes)
-        self.receive_buffer_bytes = 0
+        self.route.buffer_budget.release(self.receive_socket)
+        self.receive_socket = None
+
+    @property
+    def receive_buffer_bytes(self):
+        return self.route.buffer_budget.allocated(self.receive_socket)
 
     def connection_lost(self, _exc):
         self.release_buffer()
+        if self.route.sessions.get(self.client) is self:
+            del self.route.sessions[self.client]
         if self.closed_future is not None and not self.closed_future.done():
             self.closed_future.set_result(None)
 
@@ -116,7 +157,8 @@ class UpstreamUDP(asyncio.DatagramProtocol):
         self.transport = transport
         self.closed_future = asyncio.get_running_loop().create_future()
         try:
-            self.receive_buffer_bytes = self.route.buffer_budget.reserve(transport.get_extra_info('socket'))
+            self.receive_socket = transport.get_extra_info('socket')
+            self.route.buffer_budget.reserve(self.receive_socket)
         except OSError as exc:
             self.buffer_error = exc
             transport.close()
@@ -149,7 +191,7 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.tcp_waiting = {}
         self.closed = False
         self.buffer_budget = UDP_BUFFERS
-        self.receive_buffer_bytes = 0
+        self.receive_socket = None
         self.closed_future = None
 
     def failure(self, code, *, dropped=False):
@@ -178,7 +220,8 @@ class RelayRoute(asyncio.DatagramProtocol):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             if self.config['transport'] == 'udp':
-                self.receive_buffer_bytes = self.buffer_budget.reserve(sock, 256 * 1024)
+                self.receive_socket = sock
+                self.buffer_budget.reserve(sock, 256 * 1024, shared=True)
             sock.bind((self.listen_host, self.config['listen_port']))
             sock.setblocking(False)
             if self.config['transport'] == 'tcp':
@@ -193,8 +236,12 @@ class RelayRoute(asyncio.DatagramProtocol):
             raise
 
     def release_buffer(self):
-        self.buffer_budget.release(self.receive_buffer_bytes)
-        self.receive_buffer_bytes = 0
+        self.buffer_budget.release(self.receive_socket)
+        self.receive_socket = None
+
+    @property
+    def receive_buffer_bytes(self):
+        return self.buffer_budget.allocated(self.receive_socket)
 
     def connection_lost(self, _exc):
         self.release_buffer()
@@ -271,6 +318,8 @@ class RelayRoute(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, client):
         if self.closed: return
+        if client not in self.sessions and len(self.sessions) + len(self.pending) >= MAX_SESSIONS:
+            self.expire_idle_sessions()
         session = self.sessions.get(client)
         if session:
             session.touched = time.monotonic()
@@ -321,10 +370,14 @@ class RelayRoute(asyncio.DatagramProtocol):
     async def expire_sessions(self):
         while not self.closed:
             await asyncio.sleep(10)
-            for client, session in list(self.sessions.items()):
-                if time.monotonic() - session.touched > 60:
-                    session.transport.close()
-                    del self.sessions[client]
+            self.expire_idle_sessions()
+
+    def expire_idle_sessions(self):
+        now = time.monotonic()
+        for client, session in list(self.sessions.items()):
+            if now - session.touched > UDP_SESSION_IDLE_TIMEOUT:
+                del self.sessions[client]
+                session.transport.close()
 
     async def close(self):
         self.closed = True
@@ -332,12 +385,13 @@ class RelayRoute(asyncio.DatagramProtocol):
             self.server.close()
             await self.server.wait_closed()
         if self.transport: self.transport.abort()
-        for session in self.sessions.values(): session.transport.abort()
+        sessions = list(self.sessions.values())
+        for session in sessions: session.transport.abort()
         for writer in self.writers: writer.close()
         tasks = list(self.tasks)
         for task in tasks: task.cancel()
         if tasks: await asyncio.gather(*tasks, return_exceptions=True)
-        closed = [getattr(item, 'closed_future', None) for item in (self, *self.sessions.values())]
+        closed = [getattr(item, 'closed_future', None) for item in (self, *sessions)]
         if any(closed): await asyncio.gather(*(future for future in closed if future is not None))
         self.sessions.clear()
 
