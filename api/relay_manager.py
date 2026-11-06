@@ -50,6 +50,9 @@ def route_snapshot(value):
     reserved = value.get('reserved_udp_ports', [])
     if not isinstance(reserved, list) or len(reserved) > 2 or any(type(port) is not int or not 20000 <= port <= 20999 for port in reserved) or len(set(reserved)) != len(reserved):
         raise ValueError('Некорректные временные резервации Agent')
+    private_ports = value.get('private_ingress_ports', [])
+    if not isinstance(private_ports, list) or len(private_ports) > 4 or any(type(port) is not int or not 20000 <= port <= 20999 for port in private_ports) or len(set(private_ports)) != len(private_ports):
+        raise ValueError('Некорректные защищённые порты Agent')
     for item in value['items']:
         validate_config(item)
         identity = item.get('id')
@@ -274,7 +277,7 @@ class RelayManager:
             candidates = sorted({route['listen_port'] for route in owned if (route['transport'], route['target_port']) in sockets})
             candidates.extend(port for port in range(20000, 21000) if port not in candidates)
             def compatible(port):
-                if port in remote.get('reserved_udp_ports', []) and any(transport == 'udp' for transport, _ in sockets):
+                if port in [*remote.get('reserved_udp_ports', []), *remote.get('private_ingress_ports', [])] and any(transport == 'udp' for transport, _ in sockets):
                     return False
                 for transport, target in sockets:
                     found = next((route for route in remote['items'] if route['transport'] == transport and route['listen_port'] == port), None)
@@ -338,6 +341,10 @@ class RelayManager:
         self.write(registry)
 
     def delete_host(self, payload, identity):
+        from relay_private_transport import record
+        private = record(self, payload['host_id'])
+        if private and private['state'] != 'disabled':
+            raise ValueError('Перед удалением Relay отключите защищённый транспорт')
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
         host = self.host(registry, payload['host_id'])

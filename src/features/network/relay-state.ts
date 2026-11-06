@@ -18,6 +18,7 @@ export type RelayHost = {
   foreign_routes: number; routes: RelayRoute[]; error?: string;
   profile_failures?: number;
   capabilities?: string[];
+  private_transport?: { state: "preparing" | "sending" | "ready" | "unknown" | "disabling" | "disabled"; generation?: string; verified_at?: number };
   agent_release?: { state: "unknown" | "current" | "outdated" | "newer"; version?: string; digest?: string };
   agent_update?: { state: "sending" | "queued" | "running" | "updated" | "failed" | "unknown"; id?: string; version?: string; requested_at?: number; polling?: boolean };
   updates?: { enabled: boolean; interval_hours: 24; state: "unchecked" | "current" | "updated" | "disabled" | "failed" | "unknown"; checked_at?: string; version?: string };
@@ -78,6 +79,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     if (host.profile_failures !== undefined && !integer(host.profile_failures)) return invalid();
+    if (host.private_transport !== undefined && (!object(host.private_transport) || !["preparing", "sending", "ready", "unknown", "disabling", "disabled"].includes(String(host.private_transport.state)) || Object.keys(host.private_transport).some(key => !["state", "generation", "verified_at"].includes(key)) || host.private_transport.generation !== undefined && (typeof host.private_transport.generation !== "string" || !/^[0-9a-f]{32}$/.test(host.private_transport.generation)) || host.private_transport.verified_at !== undefined && !integer(host.private_transport.verified_at))) return invalid();
     ids.add(host.id);
     if (host.agent_release !== undefined && (!object(host.agent_release) || !["unknown", "current", "outdated", "newer"].includes(String(host.agent_release.state)) || host.agent_release.state !== "unknown" && (typeof host.agent_release.version !== "string" || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(host.agent_release.version) || typeof host.agent_release.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(host.agent_release.digest)))) return invalid();
     if (host.agent_update !== undefined && (!object(host.agent_update) || !["sending", "queued", "running", "updated", "failed", "unknown"].includes(String(host.agent_update.state)))) return invalid();

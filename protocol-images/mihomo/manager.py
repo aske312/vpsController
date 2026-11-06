@@ -57,6 +57,7 @@ import network_probe
 import relay_connections
 import relay_profile_status
 import relay_cdn
+import relay_privacy
 import xray_protocols
 import xray_core
 from version_comparison import newer_release
@@ -4738,6 +4739,9 @@ def with_relay_labels(connections):
         settings = item.get('settings', {})
         selected = relay_connections.host_id(settings)
         if selected and selected not in names:
+            from relay_private_transport import active as private_transport
+            if private_transport(relay_connection_control(), selected):
+                raise ValueError('Защищённый Relay отсутствует в реестре; обновите настройки подключения')
             # An after-CDN route also needs a Cloudflare origin change. It
             # cannot be turned into a direct route by changing client fields.
             if relay_cdn.after(settings):
@@ -5115,7 +5119,11 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     lines.append("rules:")
     for rule in rules:
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    if resolve_relays:
+        selections = {name: connection for connection, direct, cdn, tls in rendered for name in (direct, cdn, tls) if name}
+        text = relay_privacy.protect_subscription(relay_connection_control(), text, selections)
+    return text
 
 
 def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpdate) -> None:

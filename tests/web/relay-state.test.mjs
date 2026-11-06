@@ -9,6 +9,15 @@ const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', t
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
 const status = { revision: 'c'.repeat(32), hosts: [host], pending: false, origin_ip: '195.14.118.112', origin_hosts: ['195.14.118.112'], targets: [{ transport: 'tcp', port: 443 }] };
 
+test('private transport observation cannot expose keys or accept invented readiness', () => {
+  const snapshot = private_transport => ({ ...status, hosts: [{ ...host, private_transport }] });
+  const value = { state: 'ready', generation: 'a'.repeat(32), verified_at: 123456 };
+  assert.equal(relaySnapshot(snapshot(value)).hosts[0].private_transport, value);
+  for (const changed of [{ state: 'encrypted' }, { generation: '../private' }, { verified_at: -1 }, { password: 'private' }, { targets: [] }]) {
+    assert.throws(() => relaySnapshot(snapshot({ ...value, ...changed })));
+  }
+});
+
 test('profile preparation failures are explicit and reject unknown reasons', () => {
   const profile = { id: 'abcdef123456', name: 'Phone', channels: [], relay_failures: [{ host_id: host.id, reason: 'preparation_failed' }] };
   assert.equal(relaySnapshot({ ...status, profiles: [profile] }).profiles[0].relay_failures.length, 1);

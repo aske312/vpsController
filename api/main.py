@@ -103,6 +103,7 @@ from schemas import (
     ClientCreate,
     ProtocolSettingsUpdate,
     RelayHostSettings,
+    RelayPrivateTransport,
     RelayRouteSettings,
     RelayRecoverySettings,
     RelayExportRequest,
@@ -2758,6 +2759,8 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
             return JSONResponse(result, headers={'Cache-Control': 'no-store'})
         result = control.public()
         relay_update.annotate(sys.modules[__name__], result['hosts'])
+        from relay_private_transport import annotate as annotate_private_transport
+        annotate_private_transport(control, result['hosts'])
         private_hosts = {host['id']: host for host in control.read()['hosts']}
         result['targets'] = relay_targets()
         result['origin_hosts'] = relay_origin_hosts()
@@ -2838,6 +2841,11 @@ def save_relay_host(payload: RelayHostSettings, _: None = Depends(require_token)
 @app.post('/api/network/relays/{host_id}/update', status_code=202, dependencies=[Depends(require_mutation_admission)])
 def update_relay_agent(host_id: str, payload: RelayAgentUpdate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     return start_relay_mutation('relay-agent-update', {**payload.model_dump(), 'host_id': host_id}, operation_id)
+
+
+@app.put('/api/network/relays/{host_id}/private-transport', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def configure_relay_private_transport(host_id: str, payload: RelayPrivateTransport, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    return start_relay_mutation('relay-private-transport', {**payload.model_dump(), 'host_id': host_id}, operation_id)
 
 
 @app.put('/api/network/relays/reconnect', status_code=202)

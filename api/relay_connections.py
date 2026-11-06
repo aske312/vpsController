@@ -231,6 +231,9 @@ def direct_result(control, protocol, settings, result):
     selected = host_id(settings)
     if not selected:
         return result
+    from relay_private_transport import active
+    if active(control, selected):
+        raise ValueError('Защищённый Relay доступен через подписку Mihomo; отдельный формат не поддерживает внешний транспорт')
     result = copy.deepcopy(result)
     def rewrite(text, settings=settings):
         if protocol in ('wg', 'awg'):

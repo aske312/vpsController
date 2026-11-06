@@ -2767,6 +2767,13 @@ uninstall_app() {
   info "Удаление служб, данных и конфигурации панели"
   stop_legacy_containers
   systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
+  local relay_private_unit
+  for relay_private_unit in /etc/systemd/system/vps-control-relay-private-*.service; do
+    [[ -f "${relay_private_unit}" ]] || continue
+    [[ "$(head -n 1 -- "${relay_private_unit}")" == '# Managed by vps-control: encrypted Relay transport' ]] || continue
+    systemctl disable --now "$(basename -- "${relay_private_unit}")" || die "Не удалось остановить защищённый Relay; удаление данных остановлено."
+    rm -f -- "${relay_private_unit}"
+  done
   cleanup_installed_protocol_images
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \

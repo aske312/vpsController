@@ -98,6 +98,10 @@ def apply_relay_request(api, name, path, digest, identity):
     elif name == 'relay-agent-update':
         api.RelayAgentUpdate.model_validate({key: payload[key] for key in ('version', 'digest', 'expected_revision')})
         api.relay_update.perform(api, payload, identity)
+    elif name == 'relay-private-transport':
+        from relay_private_transport import perform
+        api.RelayPrivateTransport.model_validate({key: payload[key] for key in ('enabled', 'expected_revision')})
+        perform(api, payload, identity)
     elif name == 'relay-device-test-start':
         api.relay_device_test.start(api, payload, identity)
     elif name == 'relay-device-test-report':
