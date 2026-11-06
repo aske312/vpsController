@@ -226,6 +226,57 @@ class ValidationTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    def private_profile(self, identity):
+        return {'schema':1,'transport':'hysteria2','generation':identity,'relay_ip':'8.8.8.8','listen_port':20099,
+                'ingress_password':'a'*48,'ingress_certificate':'synthetic-certificate-'+'c'*128,
+                'ingress_private_key':'synthetic-private-key-'+'d'*128,'origin_ip':'9.9.9.9','origin_port':19443,
+                'origin_password':'b'*48,'origin_certificate':'synthetic-certificate-'+'e'*128,
+                'bandwidth_mbps':1000,'targets':[{'ip':'9.9.9.9','port':443,'network':'tcp'}]}
+
+    async def test_private_generation_is_immutable_and_public_status_never_contains_keys(self):
+        identity='a'*32;body=self.private_profile(identity);path='/v1/private-transports/'+identity
+        with patch.object(self.agent.private_transport,'start'):
+            first=await self.agent.dispatch('PUT',path,self.headers,body)
+            self.assertEqual(await self.agent.dispatch('PUT',path,self.headers,body),first)
+            self.assertEqual(await self.agent.dispatch('GET',path,self.headers,{}),first)
+            text=json.dumps(first)
+            for key in ('ingress_password','origin_password','ingress_private_key','ingress_certificate','origin_certificate'):
+                self.assertNotIn(body[key],text)
+            with self.assertRaises(relay.RelayError) as error:
+                await self.agent.dispatch('PUT',path,self.headers,{**body,'bandwidth_mbps':999})
+            self.assertEqual(error.exception.status,409)
+        await self.agent.dispatch('DELETE',path,{**self.headers,'if-match':str(self.agent.revision)},{})
+        self.assertEqual((await self.agent.dispatch('GET',path,self.headers,{}))['state'],'absent')
+
+    async def test_retirement_fences_a_late_create_even_when_create_was_never_observed(self):
+        identity='b'*32;body=self.private_profile(identity);path='/v1/private-transports/'+identity
+        self.assertEqual((await self.agent.dispatch('DELETE',path,self.headers,{}))['state'],'absent')
+        with self.assertRaises(relay.RelayError) as error:await self.agent.dispatch('PUT',path,self.headers,body)
+        self.assertEqual(error.exception.status,410)
+        self.assertEqual(self.agent.private_transport.ports(),[])
+
+    async def test_private_transport_cannot_approve_private_or_unregistered_foreign_targets(self):
+        for address in ('127.0.0.1','169.254.169.254','1.1.1.1'):
+            body=self.private_profile('c'*32);body['targets'][0]['ip']=address
+            with self.subTest(address=address),self.assertRaises(relay.RelayError):
+                await self.agent.dispatch('PUT','/v1/private-transports/'+'c'*32,self.headers,body)
+        self.assertFalse(self.agent.private_transport.records())
+
+    async def test_private_udp_reservation_blocks_native_route_and_does_not_open_plaintext_fallback(self):
+        identity='d'*32;body=self.private_profile(identity)
+        with patch.object(self.agent.private_transport,'start'):
+            await self.agent.dispatch('PUT','/v1/private-transports/'+identity,self.headers,body)
+        snapshot=await self.agent.dispatch('GET','/v1/routes',self.headers,{})
+        self.assertEqual(snapshot['private_ingress_ports'],[20099])
+        with self.assertRaises(relay.RelayError) as error:
+            await self.agent.dispatch('PUT','/v1/routes/collision',self.headers,{**self.body,'transport':'udp','listen_port':20099})
+        self.assertEqual(error.exception.status,409)
+        await self.agent.private_transport.launch(identity)
+        status=await self.agent.dispatch('GET','/v1/private-transports/'+identity,self.headers,{})
+        self.assertEqual(status['state'],'failed')  # Bad fixture certificate, no downloader/native runtime.
+        self.assertEqual(self.agent.routes,{})
+        self.assertNotIn('synthetic',json.dumps(status))
+
     async def test_bad_address_and_update_caches_do_not_break_status_or_disable_enabled_updates(self):
         (self.agent.config_dir/'updates.json').write_text('{"enabled":true}')
         for invalid in ('[]','{broken','{"state":{}}'):
@@ -414,6 +465,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.body = {'transport': 'tcp', 'listen_port': free_port(), 'target_ip': '1.1.1.1', 'target_port': 443}
 
     async def asyncTearDown(self):
+        await self.agent.private_transport.close()
         for measurement in self.agent.measurements.values(): measurement.close()
         for route in self.agent.routes.values(): await route.close()
         self.temp.cleanup()

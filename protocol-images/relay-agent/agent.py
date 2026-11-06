@@ -15,8 +15,12 @@ import tempfile
 import time
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
+import platform
+import subprocess
+import tarfile
+import urllib.request
 
-VERSION = '1.4.5'
+VERSION = '1.5.0'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -529,6 +533,216 @@ def validate_measurement(identity, body, own_ips):
     return {**body, 'target_ip': str(address)}
 
 
+class PrivateTransport:
+    """Opt-in immutable QUIC generations. Never log flows, identities or keys."""
+    VERSION = '1.14.4'
+    DIGESTS = {
+        'amd64': '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968',
+        'arm64': '436441f76ee2f7fe21b5b2d426d3cb261a480455a704865789ad533e4273ec26',
+    }
+
+    def __init__(self, agent):
+        self.agent = agent
+        self.root = agent.state_dir / 'private-transport'
+        self.tasks, self.processes = {}, {}
+        self.runtime_lock = asyncio.Lock()
+
+    def records(self):
+        if not self.root.exists(): return {}
+        return {path.parent.name: json.loads(path.read_text()) for path in self.root.glob('*/request.json')
+                if re.fullmatch(r'[0-9a-f]{32}', path.parent.name)}
+
+    def ports(self):
+        return sorted({value['listen_port'] for value in self.records().values()})
+
+    def status(self, identity):
+        folder = self.root / identity
+        if self.retired(identity): return {'generation': identity, 'state': 'absent'}
+        if not (folder/'request.json').exists(): raise RelayError('Protected transport not found', 404)
+        value = json.loads((folder/'request.json').read_text())
+        status = json.loads((folder/'status.json').read_text()) if (folder/'status.json').exists() else {'state': 'preparing'}
+        return {'generation': identity, 'transport': 'hysteria2', 'listen_port': value['listen_port'],
+                'state': status['state'], 'error': status.get('error'), 'restarts': status.get('restarts', 0)}
+
+    def validate(self, identity, value):
+        required = {'schema', 'transport', 'generation', 'relay_ip', 'listen_port', 'ingress_password',
+                    'ingress_certificate', 'ingress_private_key', 'origin_ip', 'origin_port',
+                    'origin_password', 'origin_certificate', 'targets', 'bandwidth_mbps'}
+        if not isinstance(value, dict) or set(value) != required or type(value['schema']) is not int or value['schema'] != 1 or value['transport'] != 'hysteria2' or value['generation'] != identity:
+            raise RelayError('Invalid protected transport profile')
+        for key in ('relay_ip', 'origin_ip'):
+            if not isinstance(value[key], str): raise RelayError('Invalid protected transport address')
+            try: address = ipaddress.ip_address(value[key])
+            except ValueError: raise RelayError('Invalid protected transport address') from None
+            if address.version != 4 or not address.is_global or address.is_multicast: raise RelayError('Invalid protected transport address')
+        if value['relay_ip'] not in self.agent.settings()['own_ips'] or value['origin_ip'] in self.agent.settings()['own_ips']:
+            raise RelayError('Protected transport address does not belong to this side')
+        if type(value['listen_port']) is not int or not PORT_MIN <= value['listen_port'] <= PORT_MAX or type(value['origin_port']) is not int or not 1024 <= value['origin_port'] <= 65535:
+            raise RelayError('Invalid protected transport port')
+        if type(value['bandwidth_mbps']) is not int or not 1 <= value['bandwidth_mbps'] <= 10000:
+            raise RelayError('Invalid protected transport bandwidth')
+        for key in ('ingress_password', 'origin_password'):
+            if not isinstance(value[key], str) or not re.fullmatch(r'[A-Za-z0-9_-]{40,128}', value[key]): raise RelayError('Invalid protected transport key')
+        for key in ('ingress_certificate', 'origin_certificate', 'ingress_private_key'):
+            if not isinstance(value[key], str) or not 64 <= len(value[key]) <= 16384: raise RelayError('Invalid protected transport certificate')
+        allowed = {(row['target_ip'], row['target_port'], row['transport']) for row in self.agent.configs()}
+        if not isinstance(value['targets'], list) or not 1 <= len(value['targets']) <= 128: raise RelayError('Explicit protected destinations required')
+        for row in value['targets']:
+            if not isinstance(row, dict) or set(row) != {'ip', 'port', 'network'} or type(row['port']) is not int or not isinstance(row['ip'], str) or row['network'] not in ('tcp', 'udp'):
+                raise RelayError('Invalid protected destination')
+            try: address = ipaddress.ip_address(row['ip'])
+            except ValueError: raise RelayError('Invalid protected destination') from None
+            if address.version != 4 or not address.is_global or address.is_multicast or not 1 <= row['port'] <= 65535:
+                raise RelayError('Invalid protected destination')
+            # The authenticated controller may approve its own public services
+            # (including temporary nonce peers). Other endpoints must already
+            # belong to explicit Relay routes; never allow private/metadata IPs.
+            if row['ip'] != value['origin_ip'] and (row['ip'], row['port'], row['network']) not in allowed:
+                raise RelayError('Destination has no approved Relay route')
+            if (row['ip'], row['port']) == (value['origin_ip'], value['origin_port']): raise RelayError('Protected transport loop')
+        return value
+
+    def binary(self):
+        architecture = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
+        if architecture not in self.DIGESTS: raise RuntimeError('unsupported_architecture')
+        folder = self.root/'runtime'; folder.mkdir(parents=True, mode=0o700, exist_ok=True)
+        binary, receipt = folder/'sing-box', folder/'digest.json'
+        if binary.is_file() and receipt.is_file():
+            saved = json.loads(receipt.read_text())
+            if saved.get('version') == self.VERSION and saved.get('archive_sha256') == self.DIGESTS[architecture] and hashlib.sha256(binary.read_bytes()).hexdigest() == saved.get('binary_sha256'):
+                return binary
+        name = f'sing-box-{self.VERSION}-linux-{architecture}'
+        url = f'https://github.com/SagerNet/sing-box/releases/download/v{self.VERSION}/{name}.tar.gz'
+        with tempfile.TemporaryDirectory(dir=folder) as temporary:
+            archive = Path(temporary)/'runtime.tar.gz';digest = hashlib.sha256();size = 0
+            with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'relay-runtime'}), timeout=30) as response, archive.open('wb') as stream:
+                while chunk := response.read(65536):
+                    size += len(chunk)
+                    if size > 64 * 1024 * 1024: raise RuntimeError('runtime_size_limit')
+                    digest.update(chunk);stream.write(chunk)
+            if digest.hexdigest() != self.DIGESTS[architecture]: raise RuntimeError('runtime_digest_mismatch')
+            with tarfile.open(archive, 'r:gz') as source:
+                item = source.getmember(name+'/sing-box')
+                if not item.isfile() or item.size > 192 * 1024 * 1024: raise RuntimeError('runtime_member_invalid')
+                body = source.extractfile(item).read()
+            candidate = Path(temporary)/'sing-box';candidate.write_bytes(body);candidate.chmod(0o700)
+            os.replace(candidate, binary)
+            atomic_json(receipt, {'version': self.VERSION, 'archive_sha256': digest.hexdigest(), 'binary_sha256': hashlib.sha256(body).hexdigest()})
+        return binary
+
+    def config(self, value, folder):
+        incoming = {'type': 'hysteria2', 'tag': 'edge', 'listen': value['relay_ip'], 'listen_port': value['listen_port'],
+                    'users': [{'password': value['ingress_password']}], 'up_mbps': value['bandwidth_mbps'], 'down_mbps': value['bandwidth_mbps'],
+                    'tls': {'enabled': True, 'alpn': ['h3'], 'certificate_path': str(folder/'ingress.crt'), 'key_path': str(folder/'ingress.key')}}
+        outgoing = {'type': 'hysteria2', 'tag': 'backhaul', 'server': value['origin_ip'], 'server_port': value['origin_port'],
+                    'inet4_bind_address': value['relay_ip'],
+                    'password': value['origin_password'], 'up_mbps': value['bandwidth_mbps'], 'down_mbps': value['bandwidth_mbps'],
+                    'tls': {'enabled': True, 'server_name': value['origin_ip'], 'certificate_path': str(folder/'origin.crt')}}
+        rules = [{'inbound': ['edge'], 'ip_cidr': [row['ip']+'/32'], 'port': [row['port']], 'network': row['network'],
+                  'action': 'route', 'outbound': 'backhaul'} for row in value['targets']]
+        return {'log': {'disabled': True}, 'inbounds': [incoming], 'outbounds': [outgoing], 'route': {'rules': rules+[{'action': 'reject', 'method': 'drop'}]}}
+
+    async def launch(self, identity):
+        folder = self.root/identity
+        try:
+            value = json.loads((folder/'request.json').read_text())
+            for name, field in [('ingress.crt', 'ingress_certificate'), ('ingress.key', 'ingress_private_key'), ('origin.crt', 'origin_certificate')]:
+                path = folder/name;path.write_text(value[field]);path.chmod(0o600)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(folder/'ingress.crt', folder/'ingress.key')
+            ssl.create_default_context(cafile=str(folder/'origin.crt'))
+            atomic_json(folder/'config.json', self.config(value, folder))
+            async with self.runtime_lock:
+                binary = await asyncio.to_thread(self.binary)
+            environment = {**os.environ, 'GOMAXPROCS': '2'}
+            check = await asyncio.create_subprocess_exec(str(binary), 'check', '-c', str(folder/'config.json'), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=environment)
+            self.processes[identity] = check
+            if await check.wait(): raise RuntimeError('runtime_config_invalid')
+            self.processes.pop(identity, None)
+            for attempt in range(3):
+                process = await asyncio.create_subprocess_exec(str(binary), 'run', '-c', str(folder/'config.json'), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=environment)
+                self.processes[identity] = process
+                await asyncio.sleep(.5)
+                if process.returncode is None:
+                    atomic_json(folder/'status.json', {'state': 'listening', 'restarts': attempt})
+                result = await process.wait()
+                if identity not in self.tasks: return
+                atomic_json(folder/'status.json', {'state': 'preparing', 'restarts': attempt+1})
+                await asyncio.sleep(2 ** attempt)
+            raise RuntimeError('runtime_stopped')
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Native errors may contain endpoint/user metadata. Do not publish
+            # them, or start a plaintext fallback, even when preparation fails.
+            atomic_json(folder/'status.json', {'state': 'failed', 'error': 'protected_transport_unavailable'})
+        finally:
+            process = self.processes.pop(identity, None)
+            if process is not None and process.returncode is None:
+                process.terminate()
+                try: await asyncio.wait_for(process.wait(), 5)
+                except asyncio.TimeoutError: process.kill();await process.wait()
+
+    def start(self, identity):
+        if identity not in self.tasks or self.tasks[identity].done():
+            atomic_json(self.root/identity/'status.json', {'state': 'preparing'})
+            self.tasks[identity] = asyncio.create_task(self.launch(identity))
+
+    async def restore(self):
+        for identity in self.records(): self.start(identity)
+
+    async def close(self):
+        tasks = list(self.tasks.values());self.tasks.clear()
+        for task in tasks: task.cancel()
+        if tasks: await asyncio.gather(*tasks, return_exceptions=True)
+
+    def retired(self, identity):
+        path = self.root/'retired.json'
+        return path.exists() and identity in json.loads(path.read_text())
+
+    def retire(self, identity):
+        self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
+        path = self.root/'retired.json'
+        values = json.loads(path.read_text()) if path.exists() else {}
+        values[identity] = int(time.time())
+        # Global revision fencing also rejects delayed requests after older
+        # control-operation tombstones have left this bounded cache.
+        if len(values) > 1024:
+            values = dict(sorted(values.items(), key=lambda row: row[1])[-1024:])
+        atomic_json(path, values)
+
+    async def request(self, method, identity, headers, body):
+        if method == 'GET': return self.status(identity)
+        if method == 'PUT' and self.retired(identity): raise RelayError('Protected generation was retired', 410)
+        existing = self.records().get(identity)
+        if method == 'PUT' and existing:
+            if existing != body: raise RelayError('Protected generation already exists', 409)
+            return self.status(identity)
+        if method == 'DELETE' and not existing:
+            if not self.retired(identity): self.agent.save(self.agent.configs())
+            self.retire(identity)
+            return {'generation': identity, 'state': 'absent'}
+        if headers.get('if-match') != str(self.agent.revision): raise RelayError('Read routes before changing protected transport', 409)
+        folder = self.root/identity
+        if method == 'DELETE':
+            self.agent.save(self.agent.configs())
+            self.retire(identity)  # Fence delayed PUTs before releasing the listener.
+            task = self.tasks.pop(identity, None)
+            if task:task.cancel();await asyncio.gather(task, return_exceptions=True)
+            for path in folder.iterdir():
+                if path.is_file():path.unlink()
+            folder.rmdir()
+            return {'generation': identity, 'state': 'absent'}
+        value = self.validate(identity, body)
+        if len(self.records()) >= 4: raise RelayError('Protected generation limit reached', 409)
+        busy = {row['listen_port'] for row in self.agent.configs() if row['transport'] == 'udp'} | set(self.ports()) | {item.port for item in self.agent.measurements.values() if not item.closed}
+        if value['listen_port'] in busy: raise RelayError('Protected UDP listener already reserved', 409)
+        self.agent.save(self.agent.configs())
+        folder.mkdir(parents=True, mode=0o700)
+        atomic_json(folder/'request.json', value);atomic_json(folder/'status.json', {'state': 'preparing'})
+        self.start(identity)
+        return self.status(identity)
+
+
 class Agent:
     def __init__(self, config_dir=CONFIG_DIR, state_dir=STATE_DIR, listen_host=None):
         listen_host = listen_host or ('::' if dual_stack_available() else '0.0.0.0')
@@ -538,6 +752,7 @@ class Agent:
         self.lock = asyncio.Lock()
         self.http_connections = 0
         self.measurements = {}
+        self.private_transport = PrivateTransport(self)
 
     def settings(self):
         config = json.loads((self.config_dir / 'config.json').read_text())
@@ -585,16 +800,20 @@ class Agent:
                     'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
                     'addresses': read_inventory(self.config_dir, self.settings()),
                     'updates': self.update_status(),
-                    'capabilities': ['udp-measurement-v1', 'manual-update-v1'],
+                    'capabilities': ['udp-measurement-v1', 'manual-update-v1', 'private-transport-v1'],
                     'address_checks': self.address_checks(),
                     'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
-            return {'revision': self.revision, 'reserved_udp_ports': sorted(item.port for item in self.measurements.values() if not item.closed), 'items': [route.status() for route in self.routes.values()] +
+            return {'revision': self.revision, 'private_ingress_ports': self.private_transport.ports(), 'reserved_udp_ports': sorted(item.port for item in self.measurements.values() if not item.closed), 'items': [route.status() for route in self.routes.values()] +
                     [{**item['config'], 'state': 'failed', 'error': item['error'], 'target_verified': False} for item in self.failed.values()]}
         update = re.fullmatch(r'/v1/updates/([0-9a-f]{32})', path)
         if update and method in ('PUT', 'GET'):
             async with self.lock:
                 return self.update_request(method, update[1], body)
+        private = re.fullmatch(r'/v1/private-transports/([0-9a-f]{32})', path)
+        if private and method in ('PUT', 'GET', 'DELETE'):
+            async with self.lock:
+                return await self.private_transport.request(method, private[1], headers, body)
         measure = re.fullmatch(r'/v1/measurements/([0-9a-f]{32})', path)
         if measure:
             async with self.lock:
@@ -622,6 +841,8 @@ class Agent:
                 self.failed.pop(route_id, None)
                 return {'revision': self.revision, 'deleted': route_id}
             if len(self.routes) + len(self.failed) >= MAX_ROUTES: raise RelayError('Route limit reached', 409)
+            if config['transport'] == 'udp' and config['listen_port'] in self.private_transport.ports():
+                raise RelayError('UDP listener reserved by protected transport', 409)
             if any(item['listen_port'] == config['listen_port'] and item['transport'] == config['transport'] for item in self.configs()):
                 raise RelayError('Listener already reserved', 409)
             route = RelayRoute(config, self.listen_host)
@@ -707,7 +928,7 @@ class Agent:
         self.measurements = {key: item for key, item in self.measurements.items() if not item.closed}
         if len(self.measurements) >= 2 or settings['route_id'] not in self.routes:
             raise RelayError('Measurement limit or route unavailable', 409)
-        used = {item['listen_port'] for item in self.configs() if item['transport'] == 'udp'} | {item.port for item in self.measurements.values()}
+        used = {item['listen_port'] for item in self.configs() if item['transport'] == 'udp'} | {item.port for item in self.measurements.values()} | set(self.private_transport.ports())
         item = Measurement(identity, settings)
         try: await item.start(self.listen_host, [port for port in range(PORT_MIN, PORT_MAX + 1) if port not in used])
         except OSError: raise RelayError('Measurement listener unavailable', 409) from None
@@ -762,6 +983,7 @@ class Agent:
 
     async def serve(self):
         await self.restore()
+        await self.private_transport.restore()
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.config_dir / 'server.crt', self.config_dir / 'server.key')
@@ -784,6 +1006,7 @@ class Agent:
             await stop.wait()
         for item in self.measurements.values(): item.close()
         for route in self.routes.values(): await route.close()
+        await self.private_transport.close()
 
 
 if __name__ == '__main__':

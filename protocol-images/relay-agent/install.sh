@@ -235,8 +235,8 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ReadWritePaths=/var/lib/vps-control-relay-agent
 UMask=0077
 LimitNOFILE=32768
-MemoryMax=256M
-TasksMax=32
+MemoryMax=768M
+TasksMax=128
 IPAccounting=true
 [Install]
 WantedBy=multi-user.target
