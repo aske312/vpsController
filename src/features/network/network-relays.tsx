@@ -72,11 +72,14 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     return () => window.clearTimeout(timer);
   }, [load, refreshKey]);
   const testingDevice = status?.hosts.some(host => host.routes.some(route => ["preparing", "awaiting_client", "processing"].includes(route.device_test?.state || "")) || host.agent_update?.polling);
+  const pollInterval = testingDevice ? 3000 : status?.hosts.some(host => host.capabilities?.includes("interval-diagnostics-v1") && host.routes.length > 0) ? 15000 : 0;
   useEffect(() => {
-    if (!testingDevice) return;
-    const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 3000);
-    return () => window.clearInterval(timer);
-  }, [testingDevice, load]);
+    if (!pollInterval) return;
+    const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, pollInterval);
+    const visible = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+  }, [pollInterval, load]);
   useEffect(() => { onDirtyChange(changed); }, [changed, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => {

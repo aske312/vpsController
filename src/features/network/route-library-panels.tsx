@@ -14,6 +14,7 @@ import { RelayAddressList } from "./relay-address-list";
 import { RouteTypeIcon } from "./route-type-icon";
 import { resourceIp } from "./resource-country";
 import { RelayProfilePicker } from "./relay-route-picker";
+import { RelayLiveDiagnostics } from "./relay-live-diagnostics";
 
 export function RouteDisclosure({ title, children }: { title: string; children: ReactNode }) {
   return <details className="routeLibraryDisclosure"><summary>{title}<span className="routeDisclosureToggle" aria-hidden="true">+</span></summary><div>{children}</div></details>;
@@ -58,6 +59,7 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
         <button type="button" disabled={locked || active} onClick={() => submit(`/mihomo/profiles/${encodeURIComponent(item.id)}/relays`)}>Повторить настройку пересылки</button>
       </div>)}
       {profiles.length === 0 && <p>Профили через этот Relay пока не настроены.</p>}
+      {route && <RelayLiveDiagnostics route={route} stale={relay.failed || host.state !== "connected" || route.state !== "listening"} />}
       <details className="relayProfileDiagnostics" open={active || undefined}><summary>Диагностика{profile ? ` · ${profile.name}` : " и отдельные подключения"}</summary>
       {route ? <>
         <div className="routeFieldPair">

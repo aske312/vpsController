@@ -605,6 +605,27 @@ class RelayManagementTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 route_snapshot({'revision': 1, 'items': [invalid]})
 
+    def test_minute_diagnostics_and_resource_budget_reach_pro_without_truncating_sessions(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        value = {'sent_packets': 100, 'received_packets': 90, 'dropped_packets': 0,
+                 'last_sent_at': 100, 'last_received_at': 100, 'last_error_at': None,
+                 'last_error': None, 'error_counts': {}, 'return_state': 'no_return', 'no_return_sessions': 300,
+                 'statistics_since': 100, 'udp_receive_budget_bytes': 512*1048576,
+                 'udp_receive_budget_used_bytes': 128*1048576, 'udp_receive_allocated_bytes': 10*1048576,
+                 'session_budget_used': 350, 'session_budget_limit': 4096, 'route_session_limit':4096,
+                 'interval': {'seconds': 60, 'errors': 2, 'dropped_packets': 1, 'new_sessions': 300,
+                              'error_counts': {'udp_buffer_full': 1, 'tcp_connect_error': 1}}}
+        self.agent.items[0].update(sessions=300, diagnostics=value)
+        host = self.control.public()['hosts'][0]
+        self.assertEqual(host['state'], 'connected')
+        self.assertEqual(host['routes'][0]['diagnostics'], value)
+        changes = [{'udp_receive_budget_used_bytes': 513*1048576}, {'session_budget_used':4097},
+                   {'no_return_sessions':65537}, {'interval':{**value['interval'],'seconds':61}},
+                   {'interval':{**value['interval'],'errors':3}}, {'interval':{**value['interval'],'new_sessions':True}}]
+        for change in changes:
+            invalid = {**self.agent.items[0], 'diagnostics': {**value, **change}}
+            with self.subTest(change=change), self.assertRaises(ValueError): route_snapshot({'revision':1,'items':[invalid]})
+
     def test_create_readback_delete_and_foreign_inventory(self):
         self.agent.items.append({'id': 'foreign', 'transport': 'udp', 'listen_port': 20001, 'target_ip': ORIGIN,
                                  'target_port': 51820, 'state': 'listening', 'target_verified': False})

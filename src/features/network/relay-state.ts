@@ -8,7 +8,10 @@ export type RelayRoute = {
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;
-  diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number>; return_state?: "no_return" | "waiting" | "flowing" | "idle"; no_return_sessions?: number };
+  diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number>; return_state?: "no_return" | "waiting" | "flowing" | "idle"; no_return_sessions?: number;
+    interval?: { seconds: number; errors: number; dropped_packets: number; new_sessions: number; error_counts: Record<string, number> };
+    statistics_since?: number; udp_receive_buffer_bytes?: number; udp_receive_allocated_bytes?: number; udp_receive_budget_bytes?: number; udp_receive_budget_used_bytes?: number; session_budget_used?: number; session_budget_limit?: number; route_session_limit?: number;
+  };
   check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number; measurement?: RelayMeasurement; cleanup_state?: "cleaned" | "failed" | "pending" };
   device_test?: RelayDeviceTest;
 };
@@ -105,7 +108,13 @@ export function relaySnapshot(value: unknown): RelayStatus {
       if (route.diagnostics !== undefined) {
         const data = route.diagnostics;
         if (!object(data) || ["sent_packets", "received_packets", "dropped_packets"].some(key => !integer(data[key])) || ["last_sent_at", "last_received_at", "last_error_at"].some(key => data[key] !== null && !integer(data[key], 0, 253402300799)) || data.last_error !== null && typeof data.last_error !== "string" || !object(data.error_counts) || Object.values(data.error_counts).some(item => !integer(item))) return invalid();
-        if (data.return_state !== undefined && (!["no_return", "waiting", "flowing", "idle"].includes(String(data.return_state)) || !integer(data.no_return_sessions, 0, 128))) return invalid();
+        if (data.return_state !== undefined && (!["no_return", "waiting", "flowing", "idle"].includes(String(data.return_state)) || !integer(data.no_return_sessions, 0, 65536))) return invalid();
+        for (const key of ["udp_receive_buffer_bytes", "udp_receive_allocated_bytes", "udp_receive_budget_bytes", "udp_receive_budget_used_bytes", "statistics_since", "session_budget_used", "session_budget_limit", "route_session_limit"]) if (data[key] !== undefined && !integer(data[key], 0, ["session_budget_used", "session_budget_limit", "route_session_limit"].includes(key) ? 65536 : Number.MAX_SAFE_INTEGER)) return invalid();
+        for (const [used, limit] of [["udp_receive_budget_used_bytes", "udp_receive_budget_bytes"], ["session_budget_used", "session_budget_limit"]]) if (data[used] !== undefined && (!integer(data[limit]) || Number(data[used]) > Number(data[limit]))) return invalid();
+        if (data.interval !== undefined) {
+          const interval = data.interval;
+          if (!object(interval) || !integer(interval.seconds, 0, 60) || ["errors", "dropped_packets", "new_sessions"].some(key => !integer(interval[key])) || !object(interval.error_counts) || Object.values(interval.error_counts).some(item => !integer(item)) || Object.values(interval.error_counts).reduce<number>((sum, item) => sum + Number(item), 0) !== interval.errors || Number(interval.dropped_packets) > Number(interval.errors)) return invalid();
+        }
       }
       if (object(route.check) && route.check.mode !== undefined && !["exchange", "media"].includes(String(route.check.mode))) return invalid();
       if (route.check !== undefined && (!object(route.check) || !["ready", "failed", "unknown"].includes(String(route.check.state)) || typeof route.check.consumer_id !== "string" || typeof route.check.checked_at !== "string" || route.check.vantage_point !== "server")) return invalid();
