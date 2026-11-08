@@ -3109,7 +3109,7 @@ change_access_mode() {
   configure_firewall "panel-only"
   write_caddy_config
   caddy_validate >/dev/null
-  systemctl restart caddy.service
+  systemctl reload caddy.service
   systemctl restart "${APP_NAME}-api.service"
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
     ok "панель доступна через защищённые подключения: http://${INTERNAL_PANEL_HOST}"

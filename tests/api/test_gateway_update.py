@@ -47,6 +47,36 @@ class GatewayTests(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "Requires deployment Bash")
 class ShellGatewayTests(unittest.TestCase):
+    def test_panel_access_preflights_before_mutation_and_reloads_gateway(self):
+        for valid in (False, True):
+            with self.subTest(valid=valid), tempfile.TemporaryDirectory() as temp:
+                calls = Path(temp) / 'calls'
+                script = f'''set -eu
+INSTALL_DIR=/opt/vps-control
+INSTALL_CONFIG=/unused
+HTTP_PORT=8080
+APP_NAME=vps-control
+INTERNAL_PANEL_HOST=admin.312.net
+python3() {{ return {0 if valid else 17}; }}
+die() {{ exit 99; }}
+set_config_value() {{ echo config >> {shlex.quote(str(calls))}; }}
+configure_access() {{ echo access >> {shlex.quote(str(calls))}; }}
+configure_firewall() {{ echo firewall >> {shlex.quote(str(calls))}; }}
+write_caddy_config() {{ echo gateway >> {shlex.quote(str(calls))}; }}
+caddy_validate() {{ return 0; }}
+systemctl() {{ echo "$*" >> {shlex.quote(str(calls))}; }}
+ok() {{ return 0; }}
+{function('change_access_mode')}
+change_access_mode access-mode external
+'''
+                result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if valid else 17, result.stderr)
+                if valid:
+                    self.assertEqual(calls.read_text().splitlines(), ['config', 'access', 'firewall', 'gateway',
+                                                                      'reload caddy.service', 'restart vps-control-api.service'])
+                else:
+                    self.assertFalse(calls.exists())
+
     def test_release_build_rejects_missing_ca_before_dependency_downloads(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
