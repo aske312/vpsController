@@ -296,7 +296,7 @@ test("DNS API preserves component application and encrypted fallback boundaries"
   const api = await readApiSources();
   // Only API/configuration contracts, not provider labels or editor markup.
   assert.match(api, /@app\.get\("\/api\/dns"\)/);
-  assert.match(api, /@app\.post\("\/api\/dns\/check"\)/);
+  assert.match(api, /@app\.post\("\/api\/dns\/check", dependencies=\[Depends\(require_active_client_api\)\]\)/);
   for (const key of ["WG_DNS", "AWG_DNS", "SHADOWSOCKS_DNS", "VRX_DNS"]) {
     assert.ok(api.includes('env_updates["' + key + '"]'), key + " remains independently applied");
   }

@@ -6,8 +6,6 @@ const panel = readFileSync("src/control-panel/control-panel.tsx", "utf8");
 const view = readFileSync("src/features/network/network-view.tsx", "utf8");
 const cssFiles = [
   "src/features/network/network.css",
-  "src/features/network/system-dns-control.css",
-  "src/features/network/dns-matrix.css",
 ].map((file) => readFileSync(file, "utf8"));
 
 test("network feature owns its state and styles stay inside the network page", () => {

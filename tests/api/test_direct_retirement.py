@@ -17,7 +17,8 @@ class DirectRetirementTests(unittest.TestCase):
         before = deepcopy(self.store)
         device = self.store[0]['devices'][-1]['id']
         exported = manager.render_client_profile(self.store[0], device)
-        cases = [('GET', '/api/clients'), ('POST', '/api/clients'),
+        cases = [('PUT', '/api/dns/settings'), ('POST', '/api/dns/check'),
+                 ('GET', '/api/clients'), ('POST', '/api/clients'),
                  ('POST', '/api/clients/native'), ('GET', '/api/clients/native/' + 'a' * 32),
                  ('POST', '/api/clients/relay'), ('GET', '/api/clients/relay/' + 'a' * 32),
                  ('POST', '/api/clients/relay/' + 'a' * 32 + '/resume'),

@@ -70,6 +70,7 @@ from protocol_health import TrafficSampler, protocol_health
 from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count, observation_scope, prime_services
 from component_state import image_files, component_state
 from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
+from direct_retirement import DIRECT_IMAGES
 from system_metrics import CpuSampler, collect_resources
 from metrics_history import MetricsHistory, MetricsMonitor, SettingsConflict
 from schemas import (
@@ -373,8 +374,7 @@ def require_token(credentials: HTTPBasicCredentials | None = Depends(basic_auth)
 
 # Direct is retired as a product entry point. Keep legacy implementation helpers
 # for recovery/shared network code; subscription routes live in the Mihomo manager.
-DIRECT_IMAGE_IDS = frozenset({'wg', 'awg', 'shadowsocks', 'vless-reality-xhttp',
-                              'hysteria2', 'tuic', 'trojan', 'openvpn', 'ikev2'})
+DIRECT_IMAGE_IDS = frozenset(DIRECT_IMAGES)
 
 
 def require_subscription_component(image_id: str, _: None = Depends(require_token)):
@@ -3118,7 +3118,7 @@ def require_dns_management(settings: DnsSettingsUpdate) -> None:
             require_owned_components(component)
 
 
-@app.put("/api/dns/settings", status_code=202, dependencies=[Depends(require_mutation_admission)])
+@app.put("/api/dns/settings", status_code=202, dependencies=[Depends(require_active_client_api), Depends(require_mutation_admission)])
 def submit_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     if not (operation_id and replay_application_operation(operation_id)):
         require_dns_management(payload)
@@ -4530,6 +4530,8 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (["/bin/bash", str(bundled_command), payload.action] if bundled_command.exists() else [CONTROL_COMMAND, payload.action])
+    if payload.action == "direct-cleanup":
+        command.append("--permanent")
     action = start_application_operation(payload.action, command, operation_id=operation_id,
         properties=(f"--property=RuntimeMaxSec={'60min' if payload.action in {'safe-update', 'kernel-update'} else '20min'}", "--property=TimeoutStopSec=45s"))
     return action
@@ -5383,7 +5385,7 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     return dns_status()
 
 
-@app.post("/api/dns/check")
+@app.post("/api/dns/check", dependencies=[Depends(require_active_client_api)])
 def check_dns(payload: DnsCheckRequest, _: None = Depends(require_token)) -> dict:
     providers = dns_provider_list()
     if payload.provider_id:

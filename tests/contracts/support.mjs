@@ -29,8 +29,6 @@ const STYLE_FILES = [
   "src/features/auth/auth.css",
   "src/features/overview/overview.css",
   "src/features/network/network.css",
-  "src/features/network/system-dns-control.css",
-  "src/features/network/dns-matrix.css",
   "src/features/security/security.css",
   "src/features/application/application.css",
   "src/features/services/services.css",

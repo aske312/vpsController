@@ -95,7 +95,7 @@ class ComponentRegistryTests(unittest.TestCase):
             for method, path, payload in cases:
                 with self.subTest(path=path):
                     self.assertEqual(client.request(method, path, json=payload).status_code,
-                                     410 if path.startswith(("/api/clients", "/api/protocols/", "/api/protocol-images/wg")) else 409)
+                                     410 if path.startswith(("/api/clients", "/api/protocols/", "/api/protocol-images/wg", "/api/dns/settings")) else 409)
 
     def test_mihomo_readonly_does_not_reconfigure_on_observation_or_provision_device(self):
         with patch.object(manager, "DATA_ROOT", self.registry.data_dir / "mihomo"), \

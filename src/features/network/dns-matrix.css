@@ -1,4 +1,0 @@
-﻿[data-network-page] .networkDnsMatrix th:first-child { width: 32%; }
-[data-network-page] .networkDnsMatrix th:nth-child(2) { width: 22%; }
-[data-network-page] .networkDnsMatrix th:last-child { width: 165px; }
-[data-network-page] .networkDnsMatrix .unavailable { opacity: .45; }

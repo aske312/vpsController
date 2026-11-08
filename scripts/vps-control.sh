@@ -2021,6 +2021,25 @@ PY
   ok "Сохранённые данные выбранного компонента очищены."
 }
 
+cleanup_direct() {
+  [[ "${2:-}" == "--permanent" ]] || die "Для удаления Direct вместе с ключами и подключениями укажите --permanent. Mihomo сохраняется."
+  local plan image_id state
+  export PRESERVE_COMPONENT_DATA=1
+  export WG_CONFIG="$(env_value WG_CONFIG)" AWG_CONFIG="$(env_value AWG_CONFIG)"
+  plan="$(WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" ACCESS_MODE="${ACCESS_MODE}" \
+    python3 "${INSTALL_DIR}/api/direct_retirement.py" --install-dir "${INSTALL_DIR}" --data-dir "${DATA_DIR}")" \
+    || die "Предварительная проверка Direct не пройдена; ничего не удалено."
+  [[ -n "${plan}" ]] || { ok "Управляемых компонентов Direct больше нет."; return; }
+  while IFS=: read -r image_id state; do
+    info "Полное удаление Direct: ${image_id}"
+    if [[ "${state}" != "retained" ]]; then
+      remove_protocol_image protocol-remove "${image_id}"
+    fi
+    purge_protocol_data protocol-purge "${image_id}"
+  done <<<"${plan}"
+  ok "Direct удалён вместе с его подключениями и ключами. Mihomo сохранён."
+}
+
 update_protocol_image() {
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
@@ -3641,6 +3660,8 @@ usage() {
   test-rollback    вернуться к production-версии, сохранённой перед test-сборкой
   install-release <архив>
                    вручную установить заранее собранный Linux-релиз без Docker, npm и apt
+  direct-cleanup --permanent
+                   удалить управляемый Direct с ключами и подключениями, сохранив Mihomo
   status           показать состояние сервисов
   logs [api|web|gateway]
                    показать журналы (для выбранного сервиса — в реальном времени)
@@ -3683,7 +3704,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|security-recover|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-purge|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|security-recover|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|direct-cleanup|protocol-install|protocol-remove|protocol-purge|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
       case "${1}" in
         ssh-key-list) ;;
         automation-apply) [[ "${VPS_CONTROL_AUTOMATION_CHILD:-}" == "1" ]] || begin_operation "${1}" ;;
@@ -3789,6 +3810,7 @@ main() {
     service-mode) change_service_mode "$@" ;;
     reboot) reboot_server ;;
     poweroff) poweroff_server ;;
+    direct-cleanup) cleanup_direct "$@" ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
     protocol-purge) purge_protocol_data "$@" ;;

@@ -1,16 +1,26 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { createTestLoader } from './vite-test-loader.mjs';
+import { network } from './network-fixtures.mjs';
 const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
 const { SystemOperationUnknown } = await loader.ssrLoadModule('/src/control-panel/system-operation.ts');
-const { saveNetworkDns, saveNetworkEndpoints, deleteNetworkEndpoint, recoverNetworkDns } = await loader.ssrLoadModule('/src/features/network/network-api.ts');
+const { readNetworkControl, saveNetworkEndpoints, deleteNetworkEndpoint } = await loader.ssrLoadModule('/src/features/network/network-api.ts');
+
+test('PRO network addresses remain available without the retired Direct DNS API', async () => {
+  const calls = [];
+  const result = await readNetworkControl(async path => {
+    calls.push(path);
+    if (path !== '/network') throw new Error('Retired Direct DNS is unavailable');
+    return network;
+  });
+  assert.deepEqual(calls, ['/network']);
+  assert.equal(result.network, network);
+});
 
 const cases = [
-  [admit => saveNetworkDns(admit, { revision: 'dns-revision', apply_system: true }), '/dns/settings', 'PUT'],
   [admit => saveNetworkEndpoints(admit, { revision: 'endpoint-revision', cdn_domain: 'cdn.example' }), '/network/endpoints', 'PUT'],
   [admit => deleteNetworkEndpoint(admit, 'cdn', 'cdn.example', 'endpoint-revision'), '/network/endpoints/cdn/cdn.example', 'DELETE'],
-  [admit => recoverNetworkDns(admit), '/dns/recover', 'POST'],
 ];
 
 test('lost network admission preserves its exact pending worker without repeating a mutation', async () => {

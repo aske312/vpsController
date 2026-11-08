@@ -151,17 +151,6 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 
-test("DNS status distinguishes installed components and keeps its summary read-only", async () => {
-  const [api, components] = await Promise.all([
-    readApiSources(), read("src/features/network/system-dns-control.tsx"),
-  ]);
-  // Architectural boundary: the status summary must not become a second editor.
-  assert.doesNotMatch(components, /<(?:input|select|button)\b/);
-  assert.match(api, /"protocol_effect_details":/);
-  assert.match(api, /"installed": installed\["wg"\]/);
-  assert.match(api, /"installed": installed\["awg"\]/);
-  assert.match(api, /"matches_selected":/);
-});
 
 test("connection latency labels identify the real measurement source", async () => {
   const [api] = await Promise.all([readApiSources()]);

@@ -1,7 +1,7 @@
-import { networkRoutesSnapshot } from "../mihomo/workspace-refresh";
 import { SystemOperationUnknown } from "../../control-panel/system-operation";
-import { dnsChecksSnapshot, dnsStatusSnapshot, networkEndpointSnapshot, networkPageSnapshot } from "./network-snapshot";
-import type { DnsCheck, DnsSettings, DnsStatus, NetworkEndpointCheck, NetworkEndpointSettings, NetworkStatus, SystemAction } from "../../shared/types/control-plane";
+import type { NetworkEndpointCheck, NetworkEndpointSettings, NetworkStatus, SystemAction } from "../../shared/types/control-plane";
+import { networkRoutesSnapshot } from "../mihomo/workspace-refresh";
+import { networkEndpointSnapshot, networkPageSnapshot } from "./network-snapshot";
 
 export type NetworkRequest = <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
 export type NetworkAdmission = (path: string, init: RequestInit) => Promise<SystemAction>;
@@ -22,15 +22,8 @@ async function startNetworkMutation(admit: NetworkAdmission, path: string, init:
 /** Все сетевые чтения и изменения страницы «Сеть» проходят через один feature API. */
 export async function readNetworkControl(request: NetworkRequest) {
   const init = { cache: "no-store" as const };
-  const [network, dns] = await Promise.all([
-    request<NetworkStatus>("/network", init),
-    request<DnsStatus>("/dns", init),
-  ]);
-  return { network: networkPageSnapshot(networkRoutesSnapshot(network)), dns: dnsStatusSnapshot(dns) };
-}
-
-export function saveNetworkDns(admit: NetworkAdmission, settings: DnsSettings) {
-  return startNetworkMutation(admit, "/dns/settings", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
+  const network = await request<NetworkStatus>("/network", init);
+  return { network: networkPageSnapshot(networkRoutesSnapshot(network)) };
 }
 
 export function saveNetworkEndpoints(admit: NetworkAdmission, settings: NetworkEndpointSettings) {
@@ -48,16 +41,4 @@ export async function checkNetworkEndpoint(request: NetworkRequest, kind: Networ
 
 export function deleteNetworkEndpoint(admit: NetworkAdmission, kind: NetworkEndpointCheck["kind"], domain: string, revision?: string) {
   return startNetworkMutation(admit, `/network/endpoints/${kind}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: revision ? { "If-Match": revision } : undefined });
-}
-
-export function recoverNetworkDns(admit: NetworkAdmission) {
-  return startNetworkMutation(admit, "/dns/recover", { method: "POST" });
-}
-
-export async function probeNetworkDns(request: NetworkRequest, providerId?: string) {
-  const result = await request<{ items: DnsCheck[] }>("/dns/check", {
-    method: "POST",
-    body: JSON.stringify({ provider_id: providerId || null }),
-  });
-  return dnsChecksSnapshot(result);
 }

@@ -14,17 +14,3 @@ test("network owns shared endpoints while protected channels keep protocol ident
   // Admission, binding identity and readiness are verified by API and state tests.
   // Presentation is free to change without retaining table markup or copy.
 });
-
-test("network DNS selection is limited to installed independently configurable protocols", async () => {
-  const [dns, css] = await Promise.all([
-    read("src/features/network/network-dns.tsx"),
-    read("src/features/network/network.css"),
-  ]);
-  assert.match(dns, /installedDnsComponents/);
-  assert.match(dns, /item\.key !== "apply_system"/);
-  assert.match(dns, /DNS:.*undefined/);
-  assert.doesNotMatch(dns, /Безопасное применение|Границы применения|networkImpact|networkPolicyNote/);
-  assert.doesNotMatch(dns, /Исключения по компонентам/);
-  assert.match(css, /networkResolverColumn \.networkProviderGrid[\s\S]+max-height: 300px/);
-  assert.match(css, /networkSaveBar[\s\S]+position: sticky/);
-});

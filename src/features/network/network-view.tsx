@@ -1,36 +1,15 @@
 "use client";
 
-import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
-import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  DnsCheck,
-  DnsSettings,
-  DnsStatus,
-  NetworkCapabilityCheck,
-  NetworkEndpointCheck,
-  NetworkEndpointSettings,
-  NetworkStatus,
-  SystemAction,
-} from "../../shared/types/control-plane";
+import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
 import { useNotifier } from "../../shared/notifications/notification-center";
-import {
-  probeNetworkDns,
-  readNetworkControl,
-  deleteNetworkEndpoint,
-  saveNetworkDns,
-  saveNetworkEndpoints,
-  recoverNetworkDns,
-  type NetworkAdmission,
-  type NetworkRequest,
-} from "./network-api";
-import { DnsView } from "./network-dns";
+import type { NetworkCapabilityCheck, NetworkEndpointCheck, NetworkEndpointSettings, NetworkStatus, SystemAction } from "../../shared/types/control-plane";
 import { appendNetworkEndpoints } from "./endpoint-additions";
+import { useNetworkAddresses } from "./network-addresses";
+import { deleteNetworkEndpoint, readNetworkControl, saveNetworkEndpoints, type NetworkAdmission, type NetworkRequest } from "./network-api";
+import { type NetworkCloudflareControl } from "./network-cloudflare";
 import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, useNetworkRelays } from "./network-relays";
-import { type NetworkCloudflareControl } from "./network-cloudflare";
-import { dnsComponents } from "./system-dns-control";
-import { useNetworkAddresses } from "./network-addresses";
 import { NetworkRouteLibrary } from "./network-route-library";
 
 export type NetworkListState = { query: string; expanded: string[] };
@@ -47,7 +26,6 @@ type Props = {
   refreshKey?: number;
   onLoadingChange?: (loading: boolean, run?: number) => void;
 };
-type Section = "diagnostics" | "dns";
 
 function NetworkIcon() {
   return (
@@ -66,20 +44,14 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
     "Сеть",
   );
   const [status, setStatus] = useState<NetworkStatus | null>(null);
-  const [dns, setDns] = useState<DnsStatus | null>(null);
-  const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
   const [endpointDraft, setEndpointDraft] =
     useState<NetworkEndpointSettings | null>(null);
-  const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
   const [loading, setLoading] = useState(true);
-  const [checkingDns, setCheckingDns] = useState(false);
   const [requestBusy, setBusy] = useState(false);
-  const [confirmRecovery, setConfirmRecovery] = useState(false);
-  const [pending, setPending] = useState<{ id?: string; kind: "dns" | "endpoints" | "delete"; draft?: DnsSettings | NetworkEndpointSettings } | null>(null);
+  const [pending, setPending] = useState<{ id?: string; kind: "endpoints" | "delete"; draft?: NetworkEndpointSettings } | null>(null);
   const operationBusy = requestBusy || Boolean(pending) || systemActionNeedsPolling(operation);
   const addresses = useNetworkAddresses({ request, busy: operationBusy, refreshKey });
   const busy = operationBusy || Boolean(addresses.pending);
-  const [section, setSection] = useState<Section>("diagnostics");
   const [loadFailed, setLoadFailed] = useState(false);
   const [relayDirty, setRelayDirty] = useState(false);
   const [routeDirty, setRouteDirty] = useState(false);
@@ -87,14 +59,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   const loadingRef = useRef(false);
   const loadingRun = useRef(0);
   const savingRef = useRef(false);
-  const checkingRef = useRef(false);
-  const savedRef = useRef<DnsSettings | null>(null);
   const savedEndpointRef = useRef<NetworkEndpointSettings | null>(null);
-  const dirty = Boolean(
-    dns &&
-    dnsDraft &&
-    JSON.stringify(dns.settings) !== JSON.stringify(dnsDraft),
-  );
   const endpointDirty = Boolean(
     status &&
     endpointDraft &&
@@ -102,7 +67,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       JSON.stringify(endpointDraft),
   );
 
-  useEffect(() => { onDirtyChange?.(dirty || endpointDirty || relayDirty || routeDirty); }, [dirty, endpointDirty, relayDirty, routeDirty, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(endpointDirty || relayDirty || routeDirty); }, [endpointDirty, relayDirty, routeDirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const load = useCallback(async (background = false) => {
@@ -114,7 +79,6 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
     try {
       const next = await readNetworkControl(request);
       if (run !== loadingRun.current) return;
-      const previous = savedRef.current;
       // The state updater may run after the refs below advance to this response.
       const previousEndpoints = savedEndpointRef.current;
       setStatus(next.network);
@@ -124,14 +88,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
           ? next.network.transport_endpoints
           : current,
       );
-      setDnsDraft((current) =>
-        !current || JSON.stringify(current) === JSON.stringify(previous)
-          ? next.dns.settings
-          : current,
-      );
-      savedRef.current = next.dns.settings;
       savedEndpointRef.current = next.network.transport_endpoints;
-      setDns(next.dns);
       setLoadFailed(false);
     } catch (cause) {
       if (run !== loadingRun.current) return;
@@ -160,76 +117,17 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       try {
         const next = await readNetworkControl(request);
         if (cancelled) return;
-        setStatus(next.network); setDns(next.dns);
+        setStatus(next.network);
         setLoadFailed(false);
-        savedRef.current = next.dns.settings;
         savedEndpointRef.current = next.network.transport_endpoints;
         if (operation.state === "succeeded") {
-          if (pending.kind === "dns") setDnsDraft((current) => JSON.stringify(current) === JSON.stringify(pending.draft) ? next.dns.settings : current);
-          else setEndpointDraft((current) => pending.kind === "delete" || JSON.stringify(current) === JSON.stringify(pending.draft) ? next.network.transport_endpoints : current);
+          setEndpointDraft((current) => pending.kind === "delete" || JSON.stringify(current) === JSON.stringify(pending.draft) ? next.network.transport_endpoints : current);
         }
       } catch (cause) { if (!cancelled) { setLoadFailed(true); notifyError(cause instanceof Error ? cause.message : "Не удалось проверить применённые настройки"); } }
       finally { if (!cancelled) setPending(null); }
     })();
     return () => { cancelled = true; };
   }, [pending, operation?.id, operation?.state, request, notifyError]);
-
-  const checkDnsProviders = useCallback(async () => {
-    if (checkingRef.current) return;
-    checkingRef.current = true;
-    setCheckingDns(true);
-    setDnsChecks({});
-    try {
-      const items = await probeNetworkDns(request);
-      setDnsChecks(Object.fromEntries(items.map((item) => [item.id, item])));
-    } catch (cause) {
-      notifyError(
-        cause instanceof Error ? cause.message : "Проверка DNS не выполнена",
-      );
-    } finally {
-      checkingRef.current = false;
-      setCheckingDns(false);
-    }
-  }, [notifyError, request]);
-
-  const saveDnsSettings = useCallback(async () => {
-    if (!dnsDraft || loadFailed || busy || savingRef.current || loading) return;
-    savingRef.current = true; loadingRun.current++;
-    setBusy(true);
-    try {
-      const settings = {
-        ...dnsDraft,
-        profiles: {},
-        custom: dnsDraft.custom
-          ? {
-              ...dnsDraft.custom,
-              addresses: dnsDraft.custom.addresses.map((address) =>
-                address.trim(),
-              ),
-              doh_url: dnsDraft.custom.doh_url.trim(),
-            }
-          : dnsDraft.custom,
-      };
-      for (const component of dnsComponents) {
-        if (
-          component.key !== "apply_system" &&
-          !dns?.protocol_effect_details?.[component.id]?.installed
-        )
-          settings[component.key] = false;
-      }
-      const started = await saveNetworkDns(admitOperation, settings);
-      setPending({ id: started.id, kind: "dns", draft: dnsDraft });
-      onOperation(started);
-    } catch (cause) {
-      if (cause instanceof SystemOperationUnknown) return;
-      notifyError(
-        cause instanceof Error ? cause.message : "Не удалось сохранить DNS",
-      );
-    } finally {
-      savingRef.current = false;
-      setBusy(false);
-    }
-  }, [admitOperation, busy, dns, dnsDraft, loadFailed, loading, notifyError, onOperation]);
 
   const saveEndpoints = useCallback(async (additions: NetworkEndpointSettings) => {
     if (!status || loadFailed || busy || savingRef.current || loading) return;
@@ -273,42 +171,11 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
 
   return (
     <div data-network-page="true">
-      {confirmRecovery && <ConfirmationDialog request={{ title: "Восстановить DNS?", message: "Будут восстановлены DNS-файлы и состояния служб до прерванного применения. Подключения могут кратковременно прерваться.", confirmLabel: "Восстановить DNS", danger: true }} onClose={(confirmed) => {
-        setConfirmRecovery(false);
-        if (!confirmed || loadFailed || busy || savingRef.current || loading) return;
-        savingRef.current = true; loadingRun.current++;
-        setBusy(true);
-        void recoverNetworkDns(admitOperation).then((started) => { setPending({ id: started.id, kind: "dns", draft: dnsDraft || undefined }); onOperation(started); }).catch((cause) => { if (!(cause instanceof SystemOperationUnknown)) notifyError(cause instanceof Error ? cause.message : "Не удалось начать восстановление DNS"); }).finally(() => { savingRef.current = false; setBusy(false); });
-      }} />}
       <main className="networkBoard">
         <header className="networkPageHeader">
           <div className="networkPageIdentity">
             <p className="eyebrow networkSectionEyebrow">Network</p>
             <h1>Сеть</h1>
-            <nav className="networkTabs" aria-label="Разделы сети">
-              {(
-                [
-                  ["diagnostics", "Адреса"],
-                  ["dns", "Настройки DNS"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  type="button"
-                  key={id}
-                  className={section === id ? "active" : ""}
-                  aria-pressed={section === id}
-                  onClick={() => setSection(id)}
-                >
-                  {label}
-                  {id === "dns" && dirty && (
-                    <span
-                      className="networkUnsavedDot"
-                      aria-label="Несохранённые изменения"
-                    />
-                  )}
-                </button>
-              ))}
-            </nav>
           </div>
           <div className="networkRefresh">
             <span>
@@ -351,23 +218,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
                 Обновление не удалось. Показаны последние полученные данные.
               </p>
             )}
-            <div hidden={section !== "dns"}>
-              <DnsView
-                dns={dns}
-                dnsDraft={dnsDraft}
-                dnsChecks={dnsChecks}
-                checkingDns={checkingDns}
-                busy={busy}
-                readFailed={loadFailed}
-                loading={loading}
-                dirty={dirty}
-                setDnsDraft={setDnsDraft}
-                checkDnsProviders={checkDnsProviders}
-                saveDnsSettings={saveDnsSettings}
-                recoverDns={() => setConfirmRecovery(true)}
-              />
-            </div>
-            <div hidden={section !== "diagnostics"}>
+            <div>
               <DiagnosticsV2
                 cloudflare={cloudflare}
                 refreshKey={refreshKey}
