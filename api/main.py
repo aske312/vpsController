@@ -726,13 +726,6 @@ def save_channel_mode(protocol: str, mode: str) -> None:
     temporary.replace(PROTECTED_CHANNELS_FILE)
 
 
-PANEL_PROTOCOL_LABELS = {
-    "wg": "WireGuard", "awg": "AmneziaWG", "shadowsocks": "Shadowsocks",
-    "vless-reality-xhttp": "Xray", "hysteria2": "Hysteria2", "tuic": "TUIC v5",
-    "trojan": "Trojan", "openvpn": "OpenVPN", "ikev2": "IKEv2",
-}
-
-
 def configured_panel_channels() -> list[str]:
     """Return protocols that can carry a request to the internal panel host."""
     return subscription_access.labels(DATA_DIR)
@@ -2737,6 +2730,8 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
 
 
 def start_relay_mutation(name, payload, identity):
+    if 'consumer_id' in payload and not str(payload['consumer_id']).startswith('mihomo:'):
+        raise HTTPException(410, 'PRO использует только подключения подписки Mihomo')
     try:
         identity = application_operation.operation_id(identity)
         with application_operation.locked(DATA_DIR):
@@ -2840,6 +2835,8 @@ def resume_relay_client(result_id: str, payload: RelayClientResume, _: None = De
 
 
 def prepare_relay_probe(route, host, consumer_id):
+    if not consumer_id.startswith('mihomo:'):
+        raise network_probe.ProbeUnavailable('PRO использует только подключения подписки Mihomo')
     from dataclasses import replace
     import copy
     if (route['target_ip'] != PUBLIC_IPV4 and not route.get('cdn_domain')) or not consumer_id:
@@ -2854,27 +2851,6 @@ def prepare_relay_probe(route, host, consumer_id):
                 yield plan
             except (ValueError, OSError, HTTPException):
                 continue
-        # Managed relay copies may use a current Direct origin credential even
-        # when its original file uses the direct address instead of legacy UDP relay.
-        clients = [item for item in read_clients() if f"direct:{item.get('id')}" == consumer_id and item.get('protocol') in ('tuic', 'hysteria2')]
-        if not clients or route['transport'] != 'udp':
-            return
-        protocol = clients[0]['protocol']
-        try:
-            paths = network_probe_sources(f'direct_{protocol}', 'udp_relay', consumer_id)
-            sources = network_probe.source_revision(paths)
-            text = paths['config'].read_text(encoding='utf-8')
-            config = json.loads(text) if protocol == 'tuic' else yaml.safe_load(text)
-            settings = json.loads(paths['settings'].read_text(encoding='utf-8'))
-            users = json.loads(paths['users'].read_text(encoding='utf-8')) if protocol == 'hysteria2' else None
-            binding = {'id': route['id'], 'desired_revision': 1, 'state': 'active', 'kind': 'udp_relay', 'address': PUBLIC_IPV4}
-            consumer = {'id': consumer_id, 'owner': 'direct', 'kind': 'udp_relay', 'address': PUBLIC_IPV4, 'reference': 'snapshot'}
-            plan = network_probe.prepare_direct_quic(binding, [consumer], clients, protocol, config, settings,
-                paths['certificate'].read_text(encoding='utf-8'), certificate_server_name(paths['certificate']), users, managed_origin=True)
-            if sources == network_probe.source_revision(paths):
-                yield plan
-        except (OSError, ValueError, KeyError, TypeError, HTTPException, yaml.YAMLError):
-            return
     for plan in plans():
         if route.get('cdn_domain'):
             if (plan.consumer_id == consumer_id and plan.relay_route_id == route['id'] and plan.relay_host_id == host['id']
@@ -2945,6 +2921,8 @@ def check_relay_route(host_id: str, route_id: str, consumer_id: str, mode: Liter
 
 
 def prepare_relay_media_probe(route, host, consumer_id):
+    if not consumer_id.startswith('mihomo:'):
+        raise network_probe.ProbeUnavailable('PRO использует только подключения подписки Mihomo')
     return relay_test_peer.base_plan(sys.modules[__name__], route, host, consumer_id)
 
 

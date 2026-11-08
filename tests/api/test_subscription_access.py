@@ -72,3 +72,12 @@ class SubscriptionAccessTests(unittest.TestCase):
                 self.assertEqual(denied.exception.status_code, 409)
         with patch.dict(os.environ, {'ACCESS_MODE': 'vpn'}), patch.object(api, 'managed_services', return_value=services), patch.object(access, 'available', return_value=['transport-wg']):
             self.assertEqual(api.service_action_definition('mihomo-transport-reality', api.ServiceAction(action='stop')), services['mihomo-transport-reality'])
+
+    def test_relay_rejects_retired_consumers_before_reading_direct_state(self):
+        with patch.object(api, 'read_clients', side_effect=AssertionError('Direct must not be read')):
+            with self.assertRaises(api.HTTPException) as denied:
+                api.start_relay_mutation('relay-route-check', {'consumer_id': 'direct:phone'}, None)
+            self.assertEqual(denied.exception.status_code, 410)
+            for prepare in (api.prepare_relay_probe, api.prepare_relay_media_probe):
+                with self.assertRaises(api.network_probe.ProbeUnavailable):
+                    prepare({}, {}, 'direct:phone')

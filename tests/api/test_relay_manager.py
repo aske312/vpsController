@@ -144,7 +144,7 @@ class RelayManagementTests(unittest.TestCase):
         from dataclasses import replace
         with patch.object(relay_cdn,'resolve',return_value='104.16.1.2'):
             self.control.ensure_cdn(self.host_id,'cdn.example','d'*32)
-        plan = ProbePlan('cdn',1,'direct:phone','cdn.example',443,'cdn',10087,'ws','original',
+        plan = ProbePlan('cdn',1,'mihomo:profile:phone','cdn.example',443,'cdn',10087,'ws','original',
                          {'protocol':'trojan','settings':{'servers':[{'address':'cdn.example','port':443,'password':'secret'}]},
                           'streamSettings':{'network':'ws','tlsSettings':{'serverName':'cdn.example'},'wsSettings':{'path':'/private','headers':{'Host':'cdn.example'}}}},
                          relay_host_id=self.host_id,relay_target_domain='cdn.example')
@@ -1216,16 +1216,16 @@ class RelayAPITests(unittest.TestCase):
     def test_native_probe_uses_remote_port_but_retains_tls_identity_and_exact_consumer(self):
         route = {'id': 'pro-'+'f'*32, 'transport': 'tcp', 'target_ip': ORIGIN, 'target_port': 443, 'listen_port': 20001}
         host = {'agent_url': f'https://{AGENT}:9443', 'token': TOKEN, 'certificate_sha256': PIN}
-        plan = ProbePlan('binding', 1, 'direct:client', 'origin.example', 443, 'vless-tls', 10088, 'ws', 'fingerprint',
+        plan = ProbePlan('binding', 1, 'mihomo:profile:client', 'origin.example', 443, 'vless-tls', 10088, 'ws', 'fingerprint',
                          {'protocol': 'vless', 'settings': {'vnext': [{'address': 'origin.example', 'port': 443, 'users': [{'id': 'secret'}]}]}, 'streamSettings': {'tlsSettings': {'serverName': 'origin.example'}}})
         with patch.object(api, 'PUBLIC_IPV4', ORIGIN), patch.object(api, 'read_route_registry', return_value={'bindings': [{'state': 'active'}]}), patch.object(api, 'prepare_network_probe', return_value=(plan, {})), patch.object(api, 'read_clients', return_value=[]):
-            actual = api.prepare_relay_probe(route, host, 'direct:client')
+            actual = api.prepare_relay_probe(route, host, 'mihomo:profile:client')
             self.assertEqual(actual.client['settings']['vnext'][0]['address'], AGENT)
             self.assertEqual(actual.client['settings']['vnext'][0]['port'], 20001)
             self.assertEqual(actual.client['streamSettings']['tlsSettings']['serverName'], 'origin.example')
             self.assertEqual(plan.client['settings']['vnext'][0]['address'], 'origin.example')
             with self.assertRaises(ValueError):
-                api.prepare_relay_probe(route, host, 'direct:another-client')
+                api.prepare_relay_probe(route, host, 'mihomo:profile:another-client')
 
     def test_recovery_blocks_other_mutations_but_allows_readonly_reconcile(self):
         (self.root/'relay').mkdir()
