@@ -65,9 +65,12 @@ class StandardSubscriptionTrafficTests(unittest.TestCase):
             self.assertIn(".yaml", response.headers["content-disposition"])
             parsed = yaml.safe_load(response.body)
             self.assertEqual(parsed["proxies"][0]["password"], password)
-            self.assertEqual(len(parsed["rules"]), 1)
-            self.assertTrue(parsed["rules"][0].startswith("MATCH,"))
-            group_name = parsed["rules"][0].split(",", 1)[1]
+            self.assertTrue(parsed["rules"][-1].startswith("MATCH,"))
+            group_name = parsed["rules"][-1].split(",", 1)[1]
+            self.assertEqual(parsed["rules"], [
+                f"DOMAIN,{manager.subscription_access.PANEL_HOST},{group_name}",
+                f"MATCH,{group_name}",
+            ])
             group = next(group for group in parsed["proxy-groups"] if group["name"] == group_name)
             self.assertEqual(group["proxies"], [parsed["proxies"][0]["name"]])
             # Confine execution to the test's loopback listener; core -t above

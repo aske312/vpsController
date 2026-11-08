@@ -55,11 +55,13 @@ class SystemMetricsTests(unittest.TestCase):
         self.assertEqual(result["resources"]["network_rx"], 10)
         self.assertIn("server", result)
 
-    def test_client_failure_does_not_hide_live_resources_or_security(self):
+    def test_retired_clients_and_absent_interfaces_preserve_resources_and_security(self):
         with patch.object(api, "system_resources", return_value={"cpu_percent": 12}), \
-             patch.object(api, "all_client_dump", side_effect=OSError("secret diagnostic")), \
+             patch.object(api, "all_client_dump", side_effect=AssertionError("Direct must not be read")) as clients, \
+             patch.object(api.Path, "exists", return_value=False), \
              patch.object(api, "run", return_value=""):
             result = api.live_status()
+        clients.assert_not_called()
         self.assertEqual(result["resources"]["cpu_percent"], 12)
         self.assertEqual(result["clients"], [])
         self.assertFalse(result["protocols"]["wg"]["active"])

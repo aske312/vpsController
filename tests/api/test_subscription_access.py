@@ -15,6 +15,7 @@ import subscription_access as access
 class SubscriptionAccessTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.object(manager.cdn_security, 'ENV', self.root / 'environment'))
         (self.root / 'mihomo').mkdir()
         ComponentRegistry(self.root).write_receipt('mihomo', 'installed')
         (self.root / 'mihomo/state.json').write_text(json.dumps({'modules': {'transport-reality': True}}))

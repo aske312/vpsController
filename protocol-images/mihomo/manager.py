@@ -1387,9 +1387,11 @@ def udp_tunnel_exclusion_rules(routing: dict[str, Any]) -> list[str]:
 
 def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, catalog: dict[str, list[str]], target: str, default_ids: tuple[str, ...] = ()) -> list[str]:
     raw_selection = str(routing.get(selection_key, "")).replace("\r", "").replace("\n", ",").strip()
-    selected = set(default_ids) if not raw_selection or raw_selection == "@default" else {value.strip().lower() for value in raw_selection.split(",") if value.strip()}
+    # Stable ordering keeps unchanged exports and accepted channel-selection
+    # digests identical when the manager restarts with a different hash seed.
+    selected = default_ids if not raw_selection or raw_selection == "@default" else [value.strip().lower() for value in raw_selection.split(",") if value.strip()]
     processes: list[str] = []
-    for game_id in selected:
+    for game_id in dict.fromkeys(selected):
         processes.extend(catalog.get(game_id, []))
     custom = str(routing.get(custom_key, "")).replace("\r", "")
     processes.extend(value.strip() for value in custom.split("\n") if value.strip())
