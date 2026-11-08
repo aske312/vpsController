@@ -1,11 +1,12 @@
 import type { Module, Profile, ProfileStats, Status } from "../mihomo/types";
 import type { ApiRequestInit } from "../../shared/lib/api-request";
+import { profileStatsSnapshot } from "../mihomo/workspace-refresh";
 
 type SummaryData = {
   status: Status | null;
   modules: Module[] | null;
   profiles: Profile[] | null;
-  profileStats: Record<string, ProfileStats["summary"]> | null;
+  profileStats: Record<string, ProfileStats> | null;
 };
 type Section = keyof SummaryData;
 export type MihomoSummary = SummaryData & { errors: Partial<Record<Section, string>>; networkErrors?: Partial<Record<Section, boolean>> };
@@ -76,7 +77,12 @@ export function createMihomoSummaryStore(request: ReadApi) {
         load("profiles", "/mihomo/profiles", (value) => items(value as { items: Profile[] }), force, version),
         load("profileStats", "/mihomo/stats", (value) => {
           const stats = items(value as { items: Array<ProfileStats & { id: string }> });
-          return Object.fromEntries(stats.map((item) => [item.id, item.summary]));
+          const ids = new Set<string>();
+          return Object.fromEntries(stats.map((item) => {
+            if (typeof item?.id !== "string" || !item.id || ids.has(item.id)) throw new Error("Invalid profile statistics identity");
+            ids.add(item.id);
+            return [item.id, profileStatsSnapshot(item)];
+          }));
         }, force, version),
       ]).then(() => { cachedAt = Date.now(); }).finally(() => { pending = null; });
       return pending;

@@ -43,3 +43,9 @@ test("transfer evidence requires valid ordered timestamps and an explicit servic
     {service_active: "false"},
   ]) assert.throws(() => profileStatsSnapshot(withRow(row)), Error);
 });
+
+test('observation periods preserve real fractional timestamps and reject invalid starts',()=>{
+ const sample=observed_since=>({...snapshot,connections:{one:{...snapshot.connections.one,observed_since}}});
+ assert.equal(profileStatsSnapshot(sample(123.5)).connections.one.observed_since,123.5);
+ for(const value of [-1,NaN,Infinity,'123',253402300800])assert.throws(()=>profileStatsSnapshot(sample(value)));
+});

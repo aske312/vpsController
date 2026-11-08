@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react';
 
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
-const { SubscriptionLimitsFields, unlimitedSubscription, subscriptionLimitChange, subscriptionTraffic, periodTraffic } = await loader.ssrLoadModule('/src/features/mihomo/subscription-limits.tsx');
+const { SubscriptionLimitsFields, unlimitedSubscription, subscriptionLimitChange, subscriptionTraffic, periodTraffic, aggregateUsage, usageBytes, usagePeriodLabel } = await loader.ssrLoadModule('/src/features/mihomo/subscription-limits.tsx');
 const { ProfileGeneral } = await loader.ssrLoadModule('/src/features/mihomo/profile-general.tsx');
 const { profileSnapshots, profileStatsSnapshot } = await loader.ssrLoadModule('/src/features/mihomo/workspace-refresh.ts');
 const render = props => renderToStaticMarkup(createElement(SubscriptionLimitsFields, { value: unlimitedSubscription, disabled: false, onChange() {}, ...props }));
@@ -94,6 +94,32 @@ test('general uses persisted device usage and subscription sum, never transient 
   assert.match(render({ traffic: subscriptionTraffic(stats, 'phone') }), /≥ 4 KB/);
   assert.match(render({ traffic: subscriptionTraffic(stats) }), /≥ 13 KB/);
   assert.match(render({ status: { state: 'active', used_bytes: 999999999, expires_at: null } }), />—</);
+});
+
+test('all-time traffic remains visible when core observations reset or disappear', () => {
+  const amount = used_bytes => ({ used_bytes, stats_available: true, stats_partial: true });
+  const usage = { summary: amount(8 * 1024 ** 3), devices: { phone: amount(3 * 1024 ** 3) } };
+  for (const observation of [{ rx_bytes: 1000, tx_bytes: 100 }, { rx_bytes: 0, tx_bytes: 0 }, { stats_available: false }]) {
+    const stats = { usage, summary: observation, connections: { one: observation } };
+    assert.equal(usageBytes(subscriptionTraffic(stats)), '≥ 8.0 GB');
+    assert.equal(usageBytes(subscriptionTraffic(stats, 'phone')), '≥ 3.0 GB');
+    assert.equal(aggregateUsage([subscriptionTraffic(stats)]).used_bytes, 8 * 1024 ** 3);
+  }
+  assert.equal(usageBytes(subscriptionTraffic({ summary: { rx_bytes: 999999, tx_bytes: 999999 } })), '—');
+});
+
+test('usage aggregation preserves partial and missing measurements without inventing zero', () => {
+  const amount = used_bytes => ({ used_bytes, stats_available: true, stats_partial: false });
+  assert.deepEqual(aggregateUsage([amount(100), amount(200)]), amount(300));
+  assert.deepEqual(aggregateUsage([amount(100), undefined]), { ...amount(100), stats_partial: true });
+  assert.equal(usageBytes(aggregateUsage([undefined, { used_bytes: null, stats_available: false, stats_partial: false }])), '—');
+  assert.equal(usageBytes(aggregateUsage([amount(0)])), '0 B');
+  assert.equal(usageBytes(aggregateUsage([])), '0 B');
+});
+
+test('lifetime period identifies the server accounting start in UTC',()=>{
+  assert.match(usagePeriodLabel({history_started_at:Date.UTC(2026,10,2,23)/1000}),/02\.11\.2026 UTC/);
+  assert.doesNotMatch(usagePeriodLabel(undefined),/Invalid Date|1970/);
 });
 
 test('traffic periods select their own totals and never substitute all-time or another device', () => {

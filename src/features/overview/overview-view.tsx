@@ -1,6 +1,7 @@
 "use client";
 
-import { trafficBytes, uptime } from "../../shared/lib/control-plane-ui";
+import { uptime } from "../../shared/lib/control-plane-ui";
+import { subscriptionTraffic, usageBytes, usagePeriodLabel } from "../mihomo/subscription-limits";
 import type { MetricsPeriod, Overview as OverviewData, ProtocolImage, ResourceHistory } from "../../shared/types/control-plane";
 import { graphSegments, knownMetric } from "../../shared/lib/resource-metrics";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -89,7 +90,6 @@ export function OverviewDashboard({
   memoryUsedBytes,
   diskUsedBytes,
   networkRate,
-  resourceHistory,
   protocolImages,
   installingProtocol,
   busy,
@@ -106,8 +106,10 @@ export function OverviewDashboard({
     memory: metricsHistory.data.points.map((point) => point.memory_used_percent),
     rx: metricsHistory.data.points.map((point) => point.rx_bps),
     tx: metricsHistory.data.points.map((point) => point.tx_bps),
-  } : metricsPeriod === "live" ? resourceHistory : { load: [], memory: [], rx: [], tx: [] };
+  } : { load: [], memory: [], rx: [], tx: [] };
   const resolution = metricsHistory.data?.resolution_s ?? 3;
+  const historyPoints = metricsHistory.data?.points;
+  const historyEnd = historyPoints?.at(-1)?.at;
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
   const summaryStore = useMemo(() => mihomoSummaryStore(mihomoInstalled ? token : "", observationVersion), [mihomoInstalled, observationVersion, token]);
@@ -223,7 +225,7 @@ export function OverviewDashboard({
                             {assignedComponents.map((component) => <span key={component} title={component.replace("transport-", "")}><ProtocolIcon protocol={component} /></span>)}
                             {!assignedComponents.length && <em>—</em>}
                           </div>
-                          <span className="overviewManagedTraffic"><b>↓ {trafficBytes(traffic, "rx_bytes")}</b><small>↑ {trafficBytes(traffic, "tx_bytes")}</small></span>
+                          <span className="overviewManagedTraffic"><b>{usageBytes(subscriptionTraffic(traffic))}</b><small>{summary.errors.profileStats ? "Последний учтённый расход" : usagePeriodLabel(subscriptionTraffic(traffic))}</small></span>
                         </div>;
                       })}
                       {mihomoProfiles === null && <p className="overviewEmpty" role="status">{summary.errors.profiles ? "Список профилей временно недоступен." : "Загрузка профилей…"}</p>}
@@ -262,6 +264,8 @@ export function OverviewDashboard({
           {metricsHistory.data?.settings.enabled === false && " · запись истории выключена в Службах"}
           {metricsHistory.data?.settings.trimmed_at && " · старые данные сокращены по лимиту места"}
         </p>
+        <p className="nodeLiveSystemNote">Числа — последние измерения; графики — выбранный период. Сетевые счётчики суммируют интерфейсы с их запуска и могут учитывать один поток несколько раз.</p>
+        {!!historyPoints?.length && <p className="nodeLiveSystemNote">Период графиков: {new Date(historyPoints[0].at * 1000).toLocaleString("ru-RU", { timeZone: "UTC" })} — {new Date(historyEnd! * 1000).toLocaleString("ru-RU", { timeZone: "UTC" })} UTC.</p>}
 
         <div className="nodeLiveGraphs">
           <TaskGraph
@@ -270,6 +274,7 @@ export function OverviewDashboard({
             detail={`Load ${overview?.resources.load1?.toFixed(2) ?? "—"} · ${overview?.resources.cpu_count ?? "—"} CPU`}
             series={[{ values: chartHistory.load, tone: "blue" }]}
             resolution={resolution}
+            endAt={historyEnd}
             maxValue={100}
             yFormatter={(value) => `${Math.round(value)}%`}
           />
@@ -279,18 +284,20 @@ export function OverviewDashboard({
             detail={`${bytes(memoryUsedBytes)} / ${bytes(memoryTotal)} · своб. ${bytes(memoryFree)}`}
             series={[{ values: chartHistory.memory, tone: "green" }]}
             resolution={resolution}
+            endAt={historyEnd}
             maxValue={100}
             yFormatter={(value) => `${Math.round(value)}%`}
           />
           <TaskGraph
             label="NETWORK"
             value={networkRate.rx == null || networkRate.tx == null ? "—" : `↓ ${bytes(networkRate.rx)}/с  ↑ ${bytes(networkRate.tx)}/с`}
-            detail={`Всего: ↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`}
+            detail={`Счётчики интерфейсов: ↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`}
             series={[
               { values: chartHistory.rx, tone: "blue" },
               { values: chartHistory.tx, tone: "green" },
             ]}
             resolution={resolution}
+            endAt={historyEnd}
             maxValue={prettyMax(Math.max(...[networkRate.rx, networkRate.tx, ...chartHistory.rx, ...chartHistory.tx, 1].filter(knownMetric)))}
             yFormatter={(value) => `${bytes(value)}/с`}
             wide
@@ -302,7 +309,7 @@ export function OverviewDashboard({
           <FactCard label="Диск" value={diskUsed == null ? "—" : `${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)} · своб. ${bytes(diskFree)}`} />
           <FactCard label="Время работы" value={uptime(overview?.server.uptime_s)} detail={`${overview?.server.city || "Город не определён"}, ${overview?.server.country || "—"}`} />
           <FactCard label="Load · 1 мин" value={overview?.resources.load1?.toFixed(2) ?? "—"} detail={`${overview?.resources.cpu_count ?? "—"} CPU`} />
-          <FactCard label="Трафик · всего" value={bytes(networkTotal)} detail={`↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`} />
+          <FactCard label="Счётчики сети" value={bytes(networkTotal)} detail={`С запуска интерфейсов · ↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`} />
           <FactCard label="Mihomo · доступы" value={`${credentialsCount ?? (mihomoInstalled ? "—" : 0)}`} detail={`Профили: ${profileCount} · используются: ${mihomoProfiles?.filter((profile) => profile.connections.length > 0).length ?? mihomoStatus?.profiles_in_use ?? (mihomoInstalled ? "—" : 0)}`} />
           <FactCard label="Маршруты" value={`${routesInUseLabel}`} detail={`${routesReadyLabel} готовы / ожидают`} />
           <FactCard label="RAM · свободно" value={bytes(memoryFree)} detail={memUsed == null ? "Нет данных" : `${memUsed.toFixed(0)}% занято`} />
@@ -341,6 +348,7 @@ function TaskGraph({
   wide = false,
   legend,
   resolution = 3,
+  endAt,
 }: {
   label: string;
   value: string;
@@ -351,8 +359,10 @@ function TaskGraph({
   wide?: boolean;
   legend?: string[];
   resolution?: number;
+  endAt?: number;
 }) {
   const dataLength = Math.max(...series.map((item) => item.values.length), 1);
+  const hasSamples = series.some(item => item.values.some(knownMetric));
   const sampleWindow = Math.max((dataLength - 1) * resolution, resolution);
   const yTicks = [1, .75, .5, .25, 0];
   const xTicks = [1, .75, .5, .25, 0];
@@ -375,15 +385,15 @@ function TaskGraph({
         <div className="nodeMetricYAxis">
           {yTicks.map((ratio) => <span key={ratio}>{yFormatter(top * ratio)}</span>)}
         </div>
-        <div className="nodeMetricXAxis">
+        {hasSamples && <div className="nodeMetricXAxis">
           {xTicks.map((ratio) => {
             const seconds = sampleWindow * ratio;
             const unit = seconds >= 86400 ? [86400, "д"] as const : seconds >= 3600 ? [3600, "ч"] as const : seconds >= 60 ? [60, "м"] as const : [1, "с"] as const;
-            return <span key={ratio}>{ratio === 0 ? "сейчас" : `−${Math.round(seconds / unit[0])}${unit[1]}`}</span>;
+            return <span key={ratio}>{ratio === 0 ? endAt == null ? "конец" : new Date(endAt * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) : `−${Math.round(seconds / unit[0])}${unit[1]}`}</span>;
           })}
-        </div>
+        </div>}
       </div>
-      <small>{detail}</small>
+      <small>{hasSamples ? detail : `Нет измерений за выбранный период · ${detail}`}</small>
     </section>
   );
 }

@@ -311,6 +311,8 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
     for (const key of ["traffic_verified_at", "traffic_observed_at"]) {
       if (row[key] !== undefined && !trafficTimestamp(row[key])) throw new Error("Некорректное подтверждение передачи данных");
     }
+    if (row.observed_since != null && (typeof row.observed_since !== "number" || !Number.isFinite(row.observed_since)
+      || row.observed_since < 0 || row.observed_since > 253402300799)) throw new Error("Некорректное начало наблюдения трафика");
     if (row.traffic_verified_at !== undefined && (!trafficTimestamp(row.traffic_observed_at) || Number(row.traffic_verified_at) > row.traffic_observed_at)) throw new Error("Противоречивое подтверждение передачи данных");
   }
   return { ...value, connections } as ProfileStats;

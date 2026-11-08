@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { bytes } from "../../shared/lib/control-plane-ui";
-import type { ProfileStats, SubscriptionLimits, SubscriptionLimitsStatus, TrafficPeriod, TrafficUsage } from "./types";
+import type { ProfileStats, SubscriptionLimits, SubscriptionLimitsStatus, TrafficAmount, TrafficPeriod, TrafficUsage } from "./types";
 import styles from "./profile-general.module.css";
 
 export const unlimitedSubscription: SubscriptionLimits = { speed_mbps: null, traffic_gb: null, days: null };
@@ -21,6 +21,25 @@ export function subscriptionLimitChange(value: SubscriptionLimits, key: keyof Su
 /** Only durable server accounting; transient core counters are not lifetime usage. */
 export function subscriptionTraffic(stats: ProfileStats | undefined, deviceId?: string): SubscriptionTraffic | undefined {
   return deviceId === undefined ? stats?.usage?.summary : stats?.usage?.devices[deviceId];
+}
+
+export function aggregateUsage(rows: (TrafficAmount | null | undefined)[]): TrafficAmount {
+  const known = rows.filter((row): row is TrafficAmount & { used_bytes: number } => Boolean(row?.stats_available && row.used_bytes != null));
+  return {
+    used_bytes: rows.length === 0 || known.length > 0 ? known.reduce((sum, row) => sum + row.used_bytes, 0) : null,
+    stats_available: rows.length === 0 || known.length > 0,
+    stats_partial: known.length !== rows.length || known.some(row => row.stats_partial),
+  };
+}
+
+export function usageBytes(traffic: TrafficAmount | null | undefined): string {
+  return traffic?.stats_available && traffic.used_bytes != null ? `${traffic.stats_partial ? "≥ " : ""}${bytes(traffic.used_bytes)}` : "—";
+}
+
+export function usagePeriodLabel(traffic: TrafficUsage | null | undefined): string {
+  return traffic?.history_started_at != null
+    ? `За всё время учёта · с ${utcDate(traffic.history_started_at)} UTC`
+    : "За всё время учёта";
 }
 
 /** Never substitute an all-time total for missing period history. */
@@ -54,13 +73,13 @@ export function SubscriptionUsage({ status, traffic, label = "Использов
   const [period, setPeriod] = useState<TrafficPeriod>("all");
   const selected = periodTraffic(traffic, period);
   const window = period !== "all" ? traffic?.periods?.[period] : undefined;
-  const used = selected?.stats_available && selected.used_bytes != null ? `${selected.stats_partial ? "≥ " : ""}${bytes(selected.used_bytes)}` : "—";
+  const used = usageBytes(selected);
   return <div className={styles.usage} role="status" data-state={status?.state}>
     <span>{label}</span><b>{used}</b>
     <label className={styles.usageFilter}><span>Период</span><select aria-label="Период трафика" value={period} onChange={event => setPeriod(event.target.value as TrafficPeriod)}>
       <option value="day">За день</option><option value="week">За 7 дней</option><option value="month">За 30 дней</option><option value="all">За всё время</option>
     </select></label>
-    <small className={styles.usagePeriod}>{period === "all" ? "За всё время учёта · без сброса по дням и месяцам"
+    <small className={styles.usagePeriod}>{period === "all" ? usagePeriodLabel(traffic)
       : window ? `${utcDate(window.started_at)} — ${utcDate(window.ended_at)} · дни по UTC, включая сегодня` : "История за выбранный период пока недоступна"}</small>
     {window && !selected?.stats_available && <small className={styles.usagePeriod}>За выбранный период пока нет доступных измерений.</small>}
     {period !== "all" && traffic?.history_started_at != null && <small className={styles.usagePeriod}>

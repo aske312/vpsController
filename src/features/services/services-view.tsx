@@ -125,7 +125,7 @@ export function ServicesDashboard({
             <Metric label="ACTIVE" value={summary.active} tone={nodeTone === "healthy" ? "ok" : "warn"} />
             <Metric label="FAILED" value={summary.failed} tone={services?.failed_units ? "bad" : ""} />
             <Metric label="AUTOSTART" value={summary.enabled} />
-            <Metric label="RESTARTS" value={summary.restarts} />
+            <Metric label="RESTARTS · SYSTEMD" value={summary.restarts} />
           </div>
         </div>
       </article>

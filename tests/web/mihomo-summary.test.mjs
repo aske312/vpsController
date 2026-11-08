@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { createMihomoSummaryStore } from "../../src/features/overview/mihomo-summary.ts";
+import test, { after } from "node:test";
+import { createTestLoader } from "./vite-test-loader.mjs";
+const loader = await createTestLoader(import.meta.url);
+after(() => loader.close());
+const { createMihomoSummaryStore } = await loader.ssrLoadModule('/src/features/overview/mihomo-summary.ts');
 
 const profile = { id: "profile-1", name: "Test", channels: ["transport-reality"], connections: [{ id: "connection-1", component: "transport-reality" }] };
 const status = { active: true, profiles: 1, credentials: 1, channels_in_use: ["transport-reality"] };
@@ -8,7 +11,9 @@ const responses = {
   "/mihomo/status": status,
   "/mihomo/modules": { items: [{ id: "transport-reality", installed: true, active: true }] },
   "/mihomo/profiles": { items: [profile] },
-  "/mihomo/stats": { items: [{ id: profile.id, summary: { rx_bytes: 120, tx_bytes: 30 } }] },
+  "/mihomo/stats": { items: [{ id: profile.id, summary: { configured: 1, active: 0, rx_bytes: 120, tx_bytes: 30 }, connections: {}, usage: {
+    summary: { used_bytes: 8192, stats_available: true, stats_partial: true }, devices: {}
+  } }] },
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -46,6 +51,20 @@ test("each failing endpoint leaves the other sections available", async () => {
   }
 });
 
+test('overview retains durable usage across core resets and rejects malformed traffic',async()=>{
+ let stats=structuredClone(responses['/mihomo/stats']);
+ const store=createMihomoSummaryStore(async path=>path==='/mihomo/stats'?stats:responses[path]);
+ await store.refresh();
+ assert.equal(store.getSnapshot().profileStats[profile.id].usage.summary.used_bytes,8192);
+ stats=structuredClone(stats);stats.items[0].summary.rx_bytes=0;stats.items[0].summary.tx_bytes=0;
+ await store.refresh(true);
+ assert.equal(store.getSnapshot().profileStats[profile.id].usage.summary.used_bytes,8192);
+ stats=structuredClone(stats);stats.items[0].usage.summary.used_bytes=-1;
+ await store.refresh(true);
+ assert.ok(store.getSnapshot().errors.profileStats);
+ assert.equal(store.getSnapshot().profileStats[profile.id].usage.summary.used_bytes,8192);
+});
+
 test("failed refresh preserves previous data, then recovers and accepts an empty profile list", async () => {
   let phase = "success";
   const store = createMihomoSummaryStore(async (path) => {
@@ -57,7 +76,7 @@ test("failed refresh preserves previous data, then recovers and accepts an empty
   phase = "failure";
   await store.refresh(true);
   assert.deepEqual(store.getSnapshot().profiles, [profile]);
-  assert.deepEqual(store.getSnapshot().profileStats[profile.id], { rx_bytes: 120, tx_bytes: 30 });
+  assert.deepEqual(store.getSnapshot().profileStats[profile.id], responses['/mihomo/stats'].items[0]);
   assert.equal(Object.keys(store.getSnapshot().errors).length, 4);
   phase = "empty";
   await store.refresh(true);
