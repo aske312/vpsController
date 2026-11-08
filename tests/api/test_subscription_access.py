@@ -49,6 +49,18 @@ class SubscriptionAccessTests(unittest.TestCase):
         self.profile.update({'limits': {'days': 1}, 'limits_started_at': int(time.time()) - 90000})
         self.assertEqual(self.channels(), [])
 
+    def test_quic_waits_for_panel_route_migration_before_it_can_close_panel(self):
+        self.profile['connections'][0]['component'] = 'transport-hysteria2'
+        (self.root / 'mihomo/state.json').write_text(json.dumps({'modules': {'transport-hysteria2': True}}))
+        with patch.object(access, 'QUIC_ROOT', self.root / 'quic'):
+            self.assertEqual(self.channels(), [])
+            config = {'inbounds': []}
+            manager.configure_quic_panel_route(config)
+            target = self.root / 'quic/hysteria2/config.json'
+            target.parent.mkdir(parents=True)
+            target.write_text(json.dumps(config))
+            self.assertEqual(self.channels(), ['transport-hysteria2'])
+
     def test_gateway_trusts_only_isolated_mihomo_ranges_and_server_hairpin(self):
         with patch.object(access, 'interface_addresses', return_value={'mh-wg0': {'address': '10.82.0.1', 'subnet': '10.82.0.0/24'}}):
             values = access.gateway_values({'PUBLIC_IPV4': '203.0.113.1', 'WG_SUBNET': '10.7.0.0/24'})

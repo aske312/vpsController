@@ -23,6 +23,7 @@ TRANSPORTS = {
     'transport-tuic': ('TUIC', 'vps-control-mihomo-tuic.service'),
 }
 INTERFACES = ('mh-wg0', 'mh-awg0')
+QUIC_ROOT = Path('/etc/vps-control/mihomo/quic')
 _limits = None
 
 
@@ -42,6 +43,18 @@ def read(path, default):
         return json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
         return default
+
+
+def panel_route_ready(component):
+    if component not in {'transport-hysteria2', 'transport-tuic'}:
+        return True
+    try:
+        config = read(QUIC_ROOT / component.removeprefix('transport-') / 'config.json', {})
+        rules = config.get('route', {}).get('rules', [])
+        return bool(rules and rules[0] == {'domain': [PANEL_HOST], 'network': 'tcp', 'port': [80],
+                                          'action': 'route-options', 'override_address': '127.0.0.1', 'override_port': 80})
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
 
 
 def available(data_dir: Path, *, profiles=None, excluded=(), observe=None):
@@ -73,7 +86,8 @@ def available(data_dir: Path, *, profiles=None, excluded=(), observe=None):
                         and str(connection.get('device_id', '')) in devices
                         and isinstance(connection.get('credential'), dict) and connection['credential']):
                     candidates.add(component)
-        return sorted(component for component in candidates if observe(TRANSPORTS[component][1]).get('active') is True)
+        return sorted(component for component in candidates if observe(TRANSPORTS[component][1]).get('active') is True
+                      and panel_route_ready(component))
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return []
 
