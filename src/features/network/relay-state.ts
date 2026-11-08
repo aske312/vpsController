@@ -1,4 +1,5 @@
 import { clientExport, type ClientExport } from "../../shared/lib/client-export";
+import countryCodes from "../../../api/resources/country-codes.json";
 
 export type RelayMeasurement = { state: "ready" | "failed" | "warning" | "unknown"; reason: string; scope?: "diagnostic_udp_path"; sent?: number; received?: number; loss_percent?: number; client_to_relay_lost?: number; relay_to_vps_lost?: number; vps_to_relay_lost?: number; relay_to_client_lost?: number; agent_local_drops?: number; origin_local_drops?: number; agent_socket_errors?: number; rtt_ms?: number | null; relay_vps_rtt_ms?: number | null; packet_size?: number };
 export type RelayDeviceTest = { id: string; state: "preparing" | "awaiting_client" | "processing" | "ready" | "warning" | "failed" | "unknown" | "expired" | "cancelled"; reason: string; created_at: number; expires_at: number; finished_at?: number; consumer_id: string; cleanup_state?: "cleaned" | "failed" | "pending"; media?: { state: "ready" | "failed" | "unknown"; reason: string; verified_bytes?: number | null; seconds?: number | null }; measurement?: RelayMeasurement; vantage_point: "client"; verification: "client_report_with_udp_witness" };
@@ -16,6 +17,7 @@ export type RelayRoute = {
   device_test?: RelayDeviceTest;
 };
 export type RelayHost = {
+  country_code_override?: string;
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
@@ -82,6 +84,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     if (host.profile_failures !== undefined && !integer(host.profile_failures)) return invalid();
+    if (host.country_code_override !== undefined && (typeof host.country_code_override !== "string" || host.country_code_override !== "" && !countryCodes.includes(host.country_code_override))) return invalid();
     if (host.private_transport !== undefined && (!object(host.private_transport) || !["preparing", "sending", "ready", "unknown", "disabling", "disabled"].includes(String(host.private_transport.state)) || Object.keys(host.private_transport).some(key => !["state", "generation", "verified_at"].includes(key)) || host.private_transport.generation !== undefined && (typeof host.private_transport.generation !== "string" || !/^[0-9a-f]{32}$/.test(host.private_transport.generation)) || host.private_transport.verified_at !== undefined && !integer(host.private_transport.verified_at))) return invalid();
     ids.add(host.id);
     if (host.agent_release !== undefined && (!object(host.agent_release) || !["unknown", "current", "outdated", "newer"].includes(String(host.agent_release.state)) || host.agent_release.state !== "unknown" && (typeof host.agent_release.version !== "string" || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(host.agent_release.version) || typeof host.agent_release.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(host.agent_release.digest)))) return invalid();

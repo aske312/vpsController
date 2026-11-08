@@ -78,13 +78,22 @@ class ResourceCountryTests(unittest.TestCase):
         ip = '85.209.155.229'
         for row in ({'ip': ip, 'country_code': 'FI'}, {'ipAddress': ip, 'countryCode': 'FI'},
                     {'ip': ip, 'location': {'country_code': 'FI'}},
-                    {'ip': ip, 'network': {'autonomous_system': {'country': 'FI'}}},
                     {'ip': ip, 'country': 'fi'}):
             self.assertEqual(normalize(row, ip), 'FI')
         for row in ({'ip': '8.8.8.8', 'country_code': 'US'}, {'country_code': 'US'},
                     {'ip': ip, 'success': False, 'country_code': 'FI'},
                     {'ip': ip, 'country_code': '../US'}, [], {'ip': ip, 'country_code': 42}):
             self.assertIsNone(normalize(row, ip))
+
+    def test_as_registration_country_is_not_ip_geolocation(self):
+        ip = '48.102.176.101'
+        network = {'autonomous_system': {'country': 'GB'}}
+        normalize = api.resource_country.country_record
+        self.assertIsNone(normalize({'ip': ip, 'network': network}, ip))
+        self.assertIsNone(normalize({'ip': ip, 'network': network,
+                                     'location': {'country': 'United States'}}, ip))
+        self.assertEqual(normalize({'ip': ip, 'network': network,
+                                    'location': {'country': 'DE'}}, ip), 'DE')
 
     def test_oversized_and_malformed_responses_are_ignored(self):
         for raw in (b'x' * 65537, b'not json', b'[]'):

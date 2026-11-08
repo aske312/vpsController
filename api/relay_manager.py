@@ -19,6 +19,7 @@ from relay_client import RelayClient, AgentAPIError
 from relay_addresses import normalize_address, normalize_addresses, all_addresses, authority
 import relay_cdn
 import relay_diagnostics
+from resource_country import country_override
 
 CONFIG_KEYS = ('transport', 'listen_port', 'target_ip', 'target_port')
 
@@ -114,6 +115,7 @@ class RelayManager:
             if not re.fullmatch(r'[0-9a-f]{32}', str(host.get('id', ''))) or host['id'] in ids or host['agent_url'] in origins or not isinstance(host.get('name'), str):
                 raise ValueError('Повреждён узел relay')
             address = host.get('client_address')
+            country_override(host.get('country_code_override', ''))
             if address is not None:normalize_address(address)
             ids.add(host['id']); origins.add(host['agent_url'])
         route_ids = set()
@@ -183,6 +185,9 @@ class RelayManager:
         host = {key: payload.get(key) for key in ('name', 'agent_url', 'certificate_sha256')}
         host.update(id=host_id, token=payload.get('token') or previous.get('token'), api_version=1)
         host['excluded_addresses'] = previous.get('excluded_addresses', [])
+        # Older clients omit the override; an explicit empty string restores auto lookup.
+        override = payload.get('country_code_override')
+        host['country_code_override'] = country_override(previous.get('country_code_override', '') if override is None else override)
         client = self.client(host)
         host['agent_url'] = 'https://'+authority(client.host, client.port)
         host['certificate_sha256'] = host['certificate_sha256'].lower()
@@ -472,6 +477,7 @@ class RelayManager:
             public['client_address'] = host.get('client_address') or self.client(host).host
             public['addresses'] = self.addresses(host)
             public['excluded_addresses'] = host.get('excluded_addresses', [])
+            public['country_code_override'] = host.get('country_code_override', '')
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
             if not probe or addresses_only:

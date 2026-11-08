@@ -6,7 +6,7 @@ import {createElement, Fragment} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(()=>loader.close());
-const {resourceIp, resourceCountry, entryCountryAddresses, countryLocationsSnapshot} = await loader.ssrLoadModule('/src/features/network/resource-country.ts');
+const {resourceIp, resourceCountry, entryCountry, entryCountryAddresses, countryLocationsSnapshot, relayCountries} = await loader.ssrLoadModule('/src/features/network/resource-country.ts');
 const {CountryFlag} = await loader.ssrLoadModule('/src/shared/components/country-flag.tsx');
 const {RouteResourceIcon} = await loader.ssrLoadModule('/src/features/network/route-resource-icon.tsx');
 
@@ -27,6 +27,18 @@ test('country resolution uses resource addresses and never guesses from names',(
 test('country responses are bound to requested IPs and validated',()=>{
  assert.deepEqual(countryLocationsSnapshot({items:[{address:'8.8.8.8',country_code:'US'}],pending:false},['8.8.8.8']).locations,{'8.8.8.8':'US'});
  for(const value of [{items:[],pending:false},{items:[{address:'1.1.1.1',country_code:'US'}],pending:false},{items:[{address:'8.8.8.8',country_code:'../us'}],pending:false}])assert.throws(()=>countryLocationsSnapshot(value,['8.8.8.8']));
+});
+
+test('manual Relay country overrides lookup only for that host and auto mode restores it',()=>{
+ const entry={kind:'relay',address:'48.102.176.101',host:{country_code_override:'DE'}};
+ const locations={'48.102.176.101':'US'};
+ assert.equal(entryCountry(entry,locations).code,'DE');
+ assert.equal(entryCountry(entry,{}).code,'DE');
+ assert.equal(entryCountry({...entry,host:{country_code_override:''}},locations).code,'US');
+ assert.equal(entryCountry({...entry,host:{}},locations).code,'US');
+ assert.equal(entryCountry({kind:'domain',domain:{resolved:[entry.address]}},locations).code,'US');
+ assert.equal(relayCountries.length,249);
+ assert.equal(relayCountries.find(country=>country.code==='DE').name,'Германия');
 });
 test('shared inline SVG flags have unique clip paths and resource icons remain fallbacks',()=>{
  const html=renderToStaticMarkup(createElement(Fragment,null,createElement(CountryFlag,{code:'NL',label:'NL'}),createElement(CountryFlag,{code:'RU',label:'RU'})));

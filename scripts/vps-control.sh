@@ -982,13 +982,12 @@ for path in sys.argv[2:]:
     if not data or data.get("success") is False:
         continue
     location = data.get("location") if isinstance(data.get("location"), dict) else data
-    network = data.get("network") if isinstance(data.get("network"), dict) else {}
-    autonomous = network.get("autonomous_system") if isinstance(network.get("autonomous_system"), dict) else {}
     ip = str(data.get("ip") or data.get("ipAddress") or data.get("ip_address") or data.get("query") or "")
     city = str(location.get("city") or location.get("cityName") or location.get("city_name") or "").strip()
     country = str(location.get("country_name") or location.get("countryName") or location.get("country") or "").strip()
     raw_country = str(location.get("country") or "").strip()
-    code = str(location.get("country_code") or location.get("countryCode") or location.get("country_code2") or data.get("country_code") or data.get("code") or autonomous.get("country") or (raw_country if re.fullmatch(r"[A-Za-z]{2}", raw_country) else "")).upper().strip()
+    # AS registration country is not evidence of this IP's location.
+    code = str(location.get("country_code") or location.get("countryCode") or location.get("country_code2") or data.get("country_code") or data.get("code") or (raw_country if re.fullmatch(r"[A-Za-z]{2}", raw_country) else "")).upper().strip()
     if ip and re.fullmatch(r"[A-Z]{2}", code):
         records.append((ip, city, country, code, coordinates(location)))
 

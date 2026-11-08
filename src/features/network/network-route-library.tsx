@@ -20,7 +20,7 @@ import type { RouteIconKind } from "./route-type-icon";
 import { RoutePagination, routePage } from "./route-pagination";
 import { RouteResourceIcon } from "./route-resource-icon";
 import { useResourceCountries } from "./use-resource-countries";
-import { entryCountryAddresses, resourceCountry } from "./resource-country";
+import { entryCountryAddresses, entryCountry, resourceCountry } from "./resource-country";
 import { ServerAddressPanel } from "./route-server-panel";
 import { NetworkCdnSettings } from "./network-cdn-settings";
 
@@ -44,7 +44,7 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
     <header className="routeLibraryHeader"><div><h2>Точки входа</h2></div><div className="routeLibraryHeaderActions">{add}</div></header>
 
     <NetworkRelayNotice relay={relay} />
-    <div className="networkProviderGrid routeLibraryList">{entryPagination.items.map(entry => <RouteStatusCard key={entry.id} title={entry.title} subtitle={entry.kind === "relay" ? entry.address : entry.subtitle} icon={entryIcon(entry)} country={resourceCountry(entryCountryAddresses(entry), locations)} cdn={entry.kind === "domain" && domainRouteKinds(entry).includes("cdn")} summary={entry.summary} onOpen={() => open(entry.id)} facts={entry.kind === "relay" ? <><span>Маршрутов: {entry.host.routes.length}</span><span>{entry.host.version ? `Agent ${entry.host.version}` : "Версия Agent неизвестна"}</span></> : <span>{entry.summary.connection}</span>} />)}</div>
+    <div className="networkProviderGrid routeLibraryList">{entryPagination.items.map(entry => <RouteStatusCard key={entry.id} title={entry.title} subtitle={entry.kind === "relay" ? entry.address : entry.subtitle} icon={entryIcon(entry)} country={entryCountry(entry, locations)} cdn={entry.kind === "domain" && domainRouteKinds(entry).includes("cdn")} summary={entry.summary} onOpen={() => open(entry.id)} facts={entry.kind === "relay" ? <><span>Маршрутов: {entry.host.routes.length}</span><span>{entry.host.version ? `Agent ${entry.host.version}` : "Версия Agent неизвестна"}</span></> : <span>{entry.summary.connection}</span>} />)}</div>
     <RoutePagination {...entryPagination} label="Точки входа" onChange={setEntryPage} />
     {!entries.length && <div className="routeLibraryEmpty"><strong>{relay.reading && !relay.status ? "Загружаем адреса…" : "Добавьте первую точку входа"}</strong><p>Подключите Relay или добавьте домен.</p></div>}
     <section className="routeLibraryServer" aria-label="Адреса этого сервера"><header><h3>Адреса этого сервера <small>{addresses.status?.items.length ?? "…"}</small></h3></header>
@@ -54,7 +54,7 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
       </div>
       <RoutePagination {...ipPagination} label="Адреса этого сервера" onChange={setIpPage} />
     </section>
-    {selected && <RouteControlDialog title={selected.title} address={selected.address} subtitle={selected.kind === "relay" ? "Relay Agent" : selected.subtitle} type={selected.kind} icon={entryIcon(selected)} country={resourceCountry(entryCountryAddresses(selected), locations)} cdn={selected.kind === "domain" && domainRouteKinds(selected).includes("cdn")} badge={<NetworkRouteSummaryBadge summary={selected.summary} />} close={close}>
+    {selected && <RouteControlDialog title={selected.title} address={selected.address} subtitle={selected.kind === "relay" ? "Relay Agent" : selected.subtitle} type={selected.kind} icon={entryIcon(selected)} country={entryCountry(selected, locations)} cdn={selected.kind === "domain" && domainRouteKinds(selected).includes("cdn")} badge={<NetworkRouteSummaryBadge summary={selected.summary} />} close={close}>
       {needsAttention(selected.summary) && <p className="routeLibraryCallout" role="status">{selected.summary.detail}</p>}
       {selected.kind === "relay" ? <RelayEntryPanel key={selected.id} host={selected.host} relay={relay} close={close} /> : <DomainEntryPanel key={selected.id} entry={selected} request={request} disabled={busy || failed || endpointDirty} onChecked={onRefresh} onRemove={(kind, address) => setDeletion({ kind, address })}>
         <NetworkCdnSettings domain={selected.address} route={selected.domain.route} detected={selected.domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={cloudflare && { ...cloudflare, blocked: cloudflare.blocked || busy || failed }} refreshKey={refreshKey} />

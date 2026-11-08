@@ -69,7 +69,7 @@
 [data-network-page] .relaySettingsSection h3 { margin:0; color:var(--text); font:600 14px/1.5 var(--ui-font); }
 [data-network-page] .relaySettingsSection p, [data-network-page] .relaySettingsSection small { margin:0; color:var(--muted); font:400 12px/1.6 var(--ui-font); overflow-wrap:anywhere; }
 [data-network-page] .relaySettingsSection label { color:var(--muted); font:400 12px/1.5 var(--ui-font); }
-[data-network-page] .relaySettingsEditor input { min-height:40px; font-size:12px; }
+[data-network-page] .relaySettingsEditor :is(input,select) { min-height:40px; font-size:12px; }
 [data-network-page] .relaySettingsEditor button { min-height:36px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); font:500 12px/1.4 var(--ui-font); cursor:pointer; }
 [data-network-page] .relaySettingsEditor button:disabled { opacity:.45; cursor:default; }
 [data-network-page] .relaySettingsEditor .networkPrimaryButton { border-color:var(--cyan); color:var(--cyan); }
@@ -88,4 +88,4 @@
 [data-network-page] .relaySettingsFooter { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
 [data-network-page] .relaySettingsFooter .routeLibraryDanger { color:var(--red); border-color:transparent; background:none; }
 [data-network-page] .relaySettingsFooter .relayActions { margin-left:auto; }
-[data-network-page] .relaySettingsEditor :is(button,input,summary):focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+[data-network-page] .relaySettingsEditor :is(button,input,select,summary):focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }

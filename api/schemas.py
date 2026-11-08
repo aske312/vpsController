@@ -4,7 +4,8 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field, StrictInt, IPvAnyAddress
+from pydantic import BaseModel, Field, StrictInt, IPvAnyAddress, field_validator
+from resource_country import country_override
 
 
 class BootstrapRequest(BaseModel):
@@ -20,11 +21,17 @@ class RelayHostSettings(BaseModel):
     id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     name: str = Field(min_length=1, max_length=64)
     client_address: str | None = Field(default=None, max_length=253)
+    country_code_override: str | None = Field(default=None, max_length=2)
     agent_url: str = Field(max_length=80)
     token: str = Field(default="", max_length=128)
     certificate_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     api_version: Literal[1] = 1
     expected_revision: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+    @field_validator('country_code_override')
+    @classmethod
+    def validate_country_override(cls, value):
+        return country_override(value) if value is not None else None
 
 
 class RelayRouteSettings(BaseModel):

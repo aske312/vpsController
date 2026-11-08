@@ -10,6 +10,7 @@ import type { NetworkAdmission, NetworkRequest } from "./network-api";
 import { relayAddresses, relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
 
 import { RouteTypeIcon } from "./route-type-icon";
+import { relayCountries } from "./resource-country";
 
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
 
@@ -24,6 +25,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   const [discard, setDiscard] = useState(false);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [country, setCountry] = useState("");
   const [connection, setConnection] = useState("");
   const [edit, setEdit] = useState<RelayHost | null>(null);
   const [confirmation, setConfirmation] = useState<RelayHost | null>(null);
@@ -107,10 +109,11 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
       notifyError(cause instanceof Error ? cause.message : "Не удалось начать операцию Relay"); return false;
     } finally { saving.current = false; setSending(false); }
   }
-  function resetDialog() { setDialog(false); setChanged(false); setName(""); setConnection(""); setAddress(""); setEdit(null); }
+  function resetDialog() { setDialog(false); setChanged(false); setName(""); setConnection(""); setAddress(""); setCountry(""); setEdit(null); }
   function close() { if (changed) setDiscard(true); else resetDialog(); }
   function openHost(selected?: RelayHost, inline = false) {
     setEdit(selected || null); setName(selected?.name || ""); setAddress(selected?.client_address || "");
+    setCountry(selected?.country_code_override || "");
     setConnection(""); setEmbedded(inline); setDialog(true); setChanged(false);
   }
   async function saveHost() {
@@ -118,7 +121,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     try {
       const params = connection ? relayConnection(connection) : edit ? { agent_url: edit.agent_url, certificate_sha256: edit.certificate_sha256, api_version: 1, token: "" } : relayConnection("");
       setConnection("");
-      if (await submit(status.pending ? "/network/relays/reconnect" : "/network/relays", { method: "PUT", body: JSON.stringify({ ...params, name: name.trim(), client_address: address.trim(), id: edit?.id || null, expected_revision: status.revision }) })) { resetDialog(); return true; }
+      if (await submit(status.pending ? "/network/relays/reconnect" : "/network/relays", { method: "PUT", body: JSON.stringify({ ...params, name: name.trim(), client_address: address.trim(), country_code_override: country, id: edit?.id || null, expected_revision: status.revision }) })) { resetDialog(); return true; }
       return false;
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Некорректные параметры подключения"); return false; }
   }
@@ -145,10 +148,11 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось прочитать результат теста"); }
   }
   return {
-    status, failed, reading, locked, load, submit, downloadTest, uploadTest, dialog, embedded, name, address, connection, edit, changed, discard, confirmation, addressConfirmation, setAddressConfirmation,
+    status, failed, reading, locked, load, submit, downloadTest, uploadTest, dialog, embedded, name, address, country, connection, edit, changed, discard, confirmation, addressConfirmation, setAddressConfirmation,
     openHost, close, resetDialog, saveHost, removeConfirmed, setDiscard, setConfirmation, recoveryConfirmation, setRecoveryConfirmation,
     changeName: (value: string) => { setName(value); setChanged(true); },
     changeAddress: (value: string) => { setAddress(value); setChanged(true); },
+    changeCountry: (value: string) => { setCountry(value); setChanged(true); },
     changeConnection: (value: string) => { setConnection(value); setChanged(true); },
   };
 }
@@ -206,6 +210,8 @@ export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
     <form className="relayForm" onSubmit={event => { event.preventDefault(); if (!invalid) void relay.saveHost(); }}>
       <section className="relaySettingsSection"><header><h3>Узел</h3></header>
         <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
+        <label>Страна<select value={relay.country} onChange={event => relay.changeCountry(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit}><option value="">Определять автоматически</option>{relayCountries.map(country => <option key={country.code} value={country.code}>{country.name}</option>)}</select></label>
+        <small>Указанная страна заменяет результат определения по IP для этого Relay.</small>
         <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="По умолчанию — IP Agent" /></label>
         <small>Без CDN, схемы и порта.</small>
       </section>

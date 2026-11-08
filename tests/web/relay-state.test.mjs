@@ -9,6 +9,11 @@ const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', t
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
 const status = { revision: 'c'.repeat(32), hosts: [host], pending: false, origin_ip: '195.14.118.112', origin_hosts: ['195.14.118.112'], targets: [{ transport: 'tcp', port: 443 }] };
 
+test('Relay country override accepts ISO countries and automatic mode',()=>{
+ for(const code of ['DE','US',''])assert.equal(relaySnapshot({...status,hosts:[{...host,country_code_override:code}]}).hosts[0].country_code_override,code);
+ for(const code of ['ZZ','EU','de','Germany',null,42])assert.throws(()=>relaySnapshot({...status,hosts:[{...host,country_code_override:code}]}));
+});
+
 test('minute statistics and shared budgets allow larger pools but reject invalid observations', () => {
   const route = { id: 'pro-'+'d'.repeat(32), host_id: host.id, transport: 'udp', listen_port: 20001, target_ip: status.origin_ip, target_port: 443, state: 'listening', target_verified: false, sessions: 300 };
   const diagnostics = { sent_packets: 100, received_packets: 90, dropped_packets: 0, last_sent_at: 100, last_received_at: 100, last_error_at: null, last_error: null, error_counts: {}, return_state: 'no_return', no_return_sessions: 300, udp_receive_budget_bytes: 536870912, udp_receive_budget_used_bytes: 1024, session_budget_used: 300, session_budget_limit:4096, interval: { seconds:60, errors:1, dropped_packets:1, new_sessions:300, error_counts:{session_limit:1} } };

@@ -328,6 +328,37 @@ class RelayManagementTests(unittest.TestCase):
         return {'host_id': self.host_id, 'transport': 'tcp', 'listen_port': port, 'target_port': 443,
                 'expected_revision': self.control.read()['revision'], 'agent_revision': self.agent.revision}
 
+    def test_country_override_persists_without_changing_routes_or_credentials(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        before = self.control.read()
+        host = before['hosts'][0]
+        self.agent.calls.clear()
+        def save(**changes):
+            payload = {**{key: value for key, value in host.items() if key != 'country_code_override'},
+                       'expected_revision': self.control.read()['revision'], **changes}
+            self.control.save_host(api.RelayHostSettings(**payload).model_dump())
+        save(country_code_override='DE')
+        reopened = RelayManager(self.root, ORIGIN, lambda *_: self.agent)
+        self.assertEqual(reopened.public(probe=False)['hosts'][0]['country_code_override'], 'DE')
+        self.assertEqual(reopened.read()['routes'], before['routes'])
+        self.assertEqual(reopened.read()['hosts'][0]['token'], host['token'])
+        save(name='Renamed')  # An older client has no country field.
+        self.assertEqual(self.control.read()['hosts'][0]['country_code_override'], 'DE')
+        save(country_code_override='')
+        self.assertEqual(reopened.public(probe=False)['hosts'][0]['country_code_override'], '')
+        self.assertTrue(all(method == 'GET' for method, *_ in self.agent.calls))
+
+    def test_country_override_validation_rejects_non_countries_before_saving(self):
+        before = self.control.read()
+        payload = {**before['hosts'][0], 'expected_revision': before['revision']}
+        for code in ('ZZ', 'EU', 'de', 'Germany', 42):
+            with self.subTest(code=code):
+                with self.assertRaises(ValueError):
+                    api.RelayHostSettings(**{**payload, 'country_code_override': code})
+                with self.assertRaises(ValueError):
+                    self.control.save_host({**payload, 'country_code_override': code})
+                self.assertEqual(self.control.read(), before)
+
     def test_allocator_skips_transient_udp_measurement_ports(self):
         request = self.agent.request
         def observed(method, path, *args, **kwargs):

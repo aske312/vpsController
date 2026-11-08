@@ -1,8 +1,24 @@
 import type { RouteEntry } from "./route-library-state";
 import { relayAddresses } from "./relay-state";
+import countryCodes from "../../../api/resources/country-codes.json";
 
 export type CountryLocations = Record<string, string | null>;
 let countryNames: Intl.DisplayNames | undefined;
+
+export const relayCountries = countryCodes.map(code => {
+  countryNames ||= new Intl.DisplayNames(["ru"], { type: "region" });
+  return { code, name: countryNames.of(code) || code };
+})
+  .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+
+export function entryCountry(entry: RouteEntry, locations: CountryLocations) {
+  const override = entry.kind === "relay" ? entry.host.country_code_override : undefined;
+  if (override && countryCodes.includes(override)) {
+    const name = relayCountries.find(country => country.code === override)?.name || override;
+    return { code: override, label: `Страна Relay: ${name} (указана вручную)` };
+  }
+  return resourceCountry(entryCountryAddresses(entry), locations);
+}
 
 export function resourceIp(value: string): string | null {
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(value)) return value.split(".").every(part => Number(part) <= 255 && String(Number(part)) === part) ? value : null;

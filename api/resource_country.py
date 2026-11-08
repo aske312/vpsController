@@ -9,6 +9,15 @@ import time
 import urllib.request
 from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+COUNTRY_CODES = frozenset(json.loads((Path(__file__).parent / 'resources' / 'country-codes.json').read_text()))
+
+
+def country_override(value: str) -> str:
+    if not isinstance(value, str) or value and value not in COUNTRY_CODES:
+        raise ValueError('Выберите страну из списка или автоматическое определение')
+    return value
 
 
 # Shared across sessions: optional geography must not exhaust API request workers.
@@ -41,11 +50,10 @@ def country_record(data: object, expected: str) -> str | None:
     except (ValueError, TypeError):
         return None
     location = data.get("location") if isinstance(data.get("location"), dict) else data
-    network = data.get("network") if isinstance(data.get("network"), dict) else {}
-    autonomous = network.get("autonomous_system") if isinstance(network.get("autonomous_system"), dict) else {}
+    # An AS registration country describes the operator, not this IP's location.
     raw = location.get("country")
     code = (location.get("country_code") or location.get("countryCode") or location.get("country_code2")
-            or data.get("country_code") or data.get("code") or autonomous.get("country")
+            or data.get("country_code") or data.get("code")
             or (raw if isinstance(raw, str) and re.fullmatch(r"[A-Za-z]{2}", raw) else ""))
     if not isinstance(code, str):
         return None
