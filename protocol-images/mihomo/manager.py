@@ -62,6 +62,7 @@ import xray_protocols
 import xray_core
 from version_comparison import newer_release
 import subscription_limits
+import client_channels
 from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
 import port_allocation
@@ -5184,11 +5185,14 @@ def require_yaml_export(requested_format: str | None = None, metadata: dict[str,
                                  "Экспорт sing-box/Xray JSON и URI-подписок удалён. Используйте клиент с поддержкой Mihomo/Clash YAML и добавьте общую ссылку профиля заново.")
 
 
-def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None) -> tuple[str, str]:
+def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None, *, selected_channels=True) -> tuple[str, str]:
     require_yaml_export(requested_format)
     profile = normalize_profile(item)
     profile["connections"] = subscription_limits.client_connections(profile, effective_client_connections(profile.get("connections", [])))
     config = render_profile(profile, device_id)
+    if selected_channels:
+        record = application_operation.read(client_channels.path(DATA_ROOT, str(profile['id']), device_id))
+        config = client_channels.render(config, record)
     validate_rendered_profile(config)
     return config, "yaml"
 
@@ -5514,8 +5518,161 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
             "Content-Disposition": f'inline; filename="{Path(profile_export_filename(selected_profile)).stem}.{extension}"',
             "Profile-Update-Interval": "24",
             "Subscription-Userinfo": subscription_limits.userinfo(selected_profile, DATA_ROOT / "subscription-limits"),
+            "X-Nodera-Selection-State": client_channels.state(application_operation.read(
+                client_channels.path(DATA_ROOT, selected_profile['id'], selected_device))),
         },
     )
+
+
+client_channel_slots = threading.BoundedSemaphore(2)
+
+
+class ChannelSelectionRequest(BaseModel):
+    # Keep the public command bounded and independent of administrative operations.
+    require_udp: bool = False
+
+    model_config = {"extra": "forbid"}
+
+
+def registered_command_device(token: str, request: Request):
+    """Subscription bearer + previously registered HWID; never register on command."""
+    if not token.isascii() or not 1 <= len(token) <= 512:
+        raise HTTPException(404, "Subscription not found")
+    raw_hwid = (request.headers.get("x-device-id") or request.headers.get("x-hwid") or "").strip()
+    if not raw_hwid or len(raw_hwid) > 256:
+        raise HTTPException(403, "Требуется зарегистрированный HWID устройства")
+    metadata = subscription_device_metadata(request)
+    for stored in profiles():
+        secret = stored.get("subscription_token")
+        if not isinstance(secret, str) or not secret:
+            continue
+        profile = normalize_profile(deepcopy(stored))
+        common = hmac.compare_digest(secret, token)
+        bound = None if common else next((str(d["id"]) for d in profile["devices"]
+            if hmac.compare_digest(device_subscription_token(secret, str(d["id"])), token)), None)
+        if not common and bound is None:
+            continue
+        access = subscription_limits.status(profile, DATA_ROOT / "subscription-limits")
+        if access["state"] in {"expired", "exhausted"}:
+            raise HTTPException(403, "Подписка истекла или исчерпан лимит трафика")
+        digest = hmac.new(secret.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
+        device = next((d for d in profile["devices"] if d.get("hwid_hash")
+            and hmac.compare_digest(str(d["hwid_hash"]), digest)
+            and (bound is None or str(d["id"]) == bound)
+            and device_matches_client(d, metadata)), None)
+        if device is None:
+            raise HTTPException(403, "HWID не зарегистрирован для этой подписки и приложения")
+        return profile, str(device["id"])
+    raise HTTPException(404, "Subscription not found")
+
+
+@app.post("/s/{token}/commands/select-channels")
+@app.post("/api/mihomo/subscriptions/{token}/commands/select-channels")
+def select_client_channels(token: str, request: Request, payload: ChannelSelectionRequest):
+    # Export only existing credentials of this device. No provisioning, shared profile
+    # mutations, command execution, arbitrary URLs or approval flags in this API.
+    with profile_mutation_lock:
+        profile, device_id = registered_command_device(token, request)
+    if not client_channel_slots.acquire(blocking=False):
+        raise HTTPException(429, "Сервер занят подготовкой каналов", headers={"Retry-After": "10"})
+    try:
+        config, _ = render_client_profile(profile, device_id, selected_channels=False)
+    except (ValueError, OSError, HTTPException):
+        raise HTTPException(409, "Не удалось подготовить каналы. Проверьте настройки профиля и Relay") from None
+    finally:
+        client_channel_slots.release()
+    return JSONResponse({
+        "version": 1, "command": "select-channels", "config": config,
+        "revision": profile_revision(profile), "require_udp": payload.require_udp,
+        "expires_at": int(time.time()) + 600,
+        "server_checks": {"configuration": "validated" if CORE_BIN.is_file() else "rendered",
+                          "client_reachability": "required"},
+        "subscription_userinfo": subscription_limits.userinfo(profile, DATA_ROOT / "subscription-limits"),
+    }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+class ChannelReport(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+    state: Literal['passed', 'failed']
+    seconds: float = Field(default=0, ge=0, le=86400, allow_inf_nan=False)
+    transfers: int = Field(default=0, ge=0, le=100000)
+    bytes: int = Field(default=0, ge=0, le=2**40)
+    udp: bool = False
+    model_config = {'extra': 'forbid'}
+
+
+class ChannelPreparation(BaseModel):
+    operation_id: str = Field(pattern=r'^[a-f0-9]{32}$')
+    revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+    source_digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    duration: Literal[30, 60, 120]
+    require_udp: bool = False
+    reports: list[ChannelReport] = Field(min_length=1, max_length=64)
+    model_config = {'extra': 'forbid'}
+
+
+class ChannelDecision(BaseModel):
+    action: Literal['accept', 'reject', 'rollback']
+    model_config = {'extra': 'forbid'}
+
+
+def channel_command_response(record, base):
+    return JSONResponse(client_channels.response(record, base), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/s/{token}/commands/select-channels/prepare')
+@app.post('/api/mihomo/subscriptions/{token}/commands/select-channels/prepare')
+def prepare_client_channels(token: str, request: Request, payload: ChannelPreparation,
+                            allow_changes: bool = Depends(subscription_mutation_access)):
+    if allow_changes is not True:
+        raise HTTPException(409, 'Изменения подписки временно недоступны')
+    with profile_mutation_lock:
+        profile, device_id = registered_command_device(token, request)
+        base, _ = render_client_profile(profile, device_id, selected_channels=False)
+        import yaml
+        config = yaml.safe_load(base)
+        try:
+            # Validate before committing the prepared subscription.
+            names = [row.name for row in payload.reports if row.state == 'passed']
+            filtered = client_channels.filter_config(config, names)
+            validate_rendered_profile(yaml.safe_dump(filtered, allow_unicode=True))
+            record = client_channels.prepare(DATA_ROOT, profile['id'], device_id, payload.model_dump(),
+                                             config, profile_revision(profile))
+        except (ValueError, OSError):
+            raise HTTPException(409, 'Профиль изменился или отчёт проверки не соответствует каналам устройства') from None
+        return channel_command_response(record, base)
+
+
+@app.get('/s/{token}/commands/select-channels/{identity}')
+@app.get('/api/mihomo/subscriptions/{token}/commands/select-channels/{identity}')
+@app.get('/s/{token}/commands/select-channels')
+@app.get('/api/mihomo/subscriptions/{token}/commands/select-channels')
+def client_channels_status(token: str, request: Request, identity: str | None = None):
+    with profile_mutation_lock:
+        profile, device_id = registered_command_device(token, request)
+        record = application_operation.read(client_channels.path(DATA_ROOT, profile['id'], device_id))
+        if not record.get('id') or identity is not None and record.get('id') != identity:
+            raise HTTPException(404, 'Подготовленный профиль не найден')
+        base, _ = render_client_profile(profile, device_id, selected_channels=False)
+        return channel_command_response(record, base)
+
+
+@app.post('/s/{token}/commands/select-channels/{identity}/decision')
+@app.post('/api/mihomo/subscriptions/{token}/commands/select-channels/{identity}/decision')
+def decide_client_channels(token: str, identity: str, request: Request, payload: ChannelDecision,
+                           allow_changes: bool = Depends(subscription_mutation_access)):
+    if allow_changes is not True:
+        raise HTTPException(409, 'Изменения подписки временно недоступны')
+    with profile_mutation_lock:
+        profile, device_id = registered_command_device(token, request)
+        base, _ = render_client_profile(profile, device_id, selected_channels=False)
+        import yaml
+        try:
+            record = client_channels.decision(DATA_ROOT, profile['id'], device_id, identity,
+                                              payload.action, yaml.safe_load(base))
+        except (ValueError, OSError):
+            raise HTTPException(409, 'Не удалось изменить подготовленный профиль. Проверьте его состояние') from None
+        return channel_command_response(record, base)
 
 
 def execute_module_operation(action: str, module_id: str, identity: str, unit: str) -> bool:
