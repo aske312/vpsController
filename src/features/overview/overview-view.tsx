@@ -148,7 +148,6 @@ export function OverviewDashboard({
   const networkRx = overview?.resources.network_rx;
   const networkTx = overview?.resources.network_tx;
   const networkTotal = knownMetric(networkRx) && knownMetric(networkTx) ? networkRx + networkTx : null;
-  const missingMetrics = Object.entries(overview?.resources.observations || {}).filter(([, sample]) => !sample.available).map(([name]) => name);
 
   const mihomoChannelStates = useMemo(() => installedMihomoChannels.map((module) => {
     const profileRefs = (mihomoProfiles || []).filter((profile) => profile.channels.some((channel) => valueMatchesChannel(channel, module))).length;
@@ -260,12 +259,6 @@ export function OverviewDashboard({
             <option value="live">5 минут</option><option value="hour">1 час</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
           </select></label>
         </header>
-        <p className="nodeLiveSystemNote">{overview?.resources.stale || metricsHistory.stale ? "Данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}
-          {metricsHistory.data?.settings.enabled === false && " · запись истории выключена в Службах"}
-          {metricsHistory.data?.settings.trimmed_at && " · старые данные сокращены по лимиту места"}
-        </p>
-        <p className="nodeLiveSystemNote">Числа — последние измерения; графики — выбранный период. Сетевые счётчики суммируют интерфейсы с их запуска и могут учитывать один поток несколько раз.</p>
-        {!!historyPoints?.length && <p className="nodeLiveSystemNote">Период графиков: {new Date(historyPoints[0].at * 1000).toLocaleString("ru-RU", { timeZone: "UTC" })} — {new Date(historyEnd! * 1000).toLocaleString("ru-RU", { timeZone: "UTC" })} UTC.</p>}
 
         <div className="nodeLiveGraphs">
           <TaskGraph
