@@ -38,8 +38,8 @@ export function usageBytes(traffic: TrafficAmount | null | undefined): string {
 
 export function usagePeriodLabel(traffic: TrafficUsage | null | undefined): string {
   return traffic?.history_started_at != null
-    ? `За всё время учёта · с ${utcDate(traffic.history_started_at)} UTC`
-    : "За всё время учёта";
+    ? `с ${utcDate(traffic.history_started_at)}`
+    : "За всё время";
 }
 
 /** Never substitute an all-time total for missing period history. */

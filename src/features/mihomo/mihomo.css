@@ -354,7 +354,7 @@
 .mihomoProfiles { display:grid; gap:12px; padding:14px; border-top:1px solid rgba(91,113,138,.12); }
 .mihomoProfileCard { min-width:0; overflow:hidden; border:1px solid rgba(91,113,138,.18); border-radius:14px; background:linear-gradient(145deg,rgba(10,22,33,.86),rgba(6,14,22,.74)); }
 .mihomoProfileHeader { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:11px 13px; border-bottom:1px solid rgba(91,113,138,.14); }
-.mihomoProfileToggle { min-width:0; display:grid; grid-template-columns:minmax(220px,1fr) minmax(360px,1.4fr) 18px; align-items:center; gap:16px; padding:4px; border:0; border-radius:10px; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.mihomoProfileToggle { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,.9fr) 18px; align-items:center; gap:16px; padding:4px; border:0; border-radius:10px; background:transparent; color:inherit; text-align:left; cursor:pointer; }
 .mihomoProfileToggle:hover { background:rgba(92,75,180,.06); }
 .mihomoProfileToggle:focus-visible,.mihomoDeviceToggle:focus-visible { outline:2px solid rgba(134,117,227,.55); outline-offset:2px; }
 
@@ -377,7 +377,7 @@
 .mihomoProfileSummary strong i { width:6px; height:6px; border-radius:50%; background:#657985; }
 .mihomoProfileSummary strong.is-online { color:#70d9b5; }
 .mihomoProfileSummary strong.is-online i { background:#54d2a5; box-shadow:0 0 7px rgba(84,210,165,.5); }
-.mihomoProfileSummary span { color:#718696; font:8px var(--font-mono); }
+.mihomoProfileSummary span { min-width:0; color:#718696; font:8px var(--font-mono); overflow-wrap:anywhere; }
 
 .mihomoRowActions { display: flex; justify-content: flex-end; gap: 7px; }
 
@@ -396,7 +396,7 @@
 .mihomoDeviceIdentity b { color:#dce8ef; font-size:11px; }
 .mihomoDeviceClientBadge { display:inline-block; margin-right:6px; padding:2px 5px; border:1px solid rgba(134,117,227,.25); border-radius:5px; background:rgba(92,75,180,.12); color:#b8adf4; font:700 9px var(--font-mono); vertical-align:middle; white-space:nowrap; }
 .mihomoDeviceIdentity small { margin-top:3px; color:#657a89; font:8px var(--font-mono); }
-.mihomoDeviceTotals { display:grid; grid-template-columns:62px 62px minmax(118px,1fr); gap:7px; }
+.mihomoDeviceTotals { display:grid; grid-template-columns:minmax(72px,max-content) minmax(80px,max-content) minmax(100px,1fr); gap:7px; }
 .mihomoDeviceTotals > span { min-width:0; padding:7px 9px; border-left:2px solid rgba(134,117,227,.35); background:rgba(10,20,29,.52); }
 .mihomoDeviceTotals small,.mihomoDeviceTotals b { display:block; }
 .mihomoDeviceTotals small { color:#607482; font:700 7px var(--font-mono); letter-spacing:.08em; }
@@ -539,7 +539,7 @@
 .mihomoHeroContent { width: 82%; padding: 22px; }
 .mihomoHeroFacts { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .mihomoHeroFacts > div.wide { grid-column: span 2; }
-.mihomoProfileToggle { grid-template-columns:minmax(190px,.8fr) minmax(330px,1.4fr) 18px; }
+.mihomoProfileToggle { grid-template-columns:minmax(0,1fr) minmax(220px,.9fr) 18px; }
 .mihomoProfileHeader > .mihomoRowActions { grid-column:1/-1; justify-content:flex-end; }
 .mihomoDeviceToggle { grid-template-columns:minmax(180px,1fr) minmax(300px,1.2fr) 18px; }
 .mihomoDeviceActions { grid-column:1/-1; justify-content:flex-start; max-width:none; }
@@ -1246,12 +1246,12 @@
 
 /* Keep the overview command deck authoritative over legacy Mihomo sizing rules. */
 .mihomoCommandHero .mihomoHeroContent { gap:16px; padding:30px 32px; }
-.mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .mihomoCommandHero .mihomoHeroFacts > div { min-height:68px; }
 .mihomoCommandHero { grid-template-rows:minmax(0,1fr) auto; border:0; background:#01010e; box-shadow:none; }
 .mihomoCommandHero::after { z-index:1; background:radial-gradient(ellipse at 63% 42%,transparent 34%,rgba(1,1,14,.18) 72%,rgba(1,1,14,.52) 100%),linear-gradient(90deg,rgba(1,1,14,.28),transparent 13%,transparent 88%,rgba(1,1,14,.24)); box-shadow:inset 0 30px 40px -36px rgba(0,0,0,.92),inset 0 -38px 48px -36px rgba(0,0,0,.96); }
 .mihomoCommandHero .mihomoHeroContent,.mihomoCommandHero .mihomoHeroArt { grid-row:1; }
-.mihomoCommandHero .mihomoHeroContent { grid-column:1; background:transparent; }
+.mihomoCommandHero .mihomoHeroContent { grid-column:1; width:100% !important; background:transparent; }
 .mihomoCommandHero .mihomoHeroArt { position:absolute; inset:0 0 48px; z-index:0; min-height:0; background-color:#01010e; background-image:url("/gate-art/mihomo-control-v2.webp"); background-position:right center; background-size:contain; background-repeat:no-repeat; filter:none; }
 .mihomoCommandHero .mihomoHeroArt::before { z-index:1; background:linear-gradient(90deg,rgba(1,1,14,.99) 0%,rgba(1,1,14,.96) 38%,rgba(1,1,14,.82) 57%,rgba(1,1,14,.42) 74%,rgba(1,1,14,.16) 100%),linear-gradient(180deg,rgba(1,1,14,.05) 0%,rgba(1,1,14,.1) 54%,rgba(1,1,14,.62) 100%); }
 .mihomoCommandHero .mihomoHeroFacts { gap:0; border:0; border-radius:10px; background:rgba(4,10,21,.36); box-shadow:none; backdrop-filter:blur(7px); }
@@ -1261,9 +1261,6 @@
 .mihomoHeroNavigation button { flex:1; justify-content:center; min-height:48px; border-radius:0; }
 .mihomoHeroNavigation button.active { border-color:transparent; box-shadow:inset 0 -2px #8c76ef; background:linear-gradient(0deg,rgba(92,75,180,.14),transparent 76%); }
 .mihomoOverviewLiveRow { grid-template-columns:8px minmax(0,1fr) 70px 96px; }
-@media (max-width:1180px) {
-  .mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(2,minmax(0,1fr)); }
-}
 @media (max-width:820px) {
   .mihomoCommandHero .mihomoHeroContent { padding:22px 18px; }
   .mihomoCommandHero .mihomoHeroContent { grid-column:1; grid-row:1; }
@@ -1423,4 +1420,9 @@
 .mihomoDnsRouteDetails > div { margin-top:14px; }
 @media (max-width:1100px) {
   .mihomoDnsRouteResolvers > div,.mihomoDnsRouteDetails > div { grid-template-columns:1fr; }
+}
+
+@media (min-width:721px) and (max-width:1280px) {
+  .mihomoProfileHeader,.mihomoDeviceHeader { grid-template-columns:minmax(0,1fr); }
+  .mihomoProfileHeader > .mihomoRowActions,.mihomoDeviceActions { grid-column:1/-1; justify-content:flex-end; }
 }

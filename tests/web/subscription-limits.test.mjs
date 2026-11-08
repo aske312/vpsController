@@ -118,7 +118,7 @@ test('usage aggregation preserves partial and missing measurements without inven
 });
 
 test('lifetime period identifies the server accounting start in UTC',()=>{
-  assert.match(usagePeriodLabel({history_started_at:Date.UTC(2026,10,2,23)/1000}),/02\.11\.2026 UTC/);
+  assert.equal(usagePeriodLabel({history_started_at:Date.UTC(2026,10,2,23)/1000}),'с 02.11.2026');
   assert.doesNotMatch(usagePeriodLabel(undefined),/Invalid Date|1970/);
 });
 
