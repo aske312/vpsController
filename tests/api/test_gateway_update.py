@@ -186,12 +186,12 @@ CADDY_CONFIG={shlex.quote(temp)}/rendered
 CADDY_SNIPPET_DIR={shlex.quote(temp)}/snippets
 ACCESS_MODE={mode}
 HTTP_PORT=18080
-env_value() {{ case "$1" in PUBLIC_DOMAIN) printf 'panel.example';; esac; }}
+env_value() {{ case "$1" in PUBLIC_DOMAIN) printf 'panel.example';; PUBLIC_IP_ENDPOINT) printf '203.0.113.10';; esac; }}
 {legacy}
 write_caddy_config
 '''
                 subprocess.run(["bash", "-c", script], check=True, capture_output=True)
-                result = subprocess.run([os.environ["PRIVACY_CADDY_BIN"], "adapt", "--config", str(root / "rendered"), "--adapter", "caddyfile"], capture_output=True, text=True)
+                result = subprocess.run([os.environ["PRIVACY_CADDY_BIN"], "validate", "--config", str(root / "rendered"), "--adapter", "caddyfile"], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(os.getenv("PRIVACY_CADDY_BIN"), "Requires Caddy")

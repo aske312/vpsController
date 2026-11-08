@@ -11,7 +11,7 @@
     @outsidePanel {
         host localhost
         not path /s/* /api/mihomo/subscriptions/*
-        not remote_ip {PANEL_SUBSCRIPTION_SOURCES}
+        not remote_ip 127.0.0.0/8 ::1/128 {PUBLIC_PANEL_ADDRESS} 10.82.0.0/24 10.83.0.0/24
     }
     respond @outsidePanel 403
     header -X-Powered-By
@@ -40,11 +40,11 @@
     }
 }
 
-http://{MH_WG_PANEL_ADDRESS}, http://{MH_AWG_PANEL_ADDRESS} {
+http://10.82.0.1, http://10.83.0.1 {
     route {
     @outsideProtectedConnection {
         not path /s/* /api/mihomo/subscriptions/*
-        not remote_ip {PANEL_SUBSCRIPTION_SOURCES}
+        not remote_ip 127.0.0.0/8 ::1/128 {PUBLIC_PANEL_ADDRESS} 10.82.0.0/24 10.83.0.0/24
     }
     respond @outsideProtectedConnection 403
     header -X-Powered-By
@@ -78,7 +78,7 @@ http://{INTERNAL_PANEL_HOST}, http://{PUBLIC_PANEL_ADDRESS} {
     route {
     @outsideProtectedConnection {
         not path /s/* /api/mihomo/subscriptions/*
-        not remote_ip {PANEL_SUBSCRIPTION_SOURCES}
+        not remote_ip 127.0.0.0/8 ::1/128 {PUBLIC_PANEL_ADDRESS} 10.82.0.0/24 10.83.0.0/24
     }
     respond @outsideProtectedConnection 403
     header -X-Powered-By

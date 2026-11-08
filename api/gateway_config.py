@@ -26,6 +26,12 @@ def render(template: str, mode: str, port: int, values: dict[str, str]) -> str:
         raise ValueError("Invalid panel access settings")
     site = domain if domain and mode == "external" else f"http://localhost:{port}" if mode == "vpn" else f":{port}"
     sources = " ".join(str(ipaddress.ip_network(value, strict=False)) for value in values.get("PANEL_SUBSCRIPTION_SOURCES", PRIVATE_SOURCES).split())
+    # Literal Mihomo defaults also remain valid for old in-memory installers.
+    # Current releases replace them with the actual isolated runtime addresses.
+    template = template.replace("127.0.0.0/8 ::1/128 {PUBLIC_PANEL_ADDRESS} 10.82.0.0/24 10.83.0.0/24", sources)
+    template = template.replace("http://10.82.0.1, http://10.83.0.1",
+                                "http://" + str(ipaddress.ip_address(values.get("MH_WG_PANEL_ADDRESS", "10.82.0.1")))
+                                + ", http://" + str(ipaddress.ip_address(values.get("MH_AWG_PANEL_ADDRESS", "10.83.0.1"))))
     substitutions = {
         "{$SITE_ADDRESS}": site, "{$HTTP_PORT}": str(port),
         "{INTERNAL_PANEL_HOST}": subscription_access.PANEL_HOST,

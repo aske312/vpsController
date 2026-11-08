@@ -141,7 +141,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
 
 test("the panel uses isolated Mihomo tunnel addresses", async () => {
   const [caddy, gateway] = await Promise.all([read("Caddyfile"), read("api/gateway_config.py")]);
-  assert.match(caddy, /http:\/\/{MH_WG_PANEL_ADDRESS}, http:\/\/{MH_AWG_PANEL_ADDRESS}/);
+  assert.match(caddy, /http:\/\/10\.82\.0\.1, http:\/\/10\.83\.0\.1/);
   assert.doesNotMatch(caddy, /\{WG_PANEL_ADDRESS\}|\{AWG_PANEL_ADDRESS\}/);
   assert.match(gateway, /subscription_access.gateway_values/);
 });
@@ -170,7 +170,7 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(manager, /No panel UI or/);
   assert.doesNotMatch(manager, /set_config_value "\$\{INSTALL_DIR\}\/install\.conf" "ACCESS_MODE"/);
   assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}, http:\/\/{PUBLIC_PANEL_ADDRESS} \{/);
-  assert.match(caddy, /not remote_ip \{PANEL_SUBSCRIPTION_SOURCES\}/);
+  assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 ::1\/128 \{PUBLIC_PANEL_ADDRESS\} 10\.82\.0\.0\/24/);
   assert.match(api, /@app\.put\("\/api\/services\/panel-access", status_code=202\)/);
   // Durable admission and non-blocking launch are covered by test_application_operation.py.
   assert.match(page, /systemOperationNotification\(operation, actionLabels\["access-mode"\], true\)/);
