@@ -1,24 +1,18 @@
 "use client";
+
 import { trafficBytes, uptime } from "../../shared/lib/control-plane-ui";
-
-import type { Client, MetricsPeriod, Overview as OverviewData, ProtocolImage, ProtocolStatus, ResourceHistory } from "../../shared/types/control-plane";
-import { graphSegments, knownMetric, networkSample } from "../../shared/lib/resource-metrics";
-import { directProtocolSnapshot, directProtocolUnavailable } from "../../control-panel/protocol-snapshot";
-
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { MetricsPeriod, Overview as OverviewData, ProtocolImage, ResourceHistory } from "../../shared/types/control-plane";
+import { graphSegments, knownMetric } from "../../shared/lib/resource-metrics";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
-import { refreshResource } from "../../shared/lib/refresh-resource";
 import { useFailureNotifications } from "../../shared/notifications/notification-center";
-import { ProtocolHealthBadge } from "../../shared/components/protocol-health-badge";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
 import { componentPresentation } from "./component-state";
 import { NodeComponentCard } from "./node-component-card";
 import { useMetricsHistory } from "./use-metrics-history";
-import { directChannelObservation } from "./direct-observation";
 
-type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
 
 let mihomoSummaryCache: { token: string; observationVersion: number; store: ReturnType<typeof createMihomoSummaryStore> } | null = null;
 function mihomoSummaryStore(token: string, observationVersion: number) {
@@ -39,40 +33,14 @@ type Props = {
   diskUsedBytes: number | null;
   networkRate: { rx: number | null; tx: number | null };
   resourceHistory: ResourceHistory;
-  clients: Client[];
   protocolImages: ProtocolImage[];
   installingProtocol: string;
   busy: boolean;
   onInstallProtocol: (image: ProtocolImage) => void;
   onUpdateProtocol: (image: ProtocolImage) => void;
-  onOpenProtocol: (image: ProtocolImage) => void;
   onAdoptProtocol: (image: ProtocolImage) => void;
   onPurgeProtocol: (image: ProtocolImage) => void;
   onRemoveProtocol: (image: ProtocolImage) => void;
-};
-
-const directShort: Record<ProtocolId, string> = {
-  wg: "WG",
-  awg: "AWG",
-  shadowsocks: "SS",
-  "vless-reality-xhttp": "VLESS",
-  hysteria2: "HY2",
-  tuic: "TUIC",
-  trojan: "TRJ",
-  openvpn: "OVPN",
-  ikev2: "IKE",
-};
-
-const directName: Record<ProtocolId, string> = {
-  wg: "WireGuard",
-  awg: "AmneziaWG",
-  shadowsocks: "Shadowsocks",
-  "vless-reality-xhttp": "VLESS Reality",
-  hysteria2: "Hysteria2",
-  tuic: "TUIC v5",
-  trojan: "Trojan",
-  openvpn: "OpenVPN",
-  ikev2: "IKEv2",
 };
 
 const bytes = (value?: number | null) => {
@@ -122,13 +90,11 @@ export function OverviewDashboard({
   diskUsedBytes,
   networkRate,
   resourceHistory,
-  clients,
   protocolImages,
   installingProtocol,
   busy,
   onInstallProtocol,
   onUpdateProtocol,
-  onOpenProtocol,
   onAdoptProtocol,
   onPurgeProtocol,
   onRemoveProtocol,
@@ -152,74 +118,12 @@ export function OverviewDashboard({
   const summaryFailures = useMemo(() => Object.fromEntries(Object.entries(summary.errors).map(([key, message]) => [key, { message: message!, network: summary.networkErrors?.[key as keyof typeof summary.errors] }])), [summary]);
   const retrySummary = useMemo(() => ({ label: "Повторить проверку", run: () => summaryStore.refresh(true) }), [summaryStore]);
   useFailureNotifications("overview-mihomo", "Mihomo на Обзоре", summaryFailures, false, retrySummary);
-  const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, ProtocolStatus>>>({});
-  const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
-  const [directSnapshotKeys, setDirectSnapshotKeys] = useState<Partial<Record<ProtocolId, string>>>({});
-  const [directRates, setDirectRates] = useState<Partial<Record<ProtocolId, { rx: number | null; tx: number | null }>>>({});
-  const directSamples = useRef<Partial<Record<ProtocolId, { rx: number; tx: number; at: number }>>>({});
-  const directRequest = useMemo(() => createApiClient(token), [token]);
-  const directReadsInFlight = useRef<Partial<Record<ProtocolId, number>>>({});
-  const directReadGeneration = useRef(0);
-
-  const directChannels = useMemo(
-    () => protocolImages.filter((item) =>
-      item.installed &&
-      item.id !== "mihomo" &&
-      (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"] as string[]).includes(item.id),
-    ),
-    [protocolImages],
-  );
-  const directIds = directChannels.map((image) => image.id).join(",");
-  const directKey = `${token}:${observationVersion}:${directIds}`;
-  const directProtocols = useMemo(() => directIds ? directIds.split(",") as ProtocolId[] : [], [directIds]);
-  const loadDirectStatuses = useCallback(async () => {
-    if (!token || !directProtocols.length) {
-      setDirectStatuses({});
-      setDirectSnapshotKeys({});
-      setDirectStatusFailures({});
-      setDirectRates({});
-      directSamples.current = {};
-      return;
-    }
-    const generation = directReadGeneration.current;
-    await Promise.all(directProtocols.map(async (protocol) => {
-      if (directReadsInFlight.current[protocol] === generation) return;
-      directReadsInFlight.current[protocol] = generation;
-      try { await refreshResource(
-        () => directRequest(`/protocols/${protocol}/status`, { cache: "no-store", readScope: directKey }).then((value) => directProtocolSnapshot(value, protocol)),
-        (next) => {
-          const sampled = networkSample({ network_rx: next.interface_rx_bytes, network_tx: next.interface_tx_bytes }, directSamples.current[protocol] || null, Date.now());
-          if (sampled.sample) directSamples.current[protocol] = sampled.sample;
-          setDirectStatuses((current) => ({ ...current, [protocol]: next }));
-          setDirectSnapshotKeys((current) => ({ ...current, [protocol]: directKey }));
-          setDirectStatusFailures((current) => ({ ...current, [protocol]: false }));
-          setDirectRates((current) => ({ ...current, [protocol]: sampled.rate }));
-        },
-        () => {
-          delete directSamples.current[protocol];
-          setDirectStatuses((current) => ({ ...current, [protocol]: directProtocolUnavailable(current[protocol]) }));
-          setDirectStatusFailures((current) => ({ ...current, [protocol]: true }));
-          setDirectRates((current) => ({ ...current, [protocol]: { rx: null, tx: null } }));
-        },
-        () => generation === directReadGeneration.current,
-      ); } finally { if (directReadsInFlight.current[protocol] === generation) delete directReadsInFlight.current[protocol]; }
-    }));
-  }, [directKey, directProtocols, directRequest, token]);
-
   useEffect(() => {
     if (!token || !mihomoInstalled) return;
     const initial = window.setTimeout(() => void summaryStore.refresh(), 0);
     const timer = window.setInterval(() => void summaryStore.refresh(true), 12000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [summaryStore, mihomoInstalled, token]);
-
-  useEffect(() => {
-    directReadGeneration.current += 1;
-    directSamples.current = {};
-    const initial = window.setTimeout(() => void loadDirectStatuses(), 0);
-    const timer = directProtocols.length ? window.setInterval(() => void loadDirectStatuses(), 6000) : null;
-    return () => { directReadGeneration.current += 1; window.clearTimeout(initial); if (timer !== null) window.clearInterval(timer); };
-  }, [directProtocols, loadDirectStatuses, observationVersion]);
 
   const installedMihomoChannels = useMemo(
     () => (summary.modules || []).filter((item) => item.category === "transport" && item.installed),
@@ -232,13 +136,9 @@ export function OverviewDashboard({
     const rank = (item: ProtocolImage) => item.installed ? 0 : item.installable ? 1 : 2;
     return rank(left) - rank(right) || left.name.localeCompare(right.name, "ru");
   }), [protocolImages]);
-  const stableDirectClients = clients.filter((client) => client.quality === "stable").length;
-  const attentionDirectClients = clients.filter((client) => !client.quality || ["warning", "error", "unknown"].includes(client.quality)).length;
-  const offlineDirectClients = clients.filter((client) => client.quality === "offline").length;
-
   const profileCount = mihomoProfiles?.length ?? mihomoStatus?.profiles ?? (mihomoInstalled ? "—" : 0);
   const credentialsCount = mihomoProfiles?.reduce((count, profile) => count + profile.connections.length, 0) ?? mihomoStatus?.credentials;
-  const totalAccessObjects = mihomoInstalled && credentialsCount === undefined ? null : (credentialsCount || 0) + clients.length;
+  const totalAccessObjects = mihomoInstalled && credentialsCount === undefined ? null : (credentialsCount || 0);
   const memoryTotal = overview?.resources.memory_total;
   const diskTotal = overview?.resources.disk_total;
   const memoryFree = overview?.resources.memory_available;
@@ -259,24 +159,9 @@ export function OverviewDashboard({
     : mihomoStatus?.channels_in_use.length ?? 0;
   const mihomoReadyCount = mihomoChannelStates.filter((item) => item.runtimeReady && !item.inUse).length;
 
-  const directChannelStates = useMemo(() => directChannels.map((image) => {
-    const protocol = image.id as ProtocolId;
-    const status = directStatuses[protocol];
-    const protocolClients = clients.filter((client) => client.protocol === protocol);
-    const observation = directChannelObservation(status, protocolClients, directRates[protocol] || { rx: null, tx: null },
-      directSnapshotKeys[protocol] !== directKey || Boolean(directStatusFailures[protocol]));
-    return { image, protocol, status, protocolClients, ...observation };
-  }), [clients, directChannels, directKey, directRates, directSnapshotKeys, directStatusFailures, directStatuses]);
-
-  const directInUseCount = directChannelStates.filter((item) => item.inUse).length;
-  const directReadyCount = directChannelStates.filter((item) => !item.statusFailed && item.status?.health?.state === "READY").length;
-  const directStoppedCount = directChannelStates.filter((item) => !item.statusFailed && item.status?.health?.state === "ERROR").length;
-  const directUnknownCount = directChannelStates.filter((item) => item.statusFailed).length;
-  const routesInUse = mihomoInUseCount + directInUseCount;
-  const routesReady = mihomoReadyCount + directReadyCount;
   const mihomoUsageKnown = !mihomoInstalled || mihomoProfiles !== null || mihomoStatus !== null;
-  const routesInUseLabel = mihomoUsageKnown && !directUnknownCount ? routesInUse : "—";
-  const routesReadyLabel = mihomoUsageKnown && !directUnknownCount && (!mihomoInstalled || summary.modules !== null) ? routesReady : "—";
+  const routesInUseLabel = mihomoUsageKnown ? mihomoInUseCount : "—";
+  const routesReadyLabel = mihomoUsageKnown && (!mihomoInstalled || summary.modules !== null) ? mihomoReadyCount : "—";
 
   return (
     <section className="overview" aria-label="Обзор инфраструктуры">
@@ -290,7 +175,7 @@ export function OverviewDashboard({
             <span><small>ACCESS OBJECTS</small><strong>{totalAccessObjects ?? "—"}</strong></span>
             {mihomoInstalled && <span className="violet"><small>PROFILES</small><strong>{profileCount}</strong></span>}
             {mihomoInstalled && <span className="violet"><small>CHANNELS</small><strong>{summary.modules ? installedMihomoChannels.length : mihomoStatus?.channels_installed ?? "—"}</strong></span>}
-            <span className={routesInUse ? "cyan" : ""}><small>ROUTES IN USE</small><strong>{routesInUseLabel}</strong></span>
+            <span className={mihomoInUseCount ? "cyan" : ""}><small>ROUTES IN USE</small><strong>{routesInUseLabel}</strong></span>
           </div>
         </header>
 
@@ -302,8 +187,7 @@ export function OverviewDashboard({
             <small>{totalAccessObjects === null ? "Загружаются данные доступа…" : totalAccessObjects ? `${totalAccessObjects} настроенных объектов доступа` : "Объекты доступа ещё не созданы"}</small>
             <dl>
               <div><dt>Mihomo credentials</dt><dd>{credentialsCount ?? (mihomoInstalled ? "—" : 0)}</dd></div>
-              <div><dt>Direct clients</dt><dd>{clients.length}</dd></div>
-              <div><dt>Routes in use</dt><dd className={routesInUse ? "ok" : ""}>{routesInUseLabel}</dd></div>
+              <div><dt>Routes in use</dt><dd className={mihomoInUseCount ? "ok" : ""}>{routesInUseLabel}</dd></div>
               <div><dt>Ready / idle</dt><dd>{routesReadyLabel}</dd></div>
             </dl>
           </aside>
@@ -355,45 +239,13 @@ export function OverviewDashboard({
               </section>
             )}
 
-            {directChannels.length > 0 && (
-              <section className="overviewRoute direct">
-                <header>
-                  <div className="overviewRouteIdentity">
-                    <span className="overviewRouteMark">↗</span>
-                    <div><p className="eyebrow">INDEPENDENT</p><h2>Direct Channels</h2><small>Прямые подключения вне Mihomo</small></div>
-                  </div>
-                  <span className={`overviewState ${directInUseCount ? "online" : "idle"}`}>
-                    {directUnknownCount ? `${directInUseCount} WORKS ${directReadyCount} READY ${directUnknownCount} UNKNOWN` : directInUseCount ? `${directInUseCount} WORKS ${directReadyCount} READY` : `${directReadyCount} READY ${directStoppedCount} ERROR`}
-                  </span>
-                </header>
-
-                <div className="overviewDirectList">
-                  {directChannelStates.map(({ image, protocol, status, statusFailed, protocolClients, sessions, rx, tx, configured, avgLatency }) => {
-                    return (
-                      <div key={image.id}>
-                        <span className={`overviewProtocolMark protocol-${protocol}`} title={directShort[protocol]}><ProtocolIcon protocol={protocol} /></span>
-                        <p>
-                          <b>{directName[protocol]}</b>
-                          <small>{statusFailed ? "runtime status недоступен" : configured === null ? "проверяем конфигурацию" : configured ? `${protocolClients.length} clients  ${sessions} sessions` : "установлен, конфигурация не обнаружена"}</small>
-                        </p>
-                        <span className="overviewDirectTraffic"><b>↓ {bytes(rx)}/с</b><small>↑ {bytes(tx)}/с</small></span>
-                        <span className="overviewDirectLatency"><b>{avgLatency !== null ? `${avgLatency} ms` : "—"}</b><small>{statusFailed ? "—" : status?.online_peers ?? "—"} peers online</small></span>
-                        <ProtocolHealthBadge health={statusFailed ? undefined : directStatuses[protocol]?.health} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {!mihomoInstalled && directChannels.length === 0 && (
+            {!mihomoInstalled && (
               <div className="overviewNoRoutes"><span>◇</span><div><h2>Защищённые каналы не установлены</h2><p>Доступные компоненты показаны ниже в каталоге.</p></div></div>
             )}
           </div>
 
           <aside className="overviewExit">
             {mihomoInstalled && <div className="violet"><ExitGlyph /><strong>Internet</strong><small>{!mihomoUsageKnown ? "Ожидание данных Mihomo" : mihomoInUseCount ? "Mihomo route active" : "Mihomo ready / idle"}</small></div>}
-            {directChannels.length > 0 && <div className="cyan"><ExitGlyph /><strong>Internet</strong><small>{directInUseCount ? "direct traffic active" : "direct routes idle"}</small></div>}
           </aside>
         </div>
       </article>
@@ -451,7 +303,6 @@ export function OverviewDashboard({
           <FactCard label="Время работы" value={uptime(overview?.server.uptime_s)} detail={`${overview?.server.city || "Город не определён"}, ${overview?.server.country || "—"}`} />
           <FactCard label="Load · 1 мин" value={overview?.resources.load1?.toFixed(2) ?? "—"} detail={`${overview?.resources.cpu_count ?? "—"} CPU`} />
           <FactCard label="Трафик · всего" value={bytes(networkTotal)} detail={`↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`} />
-          <FactCard label="Direct · клиенты" value={`${clients.length}`} detail={`${stableDirectClients} норма · ${attentionDirectClients} замеч. · ${offlineDirectClients} офлайн`} />
           <FactCard label="Mihomo · доступы" value={`${credentialsCount ?? (mihomoInstalled ? "—" : 0)}`} detail={`Профили: ${profileCount} · используются: ${mihomoProfiles?.filter((profile) => profile.connections.length > 0).length ?? mihomoStatus?.profiles_in_use ?? (mihomoInstalled ? "—" : 0)}`} />
           <FactCard label="Маршруты" value={`${routesInUseLabel}`} detail={`${routesReadyLabel} готовы / ожидают`} />
           <FactCard label="RAM · свободно" value={bytes(memoryFree)} detail={memUsed == null ? "Нет данных" : `${memUsed.toFixed(0)}% занято`} />
@@ -464,19 +315,11 @@ export function OverviewDashboard({
           <div className="nodeComponentsCounters"><span><b>{installedServerModules.length}</b> установлено</span><span><b>{installableModules.length}</b> доступно</span></div>
         </header>
         <div className="nodeComponentsList">
-          {componentImages.map(image => {
-            const observation = directChannelStates.find(item => item.image.id === image.id);
-            const healthState = observation?.status?.health?.base_state;
-            const matchingHealth = image.component_state?.health.state === "possible_issues" && healthState === "WARN"
-              || image.component_state?.health.state === "error" && healthState === "ERROR";
-            return <NodeComponentCard key={image.id} image={image}
-              healthReason={matchingHealth && !observation?.statusFailed ? observation?.status?.health?.reason : undefined}
-              coreVersion={image.id === "mihomo" ? mihomoStatus?.core_version : undefined}
-              port={observation?.statusFailed ? undefined : observation?.status?.listen_port}
-              busy={busy} installingProtocol={installingProtocol}
-              onInstall={onInstallProtocol} onUpdate={onUpdateProtocol} onOpen={onOpenProtocol}
-              onAdopt={onAdoptProtocol} onPurge={onPurgeProtocol} onRemove={onRemoveProtocol} />;
-          })}
+          {componentImages.map(image => <NodeComponentCard key={image.id} image={image}
+            coreVersion={image.id === "mihomo" ? mihomoStatus?.core_version : undefined}
+            busy={busy} installingProtocol={installingProtocol}
+            onInstall={onInstallProtocol} onUpdate={onUpdateProtocol}
+            onAdopt={onAdoptProtocol} onPurge={onPurgeProtocol} onRemove={onRemoveProtocol} />)}
           {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
         </div>
       </section>

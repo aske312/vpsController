@@ -12,7 +12,7 @@ type Props = {
   installingProtocol: string;
   onInstall: (image: ProtocolImage) => void;
   onUpdate: (image: ProtocolImage) => void;
-  onOpen: (image: ProtocolImage) => void;
+  onOpen?: (image: ProtocolImage) => void;
   onAdopt: (image: ProtocolImage) => void;
   onPurge: (image: ProtocolImage) => void;
   onRemove: (image: ProtocolImage) => void;
@@ -26,7 +26,7 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
 
   return <article className={`nodeComponentCard protocol-${image.id}`} aria-label={image.name}>
     <header>
-      <button type="button" className="nodeComponentCardOpen" disabled={!image.installed || image.id === "mihomo"} onClick={() => onOpen(image)} aria-label={`Открыть ${image.name}`}>
+      <button type="button" className="nodeComponentCardOpen" disabled={!image.installed || image.id === "mihomo"} onClick={() => onOpen?.(image)} aria-label={`Открыть ${image.name}`}>
         <span className="nodeComponentCardLogo"><ProtocolIcon protocol={image.id} /></span>
         <span className="nodeComponentCardIdentity"><strong>{image.name}</strong><small>{image.category_name || image.category || "Без категории"}</small></span>
       </button>
@@ -44,10 +44,10 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
           ) : !image.installed ? (
             <button type="button" disabled={!state.canInstall || busy || Boolean(installingProtocol)} onClick={() => onInstall(image)}>{!image.installable ? "Недоступен" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>
           ) : image.update_available && image.id !== "mihomo" ? (
-            <button type="button" aria-label={`Обновить ${image.name}`} title="Открыть компонент: доступно обновление" onClick={() => onOpen(image)}>Обновить</button>
+            <button type="button" aria-label={`Обновить ${image.name}`} title="Открыть компонент: доступно обновление" onClick={() => onOpen?.(image)}>Обновить</button>
           ) : image.update_available ? (
             <button type="button" aria-label={`Обновить ${image.name}`} title="Обновить компонент" data-tone={image.update_breaking ? "warning" : undefined} disabled={busy || !state.canUpdate || Boolean(installingProtocol)} onClick={() => onUpdate(image)}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
-          ) : image.id !== "mihomo" && attention ? <button type="button" onClick={() => onOpen(image)}>Проверить</button> : null}
+          ) : image.id !== "mihomo" && attention ? <button type="button" onClick={() => onOpen?.(image)}>Проверить</button> : null}
           {image.installed && image.removable && <button type="button" data-tone="danger" aria-label={`Удалить ${image.name}`} title="Удалить компонент с сохранением настроек" disabled={busy || Boolean(installingProtocol) || !state.canRemove} onClick={() => onRemove(image)}>{installingProtocol === `remove-${image.id}` ? "Удаление…" : "Удалить"}</button>}
       </footer>
   </article>;

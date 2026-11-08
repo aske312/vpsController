@@ -144,7 +144,7 @@ class NativeClientCreationTests(unittest.TestCase):
             self.assertEqual(start.call_count, 2)
             self.assertEqual(json.loads((self.directory / 'operation-inputs' / (self.identity+'.json')).read_text()), self.payload)
 
-    def test_export_is_authenticated_and_not_cacheable(self):
+    def test_retired_export_is_authenticated_and_does_not_expose_saved_secrets(self):
         creation.perform(self.adapter, self.payload, self.identity)
         with patch.object(api, 'DATA_DIR', self.directory):
             client = TestClient(api.app)
@@ -152,6 +152,5 @@ class NativeClientCreationTests(unittest.TestCase):
             self.assertEqual(client.get(path).status_code, 401)
             with patch.object(api, 'ADMIN_USER', 'test'), patch.object(api, 'ADMIN_PASSWORD', 'test-password'):
                 response = client.get(path, auth=('test', 'test-password'))
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.headers['Cache-Control'], 'no-store')
-            self.assertEqual(response.json()['result']['config'], 'private-export')
+            self.assertEqual(response.status_code, 410)
+            self.assertNotIn('private-export', response.text)

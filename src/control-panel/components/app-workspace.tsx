@@ -36,7 +36,6 @@ type AppWorkspaceProps = {
   activeTab: string;
   visualArt: string;
   protocolImages: ProtocolImage[];
-  showConnections: boolean;
   nodeState: string;
   nodeStateLabel: string;
   server?: ServerInfo;
@@ -70,7 +69,6 @@ export function AppWorkspace({
   activeTab,
   visualArt,
   protocolImages,
-  showConnections,
   nodeState,
   nodeStateLabel,
   server,
@@ -105,7 +103,6 @@ export function AppWorkspace({
       <GateNavigation
         activeTab={activeTab}
         protocolImages={protocolImages}
-        showConnections={showConnections}
         nodeState={nodeState}
         nodeStateLabel={nodeStateLabel}
         server={server}

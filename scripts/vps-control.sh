@@ -1881,6 +1881,7 @@ release_protocol_ports() {
 
 install_protocol_image() {
   local image_id="${2:-}"
+  [[ "${image_id}" == "mihomo" ]] || die "Отдельные модули Direct удалены; используйте Mihomo."
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
   local image_dir="${INSTALL_DIR}/protocol-images"
   local manifest=""

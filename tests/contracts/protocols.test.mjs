@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { read, readUiSources, readApiSources, readStyles } from "./support.mjs";
+import { read, readUiSources, readApiSources } from "./support.mjs";
 
 test("protocol installers declare OS support and keep per-module diagnostics", async () => {
   const [manager, awgInstall, awgRemove, wgInstall, wgRemove, ...manifests] = await Promise.all([
@@ -201,8 +201,8 @@ test("the complete protocol matrix has isolated direct and Mihomo ownership", as
 });
 
 test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
-  const [api, manager, page, css, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
-    readApiSources(), read("scripts/vps-control.sh"), readUiSources(), readStyles(),
+  const [api, manager, page, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
+    readApiSources(), read("scripts/vps-control.sh"), readUiSources(),
     read("protocol-images/shadowsocks/manifest.json"),
     read("protocol-images/shadowsocks/install.sh"),
     read("protocol-images/shadowsocks/uninstall.sh"),
@@ -269,20 +269,8 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(api, /"rx_bps": rx_bps, "tx_bps": tx_bps/);
   assert.match(api, /"no_delay": payload\.settings\.no_delay, "mtu": payload\.settings\.mtu or 1200/);
   assert.match(ssInstall, /config\["mtu"\] = 1200/);
-  assert.match(page, /АКТИВНОСТЬ/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
-  assert.match(page, /activeProtocolImage/);
-  assert.match(page, /setTab\(protocol\)/);
-  assert.match(page, /const profiles: Record<Protocol, TunnelProfile>/);
-  assert.match(page, /family: "KERNEL VPN"/);
-  assert.match(page, /family: "STEALTH VPN"/);
-  assert.match(page, /family: "ENCRYPTED PROXY"/);
-  assert.match(page, /family: "XRAY TRANSPORT"/);
-  assert.match(page, /tunnelsWorkspace/);
-  assert.match(page, /data-asset="operator_prt_1\.webp"/);
-  assert.match(page, /NOT CONNECTED/);
-  assert.doesNotMatch(page, /ProtocolCommandCenter|VlessControlCenter/);
   assert.match(page, /protocolOperationOutcome\(started, status\.action, Boolean\(current\?\.installed\) === installed\)/);
   for (const operation of ["install", "remove", "update"]) {
     const body = manager.match(new RegExp(`${operation}_protocol_image\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0] || "";
@@ -294,7 +282,6 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /mv -f -- "\$\{candidate\}" "\$\{MODULE_DIR\}\/xray"/);
   assert.match(vlessInstall, /systemctl restart vps-control-vless-reality-xhttp\.service/);
   assert.match(vlessInstall, /восстановлена предыдущая/);
-  assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\].*includes\(tab\)/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
   assert.match(manager, /ENV_FILE="\$\{CONFIG_DIR\}\/environment"/);
   assert.match(manager, /mv "\$\{LEGACY_ENV_FILE\}" "\$\{ENV_FILE\}"/);
@@ -303,40 +290,6 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(manager, /grep -Fxq "\$\{expected\}" "\$\{SERVICE_FILE\}"/);
   assert.match(manager, /start_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl start/);
   assert.match(manager, /restart_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl restart/);
-  assert.match(css, /\.tunnelsWorkspace/);
-  assert.match(css, /\.tunnelModuleRail/);
-  assert.match(css, /\.tunnelDashboardGrid/);
-});
-
-test("protocol pages safely edit channel settings and VLESS links select HTTP2", async () => {
-  const [page, api] = await Promise.all([
-    readUiSources(), readApiSources(), readStyles(),
-  ]);
-  assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings", dependencies=\[Depends\(require_component_management\)\]\)/);
-  assert.match(api, /class ProtocolSettingsUpdate/);
-  assert.match(api, /persist_tunnel_mtu/);
-  assert.match(api, /XRAY_BIN, "run", "-test"/);
-  assert.match(api, /originals = \{path: path\.read_bytes\(\) for path in paths\}/);
-  assert.match(api, /"alpn": "h2"/);
-  assert.match(api, /def configure_vless_transport/);
-  assert.match(api, /def vless_client_query/);
-  assert.match(api, /Literal\["xhttp", "raw", "grpc"\]/);
-  assert.match(api, /values\["type"\] = "tcp"/);
-  assert.match(api, /"maxConcurrency": "8-16"/);
-  assert.match(api, /"xmux_concurrency"/);
-  assert.match(api, /"keepalive"/);
-  assert.match(api, /extra = "forbid"/);
-  assert.doesNotMatch(api, /"key": "dns"/);
-  assert.match(api, /"loglevel", "xpadding"/);
-  assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
-  assert.doesNotMatch(api, /hysteria[^\n]*"--test"/);
-  assert.match(api, /@app\.post\("\/api\/protocols\/\{protocol\}\/resources\/check"\)/);
-  assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
-  assert.match(api, /"editable_settings": editable_settings/);
-  assert.doesNotMatch(page, /function ProtocolSettingsEditor/);
-  assert.match(page, /Проверить сеть/);
-  assert.match(api, /DIRECT_DIAGNOSTIC_PROTOCOLS/);
-  assert.match(api, /REALITY target TLS/);
 });
 
 test("DNS API preserves component application and encrypted fallback boundaries", async () => {
@@ -361,12 +314,11 @@ test("DNS API preserves component application and encrypted fallback boundaries"
 
 test("VLESS image supports independent REALITY, TLS and CDN profiles", async () => {
   const mihomoManager = await read("protocol-images/mihomo/manager.py");
-  const [bootstrap, manager, install, uninstall, api, caddy, config, page, protocolView, protocolCss] = await Promise.all([
+  const [bootstrap, manager, install, uninstall, api, caddy, config] = await Promise.all([
     read("scripts/install-panel.sh"), read("scripts/vps-control.sh"),
     read("protocol-images/vless-reality-xhttp/install.sh"),
     read("protocol-images/vless-reality-xhttp/uninstall.sh"), readApiSources(),
-    read("Caddyfile"), read("install.conf"), readUiSources(),
-    read("src/features/protocols/protocol-view.tsx"), read("src/features/protocols/protocols.css"),
+    read("Caddyfile"), read("install.conf"),
   ]);
   assert.match(manager, /set_env_value "VLESS_CDN_DOMAIN"/);
   assert.match(manager, /VLESS_CDN_PORT/);
@@ -410,24 +362,10 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /vless_routes: list\[Literal\["direct", "tls", "cdn"\]\]/);
   assert.match(api, /for inbound in selected_inbounds/);
   assert.match(api, /"profiles": profiles/);
-  assert.match(page, /generatedProfiles/);
-  assert.match(page, /profile\.id === "cdn"/);
-  assert.match(page, /VLESS REALITY/);
-  assert.match(page, /Тип подключения/);
-  assert.match(page, /Параметры транспорта соответствуют активному listener/);
-  assert.match(page, /Транспорт listener/);
-  assert.doesNotMatch(page, /Можно выбрать транспорт для этого профиля отдельно/);
-  assert.match(page, /tunnelsWorkspace/);
   assert.match(manager, /configure_vless_cdn_firewall/);
   assert.match(api, /Транспорт прямого VLESS/);
   assert.match(api, /Только Direct\. После смены импортируйте Direct-профили заново/);
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
-  assert.match(protocolView, /const profiles: Record<Protocol, TunnelProfile>/);
-  assert.match(protocolView, /name: "REALITY"/);
-  assert.match(protocolView, /name: "TLS route"/);
-  assert.match(protocolView, /name: "CDN route"/);
-  assert.doesNotMatch(protocolView, /function ProtocolSettingsEditor/);
-  assert.doesNotMatch(protocolView, /ProtocolCommandCenter|VlessControlCenter/);
   assert.match(api, /"routes": routes/);
   assert.match(api, /Direct · REALITY\/\{direct_transport\}/);
   assert.match(mihomoManager, /systemctl", "reset-failed", "vps-control-mihomo-reality\.service/);
@@ -435,23 +373,9 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(mihomoManager, /Profile-Update-Interval/);
   assert.match(mihomoManager, /secrets\.token_urlsafe\(32\)/);
   assert.match(install, /DynamicUser=yes/);
-  assert.match(protocolView, /className=\{`protocolWorkspace tunnelsWorkspace/);
-  assert.match(protocolView, /className="tunnelDashboardGrid"/);
-  assert.match(protocolView, /className="tunnelDiagnosticsGrid"/);
-  assert.match(protocolCss, /\.tunnelSettingsFields/);
-  assert.match(protocolCss, /\.tunnelHero/);
-  assert.match(protocolCss, /\.tunnelOperatorPlaceholder/);
-  assert.doesNotMatch(protocolView, /VlessConnectionTransportSettings/);
-  assert.doesNotMatch(protocolView, /vlessScope="connections"/);
-  assert.doesNotMatch(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
-  assert.match(protocolView, /BETA/);
-  assert.match(protocolCss, /\.tunnelsWorkspace/);
-  assert.match(protocolCss, /\.tunnelDiagnosticsGrid/);
   const controlCenterCss = await read("src/shared/styles/control-center.css");
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
-  assert.match(page, /connectionTypeSettings/);
-  assert.match(page, /newClientSettings\.mtu/);
 });
 
 test("installable protocol images are dispatched independently", async () => {
@@ -549,11 +473,9 @@ test("WG removal accepts live non-WG fallback channels and reports blockers", as
 });
 
 test("application network check covers every installed protected protocol", async () => {
-  const [view, manager] = await Promise.all([
-    read("src/features/application/application-view.tsx"),
+  const [manager] = await Promise.all([
     read("scripts/vps-control.sh"),
   ]);
-  assert.match(view, /Internet и все установленные протоколы/);
   for (const protocol of ["vless-reality-xhttp", "shadowsocks", "openvpn", "ikev2", "mihomo-manager"]) {
     assert.match(manager, new RegExp(`vps-control-${protocol}`));
   }
@@ -576,13 +498,12 @@ test("standalone direct protocols report installed and available binary versions
 });
 
 test("direct Hysteria2 is installable and manages authenticated clients", async () => {
-  const [manifestText, install, firewall, auth, api, view] = await Promise.all([
+  const [manifestText, install, firewall, auth, api] = await Promise.all([
     read("protocol-images/hysteria2/manifest.json"),
     read("protocol-images/hysteria2/install.sh"),
     read("protocol-images/hysteria2/firewall.sh"),
     read("protocol-images/hysteria2/user-api.py"),
     readApiSources(),
-    read("src/features/protocols/protocol-view.tsx"),
   ]);
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.id, "hysteria2");
@@ -596,13 +517,12 @@ test("direct Hysteria2 is installable and manages authenticated clients", async 
   assert.match(api, /payload\.protocol == "hysteria2"/);
   assert.match(api, /def hysteria2_stats/);
   assert.match(api, /tls_mode == "acme"/);
-  assert.match(view, /title: "Hysteria2"/);
 });
 
 test("direct TUIC v5 is installable and keeps clients isolated", async () => {
-  const [manifestText, install, firewall, api, view] = await Promise.all([
+  const [manifestText, install, firewall, api] = await Promise.all([
     read("protocol-images/tuic/manifest.json"), read("protocol-images/tuic/install.sh"),
-    read("protocol-images/tuic/firewall.sh"), readApiSources(), read("src/features/protocols/protocol-view.tsx"),
+    read("protocol-images/tuic/firewall.sh"), readApiSources(),
   ]);
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.id, "tuic"); assert.equal(manifest.installable, true);
@@ -612,33 +532,30 @@ test("direct TUIC v5 is installable and keeps clients isolated", async () => {
   assert.match(firewall, /vps-control-tuic/);
   assert.match(api, /payload\.protocol == "tuic"/);
   assert.match(api, /"udp_relay_mode": "native"/);
-  assert.match(view, /title: "TUIC v5"/);
 });
 
 test("direct Trojan is installable and manages isolated TLS users", async () => {
-  const [manifestText, install, api, view] = await Promise.all([read("protocol-images/trojan/manifest.json"),read("protocol-images/trojan/install.sh"),readApiSources(),read("src/features/protocols/protocol-view.tsx")]);
+  const manifestText = await read("protocol-images/trojan/manifest.json");
   const manifest=JSON.parse(manifestText); assert.equal(manifest.id,"trojan"); assert.equal(manifest.installable,true);
-  assert.match(install,/sha256sum -c -/); assert.match(install,/'type':'trojan'/); assert.match(api,/payload\.protocol == "trojan"/); assert.match(api,/"type":"trojan"/); assert.match(view,/title: "Trojan"/);
 });
 
 test("direct OpenVPN is installable and uses per-client PKI with CRL revocation", async () => {
-  const [manifestText, install, firewall, uninstall, api, view] = await Promise.all([
+  const [manifestText, install, firewall, uninstall, api] = await Promise.all([
     read("protocol-images/openvpn/manifest.json"), read("protocol-images/openvpn/install.sh"),
     read("protocol-images/openvpn/firewall.sh"), read("protocol-images/openvpn/uninstall.sh"),
-    readApiSources(), read("src/features/protocols/protocol-view.tsx"),
+    readApiSources(),
   ]);
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.id, "openvpn"); assert.equal(manifest.installable, true);
   assert.match(install, /build-server-full server nopass/); assert.match(install, /tls-crypt/); assert.match(install, /crl-verify/);
   assert.match(firewall, /MASQUERADE/); assert.match(uninstall, /protocol.*openvpn/);
   assert.match(api, /build-client-full", client_id, "nopass"/); assert.match(api, /revoke_openvpn_certificate/); assert.match(api, /openvpn_stats/);
-  assert.match(view, /title: "OpenVPN"/);
 });
 
 test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
-  const [manifestText, install, firewall, api, view] = await Promise.all([
+  const [manifestText, install, firewall, api] = await Promise.all([
     read("protocol-images/ikev2/manifest.json"), read("protocol-images/ikev2/install.sh"),
-    read("protocol-images/ikev2/firewall.sh"), readApiSources(), read("src/features/protocols/protocol-view.tsx"),
+    read("protocol-images/ikev2/firewall.sh"), readApiSources(),
   ]);
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.id, "ikev2"); assert.equal(manifest.installable, true);
@@ -647,7 +564,6 @@ test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
   assert.match(install, /Another strongSwan runtime is active/); assert.match(install, /auth = eap-mschapv2/);
   assert.match(install, /libstrongswan-standard-plugins/); assert.match(install, /SWAN=\/etc\/swanctl/); assert.match(firewall, /--dport 500/); assert.match(firewall, /--dport 4500/);
   assert.match(api, /render_ikev2_users/); assert.match(api, /reload_ikev2/); assert.match(api, /payload\.protocol == "ikev2"/);
-  assert.match(view, /title: "IKEv2"/);
 });
 
 test("direct protocol updates preserve client state and activate the new runtime", async () => {

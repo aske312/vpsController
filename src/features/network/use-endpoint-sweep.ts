@@ -34,7 +34,7 @@ export function useEndpointSweep(request: NetworkRequest, onChecked?: () => void
     if (running.current) return;
     running.current = true; stop.current = false; setChecking(true); setRows([]); setObservation(null); setFailure(""); setScope(`${kind}:${domain}`);
     const id = crypto.randomUUID();
-    operation(id, "Проверка адреса", "running", "Определяем установленные компоненты Direct и Mihomo…");
+    operation(id, "Проверка адреса", "running", "Определяем установленные компоненты Mihomo…");
     try {
       const snapshot = endpointTargets(await request(`/network/endpoints/check-targets?kind=${encodeURIComponent(kind)}&domain=${encodeURIComponent(domain)}`, { cache: "no-store" }), kind, domain);
       const next = snapshot.items.map(row => ({ ...row }));
@@ -43,7 +43,7 @@ export function useEndpointSweep(request: NetworkRequest, onChecked?: () => void
         if (stop.current) break;
         if (row.state !== "pending" || !row.consumer_id) continue;
         row.state = "running"; if (active.current) setRows(next.map(item => ({ ...item })));
-        operation(id, "Проверка адреса", "running", `${row.owner === "direct" ? "Direct" : "Mihomo"} · ${row.label} · ${row.consumer_label}`);
+        operation(id, "Проверка адреса", "running", `Mihomo · ${row.label} · ${row.consumer_label}`);
         try {
           const result = await checkNetworkEndpoint(request, kind, domain, row.consumer_id);
           row.state = result.ready && result.verification === "end_to_end" ? "ready" : result.status === "warning" || result.status === "error" ? "failed" : "unavailable";

@@ -8,17 +8,10 @@ import { cdnSecuritySnapshot, type CdnSecurityStatus } from "../shared/lib/cdn-s
 import { RefreshNotices, refreshFailure } from "./components/refresh-notices";
 import type { RefreshFailure } from "./components/refresh-notices";
 import type { ApplicationMetadata } from "../shared/types/control-plane";
-
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import Image from "next/image";
-import QRCode from "qrcode";
-import { AccessReveal } from "../shared/components/access-reveal";
-import { endpointCheckReady, endpointSelectable } from "../shared/lib/network-readiness";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmationDialog } from "../shared/components/confirmation-dialog";
-import { useDialogFocus } from "../shared/components/use-dialog-focus";
 import { LegalFooter } from "../shared/components/legal-footer";
 import { basicCredentials } from "../features/auth/basic-credentials";
-import { ProtocolIcon } from "../shared/components/protocol-icon";
 import { MihomoPage } from "../features/mihomo/mihomo-view";
 import type { SectionLeaveGuard } from "../features/mihomo/rule-leave-guard";
 import { OverviewDashboard } from "../features/overview/overview-view";
@@ -29,17 +22,12 @@ import { ServicesDashboard } from "../features/services/services-view";
 import { NetworkView, type NetworkListState } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
-import { ProtocolHealthBadge } from "../shared/components/protocol-health-badge";
-import { ConnectionsView } from "../features/connections/connections-view";
-import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
-import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
-import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, ConfirmationRequest, LoggingSettings, Overview, ProtocolImage, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
+import { actionLabels, bytes, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionSucceeded, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "./system-operation";
 import { useSystemAdmission } from "./use-system-admission";
-import { networkRoutesSnapshot } from "../features/mihomo/workspace-refresh";
-import { directProtocolSnapshot, directProtocolUnavailable, tunnelLiveObservation } from "./protocol-snapshot";
-import { clientSnapshot, clientsUnavailable, liveStatusSnapshot, overviewSnapshot, overviewUnavailable, securityLiveObservation } from "./live-snapshot";
+import { liveStatusSnapshot, overviewSnapshot, overviewUnavailable, securityLiveObservation } from "./live-snapshot";
 import { applicationStatusSnapshot, applicationStatusUnavailable, observedApplicationRequest } from "./application-snapshot";
 import { observedServicesRequest, servicesUnavailable } from "./services-snapshot";
 import { securitySnapshot, securityUnavailable } from "./security-snapshot";
@@ -47,92 +35,10 @@ import { applicationMetadataSnapshot, applicationMetadataUnavailable } from "./a
 import { applicationVersionState } from "../features/application/version-state";
 import { appendResources, networkSample as sampleNetwork, usedBytes, usedPercent } from "../shared/lib/resource-metrics";
 import type { AdoptionPlan, ComponentManagement, MetricsSettings } from "../shared/types/control-plane";
-import { RelayEndpointSelect } from "../features/network/relay-endpoint-select";
-import { useRelayClient, type RelayClientResult } from "../features/network/use-relay-client";
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
 const releaseChannel = process.env.NEXT_PUBLIC_RELEASE_CHANNEL || "production";
-
-type NewClientSettings = {
-  mtu: number;
-  keepalive: number;
-  route_mode: "all" | "ipv4";
-  channel_mode: ClientChannelMode;
-  relay_host_id?: string;
-  relay_address?: string;
-  shadowsocks_mode: "tcp_only" | "tcp_and_udp";
-  timeout: number;
-  no_delay: boolean;
-  fingerprint: "chrome" | "firefox" | "safari";
-  xray_protocol: "vless" | "vmess" | "trojan";
-  cdn_domain: string;
-  transport: "xhttp" | "raw" | "grpc";
-  transport_path: string;
-  xhttp_mode: "auto" | "stream-one" | "stream-up" | "packet-up";
-  xpadding: string;
-  xmux_concurrency: number;
-  sni: string;
-  tls_transport: "websocket" | "xhttp" | "httpupgrade" | "grpc";
-  tls_xhttp_mode: "auto" | "stream-one" | "stream-up" | "packet-up";
-  cdn_transport: "websocket" | "xhttp" | "httpupgrade" | "grpc";
-  cdn_xhttp_mode: "auto" | "stream-one" | "stream-up" | "packet-up";
-  jc: number;
-  jmin: number;
-  jmax: number;
-  s1: number;
-  s2: number;
-  h1: number;
-  h2: number;
-  h3: number;
-  h4: number;
-  tls_mode: "pinned" | "acme";
-  obfs_enabled: boolean;
-  obfs_password: string;
-  up_mbps: number;
-  down_mbps: number;
-  congestion_control: "bbr" | "cubic" | "new_reno";
-  heartbeat: "5s" | "10s" | "15s" | "30s";
-  vpn_transport: "udp" | "tcp";
-};
-
-type ClientChannelMode = "direct" | "tls_relay" | "udp_relay";
-type ClientConnectionType = { id: string; protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; channelMode?: ClientChannelMode; name: string; badge: string; description: string; unavailable?: string };
-
-function ClientConnectionSettings({
-  selectedConnectionType,
-  selectedVlessRoute,
-  newClientSettings,
-  setNewClientSettings,
-}: {
-  selectedConnectionType: ClientConnectionType;
-  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[]; available_domains?: string[]; path?: string; xhttp_mode?: string; server_name?: string };
-  newClientSettings: NewClientSettings;
-  setNewClientSettings: Dispatch<SetStateAction<NewClientSettings>>;
-}) {
-  const update = (value: Partial<NewClientSettings>) => setNewClientSettings((current) => ({ ...current, ...value }));
-  const protocol = selectedConnectionType.protocol;
-  const vlessTransportKey = selectedConnectionType.routeId === "cdn" ? "cdn_transport" : selectedConnectionType.routeId === "tls" ? "tls_transport" : "transport";
-  const vlessTransport = newClientSettings[vlessTransportKey];
-  return <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>{["vless-reality-xhttp", "openvpn"].includes(protocol) ? "Параметры транспорта соответствуют активному listener" : "Параметры сохраняются только в создаваемом подключении"}</small></div></header><div className="connectionSettingsFields">
-    {protocol === "vless-reality-xhttp" ? <>
-      <label><span>Транспорт listener</span><input value={vlessTransport.toUpperCase()} readOnly /><small>Меняется в настройках модуля, а не для отдельного подключения</small></label>
-      {selectedConnectionType.routeId === "direct" && vlessTransport !== "raw" && <label><span>Путь listener</span><input value={newClientSettings.transport_path} readOnly /></label>}
-      {(vlessTransport === "xhttp") && <label><span>Режим XHTTP listener</span><input value={selectedConnectionType.routeId === "cdn" ? newClientSettings.cdn_xhttp_mode : selectedConnectionType.routeId === "tls" ? newClientSettings.tls_xhttp_mode : newClientSettings.xhttp_mode} readOnly /></label>}
-      {selectedConnectionType.routeId === "cdn" && <label><span>CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.available_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.available_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select></label>}
-      {selectedConnectionType.routeId !== "direct" && <small>После создания проверьте это подключение в разделе «Сеть». Доступность из вашей сети проверяется отдельно.</small>}
-      <label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as NewClientSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select></label>
-      {selectedConnectionType.routeId === "direct" && <><label><span>SNI маскировки</span><input value={newClientSettings.sni} readOnly /></label>{vlessTransport === "xhttp" && <><label><span>XHTTP padding</span><input value={newClientSettings.xpadding} onChange={(event) => update({ xpadding: event.target.value })} placeholder="100-1000" /></label><label><span>Параллелизм XHTTP</span><input type="number" min={1} max={64} value={newClientSettings.xmux_concurrency} onChange={(event) => update({ xmux_concurrency: Number(event.target.value) })} /></label></>}</>}
-    </> : protocol === "shadowsocks" ? <>
-      <label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => update({ shadowsocks_mode: event.target.value as NewClientSettings["shadowsocks_mode"] })}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label><label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => update({ timeout: Number(event.target.value) })} /></label><label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => update({ no_delay: event.target.checked })} /></label>
-    </> : protocol === "wg" || protocol === "awg" ? <>
-      <label><span>MTU</span><input type="number" min={1280} max={1420} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={newClientSettings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label><label><span>Маршрутизация</span><select value={newClientSettings.route_mode} onChange={(event) => update({ route_mode: event.target.value as NewClientSettings["route_mode"] })}><option value="all">Весь трафик IPv4 + IPv6</option><option value="ipv4">Только IPv4</option></select></label>
-      {protocol === "awg" && <div className="connectionSettingsGroup"><strong>Параметры AmneziaWG</strong><div className="connectionSettingsFields">{([['jc', 'Jc', 0, 128], ['jmin', 'Jmin', 0, 128], ['jmax', 'Jmax', 0, 128], ['s1', 'S1', 0, 128], ['s2', 'S2', 0, 128], ['h1', 'H1', 0, 4294967295], ['h2', 'H2', 0, 4294967295], ['h3', 'H3', 0, 4294967295], ['h4', 'H4', 0, 4294967295]] as const).map(([key, label, min, max]) => <label key={key}><span>{label}</span><input type="number" min={min} max={max} value={newClientSettings[key]} onChange={(event) => update({ [key]: Number(event.target.value) } as Partial<NewClientSettings>)} /></label>)}</div></div>}
-    </> : protocol === "hysteria2" ? <>
-      <label><span>Tранспорт</span><select value={newClientSettings.channel_mode} disabled={false}><option value={newClientSettings.channel_mode}>{newClientSettings.channel_mode === "udp_relay" ? "UDP relay" : "Прямой UDP"}</option></select></label><label><span>TLS-сертификат</span><select value={newClientSettings.tls_mode} onChange={(event) => update({ tls_mode: event.target.value as NewClientSettings["tls_mode"] })}><option value="pinned">Закреплённый сертификат</option><option value="acme">Публичный сертификат</option></select></label><label className="connectionCheckbox"><span><strong>Salamander obfuscation</strong><small>Должен совпадать с серверным профилем</small></span><input type="checkbox" checked={newClientSettings.obfs_enabled} onChange={(event) => update({ obfs_enabled: event.target.checked })} /></label>{newClientSettings.obfs_enabled && <label><span>Пароль obfuscation</span><input type="text" value={newClientSettings.obfs_password} onChange={(event) => update({ obfs_password: event.target.value })} /></label>}<label><span>Upload, Мбит/с</span><input type="number" min={1} max={10000} value={newClientSettings.up_mbps} onChange={(event) => update({ up_mbps: Number(event.target.value) })} /></label><label><span>Download, Мбит/с</span><input type="number" min={1} max={10000} value={newClientSettings.down_mbps} onChange={(event) => update({ down_mbps: Number(event.target.value) })} /></label>
-    </> : protocol === "tuic" ? <><label><span>Транспорт</span><select value="quic" onChange={() => undefined}><option value="quic">QUIC / UDP</option></select></label><label><span>Congestion control</span><select value={newClientSettings.congestion_control} onChange={(event) => update({ congestion_control: event.target.value as NewClientSettings["congestion_control"] })}><option value="bbr">BBR</option><option value="cubic">CUBIC</option><option value="new_reno">New Reno</option></select></label><label><span>Heartbeat</span><select value={newClientSettings.heartbeat} onChange={(event) => update({ heartbeat: event.target.value as NewClientSettings["heartbeat"] })}><option value="5s">5 сек.</option><option value="10s">10 сек.</option><option value="15s">15 сек.</option><option value="30s">30 сек.</option></select></label></> : protocol === "openvpn" ? <><label><span>Транспорт listener</span><input value={newClientSettings.vpn_transport.toUpperCase()} readOnly /><small>Меняется в настройках модуля, а не для отдельного подключения</small><small>Параметр будет записан в создаваемый профиль</small></label></> : protocol === "trojan" ? <p className="connectionSettingsHint">Trojan использует TLS-сертификат сервера и индивидуальный пароль. Дополнительные параметры этого подключения не требуются.</p> : <p className="connectionSettingsHint">IKEv2 выдаёт индивидуальные логин, пароль и CA-сертификат. Дополнительные параметры профиля не требуются.</p>}
-  </div></fieldset>;
-}
 
 function reloadWithoutCache(message: string) {
   if (message) sessionStorage.setItem("312-notice", message);
@@ -149,7 +55,6 @@ function publicError(message: string, status: number) {
   }
   return value || "Команда не выполнена.";
 }
-type GeneratedProfile = { id: string; name: string; filename: string; config: string };
 type SshAuthorizedKey = { fingerprint: string; type: string; comment?: string; managed?: boolean };
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back" | "open"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean; keys?: SshAuthorizedKey[] };
 export function ControlPanel() {
@@ -160,15 +65,12 @@ export function ControlPanel() {
   const [networkListState, setNetworkListState] = useState<NetworkListState>({ query: "", expanded: [] });
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
   const [mihomoRefreshKey, setMihomoRefreshKey] = useState(0);
-  const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
   const loginInFlight = useRef(false);
-  const clientCreationInFlight = useRef(false);
   const [loginUser, setLoginUser] = useState("admin");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
   const [security, setSecurity] = useState<Record<string, unknown> | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
   const [securityLogSource, setSecurityLogSource] = useState<"ssh" | "firewall" | "system">("ssh");
@@ -178,12 +80,6 @@ export function ControlPanel() {
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [applicationMetadata, setApplicationMetadata] = useState<ApplicationMetadata | null>(null);
   const [services, setServices] = useState<ServicesStatus | null>(null);
-  const [deviceProbe, setDeviceProbe] = useState<DeviceProbe | null>(null);
-  const [probingDevice, setProbingDevice] = useState(false);
-  const deviceProbeAt = useRef(0);
-  const [clientSearch, setClientSearch] = useState("");
-  const [clientProtocolFilter, setClientProtocolFilter] = useState<"all" | Protocol>("all");
-  const [clientStateFilter, setClientStateFilter] = useState<"all" | "online" | "attention" | "offline">("all");
   const [automationDraft, setAutomationDraft] = useState<ServicesStatus["automation"] | null>(null);
   const [loggingDraft, setLoggingDraft] = useState<LoggingSettings | null>(null);
   const [metricsSettings, setMetricsSettings] = useState<MetricsSettings | null>(null);
@@ -202,14 +98,7 @@ export function ControlPanel() {
   const [networkRate, setNetworkRate] = useState<{ rx: number | null; tx: number | null }>({ rx: null, tx: null });
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
-  const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
-  const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number | null; tx: number | null }>>>({});
-  const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [installingProtocol, setInstallingProtocol] = useState("");
-  const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
-  const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
-  const [resourcesOpen, setResourcesOpen] = useState<Partial<Record<Protocol, boolean>>>({});
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState<Partial<Record<Protocol, boolean>>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshErrors, setRefreshErrors] = useState<Record<string, RefreshFailure>>({});
   const [localBusy, setBusy] = useState(false);
@@ -226,33 +115,18 @@ export function ControlPanel() {
   const [sshKeyTested, setSshKeyTested] = useState(false);
   const pendingSsh = useRef<{ id?: string; key?: string } | null>(null);
   const [sshCountdownClock, setSshCountdownClock] = useState(() => Date.now());
-  const [clientDialog, setClientDialog] = useState(false);
-  const [clientPage, setClientPage] = useState(1);
   const [mihomoProfilesPage, setMihomoProfilesPage] = useState(1);
   const [currentAdminPassword, setCurrentAdminPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
-  const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
-  const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
-  const [newClientSettings, setNewClientSettings] = useState<NewClientSettings>({ mtu: 1280, keepalive: 25, route_mode: "ipv4", channel_mode: "direct", shadowsocks_mode: "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome", xray_protocol: "vless", cdn_domain: "", transport: "xhttp", transport_path: "/", xhttp_mode: "auto", xpadding: "100-1000", xmux_concurrency: 12, sni: "ya.ru", tls_transport: "xhttp", tls_xhttp_mode: "auto", cdn_transport: "websocket", cdn_xhttp_mode: "auto", jc: 6, jmin: 8, jmax: 80, s1: 64, s2: 112, h1: 150000000, h2: 600000000, h3: 1000000000, h4: 1400000000, tls_mode: "pinned", obfs_enabled: false, obfs_password: "", up_mbps: 100, down_mbps: 100, congestion_control: "bbr", heartbeat: "10s", vpn_transport: "udp" });
-  const [generated, setGenerated] = useState("");
-  const [generatedName, setGeneratedName] = useState("client.conf");
-  const [generatedProtocol, setGeneratedProtocol] = useState<Protocol | undefined>();
-  const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);
-  const [generatedQr, setGeneratedQr] = useState("");
-  const [generatedQrError, setGeneratedQrError] = useState("");
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
-  const networkStatusLoading = useRef(false);
   const servicesLoading = useRef(false);
   const applicationMetadataLoading = useRef(false);
   const securityStatusLoading = useRef(false);
   const securityObservationVersion = useRef(0);
   const metricsObservationVersion = useRef(0);
-  const protocolStatusLoading = useRef<Partial<Record<Protocol, boolean>>>({});
-  const protocolObservationVersion = useRef<Partial<Record<Protocol, number>>>({});
-  const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const sshAccessLoading = useRef(false);
   const automationDirty = useRef(false);
@@ -262,7 +136,6 @@ export function ControlPanel() {
   const pendingLogging = useRef<{ id?: string; draft: LoggingSettings } | null>(null);
   const metricsDirty = useRef(false);
   const liveRequestInFlight = useRef(false);
-  const clientObservationVersion = useRef(0);
   const pendingConfirmation = useRef<ConfirmationRequest | null>(null);
   useEffect(() => { pendingConfirmation.current = confirmation; }, [confirmation]);
   const clearSession = useCallback(() => {
@@ -273,11 +146,9 @@ export function ControlPanel() {
     setConfirmation(null);
     setToken(""); setLoginPassword(""); setLoginPasswordVisible(false);
     setCurrentAdminPassword(""); setNewAdminPassword(""); setConfirmAdminPassword("");
-    setPasswordDialog(false); setClientDialog(false); setSshAdminDialog(false);
+    setPasswordDialog(false); setSshAdminDialog(false);
     setSshPublicKey(""); setSshAccessState(null); setSshKeyTested(false);
-    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setGeneratedProfiles([]);
-    setNewClientSettings((current) => ({...current, obfs_password: ""}));
-    setClients([]); setProtocolStatuses({}); setApplicationLogs([]); setSecurityLogs([]);
+    setApplicationLogs([]); setSecurityLogs([]);
     setBusy(false); setInstallingProtocol(""); setReloadRequested(false);
     notifications.reset();
   }, [notifications]);
@@ -299,10 +170,8 @@ export function ControlPanel() {
     // Restore browser-only credentials after hydration.
     setToken(sessionStorage.getItem("312-token") || "");
     const savedTab = sessionStorage.getItem("312-reload-tab");
-    if (savedTab && Object.hasOwn(navigationLabels, savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
+    if (savedTab && ["overview", "mihomo", "dns", "network", "security", "application", "services"].includes(savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
     sessionStorage.removeItem("312-reload-tab");
-    const savedChannel = sessionStorage.getItem("312-reload-channel");
-    if (savedChannel && directProtocolOrder.includes(savedChannel as Protocol)) setSelectedChannel(savedChannel as Protocol);
     sessionStorage.removeItem("312-reload-channel");
     const savedNotice = sessionStorage.getItem("312-notice");
     if (savedNotice) {
@@ -328,17 +197,12 @@ export function ControlPanel() {
     if (acceptedOperation.current?.id !== operation.id || acceptedOperation.current?.state !== operation.state) {
       applicationObservationVersion.current += 1;
       invalidateApiReads(token);
-      setNetworkStatus(null);
       setOverview(overviewUnavailable);
-      setClients(clientsUnavailable);
       setServices(servicesUnavailable);
       setSecurity(securityUnavailable);
       setApplicationMetadata(applicationMetadataUnavailable);
       networkSample.current = null;
       setNetworkRate({ rx: null, tx: null });
-      setProtocolStatuses((current) => Object.fromEntries(Object.entries(current).map(([protocol, status]) => [protocol, directProtocolUnavailable(status)])));
-      protocolSamples.current = {};
-      setProtocolRates({});
     }
     acceptedOperation.current = { id: operation.id, state: operation.state };
     setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: operation }));
@@ -346,9 +210,6 @@ export function ControlPanel() {
   const { pending: admissionPending, submit: submitSystemOperation, retain: retainAdmission, recheck: recheckAdmission, cancel: cancelSystemOperation } = useSystemAdmission(request, token, acceptSystemOperation);
   const busy = localBusy || admissionPending || systemActionNeedsPolling(application?.action);
   const admitNetworkOperation = useCallback((path: string, options: RequestInit) => submitSystemOperation(request, path, options), [request, submitSystemOperation]);
-  const relayClient = useRelayClient({ request, admit: admitNetworkOperation, onOperation: acceptSystemOperation, onResult: acceptRelayClientResult });
-
-  const nativeClient = useRelayClient({ request, admit: admitNetworkOperation, onOperation: acceptSystemOperation, onResult: acceptRelayClientResult, native: true });
 
   const operationHistoryPolicy = useOperationHistorySettings(request, Boolean(token));
 
@@ -442,38 +303,6 @@ export function ControlPanel() {
     return () => window.clearTimeout(timer);
   }, [autoRefresh, loadOverview, protocolImages, tab, token]);
 
-  const loadClients = useCallback(async () => {
-    if (!token) return;
-    const observationVersion = applicationObservationVersion.current;
-    const clientVersion = ++clientObservationVersion.current;
-    try {
-      const data = clientSnapshot((await request("/clients", { cache: "no-store" })).items);
-      if (observationVersion !== applicationObservationVersion.current || clientVersion !== clientObservationVersion.current) return;
-      setClients(data); setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadClients; return next; });
-    } catch (cause) {
-      if (observationVersion !== applicationObservationVersion.current || clientVersion !== clientObservationVersion.current) return;
-      setClients(clientsUnavailable);
-      setRefreshErrors((current) => ({ ...current, loadClients: refreshFailure(cause, "Не удалось обновить клиентов") }));
-    }
-  }, [request, token]);
-
-  const loadNetworkStatus = useCallback(async () => {
-    if (!token || networkStatusLoading.current) return;
-    networkStatusLoading.current = true;
-    const observationVersion = applicationObservationVersion.current;
-    try {
-      const snapshot = networkRoutesSnapshot(await request("/network", { cache: "no-store" }));
-      if (observationVersion !== applicationObservationVersion.current) return;
-      setNetworkStatus(snapshot);
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetworkStatus; return next; });
-    } catch (cause) {
-      if (observationVersion !== applicationObservationVersion.current) return;
-      setNetworkStatus(null);
-      setRefreshErrors((current) => ({ ...current, loadNetworkStatus: refreshFailure(cause, "Не удалось проверить сетевые маршруты") }));
-    } finally { networkStatusLoading.current = false; }
-  }, [request, token]);
-
   const loadSecurity = useCallback(async (force = false) => {
     if (!token || securityStatusLoading.current) return;
     securityStatusLoading.current = true;
@@ -559,66 +388,6 @@ export function ControlPanel() {
     } finally { applicationMetadataLoading.current = false; }
   }, [request, token]);
 
-  const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
-    if (!token || protocolStatusLoading.current[protocol]) return;
-    protocolStatusLoading.current[protocol] = true;
-    protocolObservationVersion.current[protocol] = (protocolObservationVersion.current[protocol] || 0) + 1;
-    const observationVersion = applicationObservationVersion.current;
-    try {
-      const next = directProtocolSnapshot(await request(`/protocols/${protocol}/status`, { cache: "no-store" }), protocol);
-      if (observationVersion !== applicationObservationVersion.current) return;
-      protocolObservationVersion.current[protocol] = (protocolObservationVersion.current[protocol] || 0) + 1;
-      const now = Date.now();
-      const sampled = sampleNetwork({ network_rx: next.interface_rx_bytes, network_tx: next.interface_tx_bytes }, protocolSamples.current[protocol] || null, now);
-      setProtocolRates((rates) => ({ ...rates, [protocol]: sampled.rate }));
-      if (sampled.sample) protocolSamples.current[protocol] = sampled.sample;
-      setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
-      setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next[`loadProtocolStatus:${protocol}`]; return next; });
-    } catch (cause) {
-      if (observationVersion !== applicationObservationVersion.current) return;
-      protocolObservationVersion.current[protocol] = (protocolObservationVersion.current[protocol] || 0) + 1;
-      setProtocolStatuses((current) => ({ ...current, [protocol]: directProtocolUnavailable(current[protocol]) }));
-      delete protocolSamples.current[protocol];
-      setProtocolRates((current) => ({ ...current, [protocol]: { rx: null, tx: null } }));
-      setRefreshErrors((current) => ({ ...current, [`loadProtocolStatus:${protocol}`]: refreshFailure(cause, "Не удалось обновить состояние протокола") }));
-    } finally { protocolStatusLoading.current[protocol] = false; }
-  }, [request, token]);
-
-  const measureDeviceRoute = useCallback(async (force = false) => {
-    if (!force && Date.now() - deviceProbeAt.current < 30000) return;
-    setProbingDevice(true);
-    const results = await Promise.all(Array.from({ length: 5 }, async (_, index) => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 4000);
-      const started = performance.now();
-      try {
-        const response = await fetch(`/api/health?_probe=${Date.now()}-${index}`, { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        await response.json();
-        return { elapsed: performance.now() - started, ok: true };
-      } catch {
-        return { elapsed: 0, ok: false };
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    }));
-    const samples = results.filter((result) => result.ok).map((result) => result.elapsed);
-    const failed = results.length - samples.length;
-    const host = window.location.hostname;
-    const route = host === "10.72.0.1" ? "WireGuard" : host === "10.73.0.1" ? "AmneziaWG" : "текущий маршрут браузера";
-    const average = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null;
-    const variation = samples.length > 1 ? Math.max(...samples) - Math.min(...samples) : null;
-    setDeviceProbe({
-      latency_ms: average == null ? null : Math.round(average),
-      variation_ms: variation == null ? null : Math.round(variation),
-      loss_percent: failed / 5 * 100,
-      successful: samples.length, samples: 5, measured_at: new Date().toISOString(), route,
-    });
-    deviceProbeAt.current = Date.now();
-    setProbingDevice(false);
-  }, []);
-
   const beginViewLoading = useCallback(() => {
     const run = ++viewLoadingRun.current;
     if (viewLoadingTimer.current !== null) {
@@ -656,7 +425,7 @@ export function ControlPanel() {
     const transitionRun = showTransition ? beginViewLoading() : undefined;
     if (showBusy) { setBusy(true); }
     try {
-      if (tab === "overview") await Promise.all([loadOverview(showBusy), loadClients(), loadApplication(showBusy), loadServices(showBusy)]);
+      if (tab === "overview") await Promise.all([loadOverview(showBusy), loadApplication(showBusy), loadServices(showBusy)]);
       else if (tab === "security") await Promise.all([loadSecurity(showBusy), loadServices(showBusy)]);
       else if (tab === "application") await Promise.all([loadApplication(showBusy), loadApplicationMetadata(showBusy), loadServices(showBusy)]);
       else if (tab === "services") await loadServices(showBusy);
@@ -666,17 +435,11 @@ export function ControlPanel() {
         if (showBusy) setMihomoRefreshKey((value) => value + 1);
         await loadOverview(showBusy);
       }
-      else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
-      else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
-      else {
-        if (tab === "clients") void measureDeviceRoute(showBusy);
-        await loadClients();
-      }
     } finally {
       if (showTransition) endViewLoading(transitionRun);
       if (showBusy) setBusy(false);
     }
-  }, [beginViewLoading, endViewLoading, loadApplication, loadApplicationMetadata, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
+  }, [beginViewLoading, endViewLoading, loadApplication, loadApplicationMetadata, loadOverview, loadSecurity, loadServices, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -763,11 +526,10 @@ export function ControlPanel() {
     if (!token || !reloadRequested || reloadBlocked) return;
     const timer = window.setTimeout(() => {
       sessionStorage.setItem("312-reload-tab", tab);
-      sessionStorage.setItem("312-reload-channel", selectedChannel);
       reloadWithoutCache("");
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [reloadBlocked, reloadRequested, selectedChannel, tab, token]);
+  }, [reloadBlocked, reloadRequested, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -803,12 +565,7 @@ export function ControlPanel() {
     if (!token || liveRequestInFlight.current || document.visibilityState !== "visible") return;
     liveRequestInFlight.current = true;
     const observationVersion = applicationObservationVersion.current;
-    const clientVersion = ++clientObservationVersion.current;
-    const protocolReads = { ...protocolStatusLoading.current };
-    const protocolVersions = { ...protocolObservationVersion.current };
     const securityVersion = securityObservationVersion.current;
-    const liveProtocol = (protocol: "wg" | "awg") => !protocolReads[protocol] && !protocolStatusLoading.current[protocol]
-      && protocolVersions[protocol] === protocolObservationVersion.current[protocol];
     try {
       const next = liveStatusSnapshot(await request("/live-status", { cache: "no-store" }));
       if (observationVersion !== applicationObservationVersion.current) return;
@@ -826,12 +583,6 @@ export function ControlPanel() {
           awg: { ...current.protocols.awg, active: next.protocols.awg?.active ?? null },
         },
       } : current);
-      const liveClients = next.clients;
-      if (clientVersion === clientObservationVersion.current) setClients(liveClients ?? clientsUnavailable);
-      setProtocolStatuses((current) => ({ ...current,
-        wg: liveProtocol("wg") ? tunnelLiveObservation(current.wg, next.protocols.wg) : current.wg,
-        awg: liveProtocol("awg") ? tunnelLiveObservation(current.awg, next.protocols.awg) : current.awg,
-      }));
       if (securityVersion === securityObservationVersion.current) setSecurity((current) => securityLiveObservation(current, next.security));
       setRefreshErrors((current) => {
         const errors = { ...current };
@@ -846,12 +597,7 @@ export function ControlPanel() {
       networkSample.current = null;
       setNetworkRate({ rx: null, tx: null });
       setOverview(overviewUnavailable);
-      if (clientVersion === clientObservationVersion.current) setClients(clientsUnavailable);
       if (securityVersion === securityObservationVersion.current) setSecurity((current) => securityLiveObservation(current, null));
-      setProtocolStatuses((current) => ({ ...current,
-        wg: liveProtocol("wg") ? directProtocolUnavailable(current.wg) : current.wg,
-        awg: liveProtocol("awg") ? directProtocolUnavailable(current.awg) : current.awg,
-      }));
       setResourceHistory((history) => Object.fromEntries(Object.entries(history).map(([key, values]) => [key, [...values, null].slice(-HISTORY_SAMPLES)])) as ResourceHistory);
       setRefreshErrors((current) => ({ ...current, liveSources: refreshFailure(cause, "Не удалось обновить live-телеметрию") }));
     } finally {
@@ -860,7 +606,7 @@ export function ControlPanel() {
   }, [request, token]);
 
   useEffect(() => {
-    if (!token || !autoRefresh || !["overview", "clients", "wg", "awg", "security"].includes(tab)) return;
+    if (!token || !autoRefresh || !["overview", "security"].includes(tab)) return;
     const initial = window.setTimeout(() => void loadLiveStatus(), 0);
     const timer = window.setInterval(() => void loadLiveStatus(), LIVE_SAMPLE_SECONDS * 1000);
     return () => {
@@ -1072,21 +818,6 @@ export function ControlPanel() {
     setCurrentAdminPassword("");
     setNewAdminPassword("");
     setConfirmAdminPassword("");
-  }
-
-  function openClientDialog() {
-    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError(""); setClientDialog(true);
-  }
-
-  function closeClientDialog() {
-    if (busy) return;
-    setClientDialog(false); setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError("");
-  }
-
-  const clientDialogRef = useDialogFocus<HTMLFormElement>(clientDialog && Boolean(token), closeClientDialog);
-
-  function resetClientDialog() {
-    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError("");
   }
 
   async function changeAdminPassword(event: FormEvent) {
@@ -1366,21 +1097,6 @@ export function ControlPanel() {
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
-  async function checkProtocolResources(protocol: Protocol) {
-    setCheckingResources(protocol);
-    try {
-      const resources = await request(`/protocols/${protocol}/resources/check`, { method: "POST" });
-      setProtocolStatuses((statuses) => {
-        const current = statuses[protocol];
-        return current ? { ...statuses, [protocol]: { ...current, resources } } : statuses;
-      });
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось проверить доступность ресурсов");
-    } finally {
-      setCheckingResources(null);
-    }
-  }
-
   function updateLoggingDraft(patch: Partial<LoggingSettings>) {
     loggingDirty.current = true;
     setLoggingDraft((current) => ({ ...(current || { persistent: true, retention_days: 30 }), ...patch }));
@@ -1451,36 +1167,7 @@ export function ControlPanel() {
     finally { setBusy(false); }
   }
 
-  async function checkNetworkDiagnostics(protocol: Protocol) {
-    setCheckingDiagnostics(protocol);
-    try {
-      const diagnostics = await request(`/protocols/${protocol}/diagnostics/check`, { method: "POST" });
-      setProtocolStatuses((statuses) => {
-        const current = statuses[protocol];
-        return current ? { ...statuses, [protocol]: { ...current, diagnostics } } : statuses;
-      });
-      await loadProtocolStatus(protocol);
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить полную диагностику сети");
-    } finally {
-      setCheckingDiagnostics(null);
-    }
-  }
-
-  function toggleNetworkDiagnostics(protocol: Protocol) {
-    const opening = !diagnosticsOpen[protocol];
-    setDiagnosticsOpen((values) => ({ ...values, [protocol]: opening }));
-    if (!opening) return;
-    void checkNetworkDiagnostics(protocol);
-  }
-
-  function toggleProtocolResources(protocol: Protocol) {
-    const opening = !resourcesOpen[protocol];
-    setResourcesOpen((values) => ({ ...values, [protocol]: opening }));
-    if (opening) void checkProtocolResources(protocol);
-  }
-
-  async function removeProtocol(image: ProtocolImage, alreadyConfirmed = false, stayOnOverview = false) {
+  async function removeProtocol(image: ProtocolImage, alreadyConfirmed = false) {
     if (!alreadyConfirmed && !await askConfirmation({
       title: image.id === "mihomo" ? `Удалить ${image.name}?` : "Удалить протокол?",
       message: image.id === "mihomo"
@@ -1488,9 +1175,6 @@ export function ControlPanel() {
         : `Исполняемая часть ${image.name} будет удалена. Настройки, ключи и подключения сохранятся для повторной установки; до неё подключения не работают.`,
       confirmLabel: image.id === "mihomo" ? "Удалить модуль" : "Удалить", phrase: image.id === "mihomo" ? "УДАЛИТЬ" : undefined, danger: true,
     })) return;
-    const nextProtocol = image.id === "mihomo"
-      ? undefined
-      : directProtocolOrder.find((protocol) => protocol !== image.id && protocolImages.some((candidate) => candidate.id === protocol && candidate.installed));
     setBusy(true); setInstallingProtocol(`remove-${image.id}`);
     let started: SystemAction | undefined;
     try {
@@ -1501,177 +1185,13 @@ export function ControlPanel() {
         action: started!,
       }));
       const completed = await waitForProtocolState(image, false, started!);
-      setProtocolStatuses((current) => {
-        const next = { ...current };
-        delete next[image.id as Protocol];
-        return next;
-      });
-      if (nextProtocol) setSelectedChannel(nextProtocol);
-      if (stayOnOverview) {
-        setTab("overview");
-      } else if (nextProtocol) {
-        setTab("channels");
-      } else {
-        setTab("overview");
-      }
+      setTab("overview");
       finishSystemCommand(completed);
     } catch (cause) {
       setInstallingProtocol("");
       const message = cause instanceof Error ? cause.message : "Не удалось запустить удаление протокола";
       if (started) finishSystemCommand(started, message); else notifyError(message);
     } finally { setInstallingProtocol(""); setBusy(false); }
-  }
-
-  const protocolClients = useMemo(() => clients.filter((client) => {
-    if ((tab === "wg" || tab === "awg") && client.protocol !== tab) return false;
-    if (clientProtocolFilter !== "all" && client.protocol !== clientProtocolFilter) return false;
-    const stateMatches = clientStateFilter === "all"
-      || (clientStateFilter === "online" && client.quality === "stable")
-      || (clientStateFilter === "attention" && (!client.quality || ["warning", "error", "unknown"].includes(client.quality)))
-      || (clientStateFilter === "offline" && client.quality === "offline");
-    if (!stateMatches) return false;
-    const query = clientSearch.trim().toLocaleLowerCase("ru-RU");
-    return !query || `${client.name} ${client.address || ""} ${client.protocol}`.toLocaleLowerCase("ru-RU").includes(query);
-  }), [clients, tab, clientProtocolFilter, clientStateFilter, clientSearch]);
-  const clientSummary = useMemo(() => ({
-    total: clients.length,
-    online: clients.filter((client) => client.quality === "stable").length,
-    attention: clients.filter((client) => !client.quality || ["warning", "error", "unknown"].includes(client.quality)).length,
-    offline: clients.filter((client) => client.quality === "offline").length,
-  }), [clients]);
-  const clientPageCount = Math.max(1, Math.ceil(protocolClients.length / CLIENTS_PER_PAGE));
-  const currentClientPage = Math.min(clientPage, clientPageCount);
-  const visibleClients = protocolClients.slice((currentClientPage - 1) * CLIENTS_PER_PAGE, currentClientPage * CLIENTS_PER_PAGE);
-  const visibleClientStart = protocolClients.length ? (currentClientPage - 1) * CLIENTS_PER_PAGE + 1 : 0;
-  const visibleClientEnd = Math.min(currentClientPage * CLIENTS_PER_PAGE, protocolClients.length);
-  const installedProtocols = useMemo(
-    () => directProtocolOrder.filter((protocol) => protocolImages.some((image) => image.id === protocol && image.installed)),
-    [protocolImages],
-  );
-  useEffect(() => {
-    if (!token || (tab !== "clients" && !clientDialog)) return;
-    const refresh = () => { for (const protocol of installedProtocols) void loadProtocolStatus(protocol).catch(() => undefined); void loadNetworkStatus(); };
-    refresh();
-    const timer = window.setInterval(refresh, 6000);
-    return () => window.clearInterval(timer);
-  }, [token, tab, clientDialog, installedProtocols, loadProtocolStatus, loadNetworkStatus]);
-  const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
-  const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.observation_failed ? {} : protocolStatuses["vless-reality-xhttp"]?.routes || {};
-  const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay", protocol: Protocol) => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && (["tuic", "hysteria2"].includes(protocol) && kind === "udp_relay" ? endpointSelectable(check) : endpointCheckReady(check) && check.verified_connection?.protocol === protocol));
-  const nativeXrayName = ({vless:"VLESS",vmess:"VMess",trojan:"Trojan"})[newClientSettings.xray_protocol];
-  const connectionTypeOptions = installedProtocols.flatMap<ClientConnectionType>((protocol) => {
-    const badge = protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase();
-    if (protocol !== "vless-reality-xhttp") {
-      const options: ClientConnectionType[] = [{
-        id: protocol, protocol, channelMode: "direct", name: labels[protocol], badge,
-        description: protocol === "shadowsocks" ? "Прямой шифрованный прокси TCP и UDP" : "Прямой VPN-туннель",
-      }];
-      const supportsTlsRelay = ["shadowsocks", "trojan", "openvpn"].includes(protocol);
-      const supportsUdpRelay = ["wg", "awg", "shadowsocks", "hysteria2", "tuic", "openvpn", "ikev2"].includes(protocol);
-      if (supportsTlsRelay && hasNetworkRoute("tls_relay", protocol)) options.push({ id: `${protocol}-tls-relay`, protocol, channelMode: "tls_relay", name: `${labels[protocol]} · TLS relay`, badge, description: "Через подтверждённый TLS relay-домен" });
-      if (supportsUdpRelay && hasNetworkRoute("udp_relay", protocol)) options.push({ id: `${protocol}-udp-relay`, protocol, channelMode: "udp_relay", name: `${labels[protocol]} · UDP relay`, badge, description: "Через подтверждённый UDP relay-домен" });
-      return options;
-    }
-    return ([
-      ["direct", "VLESS REALITY", "RLTY", "Прямой маршрут с маскировкой REALITY"],
-      ["tls", `${nativeXrayName} TLS`, "TLS", "Прямой домен с TLS-сертификатом"],
-      ["cdn", `${nativeXrayName} CDN`, "CDN", "Маршрут через настроенный CDN-домен"],
-    ] as const).filter(([id]) => id !== "direct" || newClientSettings.xray_protocol === "vless").filter(([id]) => id === "direct"
-      ? vlessRouteStatus[id]?.enabled !== false
-      : Boolean(vlessRouteStatus[id]?.enabled && vlessRouteStatus[id]?.available_domains?.length)
-    ).map(([routeId, name, routeBadge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge: routeBadge, description }));
-  });
-  const desiredConnectionTypeId = selectedClientProtocol === "vless-reality-xhttp" ? `vless-${newClientVlessRoutes[0]}` : newClientSettings.channel_mode === "direct" ? selectedClientProtocol : `${selectedClientProtocol}-${newClientSettings.channel_mode.replaceAll("_", "-")}`;
-  if (clientDialog && !connectionTypeOptions.some((option) => option.id === desiredConnectionTypeId)
-    && (selectedClientProtocol === "vless-reality-xhttp" ? newClientVlessRoutes[0] !== "direct" : newClientSettings.channel_mode !== "direct")) {
-    const routeId = selectedClientProtocol === "vless-reality-xhttp" ? newClientVlessRoutes[0] : undefined;
-    const routeName = routeId ? `VLESS ${routeId.toUpperCase()}` : `${labels[selectedClientProtocol]} · ${newClientSettings.channel_mode === "udp_relay" ? "UDP relay" : "TLS relay"}`;
-    const reason = "Доступность выбранного маршрута не подтверждена. Обновите данные или выберите другой маршрут.";
-    connectionTypeOptions.push({ id: desiredConnectionTypeId, protocol: selectedClientProtocol, ...(routeId ? { routeId } : { channelMode: newClientSettings.channel_mode }), name: routeName, badge: selectedClientProtocol.toUpperCase(), description: reason, unavailable: reason });
-  }
-  const selectedConnectionType = connectionTypeOptions.find((option) => option.id === desiredConnectionTypeId) || connectionTypeOptions[0];
-  const selectedVlessRoute = selectedConnectionType?.routeId ? vlessRouteStatus[selectedConnectionType.routeId] : undefined;
-  const openvpnTransportValue = protocolStatuses.openvpn?.editable_settings?.find(field => field.key === "vpn_transport")?.value;
-  const openvpnTransport = !protocolStatuses.openvpn?.observation_failed && (openvpnTransportValue === "udp" || openvpnTransportValue === "tcp") ? openvpnTransportValue : undefined;
-  useEffect(() => {
-    if (selectedClientProtocol !== "openvpn" || !openvpnTransport) return;
-    setNewClientSettings(current => current.vpn_transport === openvpnTransport ? current : { ...current, vpn_transport: openvpnTransport });
-  }, [openvpnTransport, selectedClientProtocol]);
-
-
-  useEffect(() => {
-    const route = selectedConnectionType?.routeId;
-    const transport = selectedVlessRoute?.transport;
-    if (!route || !transport) return;
-    setNewClientSettings((current) => {
-      const next = { ...current };
-      if (route === "direct") {
-        if (!["xhttp", "raw", "grpc"].includes(transport)) return current;
-        next.transport = transport as NewClientSettings["transport"];
-        next.transport_path = selectedVlessRoute.path || "/";
-        next.xhttp_mode = (selectedVlessRoute.xhttp_mode || "auto") as NewClientSettings["xhttp_mode"];
-        next.sni = selectedVlessRoute.server_name || current.sni;
-      } else if (route === "tls") {
-        next.tls_transport = transport as NewClientSettings["tls_transport"];
-        next.tls_xhttp_mode = (selectedVlessRoute.xhttp_mode || "auto") as NewClientSettings["tls_xhttp_mode"];
-      } else {
-        next.cdn_transport = transport as NewClientSettings["cdn_transport"];
-        next.cdn_xhttp_mode = (selectedVlessRoute.xhttp_mode || "auto") as NewClientSettings["cdn_xhttp_mode"];
-      }
-      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
-    });
-  }, [selectedConnectionType?.routeId, selectedVlessRoute?.path, selectedVlessRoute?.server_name, selectedVlessRoute?.transport, selectedVlessRoute?.xhttp_mode]);
-
-  useEffect(() => {
-    if (tab !== "clients") return;
-    void loadNetworkStatus();
-    if (installedProtocols.includes("vless-reality-xhttp")) void loadProtocolStatus("vless-reality-xhttp");
-  }, [installedProtocols, loadNetworkStatus, loadProtocolStatus, tab]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!generated) return () => { cancelled = true; };
-    void QRCode.toDataURL(generated, { errorCorrectionLevel: "L", margin: 4, width: 768 })
-      .then((dataUrl) => { if (!cancelled) setGeneratedQr(dataUrl); })
-      .catch(() => { if (!cancelled) { setGeneratedQrError("Не удалось создать QR-код для этой конфигурации"); notifyError("Не удалось создать QR-код. Скачайте файл конфигурации и импортируйте его в клиент."); } });
-    return () => { cancelled = true; };
-  }, [generated, notifyError]);
-
-  async function addClient(event: FormEvent) {
-    event.preventDefault();
-    if (clientCreationInFlight.current || nativeClient.pending || relayClient.pending) return;
-    const clientName = newClient.name.trim();
-    if (!/^[\p{L}\p{N}_. -]{2,48}$/u.test(clientName)) {
-      notifyError("Название устройства: от 2 до 48 символов — буквы, цифры, пробел, точка, дефис или _");
-      return;
-    }
-    clientCreationInFlight.current = true;
-    setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
-    if (!installedProtocols.includes(selectedClientProtocol)) {
-      clientCreationInFlight.current = false;
-      setBusy(false); notifyError("Сначала установите выбранный протокол"); return;
-    }
-    try {
-      if (selectedClientProtocol === "openvpn" && (!openvpnTransport || newClientSettings.vpn_transport !== openvpnTransport)) {
-        throw new Error("Сначала подтвердите актуальный транспорт OpenVPN listener");
-      }
-      if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
-      if (selectedConnectionType.unavailable) throw new Error(selectedConnectionType.unavailable);
-      const { cdn_domain: selectedCdnDomain, ...commonSettings } = newClientSettings;
-      const settings = {
-        ...commonSettings,
-        channel_mode: selectedConnectionType.routeId ? "direct" as ClientChannelMode : selectedConnectionType.channelMode || "direct",
-        ...(selectedConnectionType.routeId === "cdn" ? { cdn_domain: selectedCdnDomain || selectedVlessRoute?.available_domains?.[0] || "" } : {}),
-      };
-      const payload = { ...newClient, name: clientName, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
-      if (settings.relay_host_id) {
-        if (relayClient.pending || relayClient.sending) return;
-        await relayClient.start(payload);
-        return;
-      }
-      await nativeClient.start(payload);
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
-    finally { clientCreationInFlight.current = false; setBusy(false); }
   }
 
   function downloadConfig(filename: string, config: string) {
@@ -1684,31 +1204,8 @@ export function ControlPanel() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function acceptRelayClientResult(result: RelayClientResult) {
-    const profiles = result.profiles?.filter(profile => profile.config && profile.filename) || [];
-    const preferred = profiles.find(profile => profile.id === "cdn") || profiles[0];
-    setGeneratedProfiles(profiles); setGenerated(preferred?.config || result.config);
-    setGeneratedName(preferred?.filename || result.filename || "relay-client.conf");
-    setGeneratedProtocol(result.protocol);
-    setGeneratedQr(""); setGeneratedQrError(""); setClientDialog(true);
-    downloadConfig(preferred?.filename || result.filename || "relay-client.conf", preferred?.config || result.config);
-    setNewClient(current => ({ ...current, name: "" })); void loadClients();
-  }
-
   function downloadLogs(filename: string, lines: string[]) {
     downloadConfig(filename, `${lines.join("\n")}\n`);
-  }
-
-  async function removeClient(id: string) {
-    if (!await askConfirmation({
-      title: "Отозвать доступ",
-      message: "Подключение будет удалено, а доступ этого устройства к VPN прекратится сразу.",
-      confirmLabel: "Отозвать", danger: true,
-    })) return;
-    setBusy(true);
-    try { await request(`/clients/${id}`, { method: "DELETE" }); await loadClients(); }
-    catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось удалить клиента"); }
-    finally { setBusy(false); }
   }
 
   async function login(event: FormEvent) {
@@ -1847,19 +1344,6 @@ export function ControlPanel() {
     Boolean(applicationSecurity?.control_command_protected),
     Boolean(applicationSecurity?.cors_restricted),
   ];
-  const protocolTab = tab === "channels"
-    ? (installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0])
-    : (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
-  const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
-  const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: null, tx: null } : { rx: null, tx: null };
-  const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
-  const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "XRAY" : "";
-  const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg" || protocolTab === "openvpn" || protocolTab === "ikev2";
-  const protocolOperational = Boolean(activeProtocol && (protocolIsTunnel ? activeProtocol.active && activeProtocol.service_active : activeProtocol.service_active));
-  const protocolAvailability = activeProtocol?.history.availability_percent ?? (protocolOperational ? 100 : 0);
-  const protocolDiagnosticsLabel = activeProtocol?.diagnostics?.status === "healthy" ? "Стабильно" : activeProtocol?.diagnostics?.status === "critical" ? "Критично" : activeProtocol?.diagnostics?.status === "warning" ? "Требует внимания" : "Не проверено";
-  const protocolResourceAvailable = activeProtocol?.resources?.items?.filter((item) => item.available).length || 0;
-  const protocolResourceTotal = activeProtocol?.resources?.items?.length || 0;
   const operationActive = systemActionNeedsPolling(application?.action);
   const operationName = application?.action?.action || "";
   const operationTarget = protocolImages.find(image => image.id === operationName.split(":")[1])?.name;
@@ -1885,7 +1369,6 @@ export function ControlPanel() {
   const visualArt =
     tab === "overview" ? "overview"
     : tab === "mihomo" ? "mihomo"
-    : tab === "clients" ? "direct"
     : tab === "dns" ? "network"
     : tab === "security" || tab === "services" ? "security"
     : tab === "application" ? "modules"
@@ -1895,15 +1378,10 @@ export function ControlPanel() {
     activeTab={tab}
     visualArt={visualArt}
     protocolImages={protocolImages}
-    showConnections={installedProtocols.length > 0}
     nodeState={nodeState}
     nodeStateLabel={nodeStateLabel}
     server={overview?.server}
     onNavigate={(id) => {
-      if (id === "channels" && installedProtocols[0]) {
-        const channel = installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0];
-        setSelectedChannel(channel);
-      }
       void navigateTo(id as Tab);
     }}
     commandOperation={cdnCommand.operation}
@@ -1942,16 +1420,14 @@ export function ControlPanel() {
           diskUsedBytes={diskUsedBytes}
           networkRate={networkRate}
           resourceHistory={resourceHistory}
-          clients={clients}
           protocolImages={protocolImages}
           installingProtocol={installingProtocol}
           busy={busy}
           onInstallProtocol={(image) => void installProtocol(image)}
           onUpdateProtocol={(image) => void updateProtocol(image)}
-          onOpenProtocol={(image) => { setSelectedChannel(image.id as Protocol); setTab("channels"); }}
           onAdoptProtocol={(image) => void adoptProtocol(image)}
           onPurgeProtocol={(image) => void purgeProtocol(image)}
-          onRemoveProtocol={(image) => void removeProtocol(image, false, true)}
+          onRemoveProtocol={(image) => void removeProtocol(image)}
         />
       )}
 
@@ -2058,119 +1534,6 @@ export function ControlPanel() {
         onRecoverAutomation={() => void recoverAutomation()}
       />}
 
-      {protocolTab && activeProtocol && <ProtocolView
-        protocolTab={protocolTab}
-        activeProtocol={activeProtocol}
-        activeProtocolRate={activeProtocolRate}
-        activeProtocolImage={activeProtocolImage}
-        protocolCode={protocolCode}
-        protocolIsTunnel={protocolIsTunnel}
-        protocolOperational={protocolOperational}
-        protocolAvailability={protocolAvailability}
-        protocolDiagnosticsLabel={protocolDiagnosticsLabel}
-        protocolResourceAvailable={protocolResourceAvailable}
-        protocolResourceTotal={protocolResourceTotal}
-        installedProtocols={installedProtocols}
-        setTab={setTab}
-        onSelectProtocol={(protocol) => setSelectedChannel(protocol)}
-        diagnosticsOpen={diagnosticsOpen}
-        resourcesOpen={resourcesOpen}
-        checkingDiagnostics={checkingDiagnostics}
-        checkingResources={checkingResources}
-        installingProtocol={installingProtocol}
-        busy={busy}
-        updateProtocol={updateProtocol}
-        removeProtocol={removeProtocol}
-        toggleNetworkDiagnostics={toggleNetworkDiagnostics}
-        checkNetworkDiagnostics={checkNetworkDiagnostics}
-        toggleProtocolResources={toggleProtocolResources}
-        checkProtocolResources={checkProtocolResources}
-      />}
-
-      {tab === "clients" && installedProtocols.length > 0 && <ConnectionsView
-        protocolStatuses={protocolStatuses}
-        installedProtocols={installedProtocols}
-        clientStateFilter={clientStateFilter}
-        setClientStateFilter={setClientStateFilter}
-        setClientPage={setClientPage}
-        clientSummary={clientSummary}
-        deviceProbe={deviceProbe}
-        probingDevice={probingDevice}
-        measureDeviceRoute={measureDeviceRoute}
-        openClientDialog={openClientDialog}
-        protocolClients={protocolClients}
-        clientSearch={clientSearch}
-        setClientSearch={setClientSearch}
-        clientProtocolFilter={clientProtocolFilter}
-        setClientProtocolFilter={setClientProtocolFilter}
-        currentClientPage={currentClientPage}
-        clientPageCount={clientPageCount}
-        visibleClientStart={visibleClientStart}
-        visibleClientEnd={visibleClientEnd}
-        visibleClients={visibleClients}
-        removeClient={removeClient}
-      />}
-      {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
-        <form ref={clientDialogRef} tabIndex={-1} className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
-          <header className="connectionDialogHead"><div><h2 id="connection-dialog-title">{generated ? "Подключение создано" : "Новое подключение"}</h2><p>{generated ? "Конфигурация готова к передаче на устройство." : "Укажите устройство и выберите протокол доступа."}</p></div><button className="connectionDialogClose" type="button" onClick={closeClientDialog}>Закрыть</button></header>
-          {!generated ? <>
-            <div className="connectionCreateBody">
-              <div className="connectionCreateLead">
-                <span>ACCESS PROFILE</span>
-                <strong>Отдельный ключ для одного устройства</strong>
-                <p>Имя используется только в панели. После создания конфигурацию можно передать файлом или показать QR-код владельцу устройства.</p>
-              </div>
-              <div className="connectionForm">
-                <label>Название устройства<input data-dialog-initial required minLength={2} maxLength={48} pattern={"[\\p{L}\\p{N}_. \\-]{2,48}"} title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
-              </div>
-              {selectedClientProtocol === "vless-reality-xhttp" && <label><span>Протокол Xray</span><select aria-label="Протокол Xray" value={newClientSettings.xray_protocol} onChange={event => {
-                const xray_protocol = event.target.value as NewClientSettings["xray_protocol"];
-                setNewClientSettings(current => ({ ...current, xray_protocol }));
-                if (xray_protocol !== "vless" && newClientVlessRoutes.includes("direct")) {
-                  const route = vlessRouteStatus.tls?.enabled && vlessRouteStatus.tls?.available_domains?.length ? "tls" : "cdn";
-                  setNewClientVlessRoutes([route]);
-                  if (route === "cdn") setNewClientSettings(current => ({ ...current, cdn_domain:vlessRouteStatus.cdn?.available_domains?.[0] || "" }));
-                }
-              }}><option value="vless">VLESS</option><option value="vmess">VMess</option><option value="trojan">Trojan</option></select><small>VLESS: REALITY, TLS и CDN. VMess и Trojan: TLS или CDN.</small></label>}
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", relay_host_id: option.protocol === "ikev2" || option.channelMode && option.channelMode !== "direct" ? "" : current.relay_host_id, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
-              {selectedConnectionType?.unavailable && <p role="status">{selectedConnectionType.unavailable} <button type="button" onClick={() => { void loadNetworkStatus(); if (selectedClientProtocol === "vless-reality-xhttp") void loadProtocolStatus(selectedClientProtocol); }}>Проверить маршруты</button></p>}
-              {selectedConnectionType && <>
-                <div className="connectionForm"><RelayEndpointSelect request={request} value={newClientSettings.relay_host_id || ""} address={newClientSettings.relay_address || ""} onChange={(relay_host_id, relay_address) => setNewClientSettings(current => ({ ...current, relay_host_id, relay_address }))} disabled={busy || nativeClient.pending || nativeClient.sending || relayClient.pending || relayClient.sending} unavailable={selectedClientProtocol === "ikev2" ? "IKEv2 требует стандартные порты 500/4500 и несовместим с Relay Agent v1." : newClientSettings.channel_mode !== "direct" ? "Для автоматического Relay выберите основной тип протокола." : undefined} transport={["wg", "awg", "hysteria2", "tuic"].includes(selectedClientProtocol) ? "UDP" : selectedClientProtocol === "shadowsocks" && newClientSettings.shadowsocks_mode === "tcp_and_udp" ? "TCP + UDP" : selectedClientProtocol === "openvpn" ? newClientSettings.vpn_transport.toUpperCase() : "TCP"} /></div>
-                <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />
-              </>}
-              {selectedClientProtocol === "openvpn" && !openvpnTransport && <p role="status">Не удалось подтвердить транспорт OpenVPN listener. Обновите сведения о протоколе перед созданием подключения.</p>}
-              {nativeClient.pending && <div role="status" className="networkNotice"><strong>{nativeClient.failed ? "Результат создания требует проверки" : "Создаём подключение…"}</strong><p>Повторное создание заблокировано. Проверяем результат операции; конфигурация доступна в течение 24 часов.</p><button type="button" onClick={() => void nativeClient.check()}>Проверить результат подключения</button>{nativeClient.terminalFailure && <button type="button" onClick={nativeClient.dismiss}>Закрыть результат</button>}</div>}
-              {relayClient.pending && <div role="status" className="networkNotice"><strong>{relayClient.failed ? "Результат настройки Relay требует проверки" : "Создаём подключение и настраиваем Relay…"}</strong><p>Создание клиента не будет отправлено повторно. При прерванной пересылке сначала проверьте результат операции в ROUTES.</p><button type="button" onClick={() => void relayClient.check()}>Проверить результат подключения</button>{relayClient.canResume && <button type="button" disabled={busy || relayClient.sending} onClick={() => void relayClient.resume()}>Продолжить настройку Relay</button>}{relayClient.terminalFailure && <button type="button" onClick={relayClient.dismiss}>Закрыть результат</button>}</div>}
-            </div>
-            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || nativeClient.pending || nativeClient.sending || relayClient.pending || relayClient.sending || !selectedConnectionType || Boolean(selectedConnectionType.unavailable) || selectedClientProtocol === "openvpn" && !openvpnTransport}>{localBusy || nativeClient.pending || nativeClient.sending || relayClient.pending || relayClient.sending ? "Создаём…" : "Создать подключение"}</button></div>
-          </> : <>
-            <div className="connectionGenerated">
-              <div className="connectionGeneratedSummary">
-                <div><span>CONFIGURATION</span><strong>{generatedName}</strong></div>
-                <div><span>PROTOCOL</span><strong>{generatedProtocol ? labels[generatedProtocol] : "Не указан в сохранённом экспорте"}</strong></div>
-                <p>Конфигурация содержит данные доступа. Передавайте её только владельцу устройства.</p>
-              </div>
-              <div className="connectionGeneratedGrid">
-                <section className="connectionQrPanel">
-                  <header><span>QR CODE</span><strong>Сканирование на устройстве</strong></header>
-                  <AccessReveal key={generatedName}>
-                  {generatedQr ? <div className="connectionQrCanvas"><Image src={generatedQr} width={284} height={284} unoptimized alt={`QR-код конфигурации ${generatedName}`} /></div> : <div className="connectionQrCanvas pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
-                  </AccessReveal>
-                  <p>{generatedQrError ? "Эта конфигурация слишком велика для QR-кода. Скачайте файл и импортируйте его в клиент протокола." : generatedProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
-                </section>
-                <section className="connectionTransfer">
-                  <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>{generatedQrError ? "Скачайте файл конфигурации и импортируйте его в клиент протокола." : "Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения."}</p></div>
-                  {generatedProfiles.length > 1 && <div className="connectionProfileChoices" aria-label="Маршрут VLESS">{generatedProfiles.map((profile) => <button key={profile.id} type="button" className={profile.filename === generatedName ? "active" : ""} onClick={() => { setGenerated(profile.config); setGeneratedName(profile.filename); setGeneratedQr(""); setGeneratedQrError(""); }}>{profile.name}</button>)}</div>}
-                  <button type="button" className="connectionDownloadPrimary" onClick={() => downloadConfig(generatedName, generated)}><span>Конфигурация</span><strong>Скачать файл</strong><small>{generatedName}</small></button>
-                  {generatedQr && <a className="connectionDownloadSecondary" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}><span>QR-код</span><strong>Скачать изображение</strong></a>}
-                  <div className="connectionTransferNote"><strong>После передачи</strong><p>Закройте окно или создайте отдельное подключение для следующего устройства. Не используйте один ключ на нескольких устройствах.</p></div>
-                </section>
-              </div>
-            </div>
-            <div className="connectionDialogActions generatedActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово</button></div>
-          </>}
-        </form>
-      </div>}
       {sshAdminDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={() => setSshAdminDialog(false)}>
         <section className="confirmDialog sshAdminDialog" role="dialog" aria-modal="true" aria-labelledby="ssh-admin-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
           <header className="sshAdminHead">

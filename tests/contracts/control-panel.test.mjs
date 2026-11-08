@@ -37,13 +37,11 @@ test("PRO shows ISO country flags and the release identity used by Light", async
 });
 
 test("MIT license, privacy notice and connection guide are included in Russian", async () => {
-  const [privacy, terms, legalUi, guide, guideUi, page] = await Promise.all([
+  const [privacy, terms, legalUi, guide] = await Promise.all([
     read("docs/PRIVACY_POLICY.md"),
     read("docs/TERMS_OF_USE.md"),
     read("src/shared/components/legal-footer.tsx"),
     read("docs/CONNECTION_GUIDE.md"),
-    read("src/features/connections/connection-guide.tsx"),
-    readUiSources(),
   ]);
   assert.match(privacy, /Уведомление о приватности 312node\.net/);
   assert.match(privacy, /Privacy Notice/);
@@ -56,50 +54,14 @@ test("MIT license, privacy notice and connection guide are included in Russian",
   assert.match(legalUi, /Приватность \/ Privacy/);
   assert.match(legalUi, /Privacy/);
   assert.match(legalUi, /Лицензия \/ License/);
+  assert.match(guide, /Mihomo\/Clash YAML/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
-  assert.match(guide, /## WireGuard \(WG\)/);
-  assert.match(guide, /## AmneziaWG \(AWG\)/);
-  assert.match(guide, /Jc.*Jmin.*Jmax/s);
-  assert.match(guide, /## Shadowsocks \(SS\)/);
-  assert.match(guide, /## VLESS/);
-  assert.match(guide, /## Hysteria2 \(HY2\)/);
-  assert.match(guide, /## TUIC v5/);
-  assert.match(guide, /## Trojan \(TRJ\)/);
-  assert.match(guide, /## OpenVPN \(OVPN\)/);
-  assert.match(guide, /## IKEv2 \(IKE\)/);
-  assert.match(guide, /wireguard\.com\/install/);
-  assert.match(guideUi, /Подключение по выбранному протоколу/);
-  assert.doesNotMatch(guideUi, /guideLanguage|setLanguage|Connect with the selected protocol/);
-  assert.match(page, /Одно подключение соответствует одному устройству и отдельному ключу/);
-  assert.match(guideUi, /Подходящие приложения/);
-  assert.match(guideUi, /installedProtocols/);
-  assert.doesNotMatch(guideUi, /PROTOCOL INSTRUCTIONS/);
-  assert.match(guideUi, /amnezia\.org\/downloads/);
-  assert.match(page, /QRCode\.toDataURL\(generated, \{ errorCorrectionLevel: "L", margin: 4, width: 768 \}\)/);
-  assert.match(page, /Откройте клиент протокола на устройстве и отсканируйте код/);
-  assert.doesNotMatch(page, /Показать техническое содержимое/);
-  assert.doesNotMatch(page, /Копировать содержимое/);
-  assert.match(page, /clientDialog && <div className="confirmBackdrop"/);
-  assert.match(page, /Новое подключение/);
-  assert.match(page, /Скачать гайд PDF/);
-  assert.match(page, /const CLIENTS_PER_PAGE = 10/);
-  assert.match(page, /visibleClients\.map/);
-  assert.match(page, /\{visibleClientStart\}–\{visibleClientEnd\} из \{protocolClients\.length\}/);
-  assert.match(page, /connection-guide-wg-awg\.pdf/);
-  assert.match(page, /installedProtocols\.length > 0/);
-  assert.match(page, /waitForProtocolState/);
-  assert.match(page, /const nextProtocol = image\.id === "mihomo"/);
-  assert.match(page, /setSelectedChannel\(nextProtocol\)/);
-  assert.match(page, /const reloadBlocked = busy \|\| Boolean\(installingProtocol\);/);
-  assert.match(page, /setSelectedChannel\(nextProtocol\)[\s\S]*setTab\("channels"\)/);
-  assert.match(page, /2–48 символов/);
 });
 
 test("network diagnostics measure loss, jitter, MTU and server path health", async () => {
-  const [api, monitor, page] = await Promise.all([
+  const [api, monitor] = await Promise.all([
     readApiSources(),
     read("scripts/vpn-monitor-sample"),
-    readUiSources(),
   ]);
   assert.match(monitor, /ping -n -q -c 5/);
   assert.match(monitor, /ping_1_1_1_jitter/);
@@ -108,10 +70,6 @@ test("network diagnostics measure loss, jitter, MTU and server path health", asy
   assert.match(api, /def network_diagnostics/);
   assert.match(api, /Path MTU/);
   assert.match(api, /diagnostics\/check/);
-  assert.match(page, /DIAGNOSTICS/);
-  assert.match(page, /Диагностика и события/);
-  assert.match(page, /toggleNetworkDiagnostics/);
-  assert.match(page, /diagnosticsOpen\[protocolTab\]/);
   assert.doesNotMatch(api, /threading\.Thread\(target=network_diagnostics/);
 });
 
@@ -206,11 +164,8 @@ test("DNS status distinguishes installed components and keeps its summary read-o
 });
 
 test("connection latency labels identify the real measurement source", async () => {
-  const [api, page] = await Promise.all([readApiSources(), readUiSources()]);
+  const [api] = await Promise.all([readApiSources()]);
   assert.match(api, /"latency_source": "server_icmp_tunnel_ip"/);
-  assert.match(page, /РАЗБРОС RTT/);
-  assert.match(page, /VPS → device/);
-  assert.match(page, /latency_source === "server_icmp_tunnel_ip"/);
 });
 
 // Component action/state presentation is behaviorally covered by component-state.test.mjs.

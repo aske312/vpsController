@@ -371,6 +371,21 @@ def require_token(credentials: HTTPBasicCredentials | None = Depends(basic_auth)
         raise HTTPException(status_code=401, detail="Invalid administrator credentials", headers={"WWW-Authenticate": "Basic"})
 
 
+# Direct is retired as a product entry point. Keep legacy implementation helpers
+# for recovery/shared network code; subscription routes live in the Mihomo manager.
+DIRECT_IMAGE_IDS = frozenset({'wg', 'awg', 'shadowsocks', 'vless-reality-xhttp',
+                              'hysteria2', 'tuic', 'trojan', 'openvpn', 'ikev2'})
+
+
+def require_subscription_component(image_id: str, _: None = Depends(require_token)):
+    if image_id in DIRECT_IMAGE_IDS:
+        raise HTTPException(410, 'Отдельные подключения Direct удалены. Используйте профили Mihomo.', headers={'Cache-Control': 'no-store'})
+
+
+def require_active_client_api(_: None = Depends(require_token)):
+    raise HTTPException(410, 'Отдельные подключения Direct удалены. Используйте профили Mihomo.', headers={'Cache-Control': 'no-store'})
+
+
 async def require_short_mutation(_: None = Depends(require_token)):
     try:
         with application_operation.short_mutation(DATA_DIR):
@@ -2888,7 +2903,7 @@ def resume_relay(payload: RelayRecoverySettings, _: None = Depends(require_token
     return start_relay_mutation('relay-resume', payload.model_dump(), operation_id)
 
 
-@app.post('/api/clients/relay', status_code=202, dependencies=[Depends(require_mutation_admission)])
+@app.post('/api/clients/relay', status_code=202, dependencies=[Depends(require_active_client_api), Depends(require_mutation_admission)])
 def create_relay_client(payload: RelayClientCreate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     if payload.protocol == 'ikev2' or not payload.settings.relay_host_id or payload.settings.channel_mode != 'direct':
         raise HTTPException(status_code=422, detail='Протокол несовместим с выбранным Relay')
@@ -2899,7 +2914,7 @@ def create_relay_client(payload: RelayClientCreate, _: None = Depends(require_to
     return start_relay_mutation('relay-client-create', {'client': payload.model_dump(exclude={'expected_revision'}), 'expected_revision': payload.expected_revision}, operation_id)
 
 
-@app.get('/api/clients/relay/{result_id}')
+@app.get('/api/clients/relay/{result_id}', dependencies=[Depends(require_active_client_api)])
 def relay_client_result(result_id: str, _: None = Depends(require_token)):
     try:
         return JSONResponse(relay_client_creation.read_result(sys.modules[__name__], result_id), headers={'Cache-Control': 'no-store'})
@@ -2907,7 +2922,7 @@ def relay_client_result(result_id: str, _: None = Depends(require_token)):
         raise HTTPException(status_code=404, detail='Результат подключения недоступен') from None
 
 
-@app.post('/api/clients/relay/{result_id}/resume', status_code=202, dependencies=[Depends(require_mutation_admission)])
+@app.post('/api/clients/relay/{result_id}/resume', status_code=202, dependencies=[Depends(require_active_client_api), Depends(require_mutation_admission)])
 def resume_relay_client(result_id: str, payload: RelayClientResume, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     try:
         if not relay_client_creation.read_result(sys.modules[__name__], result_id).get('can_resume'):
@@ -3162,7 +3177,8 @@ def get_network_check_targets(kind: Literal['cdn', 'tls_relay', 'udp_relay'], do
             raise ValueError('Invalid component inventory')
         items = network_check_targets.targets(protocol_image_manifests(include_versions=False), modules,
             network_consumers(), read_clients(), profiles, kind, domain)
-        return {'kind': kind, 'domain': domain, 'items': items, 'observation': network_endpoint_check(kind, domain, include_saved=False)}
+        return {'kind': kind, 'domain': domain, 'items': [item for item in items if item['owner'] == 'mihomo'],
+                'observation': network_endpoint_check(kind, domain, include_saved=False)}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         raise HTTPException(status_code=503, detail='Не удалось определить все установленные компоненты') from None
 
@@ -4037,7 +4053,7 @@ def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict
 
 @app.get("/api/protocol-images")
 def protocol_images(_: None = Depends(require_token)) -> dict:
-    return {"items": list(protocol_image_manifests().values())}
+    return {"items": [item for key, item in protocol_image_manifests().items() if key not in DIRECT_IMAGE_IDS]}
 
 
 def adoption_plan(image_id: str) -> tuple[dict, list[Path], dict]:
@@ -4083,7 +4099,7 @@ def adoption_plan(image_id: str) -> tuple[dict, list[Path], dict]:
                         "Принятие не переустанавливает, не запускает и не перезапускает компонент"]}, paths, context
 
 
-@app.get("/api/protocol-images/{image_id}/adoption")
+@app.get("/api/protocol-images/{image_id}/adoption", dependencies=[Depends(require_subscription_component)])
 def preview_component_adoption(image_id: str, _: None = Depends(require_token)) -> dict:
     try:
         return adoption_plan(image_id)[0]
@@ -4091,7 +4107,7 @@ def preview_component_adoption(image_id: str, _: None = Depends(require_token)) 
         raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, RegistryError) else "Не удалось проверить конфигурацию компонента") from None
 
 
-@app.post("/api/protocol-images/{image_id}/adoption")
+@app.post("/api/protocol-images/{image_id}/adoption", dependencies=[Depends(require_subscription_component)])
 def adopt_component(image_id: str, payload: ComponentAdoption, _: None = Depends(require_token)) -> dict:
     try:
         registry = ComponentRegistry(DATA_DIR)
@@ -4279,7 +4295,7 @@ def get_application_operation(operation_id: str, _: None = Depends(require_token
     return value
 
 
-@app.post("/api/protocol-images/{image_id}/install", dependencies=[Depends(require_component_management)])
+@app.post("/api/protocol-images/{image_id}/install", dependencies=[Depends(require_subscription_component), Depends(require_component_management)])
 def install_protocol_image(image_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     previous = replay_application_operation(operation_id, f"protocol-install:{image_id}")
     if previous:
@@ -4293,7 +4309,7 @@ def install_protocol_image(image_id: str, _: None = Depends(require_token), oper
     return action
 
 
-@app.post("/api/protocol-images/{image_id}/update", dependencies=[Depends(require_component_management)])
+@app.post("/api/protocol-images/{image_id}/update", dependencies=[Depends(require_subscription_component), Depends(require_component_management)])
 def update_protocol_image(image_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     previous = replay_application_operation(operation_id, f"protocol-update:{image_id}")
     if previous:
@@ -4309,7 +4325,7 @@ def update_protocol_image(image_id: str, _: None = Depends(require_token), opera
     return action
 
 
-@app.delete("/api/protocol-images/{image_id}", dependencies=[Depends(require_component_management)])
+@app.delete("/api/protocol-images/{image_id}", dependencies=[Depends(require_subscription_component), Depends(require_component_management)])
 def remove_protocol_image(image_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     previous = replay_application_operation(operation_id, f"protocol-remove:{image_id}")
     if previous:
@@ -4354,7 +4370,7 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token), opera
     return action
 
 
-@app.post("/api/protocol-images/{image_id}/purge")
+@app.post("/api/protocol-images/{image_id}/purge", dependencies=[Depends(require_subscription_component)])
 def purge_component_data(image_id: str, payload: ComponentPurge, _: None = Depends(require_token),
                          operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     if payload.confirmation != image_id:
@@ -5182,7 +5198,7 @@ def recover_automation(_: None = Depends(require_token), operation_id: str | Non
         operation_id=operation_id, properties=(f"--property=EnvironmentFile={ENV_FILE}",))
 
 
-@app.get("/api/clients")
+@app.get("/api/clients", dependencies=[Depends(require_active_client_api)])
 def clients(_: None = Depends(require_token)) -> dict:
     return {"items": all_client_dump()}
 
@@ -5997,7 +6013,7 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
     return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
 
 
-@app.post('/api/clients/native', status_code=202, dependencies=[Depends(require_mutation_admission)])
+@app.post('/api/clients/native', status_code=202, dependencies=[Depends(require_active_client_api), Depends(require_mutation_admission)])
 def start_native_client(payload: ClientCreate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     if payload.settings.relay_host_id:
         raise HTTPException(status_code=422, detail='Для Relay используйте управляемое создание подключения')
@@ -6017,7 +6033,7 @@ def start_native_client(payload: ClientCreate, _: None = Depends(require_token),
         raise HTTPException(status_code=503, detail='Не удалось подготовить создание; проверьте историю операций') from None
 
 
-@app.get('/api/clients/native/{result_id}')
+@app.get('/api/clients/native/{result_id}', dependencies=[Depends(require_active_client_api)])
 def native_client_result(result_id: str, _: None = Depends(require_token)):
     try:
         return JSONResponse(native_client_creation.read_result(sys.modules[__name__], result_id), headers={'Cache-Control': 'no-store'})
@@ -6025,7 +6041,7 @@ def native_client_result(result_id: str, _: None = Depends(require_token)):
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
-@app.post("/api/clients", dependencies=[Depends(require_component_management)])
+@app.post("/api/clients", dependencies=[Depends(require_active_client_api), Depends(require_component_management)])
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     if payload.settings.relay_host_id:
         raise HTTPException(status_code=409, detail='Для Relay используйте управляемое создание подключения')
@@ -6423,7 +6439,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None, on_muta
     return {"id": client_id, "filename": f"{safe_name}.conf", "config": client_config}
 
 
-@app.delete("/api/clients/{client_id}", dependencies=[Depends(require_component_management)])
+@app.delete("/api/clients/{client_id}", dependencies=[Depends(require_active_client_api), Depends(require_component_management)])
 def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     items = read_clients()
     item = next((entry for entry in items if entry["id"] == client_id), None)
@@ -6788,7 +6804,7 @@ def persist_vrx_target(host: str) -> None:
     temporary.replace(VLESS_ENV)
 
 
-@app.patch("/api/protocols/{protocol}/settings", dependencies=[Depends(require_component_management)])
+@app.patch("/api/protocols/{protocol}/settings", dependencies=[Depends(require_active_client_api), Depends(require_component_management)])
 def update_protocol_settings(
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
     payload: ProtocolSettingsUpdate,
@@ -7442,7 +7458,7 @@ def schedule_protocol_diagnostics(protocol: str) -> bool:
     return True
 
 
-@app.get("/api/protocols/{protocol}/status")
+@app.get("/api/protocols/{protocol}/status", dependencies=[Depends(require_active_client_api)])
 def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
     result = protocol_status_data(protocol)
     cache = network_diagnostic_cache if protocol in ("wg", "awg") else direct_diagnostic_cache
@@ -7458,7 +7474,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
     return result
 
 
-@app.post("/api/protocols/{protocol}/resources/check")
+@app.post("/api/protocols/{protocol}/resources/check", dependencies=[Depends(require_active_client_api)])
 def check_protocol_resources(
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
     _: None = Depends(require_token),
@@ -7466,7 +7482,7 @@ def check_protocol_resources(
     return check_resource_availability(protocol)
 
 
-@app.post("/api/protocols/{protocol}/diagnostics/check")
+@app.post("/api/protocols/{protocol}/diagnostics/check", dependencies=[Depends(require_active_client_api)])
 def check_network_diagnostics(
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
     _: None = Depends(require_token),
@@ -7476,7 +7492,7 @@ def check_network_diagnostics(
     return direct_protocol_diagnostics(protocol, force=True)
 
 
-@app.post("/api/protocols/{protocol}/restart", dependencies=[Depends(require_component_management)])
+@app.post("/api/protocols/{protocol}/restart", dependencies=[Depends(require_active_client_api), Depends(require_component_management)])
 def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
     if protocol == "shadowsocks":
         unit = "vps-control-shadowsocks.target"

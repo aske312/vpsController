@@ -94,7 +94,8 @@ class ComponentRegistryTests(unittest.TestCase):
                      ("PUT", "/api/dns/settings", {"selected_id": "cloudflare"})]
             for method, path, payload in cases:
                 with self.subTest(path=path):
-                    self.assertEqual(client.request(method, path, json=payload).status_code, 409)
+                    self.assertEqual(client.request(method, path, json=payload).status_code,
+                                     410 if path.startswith(("/api/clients", "/api/protocols/", "/api/protocol-images/wg")) else 409)
 
     def test_mihomo_readonly_does_not_reconfigure_on_observation_or_provision_device(self):
         with patch.object(manager, "DATA_ROOT", self.registry.data_dir / "mihomo"), \
@@ -115,9 +116,9 @@ class ComponentRegistryTests(unittest.TestCase):
         self.addCleanup(api.app.dependency_overrides.clear)
         plan = {"compatible": True, "blockers": []}
         with patch.object(api, "DATA_DIR", self.registry.data_dir), patch.object(api, "adoption_plan", return_value=(plan, [self.config], self.context)):
-            self.assertEqual(client.post("/api/protocol-images/wg/adoption", json={"fingerprint": self.checksum}).status_code, 422)
-            self.assertEqual(client.post("/api/protocol-images/wg/adoption", json={"fingerprint": "0" * 64, "confirmed": True}).status_code, 409)
-            result = client.post("/api/protocol-images/wg/adoption", json={"fingerprint": self.checksum, "confirmed": True})
+            self.assertEqual(client.post("/api/protocol-images/mihomo/adoption", json={"fingerprint": self.checksum}).status_code, 422)
+            self.assertEqual(client.post("/api/protocol-images/mihomo/adoption", json={"fingerprint": "0" * 64, "confirmed": True}).status_code, 409)
+            result = client.post("/api/protocol-images/mihomo/adoption", json={"fingerprint": self.checksum, "confirmed": True})
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.json()["state"], "managed")
 

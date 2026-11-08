@@ -24,7 +24,6 @@ test("security distinguishes public SSH from public panel access", async () => {
   assert.match(page, /now >= deadline.*loadSshAccess/s);
   assert.match(section, /title="SSH  административный доступ"[\s\S]*onAction=\{openSshAdminDialog\}[\s\S]*actionLabel="Настроить"/);
   assert.match(page, /title="Доступ к панели"/);
-  assert.match(page, /aria-pressed=\{selectedConnectionType\?\.id === option\.id\}/);
   assert.match(page, /SSH  административный доступ/);
   assert.match(page, /title="Дополнительные VPN-службы"/);
   assert.match(page, /вне управления панели/);
@@ -232,15 +231,4 @@ test("backend keeps sensitive technical command errors in journals", async () =>
     assert.match(backend, /public_http_exception_handler/);
     assert.match(backend, /Suppressed technical/);
   }
-});
-
-test("channel DNS follows installed protected channels and security lives under system", async () => {
-  const navigation = await read("src/control-panel/components/gate-navigation.tsx");
-  assert.match(navigation, /import \{ directProtocolOrder \} from "\.\.\/\.\.\/shared\/lib\/control-plane-ui"/);
-  assert.match(navigation, /const transports = directProtocolOrder/);
-  assert.doesNotMatch(navigation, /const protocolOrder =/);
-  assert.match(navigation, /activeTab === "channels" \|\| transports\.some/);
-  assert.doesNotMatch(navigation, /label="DNS"/);
-  assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);
-  assert.doesNotMatch(navigation, /<NavGroup label="INFRASTRUCTURE">/);
 });

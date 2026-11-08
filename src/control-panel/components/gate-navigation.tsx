@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import { BrandGlyph } from "../../shared/components/brand-glyph";
-import { directProtocolOrder } from "../../shared/lib/control-plane-ui";
 
 type ProtocolImage = {
   id: string;
@@ -20,7 +19,6 @@ type ServerInfo = {
 type Props = {
   activeTab: string;
   protocolImages: ProtocolImage[];
-  showConnections: boolean;
   nodeState: string;
   nodeStateLabel: string;
   server?: ServerInfo;
@@ -30,16 +28,12 @@ type Props = {
 export function GateNavigation({
   activeTab,
   protocolImages,
-  showConnections,
   nodeState,
   nodeStateLabel,
   server,
   onNavigate,
 }: Props) {
   const mihomoInstalled = protocolImages.some((item) => item.id === "mihomo" && item.installed);
-  const transports = directProtocolOrder
-    .map((id) => protocolImages.find((item) => item.id === id && item.installed))
-    .filter((item): item is ProtocolImage => Boolean(item));
 
   return (
     <aside className="gateSidebar">
@@ -51,27 +45,11 @@ export function GateNavigation({
       <nav className="gateNav" aria-label="Основная навигация">
         <NavGroup label="WORKSPACE">
           <NavButton active={activeTab === "overview"} icon="overview" label="Обзор" onClick={() => onNavigate("overview")} />
-          {showConnections && (
-            <NavButton active={activeTab === "clients"} icon="connections" label="Подключения" onClick={() => onNavigate("clients")} />
-          )}
         </NavGroup>
 
-        {(mihomoInstalled || transports.length > 0) && (
+        {mihomoInstalled && (
           <NavGroup label="ROUTING">
-            {mihomoInstalled && (
-              <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />
-            )}
-            {transports.length > 0 && (
-              <>
-                <NavButton
-                  active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
-                  icon="transport"
-                  label="Tunnels"
-                  tone="cyan"
-                  onClick={() => onNavigate("channels")}
-                />
-              </>
-            )}
+            <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />
           </NavGroup>
         )}
 

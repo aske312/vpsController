@@ -26,7 +26,7 @@ class ModuleInstallationTests(unittest.TestCase):
         for kind in ("existing", "fresh"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
-                image = root / "protocol-images/wireguard"
+                image = root / "protocol-images/mihomo"
                 image.mkdir(parents=True)
                 for name in ("manifest.json", "install.sh", "uninstall.sh"):
                     (image / name).touch()
@@ -51,7 +51,7 @@ python3() {
     case "$2" in
       *uninstaller*) echo uninstall.sh ;;
       *installer*) echo install.sh ;;
-      *) echo wg ;;
+      *) echo mihomo ;;
     esac
   elif [[ "${2:-}" == check-install ]]; then
     echo "$INSTALL_KIND"
@@ -64,7 +64,7 @@ bash() {
   esac
 }
 '''
-                result = subprocess.run([BASH, "-c", stubs + function + "\ninstall_protocol_image protocol-install wg\n"],
+                result = subprocess.run([BASH, "-c", stubs + function + "\ninstall_protocol_image protocol-install mihomo\n"],
                                         cwd=root, env={**os.environ, "INSTALL_KIND": kind}, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 43, result.stderr)
                 self.assertEqual("UNINSTALL" in (root / "calls").read_text(), kind == "fresh")

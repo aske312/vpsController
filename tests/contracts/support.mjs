@@ -34,8 +34,6 @@ const STYLE_FILES = [
   "src/features/security/security.css",
   "src/features/application/application.css",
   "src/features/services/services.css",
-  "src/features/connections/connections.css",
-  "src/features/protocols/protocols.css",
   "src/features/mihomo/mihomo.css",
   "src/shared/styles/polish.css",
   "src/shared/styles/control-center.css",

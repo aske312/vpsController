@@ -1,8 +1,8 @@
 # 312node.net PRO
 
 Панель управления Linux VPS: мониторинг, защищённые подключения, DNS,
-маршрутизация и подписки Mihomo. Поддерживает WireGuard, AmneziaWG, Shadowsocks,
-Xray, Hysteria2, TUIC, OpenVPN и IKEv2.
+маршрутизация и подписки Mihomo с модулями WireGuard, AmneziaWG,
+Shadowsocks, Xray, Hysteria2 и TUIC.
 
 ## Требования
 
