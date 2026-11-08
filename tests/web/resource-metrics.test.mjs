@@ -23,6 +23,13 @@ test("unknown metrics remain gaps and zero remains a real sample", () => {
   assert.equal(usedPercent(10, 0), 100);
 });
 
+test('reboot invalidates a rate even when new interface counters exceed the old ones',()=>{
+  const first=networkSample({network_rx:10,network_tx:20,uptime_s:10000},null,1000);
+  const reboot=networkSample({network_rx:1000,network_tx:2000,uptime_s:10},first.sample,4000);
+  assert.deepEqual(reboot.rate,{rx:null,tx:null});
+  assert.deepEqual(networkSample({network_rx:1300,network_tx:2600,uptime_s:13},reboot.sample,7000).rate,{rx:100,tx:200});
+});
+
 test("charts do not draw a zero baseline for missing data or connect across gaps", () => {
   assert.deepEqual(graphSegments([], 100), []);
   assert.deepEqual(graphSegments([null, null], 100), []);

@@ -9,12 +9,13 @@ export function usedPercent(total: number | null | undefined, available: number 
   return used === null ? null : used / total! * 100;
 }
 
-export type NetworkSample = {rx: number; tx: number; at: number};
-export function networkSample(resources: Pick<ResourceMetrics, "network_rx" | "network_tx">, previous: NetworkSample | null, now: number) {
+export type NetworkSample = {rx: number; tx: number; at: number; uptime?: number};
+export function networkSample(resources: Pick<ResourceMetrics, "network_rx" | "network_tx" | "uptime_s">, previous: NetworkSample | null, now: number) {
   const {network_rx: rx, network_tx: tx} = resources;
-  const sample = knownMetric(rx) && knownMetric(tx) ? {rx, tx, at: now} : null;
+  const sample = knownMetric(rx) && knownMetric(tx) ? {rx, tx, at: now, ...(knownMetric(resources.uptime_s) ? {uptime: resources.uptime_s} : {})} : null;
   const seconds = previous ? (now - previous.at) / 1000 : 0;
-  const comparable = sample && previous && seconds > 0 && seconds <= 30 && sample.rx >= previous.rx && sample.tx >= previous.tx;
+  const rebooted = sample && previous && knownMetric(sample.uptime) && knownMetric(previous.uptime) && sample.uptime < previous.uptime;
+  const comparable = sample && previous && !rebooted && seconds > 0 && seconds <= 30 && sample.rx >= previous.rx && sample.tx >= previous.tx;
   return {
     sample,
     rate: {rx: comparable ? (sample.rx - previous.rx) / seconds : null, tx: comparable ? (sample.tx - previous.tx) / seconds : null},
