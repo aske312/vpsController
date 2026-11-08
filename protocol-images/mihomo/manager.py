@@ -3559,6 +3559,7 @@ def write_quic_runtime(module_id: str) -> None:
     candidate = root / "config.candidate.json"
     runtime = {"log": {"level": "warn"}, "inbounds": [inbound], "outbounds": [{"type": "direct"}]}
     runtime = subscription_limits.decorate_quic(runtime, subscription_limits.current_policy(sys.modules[__name__]), module)
+    configure_quic_panel_route(runtime)
     telemetry_service = quic_telemetry_service(module_id, load_json(config_path, {}))
     if telemetry_service:
         runtime["services"] = [telemetry_service]
@@ -3635,6 +3636,18 @@ def ensure_reality_telemetry() -> None:
                     raise RuntimeError("VLESS did not remain active after telemetry setup")
 
 
+def configure_quic_panel_route(config: dict[str, Any]) -> bool:
+    # Keep routing non-final so the authenticated user's quota/mark outbound
+    # still applies. sing-box's resolver does not use the server's /etc/hosts.
+    rule = {'domain': [subscription_access.PANEL_HOST], 'network': 'tcp', 'port': [80],
+            'action': 'route-options', 'override_address': '127.0.0.1', 'override_port': 80}
+    rules = config.setdefault('route', {}).setdefault('rules', [])
+    if rules and rules[0] == rule:
+        return False
+    rules[:] = [rule, *(item for item in rules if item != rule)]
+    return True
+
+
 def ensure_quic_telemetry(module_id: str) -> None:
     if not component_is_managed():
         return
@@ -3643,6 +3656,9 @@ def ensure_quic_telemetry(module_id: str) -> None:
         if not path.exists() or not systemctl_active(SERVICE_BY_MODULE[module_id]):
             return
         config = load_json(path, {})
+        if configure_quic_panel_route(config):
+            write_quic_runtime(module_id)
+            config = load_json(path, {})
         if not any(row.get("tag") == "panel-telemetry" for row in config.get("services", [])):
             # API services are available from sing-box 1.14. Older installs
             # remain usable and expose unknown stats until a core update.

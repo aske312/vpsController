@@ -81,3 +81,14 @@ class SubscriptionAccessTests(unittest.TestCase):
             for prepare in (api.prepare_relay_probe, api.prepare_relay_media_probe):
                 with self.assertRaises(api.network_probe.ProbeUnavailable):
                     prepare({}, {}, 'direct:phone')
+
+    def test_quic_panel_route_preserves_authenticated_quota_routes_and_credentials(self):
+        quota = {'auth_user': ['user'], 'action': 'route', 'outbound': 'subscription-marked'}
+        config = {'route': {'rules': [quota]}, 'inbounds': [{'users': [{'password': 'secret'}]}]}
+        before = deepcopy(config)
+        self.assertTrue(manager.configure_quic_panel_route(config))
+        self.assertEqual(config['route']['rules'][1:], [quota])
+        self.assertEqual(config['route']['rules'][0], {'domain': ['admin.312.net'], 'network': 'tcp', 'port': [80],
+                                                       'action': 'route-options', 'override_address': '127.0.0.1', 'override_port': 80})
+        self.assertEqual(config['inbounds'], before['inbounds'])
+        self.assertFalse(manager.configure_quic_panel_route(config))
