@@ -79,7 +79,8 @@ class NetworkAdmissionTests(unittest.TestCase):
             restart.assert_called_once()
             self.assertFalse(api.network_endpoint_check("tls_relay", "tls.example")["ready"])
             binding = routes.active_binding(api.read_route_registry(), "tls_relay", "tls.example")
-            self.assertEqual(api.prepare_network_probe(binding)[0].consumer_id, f"direct:{result['id']}")
+            with self.assertRaises(probe.ProbeUnavailable):
+                api.prepare_network_probe(binding)
 
     def test_first_mihomo_route_and_retired_route_have_distinct_admission(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -116,11 +117,11 @@ class NetworkAdmissionTests(unittest.TestCase):
             with patch.object(api, "execute_network_probe", side_effect=exchange):
                 for consumer_id in ("direct:phone", "direct:tablet", "direct:missing"):
                     result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="cdn", domain="cdn.example", consumer_id=consumer_id))
-                    self.assertEqual(result["ready"], consumer_id == "direct:phone")
-            self.assertTrue(api.network_endpoint_check("cdn", "cdn.example", consumer_id="direct:phone")["ready"])
+                    self.assertFalse(result["ready"])
+            self.assertFalse(api.network_endpoint_check("cdn", "cdn.example", consumer_id="direct:phone")["ready"])
             self.assertFalse(api.network_endpoint_check("cdn", "cdn.example", consumer_id="direct:tablet")["ready"])
             self.assertFalse(api.network_endpoint_check("cdn", "cdn.example", consumer_id="direct:missing")["ready"])
             check = api.network_endpoint_check("cdn", "cdn.example", consumer_id="direct:phone")
-            self.assertEqual(check["verified_connection"]["transport"], "xhttp")
+            self.assertNotIn("verified_connection", check)
             with patch.object(api, "network_endpoint_check", return_value={**check, "verified_connection": {"protocol": "vless"}}):
                 self.assertFalse(api.network_route_admission("wg", "udp_relay", "cdn.example"))

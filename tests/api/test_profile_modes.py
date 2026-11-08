@@ -53,6 +53,14 @@ class ProfileModeTests(unittest.TestCase):
                     self.assertEqual(config['rules'][-1], 'MATCH,' + ('DIRECT' if scope == 'selected' else manager.MIHOMO_PROXY_GROUP))
                     self.assertEqual(config['mixed-port'], 7890)
 
+    def test_panel_uses_subscription_before_personal_bypass_and_dns_policy(self):
+        for mode in ('tun', 'proxy'):
+            config = self.config({'connection_mode': mode, 'routing_scope': 'selected', 'route_dns': True},
+                                 ['DOMAIN,admin.312.net,DIRECT'])
+            self.assertEqual(config['rules'][0], 'DOMAIN,admin.312.net,' + manager.MIHOMO_PROXY_GROUP)
+            self.assertEqual(config['hosts']['admin.312.net'], '127.0.0.1')
+            self.assertTrue(config['dns']['use-hosts'])
+
     def test_proxy_removes_tun_hooks_and_process_routes_without_deleting_settings(self):
         routing = {'connection_mode': 'proxy', 'routing_scope': 'selected', 'vpn_services': 'youtube',
                    'tun_force': True, 'dns_hijack_force': True, 'tun_strict_route': True, 'dns_fake_ip': True}
@@ -84,7 +92,7 @@ class ProfileModeTests(unittest.TestCase):
         self.assertNotIn('GEOIP,RU,DIRECT,no-resolve', rules)
         self.assertEqual(rules[-1], 'MATCH,DIRECT')
         self.assertEqual(len(rules), len(set(rules)))
-        self.assertEqual(self.config({'routing_scope': 'selected'})['rules'], ['MATCH,DIRECT'])
+        self.assertEqual(self.config({'routing_scope': 'selected'})['rules'], ['DOMAIN,admin.312.net,' + manager.MIHOMO_PROXY_GROUP, 'MATCH,DIRECT'])
         self.assertFalse(any('youtube.com' in rule for rule in self.config({'vpn_services': 'youtube'})['rules']))
 
     def test_telegram_contains_valid_ipv4_and_ipv6_without_resolving_ip_rules(self):

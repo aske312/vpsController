@@ -144,6 +144,13 @@ class CdnSecurityTests(unittest.TestCase):
         self.assertGreater(len(ranges), 15)
         self.assertTrue(any(":" in value for value in ranges))
 
+    def test_protected_public_subscription_endpoint_keeps_https_reachable(self):
+        with patch.object(security, 'read_env', return_value={'ACCESS_MODE': 'vpn', 'PUBLIC_DOMAIN': 'panel.example'}), patch.object(security, 'read_routes', return_value=[]), patch.object(security.subprocess, 'run') as run:
+            security.configure_firewall()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertTrue(any(command[1:3] == ['allow', '443/tcp'] for command in commands))
+        self.assertNotIn(['ufw', '--force', 'delete', 'allow', '443/tcp'], commands)
+
     def test_aop_probe_precedes_source_filter_but_transports_remain_protected(self):
         text = security.render_routes(
             [{"domain": "cdn.example", "path": "/transport", "port": 12345}],

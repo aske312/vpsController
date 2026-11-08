@@ -574,20 +574,7 @@ load_install_config() {
 }
 
 configured_panel_channel_count() {
-  python3 - "${DATA_DIR}/clients.json" "${DATA_DIR}/mihomo/profiles.json" <<'PY'
-import json, sys
-count = 0
-for path in sys.argv[1:]:
-    try:
-        data = json.load(open(path, encoding="utf-8"))
-    except (OSError, ValueError):
-        continue
-    if path.endswith("clients.json") and isinstance(data, list):
-        count += sum(1 for item in data if isinstance(item, dict) and item.get("protocol"))
-    elif isinstance(data, list):
-        count += sum(len(item.get("connections", [])) for item in data if isinstance(item, dict))
-print(count)
-PY
+  "${INSTALL_DIR}/venv/bin/python" "${INSTALL_DIR}/api/subscription_access.py" count --data-dir "${DATA_DIR}"
 }
 
 configure_internal_panel_host() {
@@ -624,37 +611,18 @@ configure_access() {
     set_env_value "CORS_ORIGINS" "http://${LOCAL_ADDRESS}:${HTTP_PORT}"
     PANEL_URL="http://${LOCAL_ADDRESS}:${HTTP_PORT}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    local wg_address awg_address openvpn_address openvpn_interface ike_pool vpn_origin
-    wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    awg_address="$({ ip -o -4 addr show dev "${AWG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    openvpn_interface="$(ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
-    openvpn_address="$({ [[ -z "${openvpn_interface}" ]] || ip -o -4 addr show dev "${openvpn_interface}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
-    [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала настройте хотя бы одно защищённое подключение."
-    # Caddy exposes the protected panel on TCP/80.  The API listens on
-    # HTTP_PORT behind Caddy, so browser origins must use the public panel
-    # addresses and port 80 rather than the internal API port.
-    local vpn_public_ip vpn_origins="http://${INTERNAL_PANEL_HOST}"
+    [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала создайте действующую подписку Mihomo с работающим каналом."
+    local vpn_public_ip vpn_origin vpn_origins="http://${INTERNAL_PANEL_HOST}"
     vpn_public_ip="$(env_value PUBLIC_IP_ENDPOINT)"
-    if [[ -n "${vpn_public_ip}" ]]; then
-      [[ -z "${vpn_origins}" ]] || vpn_origins+=","
-      vpn_origins+="http://${vpn_public_ip}"
-    fi
-    for vpn_origin in ${wg_address:+http://${wg_address}:${HTTP_PORT}} ${awg_address:+http://${awg_address}:${HTTP_PORT}} ${openvpn_address:+http://${openvpn_address}:${HTTP_PORT}}; do
-      [[ -z "${vpn_origins}" ]] || vpn_origins+=","
-      vpn_origins+="${vpn_origin%:${HTTP_PORT}}"
-    done
-    if [[ -n "${ike_pool}" ]]; then
-      [[ -z "${vpn_origins}" ]] || vpn_origins+=","
-      [[ -n "$(env_value PUBLIC_DOMAIN)" ]] && vpn_origins+="https://$(env_value PUBLIC_DOMAIN)" || vpn_origins+="http://${public_ip}:${HTTP_PORT}"
-    fi
+    [[ -z "${vpn_public_ip}" ]] || vpn_origins+=",http://${vpn_public_ip}"
+    while IFS= read -r vpn_origin; do
+      [[ -z "${vpn_origin}" ]] || vpn_origins+=",${vpn_origin}"
+    done < <(python3 "${INSTALL_DIR}/api/subscription_access.py" origins --data-dir "${DATA_DIR}")
     set_env_value "PANEL_HOST" "0.0.0.0"
     set_env_value "CORS_ORIGINS" "${vpn_origins}"
     PANEL_URL="http://${INTERNAL_PANEL_HOST}"
   else
-    local wg_address awg_address origins
-    wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    awg_address="$({ ip -o -4 addr show dev "${AWG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
+    local origins vpn_origin
     if [[ -n "$(env_value PUBLIC_DOMAIN)" ]]; then
       origins="https://${public_ip}"
       PANEL_URL="https://${public_ip}"
@@ -662,8 +630,9 @@ configure_access() {
       origins="http://${public_ip}:${HTTP_PORT}"
       PANEL_URL="http://${public_ip}:${HTTP_PORT}"
     fi
-    [[ -z "${wg_address}" ]] || origins+=",http://${wg_address}:${HTTP_PORT}"
-    [[ -z "${awg_address}" ]] || origins+=",http://${awg_address}:${HTTP_PORT}"
+    while IFS= read -r vpn_origin; do
+      [[ -z "${vpn_origin}" ]] || origins+=",${vpn_origin}"
+    done < <(python3 "${INSTALL_DIR}/api/subscription_access.py" origins --data-dir "${DATA_DIR}")
     set_env_value "PANEL_HOST" "0.0.0.0"
     set_env_value "CORS_ORIGINS" "${origins}"
   fi
@@ -1650,11 +1619,8 @@ security_preflight() {
 }
 
 check_vpn() {
-  command -v wg >/dev/null 2>&1 || warn "WireGuard CLI пока не установлен."
-  command -v awg >/dev/null 2>&1 || warn "AmneziaWG CLI пока не установлен; панель покажет AWG остановленным."
-  [[ -s "/etc/wireguard/${WG_INTERFACE}.conf" ]] || warn "отсутствует /etc/wireguard/${WG_INTERFACE}.conf; WireGuard пока недоступен."
-  [[ -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" || -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]] \
-    || warn "отсутствует конфигурация ${AWG_INTERFACE}; AmneziaWG пока недоступен."
+  # PRO starts independently of any retired standalone Direct installation.
+  [[ -f "${DATA_DIR}/mihomo/state.json" ]] || info "Каналы настраиваются в подписках Mihomo."
 }
 
 repair_unconfigured_grub_pc() {
@@ -2129,36 +2095,13 @@ configure_firewall() {
     ufw allow from "${LOCAL_CIDR}" to any port "${HTTP_PORT}" proto tcp
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    local vpn_interface_available="no" openvpn_interface ike_pool
-    if ip link show "${WG_INTERFACE}" >/dev/null 2>&1; then
-      ufw allow in on "${WG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via WG'
-      ufw allow in on "${WG_INTERFACE}" to any port 80 proto tcp comment '312.net admin host via WG'
-      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
-        || ufw allow in on "${WG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via WG'
-      vpn_interface_available="yes"
-    fi
-    if ip link show "${AWG_INTERFACE}" >/dev/null 2>&1; then
-      ufw allow in on "${AWG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via AWG'
-      ufw allow in on "${AWG_INTERFACE}" to any port 80 proto tcp comment '312.net admin host via AWG'
-      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
-        || ufw allow in on "${AWG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via AWG'
-      vpn_interface_available="yes"
-    fi
-    openvpn_interface="$(ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
-    if [[ -n "${openvpn_interface}" ]] && systemctl is-active --quiet vps-control-openvpn.service; then
-      ufw allow in on "${openvpn_interface}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via OpenVPN'
-      ufw allow in on "${openvpn_interface}" to any port 80 proto tcp comment '312.net admin host via OpenVPN'
-      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow in on "${openvpn_interface}" to any port 443 proto tcp comment '312.net HTTPS panel via OpenVPN'
-      vpn_interface_available="yes"
-    fi
-    ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
-    if [[ -n "${ike_pool}" ]] && systemctl is-active --quiet vps-control-ikev2.service; then
-      ufw allow from "${ike_pool}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via IKEv2'
-      ufw allow from "${ike_pool}" to any port 80 proto tcp comment '312.net admin host via IKEv2'
-      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow from "${ike_pool}" to any port 443 proto tcp comment '312.net HTTPS panel via IKEv2'
-      vpn_interface_available="yes"
-    fi
-    [[ "${vpn_interface_available}" == "yes" || "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала настройте хотя бы одно защищённое подключение."
+    [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала создайте действующую подписку Mihomo с работающим каналом."
+    local vpn_interface
+    while IFS= read -r vpn_interface; do
+      [[ -n "${vpn_interface}" ]] || continue
+      ufw allow in on "${vpn_interface}" to any port 80 proto tcp comment '312.net panel via Mihomo'
+      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow in on "${vpn_interface}" to any port 443 proto tcp comment '312.net HTTPS via Mihomo'
+    done < <(python3 "${INSTALL_DIR}/api/subscription_access.py" interfaces --data-dir "${DATA_DIR}")
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
     ufw delete allow 443/tcp >/dev/null 2>&1 || true
   else
@@ -2171,6 +2114,11 @@ configure_firewall() {
     fi
   fi
   configure_vless_cdn_firewall
+  if [[ "${ACCESS_MODE}" == "vpn" ]]; then
+    # Caddy exposes bearer subscription refresh, while administrative paths
+    # remain limited to authenticated subscription traffic.
+    ufw allow 80/tcp comment '312.net subscription refresh'
+  fi
   ufw --force enable
 }
 
@@ -2197,11 +2145,11 @@ configure_vpn_firewall_policy() {
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -Eeuo pipefail'
     printf 'uplink=%q\n' "${uplink}"
-    for interface in "${WG_INTERFACE}" "${AWG_INTERFACE}"; do
+    for interface in mh-wg0 mh-awg0; do
       [[ -e "/sys/class/net/${interface}" ]] || continue
       subnet="$(ip -4 route show dev "${interface}" proto kernel scope link | awk 'NR == 1 {print $1}')"
       [[ -n "${subnet}" ]] || continue
-      if [[ "${interface}" == "${WG_INTERFACE}" ]]; then
+      if [[ "${interface}" == "mh-wg0" ]]; then
         port="$(wg show "${interface}" listen-port)"
       else
         port="$(awg show "${interface}" listen-port)"
@@ -3151,6 +3099,10 @@ restore_test_app() {
 change_access_mode() {
   local requested="${2:-}"
   [[ "${requested}" == "external" || "${requested}" == "vpn" ]] || die "режим должен быть external или vpn."
+  if [[ "${requested}" == "vpn" ]]; then
+    [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала создайте действующую подписку Mihomo с работающим каналом."
+  fi
+  python3 "${INSTALL_DIR}/api/gateway_config.py" check --mode "${requested}" --port "${HTTP_PORT}" --root "${INSTALL_DIR}"
   ACCESS_MODE="${requested}"
   set_config_value "${INSTALL_CONFIG}" "ACCESS_MODE" "${ACCESS_MODE}"
   configure_access

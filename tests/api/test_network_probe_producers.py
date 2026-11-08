@@ -234,35 +234,11 @@ class ProbeProducerTests(unittest.TestCase):
                     self.assertFalse(api.network_endpoint_check("cdn", "edge.example")["ready"])
                     self.assertFalse(manager.mihomo_route_endpoint_ready("cdn", "edge.example"))
 
-    def test_api_selects_quic_and_rejects_credential_change_after_exchange(self):
-        for change in (False, True):
-            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                tuic = root / "tuic"
-                tuic.mkdir()
-                fixture = self.quic_fixture()
-                (tuic / "config.json").write_text(json.dumps(fixture[4]))
-                (tuic / "settings.json").write_text(json.dumps(fixture[5]))
-                (tuic / "server.crt").write_text("PUBLIC CERT")
-                clients = root / "clients.json"
-                clients.write_text(json.dumps(fixture[2]))
-                with patch.object(api, "DATA_DIR", root), patch.object(api, "NETWORK_ENDPOINTS_FILE", root / "network.json"), patch.object(api, "CLIENTS_FILE", clients), patch.object(api, "VLESS_ENV", root / "vless" / "reality.env"), patch.object(api, "TUIC_DIR", tuic), patch.object(api, "HYSTERIA2_DIR", root / "missing"), patch.object(api, "certificate_server_name", return_value="probe.local"), patch.object(manager, "NETWORK_ENDPOINTS_FILE", root / "network.json"), patch.object(manager, "DIRECT_VLESS_ENV", root / "vless" / "reality.env"):
-                    api.write_network_endpoint_settings({"udp_relay_domains": ["edge.example"]})
-                    binding = network_routes.active_binding(api.read_route_registry(), "udp_relay", "edge.example")
-                    plan, _ = api.prepare_network_probe(binding)
-                    self.assertEqual(plan.producer, "direct_tuic")
-                    def exchange(plan):
-                        if change:
-                            config = json.loads((tuic / "config.json").read_text())
-                            config["inbounds"][0]["users"][0]["password"] = "rotated"
-                            (tuic / "config.json").write_text(json.dumps(config))
-                        return {"state": "verified", "method": "direct_tuic_nonce_v1", "producer": "direct_tuic", "consumer_id": plan.consumer_id, "fingerprint": plan.fingerprint}
-                    observation = {"domain": "edge.example", "resolved": ["203.0.113.1"], "matches_origin": False, "route": "proxy_or_cdn"}
-                    with patch.object(api, "network_domain_probe", return_value=observation), patch.object(api, "execute_network_probe", side_effect=exchange):
-                        result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="udp_relay", domain="edge.example"))
-                        self.assertEqual(result["ready"], not change)
-                        self.assertEqual(manager.mihomo_route_endpoint_ready("udp", "edge.example"), not change)
-                        self.assertEqual(api.network_endpoint_check("udp_relay", "edge.example")["ready"], not change)
-                        output = json.dumps(result) + api.NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")
-                        for secret in ("private-uuid", "private-password", "rotated"):
-                            self.assertNotIn(secret, output)
+    def test_pro_does_not_select_retired_direct_quic_producer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(api, 'DATA_DIR', root), patch.object(api, 'NETWORK_ENDPOINTS_FILE', root / 'network.json'), patch.object(api, 'network_consumers', return_value=[]), patch.object(api, 'read_clients', side_effect=AssertionError('Direct must not be read')):
+                api.write_network_endpoint_settings({'udp_relay_domains': ['edge.example']})
+                binding = network_routes.active_binding(api.read_route_registry(), 'udp_relay', 'edge.example')
+                with self.assertRaises(probe.ProbeUnavailable):
+                    api.prepare_network_probe(binding)

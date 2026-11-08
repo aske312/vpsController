@@ -61,8 +61,8 @@ class SystemMetricsTests(unittest.TestCase):
              patch.object(api, "run", return_value=""):
             result = api.live_status()
         self.assertEqual(result["resources"]["cpu_percent"], 12)
-        self.assertIsNone(result["clients"])
-        self.assertIsNone(result["protocols"]["wg"])
-        self.assertIn("clients", result["unavailable"])
+        self.assertEqual(result["clients"], [])
+        self.assertFalse(result["protocols"]["wg"]["active"])
+        self.assertNotIn("clients", result["unavailable"])
         self.assertIsInstance(result["security"], dict)
         self.assertNotIn("secret", str(result))

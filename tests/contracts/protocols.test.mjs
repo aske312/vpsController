@@ -90,7 +90,7 @@ test("WG and AWG modules install and uninstall independently", async () => {
   ]);
   const baseDependencies = manager.match(/Установка системных зависимостей" apt-get install -y ([^\n]+)/)?.[1] || "";
   assert.doesNotMatch(baseDependencies, /wireguard-tools/);
-  assert.match(api, /Нельзя удалить последний активный канал доступа к закрытой панели/);
+  assert.match(api, /нельзя остановить последний канал подписки Mihomo/);
   assert.match(wgRemove, /delete route allow in on "\$\{WG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{WG_SUBNET\}"/);
   assert.match(awgRemove, /delete route allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
   assert.match(wgRemove, /99-vps-control-wireguard\.conf/);
@@ -462,13 +462,10 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(mihomoReality, /done\nexit 0\nSH/);
 });
 
-test("WG removal accepts live non-WG fallback channels and reports blockers", async () => {
+test("protected PRO access has no standalone removal fallback", async () => {
   const [api, page] = await Promise.all([readApiSources(), readUiSources()]);
-  assert.match(api, /fallback_channels = set\(configured_panel_channels\(\)\)/);
-  assert.match(api, /vps-control-openvpn\.service/);
-  assert.match(api, /vps-control-ikev2\.service/);
-  assert.match(api, /"transport-reality": "vps-control-mihomo-reality\.service"/);
-  assert.match(api, /Нельзя удалить последний активный канал доступа/);
+  assert.match(api, /subscription_access.available/);
+  assert.doesNotMatch(api, /fallback_channels = set/);
   assert.match(page, /role=\{item.state === "error" \? "alert" : "status"\}/);
 });
 

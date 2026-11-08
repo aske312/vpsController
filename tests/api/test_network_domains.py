@@ -163,9 +163,7 @@ class NetworkDomainsTests(unittest.TestCase):
                 api.delete_network_endpoint("cdn", "cdn.example.com", None)
             update.assert_not_called()
             self.assertIn("CDN_ENABLED=yes", env.read_text())
-            retirement = json.loads((data_dir / "retirements.json").read_text(encoding="utf-8"))
-            self.assertEqual(retirement[0]["domain"], "cdn.example.com")
-            self.assertTrue(any("Phone" in usage for usage in retirement[0]["usages"]))
+            self.assertFalse((data_dir / "retirements.json").exists())
 
     def test_delete_transport_endpoint_removes_unused_retirement_marker(self):
         with tempfile.TemporaryDirectory() as root:

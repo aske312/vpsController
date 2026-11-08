@@ -12,9 +12,10 @@ from pathlib import Path
 import cdn_security
 import ech_settings
 import runtime_dependencies
+import subscription_access
 
 
-PRIVATE_SOURCES = "127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+PRIVATE_SOURCES = "127.0.0.0/8 ::1/128"
 
 
 def render(template: str, mode: str, port: int, values: dict[str, str]) -> str:
@@ -24,23 +25,23 @@ def render(template: str, mode: str, port: int, values: dict[str, str]) -> str:
     if mode not in {"vpn", "external", "local"} or not 1 <= port <= 65535:
         raise ValueError("Invalid panel access settings")
     site = domain if domain and mode == "external" else f"http://localhost:{port}" if mode == "vpn" else f":{port}"
+    sources = " ".join(str(ipaddress.ip_network(value, strict=False)) for value in values.get("PANEL_SUBSCRIPTION_SOURCES", PRIVATE_SOURCES).split())
     substitutions = {
         "{$SITE_ADDRESS}": site, "{$HTTP_PORT}": str(port),
-        "{INTERNAL_PANEL_HOST}": "admin.312.net",
+        "{INTERNAL_PANEL_HOST}": subscription_access.PANEL_HOST,
+        "{PANEL_SUBSCRIPTION_SOURCES}": sources,
         "{PUBLIC_PANEL_ADDRESS}": values.get("PUBLIC_IP_ENDPOINT") or values.get("PUBLIC_IPV4") or values.get("PUBLIC_IP") or "127.0.0.1",
-        "{WG_PANEL_ADDRESS}": str(next(ipaddress.ip_network(values.get("WG_SUBNET") or "10.72.0.0/24").hosts())),
-        "{AWG_PANEL_ADDRESS}": str(next(ipaddress.ip_network(values.get("AWG_SUBNET") or "10.73.0.0/24").hosts())),
-        "{PANEL_ACCESS_GUARD}": f"@outsidePanel not remote_ip {PRIVATE_SOURCES}\n    respond @outsidePanel 403" if mode == "vpn" else "",
+        "{MH_WG_PANEL_ADDRESS}": str(ipaddress.ip_address(values.get("MH_WG_PANEL_ADDRESS", "10.82.0.1"))),
+        "{MH_AWG_PANEL_ADDRESS}": str(ipaddress.ip_address(values.get("MH_AWG_PANEL_ADDRESS", "10.83.0.1"))),
+        "{PANEL_ACCESS_GUARD}": f"@outsidePanel not remote_ip {sources}\n    respond @outsidePanel 403" if mode == "vpn" else "",
     }
     for key, value in substitutions.items():
         template = template.replace(key, value)
     if mode == "vpn" and domain:
         template += f"""
-# Token-protected subscription refresh through CF or a configured tunnel.
+# Public bearer-protected subscription refresh; no administrative routes.
 {domain} {{
     route {{
-        @outsideProtectedConnection not remote_ip {PRIVATE_SOURCES} {' '.join(cdn_security.networks())}
-        respond @outsideProtectedConnection 403
         header {{
             -Server
             -X-Powered-By
@@ -85,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=Path("/etc/caddy/Caddyfile"))
     args = parser.parse_args()
     values = cdn_security.read_env(cdn_security.ENV)
+    values.update(subscription_access.gateway_values(values))
     if args.action == "check":
         with runtime_dependencies.candidate_caddy() as caddy:
             validate_candidate(args.root, args.mode, args.port, values, caddy)

@@ -133,6 +133,9 @@ class ComponentRegistryTests(unittest.TestCase):
     def test_shared_routes_reject_external_consumer_before_any_write(self):
         environment = self.root / "reality.env"
         environment.write_text("CDN_ENABLED=yes\nCDN_DOMAIN=legacy.example.com\n")
+        routes = self.root / "routes"
+        routes.mkdir()
+        (routes / "external.json").write_text(json.dumps({"domain": "legacy.example.com"}))
         with patch.object(api, "DATA_DIR", self.registry.data_dir), patch.object(api, "VLESS_ENV", environment), \
              patch.object(api, "MIHOMO_VLESS_CDN_ROUTES", self.root / "routes"), \
              patch.object(api, "remember_network_endpoint_retirement", side_effect=AssertionError("Unexpected write")), \

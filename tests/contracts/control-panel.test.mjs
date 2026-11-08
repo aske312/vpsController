@@ -106,7 +106,7 @@ test("long application actions can be stopped and rolled back", async () => {
 test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
   const [api, page] = await Promise.all([readApiSources(), readUiSources()]);
   assert.match(api, /@app\.get\("\/api\/live-status"\)/);
-  assert.match(api, /include_quality=False/);
+  assert.match(api, /protocol_live\("wg", "mh-wg0"\)/);
   assert.match(page, /liveRequestInFlight/);
   assert.match(page, /const LIVE_SAMPLE_SECONDS = 3/);
   assert.match(page, /const HISTORY_SAMPLES = 100/);

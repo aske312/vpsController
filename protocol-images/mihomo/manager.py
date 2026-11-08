@@ -62,6 +62,7 @@ import xray_protocols
 import xray_core
 from version_comparison import newer_release
 import subscription_limits
+import subscription_access
 import client_channels
 from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
@@ -4447,6 +4448,12 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     return profile_response(item)
 
 
+def require_subscription_panel_path(data):
+    mode = cdn_security.read_env(cdn_security.ENV).get('ACCESS_MODE', os.getenv('ACCESS_MODE'))
+    if mode == 'vpn' and not subscription_access.available(DATA_ROOT.parent, profiles=data):
+        raise HTTPException(409, "Сначала откройте публичный доступ: нельзя удалить последний действующий канал подписки Mihomo")
+
+
 @serialized_profile_mutation
 @transactional_profile_mutation
 def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
@@ -4457,6 +4464,19 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Profile not found")
     if payload.operation_id and item.get("last_operation_id") == payload.operation_id:
         return profile_response(item)
+    candidate = deepcopy(data)
+    preview = next(entry for entry in candidate if entry['id'] == profile_id)
+    if payload.limits is not None:
+        subscription_limits.set_limits(preview, payload.limits.model_dump())
+    if payload.devices is not None:
+        preview['devices'] = [device.model_dump() for device in payload.devices]
+    if payload.connections is not None:
+        requested = {definition.id: definition for definition in payload.connections}
+        preview['connections'] = [connection for connection in preview.get('connections', [])
+                                  if connection['id'] in requested and connection['component'] == requested[connection['id']].component]
+    elif payload.channels is not None:
+        preview['connections'] = [connection for connection in preview.get('connections', []) if connection['component'] in payload.channels]
+    require_subscription_panel_path(candidate)
     write_action(f"profile-update:{profile_id}", f"Обновление профиля «{item.get('name', '')}»…", progress=15)
     if payload.name is not None:
         item["name"] = payload.name.strip()
@@ -4574,6 +4594,10 @@ def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Общие настройки профиля нельзя удалить")
     if not any(device["id"] == device_id for device in item["devices"]):
         return {"removed": device_id, "already_removed": True}
+    candidate = deepcopy(data)
+    preview = next(entry for entry in candidate if entry['id'] == profile_id)
+    preview['devices'] = [device for device in item['devices'] if device['id'] != device_id]
+    require_subscription_panel_path(candidate)
     operation = f"device-delete:{profile_id}:{device_id}"
     write_action(operation, "Удаление устройства и его подключений…", progress=20)
     reality_changed = False
@@ -4605,6 +4629,7 @@ def delete_profile(profile_id: str) -> dict[str, Any]:
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         return {"removed": profile_id, "already_removed": True}
+    require_subscription_panel_path([entry for entry in data if entry.get('id') != profile_id])
     write_action(f"profile-delete:{profile_id}", f"Удаление профиля «{item.get('name', '')}»…", progress=20)
     errors: list[str] = []
     reality_changed = False
@@ -4982,7 +5007,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     mode = "rule" if routing.get('routing_scope') in ('all', 'selected') else str(routing.get("mode", "rule"))
     tun_enabled = connection_mode(routing) == 'tun'
     explicit_proxy = routing.get('connection_mode') == 'proxy'
-    rules = profile_final_rules(routing)
+    rules = [f"DOMAIN,{subscription_access.PANEL_HOST},{MIHOMO_PROXY_GROUP}", *profile_final_rules(routing)]
     if not connections:
         # A valid replacement must revoke old subscription nodes on refresh.
         # Returning an error would leave the client's previous nodes in use.
@@ -5028,6 +5053,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     lines += [
         "dns:",
         "  enable: true",
+        "  use-hosts: true",
         f"  ipv6: {str(bool(dns.get('ipv6', False))).lower()}",
         f"  enhanced-mode: {dns['enhanced_mode']}",
         f"  prefer-h3: {str(bool(dns.get('prefer_h3', False))).lower()}",
@@ -5066,6 +5092,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         if fake_ip_filter:
             lines.append("  fake-ip-filter:")
             lines.extend(f"    - {q(line)}" for line in fake_ip_filter)
+    if connections:
+        try:
+            panel_address = str(ipaddress.ip_address(public_endpoint().strip('[]')))
+        except ValueError:
+            panel_address = None
+        if panel_address:
+            lines += ['hosts:', f'  {q(subscription_access.PANEL_HOST)}: {q(panel_address)}']
     lines.append("proxies:" if rendered else "proxies: []")
     for connection, name, cdn_name, tls_name in rendered:
         if name:

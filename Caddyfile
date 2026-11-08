@@ -10,7 +10,8 @@
     # Also understood by older release installers: the protected site uses localhost.
     @outsidePanel {
         host localhost
-        not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        not path /s/* /api/mihomo/subscriptions/*
+        not remote_ip {PANEL_SUBSCRIPTION_SOURCES}
     }
     respond @outsidePanel 403
     header -X-Powered-By
@@ -39,9 +40,12 @@
     }
 }
 
-http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
+http://{MH_WG_PANEL_ADDRESS}, http://{MH_AWG_PANEL_ADDRESS} {
     route {
-    @outsideProtectedConnection not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    @outsideProtectedConnection {
+        not path /s/* /api/mihomo/subscriptions/*
+        not remote_ip {PANEL_SUBSCRIPTION_SOURCES}
+    }
     respond @outsideProtectedConnection 403
     header -X-Powered-By
     handle /s/* {
@@ -72,7 +76,10 @@ http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
 # Stable panel address for full tunnels and HTTP/SOCKS proxy connections.
 http://{INTERNAL_PANEL_HOST}, http://{PUBLIC_PANEL_ADDRESS} {
     route {
-    @outsideProtectedConnection not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    @outsideProtectedConnection {
+        not path /s/* /api/mihomo/subscriptions/*
+        not remote_ip {PANEL_SUBSCRIPTION_SOURCES}
+    }
     respond @outsideProtectedConnection 403
     header -X-Powered-By
     handle /s/* {

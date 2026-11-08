@@ -193,14 +193,14 @@ def configure_firewall() -> None:
     """Retain ACME HTTP and explicit direct TLS; close the old blanket CDN rule."""
     routes = read_routes()
     protected = read_env(ENV).get("ACCESS_MODE") == "vpn"
-    if protected and not any(not route.get("cloudflare", True) for route in routes):
+    if protected and not read_env(ENV).get("PUBLIC_DOMAIN") and not any(not route.get("cloudflare", True) for route in routes):
         # Add replacement rules first. VPN-interface rules belong to the panel manager.
         if routes or read_env(ENV).get("PUBLIC_DOMAIN"):
             for network in networks():
                 subprocess.run(["ufw", "allow", "from", network, "to", "any", "port", "443", "proto", "tcp", "comment", "GATE.312 Cloudflare HTTPS"], check=True, capture_output=True)
         for rule in ("443/tcp", "https", "WWW Secure", "WWW Full", "Nginx Full", "Nginx HTTPS"):
             subprocess.run(["ufw", "--force", "delete", "allow", rule], capture_output=True)
-    elif routes:
+    elif routes or read_env(ENV).get("PUBLIC_DOMAIN"):
         subprocess.run(["ufw", "allow", "443/tcp", "comment", "GATE.312 configured HTTPS transport"], check=True, capture_output=True)
     # HTTP remains reachable for certificate issuance, never an origin proxy.
     if routes or read_env(ENV).get("PUBLIC_DOMAIN"):

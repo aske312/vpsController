@@ -132,24 +132,18 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(api, /if not channels:/);
   assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
   assert.match(api, /"web": \{"name": "Web 312node\.net"/);
-  assert.match(api, /The last active VPN cannot be stopped while panel access is VPN-only/);
-  assert.match(manager, /vpn_interface_available="no"/);
+  assert.match(api, /нельзя остановить последний канал подписки Mihomo/);
+  assert.match(manager, /subscription_access.py" count/);
   assert.match(manager, /set_env_value "CORS_ORIGINS" "\$\{vpn_origins\}"/);
   assert.doesNotMatch(manager, /ip link show "\$\{WG_INTERFACE\}"[^\n]+\|\| die[^\n]+\n\s*ip link show "\$\{AWG_INTERFACE\}"[^\n]+\|\| die/);
   assert.match(eslint, /"\.runtime\/\*\*"/);
 });
 
-test("the panel has direct private addresses inside WG and AWG tunnels", async () => {
-  const [caddy, manager, api] = await Promise.all([
-    read("Caddyfile"), read("scripts/vps-control.sh"), readApiSources(),
-  ]);
-  assert.match(caddy, /http:\/\/{WG_PANEL_ADDRESS}, http:\/\/{AWG_PANEL_ADDRESS}/);
-  assert.match(manager, /ipaddress\.ip_network\(sys\.argv\[1\] or "10\.72\.0\.0\/24"\)/);
-  assert.match(manager, /s\|{WG_PANEL_ADDRESS}\|\$\{wg_panel_address\}\|g/);
-  assert.match(api, /vpn_urls\.append\(f"https:\/\/\{PUBLIC_DOMAIN\}"\)/);
-  assert.match(api, /vpn_urls\.append\(f"http:\/\/\{address\}:/);
-  assert.match(manager, /HTTPS panel via WG/);
-  assert.match(manager, /HTTPS panel via AWG/);
+test("the panel uses isolated Mihomo tunnel addresses", async () => {
+  const [caddy, gateway] = await Promise.all([read("Caddyfile"), read("api/gateway_config.py")]);
+  assert.match(caddy, /http:\/\/{MH_WG_PANEL_ADDRESS}, http:\/\/{MH_AWG_PANEL_ADDRESS}/);
+  assert.doesNotMatch(caddy, /\{WG_PANEL_ADDRESS\}|\{AWG_PANEL_ADDRESS\}/);
+  assert.match(gateway, /subscription_access.gateway_values/);
 });
 
 test("protected panel access uses one stable host through every configured channel", async () => {
@@ -166,18 +160,17 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(view, /panel_access\?\.can_enable === false/);
   assert.match(manager, /configured_panel_channel_count/);
   assert.match(manager, /127\.0\.0\.1 %s # 312\.net internal panel/);
-  assert.match(manager, /admin host via WG/);
-  assert.match(manager, /admin host via OpenVPN/);
+  assert.match(manager, /panel via Mihomo/);
   assert.match(manager, /http:\/\/localhost:\$\{HTTP_PORT\}/);
   assert.match(manager, /PUBLIC_PANEL_ADDRESS/);
   assert.match(manager, /vpn_public_ip/);
   assert.match(manager, /env_value PUBLIC_IP_ENDPOINT/);
-  assert.match(manager, /vpn_origin%:\$\{HTTP_PORT\}/);
+  assert.match(manager, /subscription_access.py" origins/);
   assert.match(manager, /handle \/api\/mihomo\/subscriptions\/\*/);
   assert.match(manager, /No panel UI or/);
   assert.doesNotMatch(manager, /set_config_value "\$\{INSTALL_DIR\}\/install\.conf" "ACCESS_MODE"/);
   assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}, http:\/\/{PUBLIC_PANEL_ADDRESS} \{/);
-  assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 ::1\/128 10\.0\.0\.0\/8/);
+  assert.match(caddy, /not remote_ip \{PANEL_SUBSCRIPTION_SOURCES\}/);
   assert.match(api, /@app\.put\("\/api\/services\/panel-access", status_code=202\)/);
   // Durable admission and non-blocking launch are covered by test_application_operation.py.
   assert.match(page, /systemOperationNotification\(operation, actionLabels\["access-mode"\], true\)/);
@@ -202,11 +195,9 @@ test("protected panel access follows every routable managed VPN", async () => {
     readApiSources(), read("scripts/vps-control.sh"), read("src/features/security/security-view.tsx"),
   ]);
   assert.match(api, /panel_allowed_channels/);
-  assert.match(api, /panel_allowed_channels\.add\("OpenVPN"\)/);
-  assert.match(api, /panel_allowed_channels\.add\("IKEv2"\)/);
+  assert.match(api, /subscription_access.INTERFACES/);
   assert.match(api, /"allowed_channels": sorted\(panel_allowed_channels\)/);
-  assert.match(manager, /panel via OpenVPN/);
-  assert.match(manager, /panel via IKEv2/);
+  assert.match(manager, /panel via Mihomo/);
   assert.match(securityView, /allowed_channels/);
   assert.doesNotMatch(securityView, /"WG \/ AWG"/);
 });

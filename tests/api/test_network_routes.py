@@ -74,7 +74,7 @@ class NetworkRouteTests(unittest.TestCase):
         self.assertEqual(readded["bindings"][0], snapshot)
         self.assertNotEqual(readded["bindings"][0]["id"], readded["bindings"][1]["id"])
 
-    def test_deletion_atomically_preserves_direct_and_mihomo_references_without_touching_runtime(self):
+    def test_deletion_tracks_mihomo_without_touching_retired_direct_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.enterContext(patch.object(api, "DATA_DIR", root))
@@ -99,7 +99,7 @@ class NetworkRouteTests(unittest.TestCase):
             api.delete_network_endpoint("cdn", "relay.example")
             stored = json.loads(api.NETWORK_ENDPOINTS_FILE.read_text())
             self.assertEqual(stored["udp_relay_domains"], [])
-            self.assertEqual(routes.consumer_state(stored["route_registry"], "direct:phone")["state"], "stale")
+            self.assertEqual(routes.consumer_state(stored["route_registry"], "direct:phone")["state"], "current")
             self.assertEqual(api.CLIENTS_FILE.read_bytes(), before)
             self.assertEqual(profiles.read_bytes(), profile_before)
             self.assertEqual(routes.consumer_state(stored["route_registry"], "mihomo:profile:tls")["state"], "stale")

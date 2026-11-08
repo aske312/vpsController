@@ -381,7 +381,7 @@ class SecurityObservationTests(unittest.TestCase):
             api.security()
 
     def test_firewall_rule_checks_distinguish_present_absent_and_source_errors(self):
-        self.host_path(f"/sys/class/net/{api.WG_INTERFACE}").mkdir(parents=True, exist_ok=True)
+        self.host_path(f"/sys/class/net/mh-wg0").mkdir(parents=True, exist_ok=True)
         self.firewall_code = 0
         self.assertTrue(api.security()["firewall"]["protocol_policies"]["wg"]["healthy"])
         self.firewall_code = 1

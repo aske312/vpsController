@@ -172,47 +172,11 @@ class NetworkProbePlanTests(unittest.TestCase):
         self.assertEqual(witnesses[0].socket.fileno(), -1)
         self.assertFalse(witnesses[0].thread.is_alive())
 
-    def test_api_only_records_verified_current_plan_and_never_secrets(self):
-        for change in (None, "credential", "revision", "retired", "listener", "file"):
-            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
-                self.setUp()
-                root = Path(temporary)
-                config, env, clients = root / "config.json", root / "reality.env", root / "clients.json"
-                config.write_text(json.dumps(self.config))
-                clients.write_text(json.dumps(self.clients))
-                env.write_text("CDN_ENABLED=yes\nCDN_DOMAIN=cdn.example\n")
-                with patch.object(api, "DATA_DIR", root), patch.object(api, "NETWORK_ENDPOINTS_FILE", root / "network.json"), patch.object(api, "VLESS_CONFIG", config), patch.object(api, "VLESS_ENV", env), patch.object(api, "CLIENTS_FILE", clients), patch.object(api, "network_consumers", return_value=self.consumers), patch.object(api, "read_clients", side_effect=lambda: json.loads(clients.read_text())):
-                    api.write_network_endpoint_settings({"cdn_domains": ["cdn.example"]})
-                    def execute(plan, *args):
-                        if change in {"credential", "listener", "file"}:
-                            current = json.loads(config.read_text())
-                            if change == "credential":
-                                current["inbounds"][0]["settings"]["clients"] = []
-                            if change == "listener":
-                                current["inbounds"][0]["streamSettings"]["xhttpSettings"]["path"] = "/changed"
-                            if change == "file":
-                                # An actual replacement has a distinct inode even when
-                                # the filesystem clock gives rapid writes the same mtime.
-                                replacement = config.with_suffix('.replacement')
-                                replacement.write_text(json.dumps(current))
-                                replacement.replace(config)
-                            else:
-                                config.write_text(json.dumps(current))
-                        if change in {"revision", "retired"}:
-                            current = json.loads(api.NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8"))
-                            binding = current["route_registry"]["bindings"][0]
-                            if change == "revision": binding["desired_revision"] += 1
-                            else: binding["state"] = "retired"
-                            api.NETWORK_ENDPOINTS_FILE.write_text(json.dumps(current), encoding="utf-8")
-                        return {"state": "verified", "method": "direct_vless_nonce_v1", "consumer_id": plan.consumer_id, "fingerprint": plan.fingerprint, "origin_address": "203.0.113.1"}
-                    observation = {"domain": "cdn.example", "resolved": ["203.0.113.1"], "matches_origin": False, "route": "proxy_or_cdn"}
-                    with patch.object(api, "network_domain_probe", return_value=observation), patch.object(network_probe, "execute_direct_vless", side_effect=execute):
-                        result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="cdn", domain="cdn.example"))
-                        self.assertEqual(result["ready"], change is None)
-                        self.assertEqual(api.network_endpoint_check("cdn", "cdn.example")["ready"], change is None)
-                    serialized = api.NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8") + json.dumps(result)
-                    self.assertNotIn("secret-uuid", serialized)
-                    if change is None:
-                        config.write_text(json.dumps(self.config) + " ")
-                        with patch.object(api, "network_domain_probe", return_value=observation):
-                            self.assertTrue(api.network_endpoint_check("cdn", "cdn.example")["ready"])
+    def test_pro_does_not_execute_retired_direct_probe_or_borrow_its_credentials(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(api, 'DATA_DIR', root), patch.object(api, 'NETWORK_ENDPOINTS_FILE', root / 'network.json'), patch.object(api, 'network_consumers', return_value=self.consumers), patch.object(api, 'read_clients', side_effect=AssertionError('Direct must not be read')), patch.object(network_probe, 'execute_direct_vless', side_effect=AssertionError('Direct must not be executed')):
+                api.write_network_endpoint_settings({'cdn_domains': ['cdn.example']})
+                binding = api.network_routes.active_binding(api.read_route_registry(), 'cdn', 'cdn.example')
+                with self.assertRaises(network_probe.ProbeUnavailable):
+                    api.prepare_network_probe(binding)

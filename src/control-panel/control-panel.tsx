@@ -864,11 +864,11 @@ export function ControlPanel() {
       || (overview?.server.public_domain ? `https://${overview.server.public_domain}` : `http://${overview?.server.public_ip || ""}`);
     const channels = services?.panel_access?.available_channels || [];
     if (mode === "vpn" && !channels.length) {
-      notifyError("Сначала настройте хотя бы одно защищённое подключение");
+      notifyError("Сначала создайте действующую подписку Mihomo с работающим каналом");
       return;
     }
     const message = mode === "vpn"
-      ? `Панель будет доступна по адресу ${protectedUrl} через: ${channels.join(" / ")}. Убедитесь, что подключение включено; текущее публичное подключение может завершиться.`
+      ? `Панель будет доступна по адресу ${protectedUrl} через: ${channels.join(" / ")}. Убедитесь, что подписка обновлена и подключена в клиенте Mihomo; текущее публичное подключение может завершиться.`
       : "Открыть публичный доступ к панели из интернета?";
     if (!await askConfirmation({
       title: mode === "vpn" ? "Ограничить доступ к панели?" : "Открыть публичный доступ?",

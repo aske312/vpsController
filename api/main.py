@@ -71,6 +71,7 @@ from service_state import observe_service, ssh_observation, observed_active, obs
 from component_state import image_files, component_state
 from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
 from direct_retirement import DIRECT_IMAGES
+import subscription_access
 from system_metrics import CpuSampler, collect_resources
 from metrics_history import MetricsHistory, MetricsMonitor, SettingsConflict
 from schemas import (
@@ -564,33 +565,6 @@ def write_network_endpoint_settings(settings: dict[str, object]) -> dict[str, ob
 def network_consumers() -> list[dict]:
     """References only: never copy credentials into the shared registry."""
     result = []
-    settings = read_network_endpoint_settings()
-    reality = {}
-    if VLESS_ENV.exists():
-        reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-    if CLIENTS_FILE.exists() and not isinstance(json.loads(CLIENTS_FILE.read_text(encoding="utf-8")), list):
-        raise ValueError("Invalid Direct clients")
-    for item in read_clients():
-        if not item.get("id"):
-            continue
-        routes = []
-        if item.get("protocol") == "vless-reality-xhttp":
-            for route, kind, key in (("cdn", "cdn", "CDN_DOMAIN"), ("tls", "tls_relay", "TLS_DOMAIN")):
-                if route in item.get("vless_routes", []):
-                    address = item.get("route_endpoints", {}).get(kind) or (item.get("settings", {}).get("cdn_domain") if kind == "cdn" else None) or reality.get(key)
-                    if address:
-                        routes.append((kind, address, "snapshot" if item.get("route_endpoints") else "legacy"))
-        elif item.get("channel_mode") in {"tls_relay", "udp_relay"}:
-            kind = item["channel_mode"]
-            if item.get("route_endpoint"):
-                routes.append((kind, item["route_endpoint"], "snapshot"))
-            else:
-                # Legacy records lack the chosen export address. Preserve all
-                # possible references rather than silently picking another one.
-                routes.extend((kind, address, "legacy-uncertain") for address in settings.get(f"{kind}_domains", []))
-        for kind, address, confidence in routes:
-            result.append({"id": f"direct:{item['id']}", "owner": "direct", "label": str(item.get("name") or item["id"]),
-                           "kind": kind, "address": str(address).strip().lower(), "reference": confidence})
     path = DATA_DIR / "mihomo" / "profiles.json"
     profiles = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
     if not isinstance(profiles, list):
@@ -652,23 +626,6 @@ def forget_network_endpoint_retirement(kind: str, domain: str) -> None:
 def endpoint_connection_usages(kind: str, domain: str) -> list[str]:
     usages: list[str] = []
     domain = domain.strip().lower()
-    reality: dict[str, str] = {}
-    if VLESS_ENV.exists():
-        try:
-            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-        except OSError:
-            pass
-    for item in read_clients():
-        name = str(item.get("name") or item.get("id") or "Прямое подключение")
-        protocol = str(item.get("protocol", ""))
-        used = False
-        if protocol == "vless-reality-xhttp":
-            route_domain = item.get('route_endpoints', {}).get(kind) or {"cdn": reality.get("CDN_DOMAIN", ""), "tls_relay": reality.get("TLS_DOMAIN", "")}.get(kind, "")
-            used = ((kind == "cdn" and "cdn" in item.get("vless_routes", [])) or (kind == "tls_relay" and "tls" in item.get("vless_routes", []))) and route_domain.strip().lower() == domain
-        elif kind in {"tls_relay", "udp_relay"}:
-            used = item.get("channel_mode") == kind
-        if used:
-            usages.append(f"Прямое подключение «{name}»")
     try:
         profiles = json.loads((DATA_DIR / "mihomo" / "profiles.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -778,24 +735,7 @@ PANEL_PROTOCOL_LABELS = {
 
 def configured_panel_channels() -> list[str]:
     """Return protocols that can carry a request to the internal panel host."""
-    channels = {
-        PANEL_PROTOCOL_LABELS.get(str(item.get("protocol", "")), str(item.get("protocol", "")))
-        for item in read_clients()
-        if item.get("protocol")
-    }
-    try:
-        profiles = json.loads((DATA_DIR / "mihomo" / "profiles.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        profiles = []
-    if isinstance(profiles, list):
-        for profile in profiles:
-            if not isinstance(profile, dict):
-                continue
-            for connection in profile.get("connections", []):
-                if isinstance(connection, dict) and connection.get("component"):
-                    component = str(connection["component"])
-                    channels.add(PANEL_PROTOCOL_LABELS.get(component, component))
-    return sorted(channel for channel in channels if channel)
+    return subscription_access.labels(DATA_DIR)
 
 
 def internal_panel_url() -> str:
@@ -1958,8 +1898,8 @@ def overview(_: None = Depends(require_token)) -> dict:
         },
         "resources": resources,
         "protocols": {
-            "wg": {"interface": WG_INTERFACE, "port": WG_PORT, "active": bool(run("wg", "show", WG_INTERFACE))},
-            "awg": {"interface": AWG_INTERFACE, "port": AWG_PORT, "active": bool(run("awg", "show", AWG_INTERFACE))},
+            "wg": {"interface": "mh-wg0", "port": 0, "active": Path("/sys/class/net/mh-wg0").exists()},
+            "awg": {"interface": "mh-awg0", "port": 0, "active": Path("/sys/class/net/mh-awg0").exists()},
         },
     }
 
@@ -2352,22 +2292,6 @@ def prepare_network_probe(binding: dict, consumer_id: str | None = None):
     if consumer_id:
         consumers = [item for item in consumers if item.get("id") == consumer_id]
     if binding["kind"] in {"cdn", "tls_relay"}:
-        try:
-            paths = direct_probe_sources()
-            sources = network_probe.source_revision(paths)
-            config = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-            environment = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-            plan = network_probe.prepare_direct_vless(binding, consumers, read_clients(), config, environment)
-            if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
-            if binding['kind'] == 'cdn':
-                current = next((item for item in read_clients() if 'direct:'+item.get('id', '') == plan.consumer_id), {})
-                selected_relay = current.get('settings', {}).get('relay_host_id')
-                if selected_relay:
-                    from dataclasses import replace
-                    plan = replace(plan, relay_host_id=selected_relay, relay_target_domain=binding['address'], relay_client_address=current.get('settings', {}).get('relay_address', ''))
-            return prepare_client_relay_probe(plan), sources
-        except (OSError, ValueError, TypeError, KeyError):
-            pass
         for consumer in consumers:
             if consumer.get("owner") != "mihomo" or consumer.get("kind") != binding["kind"] or consumer.get("address") != binding["address"]:
                 continue
@@ -2381,21 +2305,6 @@ def prepare_network_probe(binding: dict, consumer_id: str | None = None):
                 if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
                 return prepare_client_relay_probe(plan), sources
             except (OSError, ValueError, TypeError, KeyError):
-                continue
-    elif binding["kind"] == "udp_relay":
-        for protocol in ("tuic", "hysteria2"):
-            try:
-                paths = network_probe_sources(f"direct_{protocol}", binding["kind"], consumer_id or "")
-                sources = network_probe.source_revision(paths)
-                config_text = paths["config"].read_text(encoding="utf-8")
-                config = json.loads(config_text) if protocol == "tuic" else yaml.safe_load(config_text)
-                settings = json.loads(paths["settings"].read_text(encoding="utf-8"))
-                users = json.loads(paths["users"].read_text(encoding="utf-8")) if protocol == "hysteria2" else None
-                plan = network_probe.prepare_direct_quic(binding, consumers, read_clients(), protocol, config, settings,
-                    paths["certificate"].read_text(encoding="utf-8"), certificate_server_name(paths["certificate"]), users)
-                if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
-                return plan, sources
-            except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError, HTTPException):
                 continue
     raise network_probe.ProbeUnavailable("Нет существующего совместимого consumer с live credentials, listener и маршрутом")
 
@@ -2780,8 +2689,6 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
         result['targets'] = relay_targets()
         result['origin_hosts'] = relay_origin_hosts()
         candidates = [{'id': item['id'], 'label': item['label']} for item in network_consumers()]
-        candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('tuic', 'hysteria2'))
-        candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('wg', 'awg'))
         profiles_path = DATA_DIR / 'mihomo' / 'profiles.json'
         profiles = []
         if profiles_path.is_file():
@@ -3176,7 +3083,7 @@ def get_network_check_targets(kind: Literal['cdn', 'tls_relay', 'udp_relay'], do
         if not isinstance(modules, dict) or not isinstance(profiles, list):
             raise ValueError('Invalid component inventory')
         items = network_check_targets.targets(protocol_image_manifests(include_versions=False), modules,
-            network_consumers(), read_clients(), profiles, kind, domain)
+            network_consumers(), [], profiles, kind, domain)
         return {'kind': kind, 'domain': domain, 'items': [item for item in items if item['owner'] == 'mihomo'],
                 'observation': network_endpoint_check(kind, domain, include_saved=False)}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
@@ -3528,11 +3435,7 @@ def security(_: None = Depends(require_token)) -> dict:
     panel_allowed_channels = set()
     if access_mode == "vpn":
         panel_allowed_channels.update(configured_panel_channels())
-    openvpn_interface = security_route_interface("10.74.0.0/24")
-    try:
-        ikev2_pool = str(json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8")).get("pool", ""))
-    except (OSError, json.JSONDecodeError):
-        ikev2_pool = ""
+    mihomo_interfaces = subscription_access.interface_addresses()
     for rule in ufw_rules:
         parts = rule.split()
         if len(parts) < 6 or parts[2] != panel_port or parts[0] != "allow":
@@ -3542,17 +3445,12 @@ def security(_: None = Depends(require_token)) -> dict:
             for part in parts
             if part.startswith("in_")
         }
-        vpn_interfaces = interface_tokens.intersection({WG_INTERFACE, AWG_INTERFACE})
+        vpn_interfaces = interface_tokens.intersection(subscription_access.INTERFACES)
         panel_vpn_interfaces.update(vpn_interfaces)
-        if WG_INTERFACE in vpn_interfaces:
-            panel_allowed_channels.add("WireGuard")
-        if AWG_INTERFACE in vpn_interfaces:
-            panel_allowed_channels.add("AmneziaWG")
-        if openvpn_interface and openvpn_interface in interface_tokens:
-            panel_vpn_interfaces.add(openvpn_interface)
-            panel_allowed_channels.add("OpenVPN")
-        if ikev2_pool and parts[5] == ikev2_pool:
-            panel_allowed_channels.add("IKEv2")
+        if "mh-wg0" in vpn_interfaces:
+            panel_allowed_channels.add("Подписка Mihomo · WireGuard")
+        if "mh-awg0" in vpn_interfaces:
+            panel_allowed_channels.add("Подписка Mihomo · AmneziaWG")
         if parts[5] in ("0.0.0.0/0", "::/0") and not vpn_interfaces:
             panel_public_rule = True
     # Public transport hosts may legitimately keep TCP 80/443 open while the
@@ -3598,8 +3496,8 @@ def security(_: None = Depends(require_token)) -> dict:
     )
     protocol_policies = {}
     for protocol, interface, subnet in (
-        ("wg", WG_INTERFACE, WG_SUBNET),
-        ("awg", AWG_INTERFACE, AWG_SUBNET),
+        ("wg", "mh-wg0", mihomo_interfaces.get("mh-wg0", {}).get("subnet", "10.82.0.0/24")),
+        ("awg", "mh-awg0", mihomo_interfaces.get("mh-awg0", {}).get("subnet", "10.83.0.0/24")),
     ):
         installed = Path(f"/sys/class/net/{interface}").exists()
         direct_route_allowed = installed and bool(uplink_interface) and security_iptables_rule(
@@ -3727,7 +3625,7 @@ def security(_: None = Depends(require_token)) -> dict:
                 kernel_settings["net.ipv4.conf.all.rp_filter"] in (1, 2)
                 or (
                     forwarding_enabled
-                    and any(Path(f"/sys/class/net/{interface}").exists() for interface in (WG_INTERFACE, AWG_INTERFACE))
+                    and any(Path(f"/sys/class/net/{interface}").exists() for interface in subscription_access.INTERFACES)
                 )
             ),
             "redirects_disabled": all(
@@ -3978,7 +3876,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
 
 
 @observation_scope()
-def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict]:
+def protocol_image_manifests(*, include_versions: bool = True, include_retired: bool = False) -> dict[str, dict]:
     images: dict[str, dict] = {}
     candidates = []
     if not PROTOCOL_IMAGES_DIR.exists():
@@ -3996,6 +3894,8 @@ def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict
         except (OSError, json.JSONDecodeError):
             continue
         image_id = str(manifest.get("id", ""))
+        if image_id in DIRECT_IMAGE_IDS and not include_retired:
+            continue
         installer = str(manifest.get("installer", ""))
         uninstaller = str(manifest.get("uninstaller", ""))
         installable = manifest.get("installable", True) is True
@@ -4137,11 +4037,6 @@ def require_owned_components(*image_ids: str) -> None:
 def require_route_management(domain: str | None = None) -> None:
     """Check every consumer before changing shared proxy configuration."""
     try:
-        if VLESS_ENV.exists():
-            values = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-            if any(values.get(f"{prefix}_ENABLED") == "yes" and values.get(f"{prefix}_DOMAIN") and
-                   (domain is None or values[f"{prefix}_DOMAIN"].strip().lower() == domain) for prefix in ("CDN", "TLS")):
-                require_owned_components("vless-reality-xhttp")
         for path in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
             value = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(value, dict):
@@ -4330,42 +4225,13 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token), opera
     previous = replay_application_operation(operation_id, f"protocol-remove:{image_id}")
     if previous:
         return previous
+    if image_id == "mihomo" and os.getenv("ACCESS_MODE", "external") == "vpn":
+        raise HTTPException(409, "Сначала откройте публичный доступ к панели, затем удалите Mihomo")
     image = protocol_image_manifests().get(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
     if not image.get("removable"):
         raise HTTPException(status_code=409, detail="Protocol does not support removal")
-    if os.getenv("ACCESS_MODE", "external") == "vpn" and image_id in ("wg", "awg"):
-        removed_label = "WireGuard" if image_id == "wg" else "AmneziaWG"
-        fallback_channels = set(configured_panel_channels()) - {removed_label}
-        # A protected panel is routable through every managed VPN, not only
-        # through the other WireGuard-family interface.  The old two-item
-        # check incorrectly rejected WG removal even with OpenVPN/IKEv2 ready.
-        live_fallbacks = set()
-        if "WireGuard" in fallback_channels and run("systemctl", "is-active", f"wg-quick@{WG_INTERFACE}.service") == "active":
-            live_fallbacks.add("WireGuard")
-        if "AmneziaWG" in fallback_channels and run("systemctl", "is-active", f"awg-quick@{AWG_INTERFACE}.service") == "active":
-            live_fallbacks.add("AmneziaWG")
-        if "OpenVPN" in fallback_channels and run("systemctl", "is-active", "vps-control-openvpn.service") == "active":
-            live_fallbacks.add("OpenVPN")
-        if "IKEv2" in fallback_channels and run("systemctl", "is-active", "vps-control-ikev2.service") == "active":
-            live_fallbacks.add("IKEv2")
-        fallback_services = {
-            "VLESS": "vps-control-vless-reality-xhttp.service",
-            "transport-reality": "vps-control-mihomo-reality.service",
-            "Shadowsocks": "vps-control-shadowsocks.target",
-            "Hysteria2": "vps-control-hysteria2.service",
-            "TUIC v5": "vps-control-tuic.service",
-            "Trojan": "vps-control-trojan.service",
-        }
-        for channel, unit_name in fallback_services.items():
-            if channel in fallback_channels and run("systemctl", "is-active", unit_name) == "active":
-                live_fallbacks.add(channel)
-        if not live_fallbacks:
-            raise HTTPException(
-                status_code=409,
-                detail="Нельзя удалить последний активный канал доступа к закрытой панели. Сначала включите другой VPN-протокол или публичный доступ.",
-            )
     action = start_application_operation(f"protocol-remove:{image_id}", [CONTROL_COMMAND, "protocol-remove", image_id], operation_id=operation_id)
     return action
 
@@ -4666,7 +4532,6 @@ def managed_services() -> dict[str, dict]:
         },
         "web": {"name": "Web 312node.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
-        "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
             "name": "Автоматические обновления ОС", "unit": "apt-daily-upgrade.timer",
@@ -4892,28 +4757,10 @@ def services_status(_: None = Depends(require_token)) -> dict:
                    timers=[f"vps-control-auto-{name}.timer" for name in ("reboot", "cleanup", "update")])
     for service_id, definition in definitions.items():
         details = service_details(service_id, definition)
-        # "monitor" is direct WG/AWG CSV logging specifically; hide it until
-        # a direct tunnel exists for it to record. Protocol and Mihomo rows
-        # are already gated by managed_services() only including what's
-        # actually installed, so no separate module_configured check remains.
-        if service_id == "monitor" and not (WG_CONFIG.exists() or AWG_CONFIG.exists()):
-            continue
         if details["unit_present"] is not False:
             items.append(details)
-    vpn_urls = []
     panel_channels = configured_panel_channels()
-    if PUBLIC_DOMAIN:
-        vpn_urls.append(f"https://{PUBLIC_DOMAIN}")
-    else:
-        openvpn_interface = run("bash", "-lc", "ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"dev\") {print $(i+1); exit}}'")
-        for interface in (WG_INTERFACE, AWG_INTERFACE, openvpn_interface):
-            if not interface:
-                continue
-            address = run("bash", "-lc", f"ip -o -4 addr show dev {interface} 2>/dev/null | awk 'NR==1 {{split($4,a,\"/\"); print a[1]}}'")
-            if address:
-                vpn_urls.append(f"http://{address}:{os.getenv('HTTP_PORT', '80')}")
-        if IKEV2_SETTINGS.exists() and run("systemctl", "is-active", "vps-control-ikev2.service") == "active":
-            vpn_urls.append(f"https://{PUBLIC_DOMAIN}" if PUBLIC_DOMAIN else f"http://{PUBLIC_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}")
+    vpn_urls = [internal_panel_url(), *['http://' + item['address'] for item in subscription_access.interface_addresses().values()]]
     logging_values = {}
     if LOGGING_CONFIG_FILE.exists():
         for line in LOGGING_CONFIG_FILE.read_text(encoding="utf-8").splitlines():
@@ -4967,12 +4814,14 @@ def live_status(_: None = Depends(require_token)) -> dict:
             unavailable.append(name)
             return None
 
-    live_clients = source("clients", lambda: all_client_dump(include_quality=False))
+    live_clients = []  # Standalone Direct clients are retired in PRO.
 
     def protocol_live(protocol: str, interface: str) -> dict:
-        if live_clients is None:
-            raise ValueError("Client observation is unavailable")
-        protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
+        active = Path(f"/sys/class/net/{interface}").exists()
+        peers = run(protocol, 'show', interface, 'peers', check=True).splitlines() if active else []
+        handshakes = run(protocol, 'show', interface, 'latest-handshakes', check=True).splitlines() if active else []
+        online = sum(1 for row in handshakes if len(row.split()) == 2 and row.split()[1].isdigit()
+                     and 0 < time.time() - int(row.split()[1]) < 180)
         statistics = Path(f"/sys/class/net/{interface}/statistics")
         try:
             received = int((statistics / "rx_bytes").read_text())
@@ -4985,13 +4834,8 @@ def live_status(_: None = Depends(require_token)) -> dict:
             received = transmitted = 0
         return {
             "active": Path(f"/sys/class/net/{interface}").exists(),
-            "peers": len(protocol_clients),
-            "online_peers": len([
-                client for client in protocol_clients
-                if client.get("handshake_age_s") is not None and client["handshake_age_s"] < (
-                    STREAM_ACTIVITY_WINDOW_S if protocol in ("shadowsocks", "vless-reality-xhttp") else 180
-                )
-            ]),
+            "peers": len(peers),
+            "online_peers": online,
             "interface_rx_bytes": received,
             "interface_tx_bytes": transmitted,
         }
@@ -5000,8 +4844,8 @@ def live_status(_: None = Depends(require_token)) -> dict:
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "resources": resources,
         "protocols": {
-            "wg": source("wg", lambda: protocol_live("wg", WG_INTERFACE)),
-            "awg": source("awg", lambda: protocol_live("awg", AWG_INTERFACE)),
+            "wg": source("wg", lambda: protocol_live("wg", "mh-wg0")),
+            "awg": source("awg", lambda: protocol_live("awg", "mh-awg0")),
         },
         "clients": live_clients,
         "security": source("security", lambda: {
@@ -5039,24 +4883,12 @@ def service_action_definition(service_id: str, payload: ServiceAction) -> dict:
         require_owned_components(definition["component_id"])
     if payload.action not in definition["controls"]:
         raise HTTPException(status_code=409, detail="Action is not allowed for this service")
-    if service_id in ("wg", "awg") and payload.action == "stop" and os.getenv("ACCESS_MODE", "external") == "vpn":
-        alternate_id = "awg" if service_id == "wg" else "wg"
-        alternate_definition = managed_services().get(alternate_id)
-        alternate_ready = alternate_definition is not None and (
-            service_details(alternate_id, alternate_definition)["active"]
-            and Path(f"/sys/class/net/{AWG_INTERFACE if alternate_id == 'awg' else WG_INTERFACE}").exists()
-        )
-        if not alternate_ready:
-            raise HTTPException(
-                status_code=409,
-                detail="The last active VPN cannot be stopped while panel access is VPN-only",
-            )
+    if payload.action == "stop" and os.getenv("ACCESS_MODE", "external") == "vpn":
+        module = service_id.removeprefix('mihomo-')
+        if service_id == 'mihomo' or module in subscription_access.TRANSPORTS and not subscription_access.available(DATA_DIR, excluded={module}):
+            raise HTTPException(409, "Сначала откройте публичный доступ: нельзя остановить последний канал подписки Mihomo")
     if service_id == "ssh" and payload.action == "stop":
-        vpn_ready = any(
-            Path(f"/sys/class/net/{interface}").exists()
-            and run("systemctl", "is-active", f"{tool}-quick@{interface}.service") == "active"
-            for interface, tool in ((WG_INTERFACE, "wg"), (AWG_INTERFACE, "awg"))
-        )
+        vpn_ready = bool(configured_panel_channels())
         panel_ready = (
             run("systemctl", "is-active", "vps-control-api.service") == "active"
             and run("systemctl", "is-active", "vps-control-web.service") == "active"
@@ -5153,7 +4985,7 @@ def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_
     if payload.mode == "vpn":
         channels = configured_panel_channels()
         if not channels:
-            raise HTTPException(status_code=409, detail="Сначала настройте хотя бы одно защищённое подключение")
+            raise HTTPException(status_code=409, detail="Сначала создайте действующую подписку Mihomo с работающим каналом")
     action = start_application_operation("access-mode", [CONTROL_COMMAND, "access-mode", payload.mode], operation_id=operation_id)
     return {**action, "mode": payload.mode, "internal_url": internal_panel_url(), "external_url": external_panel_url(),
             "available_channels": configured_panel_channels()}
