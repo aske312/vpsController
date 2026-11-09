@@ -5515,7 +5515,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
     except ValueError:
         raise HTTPException(400, 'Некорректный nonce подписки') from None
     try:
-        signer = subscription_signing.load_signer(os.getenv('PRO_SUBSCRIPTION_SIGNING_KEY'))
+        signer = subscription_signing.server_signer()
     except (OSError, ValueError, TypeError):
         raise HTTPException(503, 'Подпись подписки временно недоступна') from None
     selected_profile: dict[str, Any] | None = None

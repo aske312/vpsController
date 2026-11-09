@@ -2,9 +2,13 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import re
+import shlex
+import shutil
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
@@ -63,6 +67,46 @@ class SubscriptionSigningTests(unittest.TestCase):
         with self.assertRaises(OSError):
             signing.load_signer(str(ROOT / 'missing-subscription-signing-key.pem'))
 
+    def test_automatic_provisioning_keeps_one_identity_and_default_loader_uses_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / 'server.pem'
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                records = list(pool.map(lambda _: signing.public_record(signing.create_signer(filename, ensure=True)), range(8)))
+            self.assertTrue(all(record == records[0] for record in records))
+            original = filename.read_bytes()
+            with patch.object(signing, 'DEFAULT_KEY_FILE', filename), patch.dict(os.environ, {'PRO_SUBSCRIPTION_SIGNING_KEY': ''}):
+                self.assertEqual(signing.public_record(signing.server_signer()), records[0])
+            command = [sys.executable, str(ROOT / 'api/subscription_signing.py'), '--ensure', str(filename)]
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout), records[0])
+            self.assertEqual(filename.read_bytes(), original)
+            self.assertEqual(list(filename.parent.iterdir()), [filename])
+
+    def test_provisioning_does_not_replace_invalid_key_or_publish_partial_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / 'server.pem'
+            with patch.object(signing.os, 'link', side_effect=OSError('publish failed')):
+                with self.assertRaises(OSError):
+                    signing.create_signer(filename, ensure=True)
+            self.assertEqual(list(filename.parent.iterdir()), [])
+            filename.write_bytes(b'not a private key')
+            with self.assertRaises(ValueError):
+                signing.create_signer(filename, ensure=True)
+            self.assertEqual(filename.read_bytes(), b'not a private key')
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX ownership and symlinks')
+    def test_provisioning_rejects_symlink_and_insecure_existing_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / 'real.pem'
+            signing.create_signer(real, ensure=True)
+            link = Path(directory) / 'link.pem'
+            link.symlink_to(real)
+            with self.assertRaises(ValueError):
+                signing.create_signer(link, ensure=True)
+            real.chmod(0o644)
+            with self.assertRaises(ValueError):
+                signing.create_signer(real, ensure=True)
+
     def test_key_generation_is_exclusive_and_only_prints_public_record(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / 'private.pem'
@@ -102,6 +146,7 @@ class SignedSubscriptionEndpointTests(unittest.TestCase):
                     claims = signing.verify(response.headers['x-subscription-proof'], response.content,
                                             str(response.url), nonce, signing.public_record(key))
                     self.assertEqual(claims['source'], 'pro')
+                    self.assertEqual(response.headers['x-subscription-public-key'], next(iter(signing.public_record(key).values())))
 
     def test_configured_missing_key_fails_closed_without_exposing_path(self):
         from fastapi.testclient import TestClient
@@ -118,3 +163,42 @@ class SignedSubscriptionEndpointTests(unittest.TestCase):
         response = TestClient(manager.app).get('/s/test-token', headers={'X-Subscription-Nonce': 'short'})
         self.assertEqual(response.status_code, 400)
         self.provision.assert_not_called()
+
+
+class SigningUpdateHookTests(unittest.TestCase):
+    def test_update_provisions_only_managed_mihomo_and_propagates_failure(self):
+        bash = str(Path('D:/Git/bin/bash.exe')) if os.name == 'nt' else shutil.which('bash')
+        if not bash or not Path(bash).is_file():
+            self.skipTest('Requires Bash')
+        source = (ROOT / 'scripts/vps-control.sh').read_text(encoding='utf-8')
+        function = re.search(r'(?ms)^ensure_mihomo_profile_runtimes\(\) \{.*?^\}', source).group()
+        for managed, has_signer, signing_exit, expected in ((False, True, 0, 0), (True, True, 19, 19), (True, True, 0, 23), (True, False, 0, 23)):
+            with self.subTest(managed=managed, has_signer=has_signer, signing_exit=signing_exit), tempfile.TemporaryDirectory(dir=ROOT / '.runtime') as directory:
+                root = Path(directory)
+                python = root / 'venv/bin/python'
+                python.parent.mkdir(parents=True)
+                if has_signer:
+                    helper = root / 'api/subscription_signing.py'
+                    helper.parent.mkdir()
+                    helper.touch()
+                python.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$TEST_EVENTS"\nexit '+str(signing_exit)+'\n', encoding='utf-8', newline='\n')
+                python.chmod(0o755)
+                posix_root = root.resolve().as_posix()
+                if os.name == 'nt':
+                    posix_root = '/' + posix_root[0].lower() + posix_root[2:]
+                script = ('set -eu\nINSTALL_DIR='+shlex.quote(posix_root)+'\nDATA_DIR="$INSTALL_DIR"\n'
+                          'export TEST_EVENTS="$INSTALL_DIR/events"\n'
+                          'python3() { return '+('0' if managed else '1')+'; }\n'
+                          'env_value() { printf "%s" "/private/custom server.pem"; }\n'
+                          'bash() { echo limits >> "$TEST_EVENTS"; return 23; }\n'
+                          +function+'\nensure_mihomo_profile_runtimes\n')
+                result = subprocess.run([bash, '-c', script], capture_output=True, text=True, env={k:v for k,v in os.environ.items() if k != 'PRO_SUBSCRIPTION_SIGNING_KEY'})
+                self.assertEqual(result.returncode, expected, result.stderr)
+                events = (root / 'events').read_text() if (root / 'events').exists() else ''
+                if managed and has_signer:
+                    self.assertIn('--ensure /private/custom server.pem', events)
+                    self.assertEqual('limits' in events, signing_exit == 0)
+                elif managed:
+                    self.assertEqual(events, 'limits\n')
+                else:
+                    self.assertEqual(events, '')

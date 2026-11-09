@@ -1,4 +1,4 @@
-"""PRO subscription provenance. Trust anchors are provisioned out of band."""
+"""Per-installation PRO subscription signatures; private keys never leave the host."""
 import argparse
 import base64
 import hashlib
@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import tempfile
 import time
 
 from cryptography.exceptions import InvalidSignature
@@ -15,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 DOMAIN = b'vps-control/pro-subscription/v1\0'
 TTL = 300
+DEFAULT_KEY_FILE = Path('/etc/vps-control/subscription-signing.pem')
 
 
 def encode(value):
@@ -38,10 +40,12 @@ def validate_nonce(value):
 
 
 def load_signer(filename):
-    """No automatic key generation: arbitrary installs must not become trusted."""
+    """Read an existing private signer without changing or rotating it."""
     if not filename:
         return None
-    descriptor = os.open(filename, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    if Path(filename).is_symlink():
+        raise ValueError('Signing key must not be a symlink')
+    descriptor = os.open(filename, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
     with os.fdopen(descriptor, 'rb') as source:
         info = os.fstat(source.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
@@ -52,6 +56,46 @@ def load_signer(filename):
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError('Expected an Ed25519 signing key')
     return key
+
+
+def server_signer():
+    configured = os.getenv('PRO_SUBSCRIPTION_SIGNING_KEY')
+    if configured:
+        return load_signer(configured)
+    # Migration is performed by installation/update, never by a public request.
+    if DEFAULT_KEY_FILE.exists() or DEFAULT_KEY_FILE.is_symlink():
+        return load_signer(DEFAULT_KEY_FILE)
+    return None
+
+
+def create_signer(filename, *, ensure=False):
+    """Publish a complete 0600 key atomically. Concurrent updates keep one identity."""
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if ensure and (filename.exists() or filename.is_symlink()):
+        return load_signer(filename)
+    descriptor, temporary = tempfile.mkstemp(prefix='.subscription-signing-', dir=filename.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as target:
+            key = Ed25519PrivateKey.generate()
+            target.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+            target.flush()
+            os.fsync(target.fileno())
+        try:
+            os.link(temporary, filename)
+            if os.name == 'posix':
+                parent = os.open(filename.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(parent)
+                finally:
+                    os.close(parent)
+        except FileExistsError:
+            if not ensure:
+                raise
+        return load_signer(filename)
+    finally:
+        os.unlink(temporary)
 
 
 def public_record(key):
@@ -67,7 +111,8 @@ def proof_headers(key, body, url, nonce='', *, now=None):
               'body_sha256': digest(body), 'url_sha256': digest(url.encode('utf-8')),
               'nonce': validate_nonce(nonce), 'iat': issued, 'exp': issued + TTL}
     payload = json.dumps(claims, sort_keys=True, separators=(',', ':')).encode('utf-8')
-    return {'X-Subscription-Proof': encode(payload) + '.' + encode(key.sign(DOMAIN + payload))}
+    return {'X-Subscription-Proof': encode(payload) + '.' + encode(key.sign(DOMAIN + payload)),
+            'X-Subscription-Public-Key': next(iter(public_record(key).values()))}
 
 
 def verify(proof, body, url, nonce, trusted_keys, *, now=None):
@@ -101,18 +146,11 @@ def verify(proof, body, url, nonce, trusted_keys, *, now=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Create an offline PRO subscription signing key; print only its public trust record.')
+    parser = argparse.ArgumentParser(description='Create a PRO subscription signing key; print only its public record.')
     parser.add_argument('key_file', type=Path)
+    parser.add_argument('--ensure', action='store_true', help='Keep and validate an existing key instead of rotating it')
     args = parser.parse_args()
-    key = Ed25519PrivateKey.generate()
-    args.key_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Exclusive creation prevents accidental rotation of an already pinned key.
-    descriptor = os.open(args.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, 'wb') as target:
-        target.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                       serialization.NoEncryption()))
-        target.flush()
-        os.fsync(target.fileno())
+    key = create_signer(args.key_file, ensure=args.ensure)
     print(json.dumps(public_record(key), sort_keys=True))
 
 
