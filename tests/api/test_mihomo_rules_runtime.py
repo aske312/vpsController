@@ -129,7 +129,8 @@ class RuleExportTests(unittest.TestCase):
                 disabled = manager.profile_rules(routing)
                 self.assertNotIn('DOMAIN-SUFFIX,trafficjunky.net,REJECT', disabled)
                 self.assertNotIn('DOMAIN-SUFFIX,google-analytics.com,REJECT', disabled)
-                self.assertEqual(disabled[:2], [personal[1], process])
+                self.assertEqual(disabled[0], personal[1])
+                self.assertLess(disabled.index('DOMAIN-SUFFIX,max.ru,DIRECT'), disabled.index(process))
 
 
 

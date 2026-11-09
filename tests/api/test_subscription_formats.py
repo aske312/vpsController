@@ -196,6 +196,19 @@ class SubscriptionFormatTests(unittest.TestCase):
             self.assertIn(b'password: "test-only"', response.body)
         self.provision.assert_not_called()
 
+    def test_pro_source_marker_on_common_and_device_subscription_endpoints(self):
+        from fastapi.testclient import TestClient
+        self.fetch('ClashMi/1.0')
+        device = self.store[0]['devices'][-1]['id']
+        bound = manager.device_subscription_token('test-token', device)
+        client = TestClient(manager.app)
+        for prefix, token in product(('/s/', '/api/mihomo/subscriptions/'), ('test-token', bound)):
+            with self.subTest(prefix=prefix, bound=token == bound):
+                response = client.get(prefix + token, headers={'User-Agent': 'ClashMi/1.0', 'X-HWID': 'phone'})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.headers['x-subscription-source'], 'pro')
+                self.assertIn('text/yaml', response.headers['content-type'])
+
     def test_http_error_contract_and_unknown_token_do_not_expose_state(self):
         from fastapi.testclient import TestClient
         overrides = {manager.subscription_mutation_access: lambda: False, manager.auth_required: lambda: None}

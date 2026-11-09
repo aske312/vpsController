@@ -25,6 +25,47 @@ class RoutingPresetTests(unittest.TestCase):
         self.enterContext(patch.object(manager, 'public_endpoint', return_value='127.0.0.1'))
         self.enterContext(patch.object(manager, 'module_is_installed', return_value=True))
 
+    def test_advertising_and_trackers_are_independent_opt_in_profile_rules(self):
+        ad = 'DOMAIN,an.yandex.ru,REJECT'
+        tracker = 'DOMAIN,mc.yandex.ru,REJECT'
+        for scope in ('all', 'selected'):
+            for ads, trackers in ((False, False), (True, False), (False, True), (True, True)):
+                item = profile()
+                item['routing'] = {'routing_scope': scope, 'block_advertising': ads,
+                                   'block_privacy': trackers, 'direct_ru_sites': True}
+                config = yaml.safe_load(manager.render_profile(item))
+                rules = config['rules']
+                with self.subTest(scope=scope, ads=ads, trackers=trackers):
+                    self.assertEqual(ad in rules, ads)
+                    self.assertEqual(tracker in rules, trackers)
+                    if scope == 'all' and ads:
+                        self.assertLess(rules.index(ad), rules.index('DOMAIN-SUFFIX,ru,DIRECT'))
+                    self.assertNotIn('DOMAIN-SUFFIX,yandex.ru,REJECT', rules)
+                    self.assertNotIn('DOMAIN-SUFFIX,google.com,REJECT', rules)
+                    self.assertNotIn('DOMAIN-SUFFIX,sentry.io,REJECT', rules)
+        self.assertFalse(manager.routing_defaults()['block_advertising'])
+        self.assertIn('block_advertising', device_capabilities()['rules'])
+        self.assertEqual(manager.yaml_profile_routing({'block_ads': True}), {})
+        with self.assertRaises(manager.HTTPException):
+            manager.validate_routing({'block_advertising': 'yes'}, current={})
+
+    def test_advertising_custom_list_inheritance_and_personal_exception(self):
+        item = profile()
+        item['routing'] = {'block_advertising': True, 'block_privacy': True,
+                           'block_advertising_rules': 'DOMAIN,custom.ads.test,REJECT'}
+        config = yaml.safe_load(manager.render_profile(item))
+        self.assertIn('DOMAIN,custom.ads.test,REJECT', config['rules'])
+        self.assertNotIn('DOMAIN,an.yandex.ru,REJECT', config['rules'])
+        self.assertIn('DOMAIN,mc.yandex.ru,REJECT', config['rules'])
+        item['devices'][0]['routing'] = {'block_advertising': False}
+        self.assertNotIn('DOMAIN,custom.ads.test,REJECT', yaml.safe_load(manager.render_profile(item))['rules'])
+        personal = 'DOMAIN,allowed.doubleclick.net,DIRECT'
+        rules = manager.profile_rules({'block_advertising': True, 'block_privacy': True,
+                                       '_personal_rule_lines': ['PROCESS-NAME,chrome.exe,DIRECT', personal]})
+        self.assertLess(rules.index(personal), rules.index('DOMAIN-SUFFIX,doubleclick.net,REJECT'))
+        self.assertLess(rules.index('DOMAIN-SUFFIX,doubleclick.net,REJECT'),
+                        rules.index('PROCESS-NAME,chrome.exe,DIRECT'))
+
     def test_schema_validation_and_safe_defaults(self):
         result = manager.validate_routing({'quic_compatibility': True, 'block_malware': True,
                                           'direct_ru_services': True, 'quic_domains': 'Video.Example.org, видео.рф\nvideo.example.org'}, current={})
@@ -45,6 +86,35 @@ class RoutingPresetTests(unittest.TestCase):
         self.assertIn('DOMAIN-SUFFIX,ru,DIRECT', rules)
         self.assertIn('DOMAIN-SUFFIX,mail.ru,DIRECT', rules)
         self.assertIn('DOMAIN-SUFFIX,imgsmail.ru,DIRECT', rules)
+
+    def test_max_calls_and_other_russian_products_are_explicit_direct_exceptions(self):
+        item = profile()
+        item['routing'] = {'direct_ru_sites': True}
+        rules = yaml.safe_load(manager.render_profile(item))['rules']
+        for domain in ('max.ru', 'oneme.ru', 'okcdn.ru', 'vkuser.net', 'sferum-platform.ru',
+                       'tamtam.chat', 'rustore.team', 'rustore.tv', 'yastatic.net',
+                       'vk-portal.net', 'smailru.net', 'odnoklassniki.eu', '2gis.com'):
+            with self.subTest(domain=domain):
+                self.assertIn(f'DOMAIN-SUFFIX,{domain},DIRECT', rules)
+                self.assertLess(rules.index(f'DOMAIN-SUFFIX,{domain},DIRECT'),
+                                rules.index('MATCH,' + manager.MIHOMO_PROXY_GROUP))
+        self.assertIn('max', {row['id'] for row in RU_SERVICE_CATALOG['groups']})
+
+    def test_russian_domain_exceptions_win_over_application_vpn_without_bypassing_security(self):
+        process = 'PROCESS-NAME,chrome.exe,GATE.312'
+        for setting, domain in (('direct_ru_sites', 'max.ru'), ('direct_ru_banks', 'sberbank.com'),
+                                ('direct_ru_marketplaces', 'ozonusercontent.com'),
+                                ('direct_ru_services', 'mts-ws.net')):
+            routing = {setting: True, 'block_malware': True, '_personal_rule_lines': [process]}
+            rules = manager.profile_rules(routing)
+            direct = f'DOMAIN-SUFFIX,{domain},DIRECT'
+            with self.subTest(setting=setting):
+                self.assertLess(rules.index('RULE-SET,security-phishing,REJECT'), rules.index(direct))
+                self.assertLess(rules.index(direct), rules.index(process))
+                self.assertEqual(len(rules), len(set(rules)))
+        explicit = 'DOMAIN,web.max.ru,GATE.312'
+        rules = manager.profile_rules({'direct_ru_sites': True, '_personal_rule_lines': [process, explicit]})
+        self.assertLess(rules.index(explicit), rules.index('DOMAIN-SUFFIX,max.ru,DIRECT'))
 
     def test_vk_portal_follows_vk_route_in_yaml(self):
         item = profile()
@@ -166,6 +236,85 @@ class RoutingPresetTests(unittest.TestCase):
         config = yaml.safe_load(manager.render_client_profile(item, 'common')[0])
         self.assertEqual(set(config['rule-providers']), set(SECURITY_PROVIDERS))
         self.assertNotIn('block_ads', device_capabilities()['rules'])
+
+    @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires real Mihomo')
+    def test_real_core_routes_max_and_russian_resources_direct_for_tcp_and_udp(self):
+        class Echo(socketserver.BaseRequestHandler):
+            def handle(self):
+                data, udp = self.request
+                udp.sendto(data, self.client_address)
+
+        class Origin(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Length', '6')
+                self.end_headers()
+                self.wfile.write(b'direct')
+
+            def log_message(self, *_):
+                pass
+
+        destination = free_port(udp=True)
+        blocked_domains = {'max.ru.audit.test', 'an.yandex.ru', 'mc.yandex.ru', 'ad.doubleclick.net'}
+        domains = ('web.max.ru', 'ws-api.oneme.ru', 'calls.okcdn.ru', 'videostun4.okcdn.ru',
+                   'call42-1.vkuser.net', 'cdn.rustore.team', 'tamtam.chat', *sorted(blocked_domains))
+        servers = [http.server.ThreadingHTTPServer(('127.0.0.1', destination), Origin),
+                   socketserver.ThreadingUDPServer(('127.0.0.1', destination), Echo)]
+        for server in servers:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness:
+                item = profile()
+                item['routing'] = {'direct_ru_sites': True, 'block_advertising': True,
+                                   'block_privacy': True, 'sniffer': False}
+                config = yaml.safe_load(manager.render_profile(item))
+                config['mixed-port'] = port = free_port(udp=True)
+                config['dns']['enable'] = False
+                config['hosts'] = {domain: '127.0.0.1' for domain in domains}
+                # Use only the exported domain decisions. GEOIP data and public
+                # destinations are unnecessary for this isolated traffic test.
+                config['rules'] = [f'DST-PORT,{readiness},DIRECT', *[
+                    rule for rule in config['rules'] if not rule.startswith(('GEOIP,', 'MATCH,'))
+                ], 'MATCH,REJECT']
+                path = Path(folder) / 'config.yaml'
+                path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding='utf-8')
+                with open(Path(folder) / 'core.log', 'w') as log:
+                    process = subprocess.Popen([os.environ['PRIVACY_MIHOMO_BIN'], '-d', folder, '-f', str(path)],
+                        stdout=log, stderr=subprocess.STDOUT,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                    try:
+                        wait_port(port, process)
+                        wait_http_proxy(port, process, readiness)
+                        for domain in domains:
+                            blocked = domain in blocked_domains
+                            with self.subTest(domain=domain, transport='tcp'), socket.create_connection(('127.0.0.1', port), timeout=3) as tcp:
+                                tcp.settimeout(3)
+                                tcp.sendall(f'GET http://{domain}:{destination}/ HTTP/1.1\r\nHost: {domain}:{destination}\r\nConnection: close\r\n\r\n'.encode())
+                                response = tcp.makefile('rb').read()
+                                self.assertEqual(b'direct' in response, not blocked)
+                            with self.subTest(domain=domain, transport='udp'), socket.create_connection(('127.0.0.1', port), timeout=3) as control:
+                                control.settimeout(3)
+                                control.sendall(b'\x05\x01\x00')
+                                self.assertEqual(control.recv(2), b'\x05\x00')
+                                control.sendall(b'\x05\x03\x00\x01\x7f\x00\x00\x01\x00\x00')
+                                reply = control.makefile('rb').read(10)
+                                self.assertEqual(reply[:4], b'\x05\x00\x00\x01')
+                                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                                    udp.settimeout(.4 if blocked else 3)
+                                    packet = b'\x00\x00\x00\x03' + bytes([len(domain)]) + domain.encode() + destination.to_bytes(2, 'big') + b'direct'
+                                    udp.sendto(packet, ('127.0.0.1', int.from_bytes(reply[-2:], 'big')))
+                                    if blocked:
+                                        with self.assertRaises(socket.timeout):
+                                            udp.recvfrom(8192)
+                                    else:
+                                        self.assertTrue(udp.recvfrom(8192)[0].endswith(b'direct'))
+                    finally:
+                        process.terminate()
+                        process.wait(timeout=10)
+        finally:
+            for server in servers:
+                server.shutdown()
+                server.server_close()
 
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires real Mihomo')
     def test_all_new_presets_pass_real_mihomo_validation(self):

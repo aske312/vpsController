@@ -2215,6 +2215,11 @@ sync_release() {
   chmod 0755 "${INSTALL_DIR}"
   rsync -a --delete \
     --exclude '.git/' \
+    --include '/docs/' \
+    --include '/docs/CONNECTION_GUIDE.md' \
+    --include '/docs/PRIVACY_POLICY.md' \
+    --include '/docs/TERMS_OF_USE.md' \
+    --exclude '/docs/***' \
     --exclude '.idea/' \
     --exclude '.openai/' \
     --exclude '/docs/audit/' \
@@ -2224,6 +2229,7 @@ sync_release() {
     --exclude '.env*' \
     --exclude 'node_modules/' \
     --exclude 'venv/' \
+    --exclude '.venv/' \
     --exclude '.vinext/' \
     --exclude '.wrangler/' \
     --exclude '.runtime/' \

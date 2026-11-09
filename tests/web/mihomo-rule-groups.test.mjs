@@ -18,6 +18,21 @@ test("reviewed RU domains belong to the matching service switch", () => {
   }
 });
 
+test("advertising networks have independent editable rule groups", () => {
+  const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/ad-service-domains.json", import.meta.url), "utf8"));
+  const groups = ruleIconGroups.block_advertising;
+  const all = catalog.groups.flatMap(entry => [
+    ...entry.domains.map(domain => `DOMAIN-SUFFIX,${domain},REJECT`),
+    ...entry.hosts.map(host => `DOMAIN,${host},REJECT`),
+  ]);
+  const list = { id: "block_advertising", default_rules: all.join("\n") };
+  assert.deepEqual(Object.values(partitionRuleGroups(list, groups)).flat().sort(), [...all].sort());
+  const disabled = toggleRuleGroup(list, groups, "@default", "yandex");
+  assert.equal(disabled.includes("DOMAIN,an.yandex.ru,REJECT"), false);
+  assert.equal(disabled.includes("DOMAIN-SUFFIX,doubleclick.net,REJECT"), true);
+  assert.equal(toggleRuleGroup(list, groups, disabled, "yandex"), "@default");
+});
+
 test("generic group toggles preserve custom rules and round trip", () => {
   const list = { default_rules: "DOMAIN-SUFFIX,example.com,REJECT\nDOMAIN-SUFFIX,other.test,REJECT" };
   const groups = [{ id: "one", tokens: ["example.com"] }, { id: "other", tokens: [] }];

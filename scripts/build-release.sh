@@ -24,10 +24,13 @@ rsync -a --delete \
   --exclude '.git/' --exclude '.idea/' --exclude '.runtime/' --exclude '.vinext/' \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
   --exclude '__pycache__/' --exclude '*.pyc' \
+  --include '/docs/' --include '/docs/CONNECTION_GUIDE.md' \
+  --include '/docs/PRIVACY_POLICY.md' --include '/docs/TERMS_OF_USE.md' \
+  --exclude '/docs/***' \
   --exclude '/docs/audit/' --exclude '/.servers/' --exclude 'AGENTS.md' \
   --exclude '/docs/.audit/' --exclude '/docs/.backlog/' --exclude '/docs/.plans/' \
   --exclude '/docs/backlog/' --exclude '/docs/plans/' --exclude '/docs/direct-audit/' \
-  --include '/.env.example' --exclude '.env*' --exclude 'venv/' \
+  --include '/.env.example' --exclude '.env*' --exclude 'venv/' --exclude '.venv/' \
   "${ROOT_DIR}/" "${STAGE}/"
 
 # Check the staged release, not an ignored file left in a developer's workspace.

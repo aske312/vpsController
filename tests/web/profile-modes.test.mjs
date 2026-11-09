@@ -40,10 +40,11 @@ test("explicit Proxy wins over legacy forced TUN and switching back restores TUN
 });
 
 test("Protection reflects profile-only traffic functions while inheriting connection defaults", () => {
-  const defaults = { block_malware: true, block_privacy: true, quic_compatibility: true, tun_enabled: true, dns_secure: true };
+  const defaults = { block_malware: true, block_advertising: true, block_privacy: true, quic_compatibility: true, tun_enabled: true, dns_secure: true };
   const profile = { block_privacy: true, dns_secure: false };
   const routing = profileRoutingSettings(defaults, profile);
   assert.equal(routing.block_malware, false);
+  assert.equal(routing.block_advertising, false);
   assert.equal(routing.block_privacy, true);
   assert.equal(routing.quic_compatibility, false);
   assert.equal(routing.dns_secure, false);
@@ -121,7 +122,7 @@ test("routing choices exclude inactive presets for Proxy and selected-only scope
 });
 
 test("traffic functions stay in Protection for both routing scopes and keep their saved keys", () => {
-  const titles = { block_malware: "Фишинг и вредоносные сайты", block_privacy: "Приватность", quic_compatibility: "Совместимость QUIC" };
+  const titles = { block_malware: "Фишинг и вредоносные сайты", block_advertising: "Реклама", block_privacy: "Трекеры", quic_compatibility: "Совместимость QUIC" };
   for (const scope of ["all", "selected"]) {
     let routing = { connection_mode: "tun", routing_scope: scope, block_malware: true, route_dns: true };
     const onChange = (key, value) => { routing = { ...routing, [key]: value }; };

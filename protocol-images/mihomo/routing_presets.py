@@ -5,6 +5,15 @@ import json
 from pathlib import Path
 
 
+# Dedicated advertising endpoints; broad shared infrastructure and tracker-only
+# domains are excluded so advertising and tracker switches remain independent.
+AD_SERVICE_CATALOG = json.loads(Path(__file__).with_name('ad-service-domains.json').read_text(encoding='utf-8'))
+AD_RULES = [rule for group in AD_SERVICE_CATALOG['groups'] for rule in [
+    *(f'DOMAIN-SUFFIX,{domain},REJECT' for domain in group['domains']),
+    *(f'DOMAIN,{host},REJECT' for host in group['hosts']),
+]]
+
+
 # Reviewed service-owned domains; shared cloud/CDN hosts retain exact matching.
 # The UI uses the same catalog so a service switch controls all of its assets.
 RU_SERVICE_CATALOG = json.loads(Path(__file__).with_name('ru-service-domains.json').read_text(encoding='utf-8'))

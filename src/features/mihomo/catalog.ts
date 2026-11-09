@@ -1,6 +1,7 @@
 import connectionVariants from "../../../protocol-images/mihomo/connection-variants.json" with { type: "json" };
 import type { ProfilePreset, RuleIconGroup } from "./types";
 import ruServices from "../../../protocol-images/mihomo/ru-service-domains.json" with { type: "json" };
+import adServices from "../../../protocol-images/mihomo/ad-service-domains.json" with { type: "json" };
 
 export const presetConnectionOptions = connectionVariants as ProfilePreset["components"];
 
@@ -171,9 +172,10 @@ export const p2pClientCatalog = [
 
 export const profileDirectRules = [
   { key: "block_malware", code: "SAFE", title: "Фишинг и вредоносные сайты", text: "Опасные домены и фишинг.", group: "Функции" },
+  { key: "block_advertising", code: "ADS", title: "Реклама", text: "Домены рекламных сетей.", group: "Функции" },
   { key: "quic_compatibility", code: "QUIC", title: "Совместимость QUIC", text: "TCP вместо QUIC для выбранных сайтов.", group: "Функции" },
   { key: "direct_ru_services", code: "GOS", title: "Госуслуги и операторы", text: "Госуслуги и связь напрямую.", group: "Напрямую" },
-  { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Функции" },
+  { key: "block_privacy", code: "PRIV", title: "Трекеры", text: "Аналитика и профилирование.", group: "Функции" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы.", group: "Напрямую" },
@@ -186,6 +188,7 @@ export const profileDirectRules = [
 ];
 
 export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
+  block_advertising: [],
   block_malware: [
     { id: "threats", code: "TIF", name: "Вредоносные домены", tokens: ["RULE-SET,security-threats,"] },
     { id: "phishing", code: "PHISH", name: "Фишинг", tokens: ["RULE-SET,security-phishing,"] },
@@ -215,7 +218,7 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   ],
   block_privacy: [
     { id: "google", code: "GA", name: "Google Analytics", tokens: ["google-analytics"] },
-    { id: "yandex", code: "YM", name: "Яндекс Метрика", tokens: ["mc.yandex"] },
+    { id: "yandex", code: "YM", name: "Яндекс Метрика", tokens: ["mc.yandex", "appmetrica.yandex", "metrika.yandex", "webvisor", "yandex-metrica", "yandexmetrica"] },
     { id: "clarity", code: "CLARITY", name: "Microsoft Clarity", tokens: ["clarity.ms"] },
     { id: "hotjar", code: "HOTJAR", name: "Hotjar", tokens: ["hotjar"] },
     { id: "fullstory", code: "FS", name: "FullStory", tokens: ["fullstory"] },
@@ -310,7 +313,7 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   ],
 };
 
-for (const entry of ruServices.groups) {
+for (const entry of [...ruServices.groups, ...adServices.groups]) {
   const tokens = [
     ...entry.domains.map(domain => `DOMAIN-SUFFIX,${domain},`),
     ...entry.hosts.map(host => `DOMAIN,${host},`),

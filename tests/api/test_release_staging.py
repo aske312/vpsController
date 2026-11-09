@@ -46,8 +46,10 @@ class ReleaseStagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root, stage = Path(directory) / 'source', Path(directory) / 'stage'
             root.mkdir(); stage.mkdir()
-            files = ('.env.example', '.env', '.env.production', 'api/.env',
-                     '.servers/vps-1.txt', 'docs/.audit/README.md', 'api/main.py',
+            files = ('.env.example', '.env', '.env.production', 'api/.env', '.venv/site-packages/private.txt',
+                     '.servers/vps-1.txt', 'docs/.audit/README.md', 'docs/AUDIT/report.md',
+                     'docs/SUBSCRIPTION_PROVENANCE.md', 'docs/internal-notes.md',
+                     'docs/CONNECTION_GUIDE.md', 'docs/PRIVACY_POLICY.md', 'docs/TERMS_OF_USE.md', 'api/main.py',
                      'api/__pycache__/retired.cpython-312.pyc', 'api/retired.pyc')
             for name in files:
                 path = root / name
@@ -59,4 +61,5 @@ class ReleaseStagingTests(unittest.TestCase):
             subprocess.run(['bash', '-euc', command], check=True,
                            env={**os.environ, 'ROOT_DIR': str(root), 'STAGE': str(stage)})
             self.assertEqual(sorted(str(p.relative_to(stage)) for p in stage.rglob('*') if p.is_file()),
-                             ['.env.example', 'api/main.py'])
+                             ['.env.example', 'api/main.py', 'docs/CONNECTION_GUIDE.md',
+                              'docs/PRIVACY_POLICY.md', 'docs/TERMS_OF_USE.md'])

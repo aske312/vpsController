@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "reviewed_at": "2026-11-09",
+  "sources": [
+    "https://github.com/v2fly/domain-list-community/blob/master/data/google",
+    "https://github.com/v2fly/domain-list-community/blob/master/data/yandex",
+    "https://github.com/v2fly/domain-list-community/blob/master/data/mailru-group",
+    "https://github.com/v2fly/domain-list-community/blob/master/data/category-ads-all"
+  ],
+  "groups": [
+    {
+      "presets": ["block_advertising"],
+      "id": "google",
+      "code": "GADS",
+      "name": "Google Ads и DoubleClick",
+      "domains": ["doubleclick.net", "doubleclick.com", "googlesyndication.com", "googleadservices.com", "googletagservices.com", "2mdn.net", "admob.com"],
+      "hosts": ["adservice.google.com", "pagead.l.google.com", "mobileads.google.com", "mail-ads.google.com"]
+    },
+    {
+      "presets": ["block_advertising"],
+      "id": "yandex",
+      "code": "YA",
+      "name": "Реклама Яндекса и AdFox",
+      "domains": ["adfox.ru", "yads.tech"],
+      "hosts": ["an.yandex.ru", "ads.yandex.ru", "ads.yandex.com", "adsdk.yandex.ru", "adfox.yandex.ru", "bs.yandex.ru"]
+    },
+    {
+      "presets": ["block_advertising"],
+      "id": "vk",
+      "code": "VK",
+      "name": "Реклама VK и Mail.ru",
+      "domains": [],
+      "hosts": ["ad.mail.ru", "target.my.com", "ads.viqeo.tv", "ads.rustore.ru"]
+    },
+    {
+      "presets": ["block_advertising"],
+      "id": "networks",
+      "code": "ADS",
+      "name": "Рекламные сети",
+      "domains": ["adnxs.com", "adcolony.com", "advertserve.com", "casalemedia.com", "mgid.com", "spotxchange.com", "ad-delivery.net", "cpmstar.com"],
+      "hosts": []
+    }
+  ]
+}

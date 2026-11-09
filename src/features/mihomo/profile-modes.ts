@@ -1,5 +1,5 @@
 export type ProfileRouting = Record<string, string | number | boolean>;
-export const profileFunctionKeys: readonly string[] = ["block_malware", "block_privacy", "quic_compatibility"];
+export const profileFunctionKeys: readonly string[] = ["block_malware", "block_advertising", "block_privacy", "quic_compatibility"];
 
 export function profileRoutingSettings(defaults: ProfileRouting, profile: ProfileRouting): ProfileRouting {
   const result = { ...defaults, ...profile };

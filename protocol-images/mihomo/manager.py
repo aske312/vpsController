@@ -42,7 +42,7 @@ from client_subscription import CLIENT_HINTS, import_page
 import client_compatibility
 from client_capabilities import FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from dns_routing import mihomo_route_dns, validate_route_dns
-from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
+from routing_presets import AD_RULES, QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
@@ -64,6 +64,7 @@ from version_comparison import newer_release
 import subscription_limits
 import subscription_access
 import client_channels
+import subscription_signing
 from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
 import port_allocation
@@ -1015,6 +1016,7 @@ def public_mrs_rules(name: str, request: Request) -> Response:
 
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
     "block_malware": [f"RULE-SET,{name},REJECT" for name in SECURITY_PROVIDERS],
+    "block_advertising": AD_RULES,
     "quic_compatibility": QUIC_DEFAULT_RULES,
     "direct_ru_services": SERVICE_RULES,
     "block_privacy": [
@@ -1023,6 +1025,16 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,google-analytics.com,REJECT",
         "DOMAIN,mc.yandex.ru,REJECT",
         "DOMAIN,mc.yandex.com,REJECT",
+        "DOMAIN,appmetrica.yandex.ru,REJECT",
+        "DOMAIN,appmetrica.yandex.com,REJECT",
+        "DOMAIN,appmetrica.yandex.net,REJECT",
+        "DOMAIN,metrika.yandex.ru,REJECT",
+        "DOMAIN,metrika.yandex.com,REJECT",
+        "DOMAIN,metrika.yandex.net,REJECT",
+        "DOMAIN-SUFFIX,webvisor.com,REJECT",
+        "DOMAIN-SUFFIX,webvisor.org,REJECT",
+        "DOMAIN-SUFFIX,yandex-metrica.ru,REJECT",
+        "DOMAIN-SUFFIX,yandexmetrica.com,REJECT",
         "DOMAIN-SUFFIX,clarity.ms,REJECT",
         "DOMAIN-SUFFIX,hotjar.com,REJECT",
         "DOMAIN-SUFFIX,hotjar.io,REJECT",
@@ -1309,10 +1321,11 @@ DIRECT_P2P_PROCESSES: dict[str, list[str]] = {
 
 DIRECT_RULE_META = {
     "block_malware": ("Фишинг и вредоносные сайты", "Опасные домены и фишинг."),
+    "block_advertising": ("Реклама", "Блокирует выделенные домены рекламных сетей."),
     "quic_compatibility": ("Совместимость QUIC", "TCP вместо QUIC для выбранных сайтов."),
     "direct_ru_services": ("Госуслуги и операторы", "Госуслуги и связь напрямую."),
     "windows_geolocation": ("Геолокация Windows", "Только запросы Windows Location Services идут напрямую; остальной трафик остаётся в туннеле."),
-    "block_privacy": ("Приватность", "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию."),
+    "block_privacy": ("Трекеры", "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию."),
     "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
@@ -1444,15 +1457,23 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     # Explicit domain exceptions keep their priority. An application-wide
     # route (browser/player) must not bypass enabled ad/privacy protection.
     rules.extend(rule for rule in personal if not rule.startswith("PROCESS-"))
-    for setting in ("block_malware", "block_privacy", "quic_compatibility"):
+    for setting in ("block_malware", "block_advertising", "block_privacy", "quic_compatibility"):
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
     if routing.get('quic_compatibility', False):
         rules.extend(quic_rule(domain) for domain in quic_domains(routing.get('quic_domains', '')))
+    # Regional domain exceptions must win over a browser/application-wide VPN
+    # route, for TCP and UDP alike. Keep explicit personal domain decisions and
+    # security filters first; IP-based GEOIP bypasses retain their later priority.
+    if routing.get('routing_scope') != 'selected':
+        for setting in ('direct_ru_sites', 'direct_ru_banks', 'direct_ru_marketplaces', 'direct_ru_services'):
+            if routing.get(setting, False):
+                rules.extend(rule for rule in configured_preset_rules(routing, setting)
+                             if rule.startswith(('DOMAIN,', 'DOMAIN-SUFFIX,')) and rule.endswith(',DIRECT'))
     rules.extend(rule for rule in personal if rule.startswith("PROCESS-"))
     rules.extend(service_rules(routing))
     for setting in DIRECT_RULE_PRESETS:
-        if setting in {"direct_local_network", "block_malware", "block_privacy", "quic_compatibility"}:
+        if setting in {"direct_local_network", "block_malware", "block_advertising", "block_privacy", "quic_compatibility"}:
             continue
         if routing.get('routing_scope') == 'selected':
             continue  # Broad bypass presets belong to the VPN-by-default mode.
@@ -5240,10 +5261,18 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
     require_yaml_export(requested_format)
     profile = normalize_profile(item)
     profile["connections"] = subscription_limits.client_connections(profile, effective_client_connections(profile.get("connections", [])))
+    record = application_operation.read(client_channels.path(DATA_ROOT, str(profile['id']), device_id)) if selected_channels else {}
+    selected = client_channels.active(record)
+    if selected_channels and not selected:
+        profile['connections'] = [entry for entry in profile['connections'] if not entry.get('selection_candidate')]
     config = render_profile(profile, device_id)
     if selected_channels:
-        record = application_operation.read(client_channels.path(DATA_ROOT, str(profile['id']), device_id))
-        config = client_channels.render(config, record)
+        import yaml
+        if selected and selected.get('source_digest') == client_channels.digest(yaml.safe_load(config)):
+            config = client_channels.render(config, record)
+        elif any(entry.get('selection_candidate') for entry in profile['connections']):
+            profile['connections'] = [entry for entry in profile['connections'] if not entry.get('selection_candidate')]
+            config = render_profile(profile, device_id)
     validate_rendered_profile(config)
     return config, "yaml"
 
@@ -5481,6 +5510,14 @@ def subscription_mutation_access():
 def public_profile_subscription(token: str, request: Request, allow_changes: bool = Depends(subscription_mutation_access)) -> PlainTextResponse:
     if not token.isascii() or len(token) > 512:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        nonce = subscription_signing.validate_nonce(request.headers.get('x-subscription-nonce', ''))
+    except ValueError:
+        raise HTTPException(400, 'Некорректный nonce подписки') from None
+    try:
+        signer = subscription_signing.load_signer(os.getenv('PRO_SUBSCRIPTION_SIGNING_KEY'))
+    except (OSError, ValueError, TypeError):
+        raise HTTPException(503, 'Подпись подписки временно недоступна') from None
     selected_profile: dict[str, Any] | None = None
     bound_device: str | None = None
     for item in profiles():
@@ -5568,6 +5605,8 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
             "Cache-Control": "no-store",
             "Content-Disposition": f'inline; filename="{Path(profile_export_filename(selected_profile)).stem}.{extension}"',
             "Profile-Update-Interval": "24",
+            "X-Subscription-Source": "pro",
+            **subscription_signing.proof_headers(signer, config.encode('utf-8'), str(request.url), nonce),
             "Subscription-Userinfo": subscription_limits.userinfo(selected_profile, DATA_ROOT / "subscription-limits"),
             "X-Nodera-Selection-State": client_channels.state(application_operation.read(
                 client_channels.path(DATA_ROOT, selected_profile['id'], selected_device))),
@@ -5583,6 +5622,95 @@ class ChannelSelectionRequest(BaseModel):
     require_udp: bool = False
 
     model_config = {"extra": "forbid"}
+
+
+def client_route_definitions(profile, device_id):
+    """Build bounded proposals from PRO inventory, never from client-supplied settings."""
+    try:
+        settings = load_json(NETWORK_ENDPOINTS_FILE, {})
+        bindings = [row for row in network_routes.migrate(settings)['bindings'] if row['state'] == 'active']
+        hosts = relay_connection_control().read()['hosts']
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError('Invalid route inventory') from None
+    existing = [row for row in profile['connections'] if row['device_id'] == device_id]
+    definitions = []
+    seen = set()
+    for row in existing:
+        seen.add(client_channels.digest([row['component'], {**connection_defaults(row['component']), **row.get('settings', {})}]))
+    for component in sorted(TRANSPORTS):
+        if not module_is_installed(component) or not module_is_ready(component):
+            continue
+        variants = [{}]
+        if component == 'transport-reality':
+            variants = [{'route_mode': 'direct', 'transport': transport} for transport in ('xhttp', 'raw', 'grpc')]
+        for binding in bindings:
+            kind, address = binding['kind'], binding['address']
+            if component == 'transport-reality' and kind in {'cdn', 'tls_relay'}:
+                mode = 'cdn' if kind == 'cdn' else 'tls'
+                for protocol in ('vless', 'vmess', 'trojan'):
+                    for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
+                        variants.append({'route_mode': mode, mode + '_domain': address,
+                                         mode + '_transport': transport, 'xray_protocol': protocol})
+            elif kind == 'udp_relay' and component in relay_connections.UDP_COMPONENTS | {'transport-shadowsocks'}:
+                variants.append({'udp_domain': address})
+        # Direct Relay forwarding does not change CDN DNS or shared delivery policy.
+        direct = list(variants[:3] if component == 'transport-reality' else variants[:1])
+        variants.extend({**values, 'relay_host_id': host['id']} for host in hosts for values in direct)
+        for values in variants:
+            if len(existing) + len(definitions) >= 64:
+                return definitions
+            try:
+                validated = validate_connection(component, values)
+            except HTTPException:
+                # Local prerequisites may rule out a proposal; client reachability
+                # is deliberately not inferred from the server's network.
+                continue
+            signature = client_channels.digest([component, validated])
+            if signature in seen:
+                continue
+            seen.add(signature)
+            identity = 'nodera-' + client_channels.digest([device_id, signature])[:24]
+            if any(row['id'] == identity for row in existing):
+                continue
+            definitions.append({'id': identity,
+                                'component': component, 'device_id': device_id,
+                                'name': manifest(component).get('name', component),
+                                'settings': validated, 'selection_candidate': True})
+    return definitions
+
+
+def provision_client_routes(profile, device_id):
+    record = application_operation.read(client_channels.path(DATA_ROOT, profile['id'], device_id))
+    # A retry must not change the source of an awaiting client decision.
+    if client_channels.state(record) == 'pending':
+        return profile
+    definitions = client_route_definitions(profile, device_id)
+    if not definitions:
+        return profile
+    import yaml
+    old_base, _ = render_client_profile(profile, device_id, selected_channels=False)
+    old_digest = client_channels.digest(yaml.safe_load(old_base))
+    updated = deepcopy(record)
+    target = client_channels.path(DATA_ROOT, profile['id'], device_id)
+    try:
+        with profile_runtime_transaction({row['component'] for row in definitions}):
+            provisioned = provision_connections(profile['id'], definitions, profile=profile)
+            profile['connections'].extend(provisioned)
+            # Preserve an accepted selection when merely extending its catalog.
+            # Existing names and credentials stay unchanged as candidates append.
+            base, _ = render_client_profile(profile, device_id, selected_channels=False)
+            for selection in (updated, updated.get('previous') or {}):
+                if selection.get('source_digest') == old_digest:
+                    selection['source_digest'] = client_channels.digest(yaml.safe_load(base))
+                    selection['revision'] = profile_revision(profile)
+            if updated != record:
+                application_operation.atomic_json(target, updated)
+            save_subscription_profile(profile)
+    except BaseException:
+        if updated != record:
+            application_operation.atomic_json(target, record)
+        raise
+    return profile
 
 
 def registered_command_device(token: str, request: Request):
@@ -5619,16 +5747,20 @@ def registered_command_device(token: str, request: Request):
 
 @app.post("/s/{token}/commands/select-channels")
 @app.post("/api/mihomo/subscriptions/{token}/commands/select-channels")
-def select_client_channels(token: str, request: Request, payload: ChannelSelectionRequest):
-    # Export only existing credentials of this device. No provisioning, shared profile
-    # mutations, command execution, arbitrary URLs or approval flags in this API.
+def select_client_channels(token: str, request: Request, payload: ChannelSelectionRequest,
+                           allow_changes: bool = Depends(subscription_mutation_access)):
+    if allow_changes is not True:
+        raise HTTPException(409, 'Изменения подписки временно недоступны')
     with profile_mutation_lock:
-        profile, device_id = registered_command_device(token, request)
+        registered_command_device(token, request)
     if not client_channel_slots.acquire(blocking=False):
         raise HTTPException(429, "Сервер занят подготовкой каналов", headers={"Retry-After": "10"})
     try:
-        config, _ = render_client_profile(profile, device_id, selected_channels=False)
-    except (ValueError, OSError, HTTPException):
+        with profile_mutation_lock:
+            profile, device_id = registered_command_device(token, request)
+            profile = provision_client_routes(profile, device_id)
+            config, _ = render_client_profile(profile, device_id, selected_channels=False)
+    except (ValueError, OSError, RuntimeError, HTTPException):
         raise HTTPException(409, "Не удалось подготовить каналы. Проверьте настройки профиля и Relay") from None
     finally:
         client_channel_slots.release()
@@ -5667,8 +5799,10 @@ class ChannelDecision(BaseModel):
     model_config = {'extra': 'forbid'}
 
 
-def channel_command_response(record, base):
-    return JSONResponse(client_channels.response(record, base), headers={'Cache-Control': 'no-store'})
+def channel_command_response(record, base, profile, device_id):
+    result = client_channels.response(record, base)
+    result['config'], _ = render_client_profile(profile, device_id)
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/s/{token}/commands/select-channels/prepare')
@@ -5691,7 +5825,7 @@ def prepare_client_channels(token: str, request: Request, payload: ChannelPrepar
                                              config, profile_revision(profile))
         except (ValueError, OSError):
             raise HTTPException(409, 'Профиль изменился или отчёт проверки не соответствует каналам устройства') from None
-        return channel_command_response(record, base)
+        return channel_command_response(record, base, profile, device_id)
 
 
 @app.get('/s/{token}/commands/select-channels/{identity}')
@@ -5705,7 +5839,7 @@ def client_channels_status(token: str, request: Request, identity: str | None = 
         if not record.get('id') or identity is not None and record.get('id') != identity:
             raise HTTPException(404, 'Подготовленный профиль не найден')
         base, _ = render_client_profile(profile, device_id, selected_channels=False)
-        return channel_command_response(record, base)
+        return channel_command_response(record, base, profile, device_id)
 
 
 @app.post('/s/{token}/commands/select-channels/{identity}/decision')
@@ -5723,7 +5857,7 @@ def decide_client_channels(token: str, identity: str, request: Request, payload:
                                               payload.action, yaml.safe_load(base))
         except (ValueError, OSError):
             raise HTTPException(409, 'Не удалось изменить подготовленный профиль. Проверьте его состояние') from None
-        return channel_command_response(record, base)
+        return channel_command_response(record, base, profile, device_id)
 
 
 def execute_module_operation(action: str, module_id: str, identity: str, unit: str) -> bool:

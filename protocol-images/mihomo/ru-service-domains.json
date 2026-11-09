@@ -61,6 +61,39 @@
   ],
   "groups": [
     {
+      "presets": ["direct_ru_sites"],
+      "id": "max",
+      "code": "MAX",
+      "name": "MAX и Сферум",
+      "domains": [
+        "max.ru", "oneme.ru",
+        "sferum.ru", "sferum-dev.ru", "sferum-platform.ru"
+      ],
+      "hosts": ["calls.okcdn.ru", "videowebrtc.okcdn.ru"],
+      "shared_groups": ["vk", "ok"],
+      "reviewed_at": "2026-11-09",
+      "sources": [
+        "https://max.ru/",
+        "https://bugbounty.standoff365.com/en-US/programs/max"
+      ]
+    },
+    {
+      "presets": ["direct_ru_sites"],
+      "id": "tamtam",
+      "code": "TT",
+      "name": "ТамТам",
+      "domains": ["tamtam.chat"],
+      "hosts": []
+    },
+    {
+      "presets": ["direct_ru_sites"],
+      "id": "rustore",
+      "code": "RS",
+      "name": "RuStore",
+      "domains": ["rustore.ru", "rustore.team", "rustore.tv"],
+      "hosts": []
+    },
+    {
       "presets": [
         "direct_ru_sites"
       ],
@@ -163,7 +196,16 @@
       "name": "Одноклассники",
       "domains": [
         "ok.me",
-        "okl.lt"
+        "okl.lt",
+        "okcdn.ru",
+        "odnoklasniki.by",
+        "odnoklasniki.ua",
+        "odnoklassniki.am",
+        "odnoklassniki.by",
+        "odnoklassniki.co.ee",
+        "odnoklassniki.eu",
+        "odnoklassniki.lv",
+        "odnoklassniki.tj"
       ],
       "hosts": []
     },

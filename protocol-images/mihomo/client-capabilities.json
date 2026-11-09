@@ -5,6 +5,6 @@
     "transports": ["raw", "tcp", "xhttp", "grpc", "websocket", "httpupgrade"],
     "features": ["tunnel_privacy", "tunnel_ech"],
     "strategies": ["", "fallback", "url-test", "select"],
-    "rules": ["block_malware", "quic_compatibility", "direct_ru_services", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "windows_geolocation", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
+    "rules": ["block_malware", "block_advertising", "quic_compatibility", "direct_ru_services", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "windows_geolocation", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
   }
 }

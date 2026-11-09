@@ -13,7 +13,10 @@ from tests.api import test_subscription_formats as subscription_formats
 
 
 class ClientChannelTests(unittest.TestCase):
-    setUp = subscription_formats.SubscriptionFormatTests.setUp
+    def setUp(self):
+        subscription_formats.SubscriptionFormatTests.setUp(self)
+        self.enterContext(patch.object(manager, 'module_is_ready', return_value=False))
+
     fetch = subscription_formats.SubscriptionFormatTests.fetch
 
     def register(self, hwid="pc"):
@@ -26,7 +29,7 @@ class ClientChannelTests(unittest.TestCase):
             headers={"X-Device-ID": hwid, "X-Client-Name": "Nodera", "X-Device-OS": "windows",
                      "User-Agent": "Nodera/0.0.4 (Windows; Mihomo)"})
 
-    def test_registered_hwid_needs_no_approval_and_command_never_mutates(self):
+    def test_registered_hwid_without_new_routes_does_not_mutate(self):
         device_id = self.register()
         before = deepcopy(self.store)
         with patch.object(manager, "render_client_profile", return_value=("proxies: []", "yaml")) as render, \
@@ -204,3 +207,100 @@ class ClientChannelTests(unittest.TestCase):
         self.store[0]['connections'][-1]['credential']['password'] = 'rotated'
         self.assertEqual(self.command('/' + payload['operation_id']).json()['state'], 'stale')
         self.assertEqual(self.command('/' + payload['operation_id'] + '/decision', {'action': 'accept'}).status_code, 409)
+
+    def test_new_route_is_provisioned_once_and_only_selected_after_client_report(self):
+        import yaml
+        device = self.register()
+        before, _ = manager.render_client_profile(self.store[0], device)
+        calls = self.provision.call_count
+        with patch.object(manager, 'module_is_ready', side_effect=lambda component: component == 'transport-shadowsocks'):
+            candidate = self.request()
+            self.assertEqual(candidate.status_code, 200, candidate.text)
+            data = candidate.json()
+            nodes = yaml.safe_load(data['config'])['proxies']
+            self.assertEqual(len(nodes), 2)
+            self.assertEqual(self.provision.call_count, calls + 1)
+            created = [row for row in self.store[0]['connections'] if row.get('selection_candidate')]
+            self.assertEqual(len(created), 1)
+            self.assertEqual(created[0]['device_id'], device)
+            self.assertEqual(manager.render_client_profile(self.store[0], device)[0], before)
+            self.assertEqual(self.request().json()['config'], data['config'])
+            self.assertEqual(self.provision.call_count, calls + 1)
+        names = [row['name'] for row in nodes]
+        payload = {'operation_id': 'c' * 32, 'revision': data['revision'],
+                   'source_digest': manager.client_channels.digest(yaml.safe_load(data['config'])),
+                   'duration': 30, 'require_udp': False,
+                   'reports': [{'name': name, 'state': 'passed' if i == 1 else 'failed',
+                                'seconds': 30, 'transfers': 3, 'bytes': 786432}
+                               for i, name in enumerate(names)]}
+        prepared = self.command('/prepare', payload)
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        self.assertEqual([row['name'] for row in yaml.safe_load(prepared.json()['config'])['proxies']], [names[1]])
+        suffix = '/' + payload['operation_id'] + '/decision'
+        self.assertEqual(self.command(suffix, {'action': 'accept'}).json()['state'], 'accepted')
+        rolled_back = self.command(suffix, {'action': 'rollback'})
+        self.assertEqual(rolled_back.json()['config'], before)
+        self.assertEqual(manager.render_client_profile(self.store[0], device)[0], before)
+
+    def test_route_inventory_uses_active_bindings_and_installed_running_modules(self):
+        device = self.register()
+        registry = {'schema': 1, 'bindings': [
+            {'state': 'active', 'kind': 'cdn', 'address': 'cdn.example.com'},
+            {'state': 'retired', 'kind': 'tls_relay', 'address': 'retired.example.com'}]}
+        with patch.object(manager.network_routes, 'migrate', return_value=registry), \
+                patch.object(manager, 'module_is_installed', side_effect=lambda module: module == 'transport-reality'), \
+                patch.object(manager, 'module_is_ready', return_value=True), \
+                patch.object(manager, 'validate_connection', side_effect=lambda module, values: values):
+            definitions = manager.client_route_definitions(self.store[0], device)
+        self.assertEqual(len(definitions), 15)
+        self.assertEqual({row['component'] for row in definitions}, {'transport-reality'})
+        self.assertEqual({row['settings']['transport'] for row in definitions if row['settings']['route_mode'] == 'direct'},
+                         {'xhttp', 'raw', 'grpc'})
+        self.assertFalse(any('retired.example.com' in str(row) for row in definitions))
+        self.assertTrue(all(row['device_id'] == device for row in definitions))
+
+    def test_candidate_failure_does_not_save_profile_and_busy_mutations_are_denied(self):
+        self.register()
+        before = deepcopy(self.store)
+        with patch.object(manager, 'component_is_managed', return_value=False):
+            self.assertEqual(self.request().status_code, 409)
+        with patch.object(manager, 'module_is_ready', side_effect=lambda component: component == 'transport-shadowsocks'), \
+                patch.object(manager, 'render_client_profile', side_effect=ValueError('private-secret')), \
+                patch.object(manager, 'save_subscription_profile') as save:
+            response = self.request()
+            self.assertEqual(response.status_code, 409)
+            self.assertNotIn('private-secret', response.text)
+            save.assert_not_called()
+        self.assertEqual(self.store, before)
+
+    def test_extending_catalog_preserves_accepted_routes_and_pending_catalog_is_frozen(self):
+        config, payload, device = self.lifecycle()
+        self.command('/prepare', payload)
+        calls = self.provision.call_count
+        with patch.object(manager, 'module_is_ready', side_effect=lambda component: component == 'transport-shadowsocks'):
+            self.assertEqual(self.request().status_code, 200)
+            self.assertEqual(self.provision.call_count, calls)
+            self.command('/' + payload['operation_id'] + '/decision', {'action': 'accept'})
+            before, _ = manager.render_client_profile(self.store[0], device)
+            candidate = self.request()
+            self.assertEqual(candidate.status_code, 200, candidate.text)
+            self.assertEqual(self.provision.call_count, calls + 1)
+        self.assertEqual(manager.render_client_profile(self.store[0], device)[0], before)
+        self.assertEqual(self.command('/' + payload['operation_id']).json()['state'], 'accepted')
+
+    def test_relay_proposals_and_catalog_size_are_bounded(self):
+        device = self.register()
+        bindings = [{'state': 'active', 'kind': 'cdn', 'address': f'cdn{i}.example.com'} for i in range(20)]
+        with patch.object(manager.network_routes, 'migrate', return_value={'bindings': bindings}), \
+                patch.object(manager, 'module_is_installed', side_effect=lambda module: module == 'transport-reality'), \
+                patch.object(manager, 'module_is_ready', return_value=True), \
+                patch.object(manager, 'validate_connection', side_effect=lambda module, values: values):
+            self.assertEqual(len(manager.client_route_definitions(self.store[0], device)), 63)
+        with patch.object(manager.network_routes, 'migrate', return_value={'bindings': []}), \
+                patch.object(manager, 'relay_connection_control') as relay, \
+                patch.object(manager, 'module_is_installed', side_effect=lambda module: module == 'transport-shadowsocks'), \
+                patch.object(manager, 'module_is_ready', return_value=True), \
+                patch.object(manager, 'validate_connection', side_effect=lambda module, values: values):
+            relay.return_value.read.return_value = {'hosts': [{'id': 'a' * 32}]}
+            proposals = manager.client_route_definitions(self.store[0], device)
+        self.assertTrue(any(row['settings'].get('relay_host_id') == 'a' * 32 for row in proposals))

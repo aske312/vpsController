@@ -12,7 +12,7 @@ import { addressRoleLabels } from "./server-address-state";
 import type { RelayControl } from "./network-relays";
 import { NetworkRelayNotice } from "./network-relays";
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
-import { serverAddressSummary, type RouteSummary } from "./route-summary";
+import { serverAddressSummary } from "./route-summary";
 import { domainRouteKinds, needsAttention, routeEntries, type RouteEntry } from "./route-library-state";
 import { DomainEntryPanel, RelayEntryPanel } from "./route-library-panels";
 import type { NetworkCloudflareControl } from "./network-cloudflare";
@@ -23,6 +23,8 @@ import { useResourceCountries } from "./use-resource-countries";
 import { entryCountryAddresses, entryCountry, resourceCountry } from "./resource-country";
 import { ServerAddressPanel } from "./route-server-panel";
 import { NetworkCdnSettings } from "./network-cdn-settings";
+import { RouteStatusCard } from "./route-status-card";
+import { relayAddresses } from "./relay-state";
 
 type Props = { status: NetworkStatus | null; relay: RelayControl; addresses: ReturnType<typeof useNetworkAddresses>; request: NetworkRequest; listState: NetworkListState; onListStateChange: (state: NetworkListState) => void; busy: boolean; failed: boolean; endpointDirty: boolean; onRemove: (kind: NetworkEndpointCheck["kind"], address: string) => void; add: ReactNode; onRefresh?: () => void; cloudflare?: NetworkCloudflareControl; refreshKey: number };
 
@@ -44,13 +46,22 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
     <header className="routeLibraryHeader"><div><h2>Точки входа</h2></div><div className="routeLibraryHeaderActions">{add}</div></header>
 
     <NetworkRelayNotice relay={relay} />
-    <div className="networkProviderGrid routeLibraryList">{entryPagination.items.map(entry => <RouteStatusCard key={entry.id} title={entry.title} subtitle={entry.kind === "relay" ? entry.address : entry.subtitle} icon={entryIcon(entry)} country={entryCountry(entry, locations)} cdn={entry.kind === "domain" && domainRouteKinds(entry).includes("cdn")} summary={entry.summary} onOpen={() => open(entry.id)} facts={entry.kind === "relay" ? <><span>Маршрутов: {entry.host.routes.length}</span><span>{entry.host.version ? `Agent ${entry.host.version}` : "Версия Agent неизвестна"}</span></> : <span>{entry.summary.connection}</span>} />)}</div>
+    <div className="routeLibraryList">{entryPagination.items.map(entry => <RouteStatusCard key={entry.id} title={entry.title} address={entry.address} types={entryTypes(entry)} icon={entryIcon(entry)} country={entryCountry(entry, locations)} cdn={entry.kind === "domain" && domainRouteKinds(entry).includes("cdn")} summary={entry.summary} onOpen={() => open(entry.id)} details={entry.kind === "relay" ? [
+      { label: "Пересылки", value: entry.summary.connection },
+      { label: "Адресов", value: String(relayAddresses(entry.host).length) },
+    ] : [
+      { label: "Доставка", value: entry.summary.connection },
+      { label: "IP в DNS", value: entry.domain.resolved.length ? entry.domain.resolved.slice(0, 2).join(" · ") + (entry.domain.resolved.length > 2 ? ` · ещё ${entry.domain.resolved.length - 2}` : "") : "Не определён" },
+    ]} />)}</div>
     <RoutePagination {...entryPagination} label="Точки входа" onChange={setEntryPage} />
     {!entries.length && <div className="routeLibraryEmpty"><strong>{relay.reading && !relay.status ? "Загружаем адреса…" : "Добавьте первую точку входа"}</strong><p>Подключите Relay или добавьте домен.</p></div>}
     <section className="routeLibraryServer" aria-label="Адреса этого сервера"><header><h3>Адреса этого сервера <small>{addresses.status?.items.length ?? "…"}</small></h3></header>
       {serverProblem && <div className="routeLibraryCallout" role="status"><p>{addresses.pending ? "Проверяем результат назначения IP. Команда не повторяется." : "Актуальность адресов не подтверждена."}</p><button type="button" disabled={addresses.reading} onClick={() => void addresses.load()}>Проверить состояние</button></div>}
       {!addresses.status && <p>Определяем адреса…</p>}
-      <div className="networkProviderGrid routeServerGrid">{ipPagination.items.map(row => <RouteStatusCard key={row.address} title={row.address} subtitle={`${row.family === "ipv4" ? "IPv4" : "IPv6"} · ${addressRoleLabels[row.role]}`} icon="ip" summary={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending))} onOpen={() => open(`SERVER-${row.address}`)} facts={<span>{row.role === "primary" ? "Для новых подключений" : row.role === "reserve" ? "Резервный адрес" : row.presence === "present" && !serverProblem ? "Можно назначить основным" : "Назначение недоступно"}</span>} />)}
+      <div className="routeServerGrid">{ipPagination.items.map(row => <RouteStatusCard key={row.address} title={row.address} types={[row.family === "ipv4" ? "IPv4" : "IPv6", addressRoleLabels[row.role]]} icon="ip" summary={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending))} onOpen={() => open(`SERVER-${row.address}`)} details={[
+        { label: "Интерфейс", value: row.interfaces.join(", ") || "Не подтверждён" },
+        { label: "Назначение", value: row.role === "primary" ? "Для новых подключений" : row.role === "reserve" ? "Резервный адрес" : row.presence === "present" && !serverProblem ? "Можно назначить основным" : "Назначение недоступно" },
+      ]} />)}
       </div>
       <RoutePagination {...ipPagination} label="Адреса этого сервера" onChange={setIpPage} />
     </section>
@@ -73,13 +84,10 @@ function entryIcon(entry: RouteEntry): RouteIconKind {
   return kinds.length === 1 ? ({ cdn: "cdn", tls_relay: "tls", udp_relay: "udp" } as const)[kinds[0]] : "domain";
 }
 
-function RouteStatusCard({ title, subtitle, icon, country, cdn, summary, onOpen, facts }: { title: string; subtitle: string; icon: RouteIconKind; country?: ReturnType<typeof resourceCountry>; cdn?: boolean; summary: RouteSummary; onOpen: () => void; facts: ReactNode }) {
-  return <button type="button" className="networkProvider routeLibraryRow" data-state={summary.state} aria-haspopup="dialog" onClick={onOpen} aria-label={`Открыть ${title}`}>
-    <span className="networkProviderCode routeCardIcon"><RouteResourceIcon kind={icon} country={country} cdn={cdn} /></span>
-    <span className="networkProviderText"><strong title={title}>{title}</strong><small title={subtitle}>{subtitle}</small><NetworkRouteSummaryBadge summary={summary} /></span>
-    <span className="networkProviderIndicator" aria-hidden="true" />
-    <span className="routeCardFacts">{facts}</span>
-  </button>;
+function entryTypes(entry: RouteEntry): string[] {
+  if (entry.kind === "relay") return ["Relay"];
+  const kinds = domainRouteKinds(entry);
+  return kinds.length ? kinds.map(kind => ({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[kind]) : ["Домен"];
 }
 
 function RouteControlDialog({ title, address, subtitle, type, icon, country, cdn, badge, close, children }: { title: string; address: string; subtitle: string; icon: RouteIconKind; country?: ReturnType<typeof resourceCountry>; cdn?: boolean; type: "relay" | "domain" | "server"; badge: ReactNode; close: () => void; children: ReactNode }) {

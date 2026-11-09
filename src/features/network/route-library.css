@@ -23,12 +23,36 @@
 [data-network-page] .routeLibraryHeader h2 { margin:0; color:var(--text); font-size:18px; font-weight:600; letter-spacing:-.015em; }
 [data-network-page] .routeLibraryHeader p:last-child { margin:7px 0 0; color:var(--muted); font-size:13px; }
 [data-network-page] .routeLibraryHeaderActions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:10px; }
-[data-network-page] .routeLibraryList, [data-network-page] .routeServerGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(304px,100%),1fr)); gap:10px; padding:12px 18px; }
-[data-network-page] .routeLibraryRow { width:100%; height:144px; grid-template-rows:minmax(0,1fr) auto; padding:14px; cursor:pointer; font-family:var(--ui-font); }
+[data-network-page] .routeLibraryList, [data-network-page] .routeServerGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr)); gap:14px; padding:12px 18px 18px; align-items:stretch; }
+[data-network-page] .routeLibraryRow { display:flex; flex-direction:column; gap:16px; min-width:0; width:100%; min-height:224px; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel-inset); color:var(--text); text-align:left; cursor:pointer; font-family:var(--ui-font); transition:border-color .15s,background .15s; }
+[data-network-page] .routeLibraryRow:hover { border-color:var(--cyan); background:color-mix(in srgb,var(--cyan) 3%,var(--panel-inset)); }
 [data-network-page] .routeLibraryRow:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
-[data-network-page] .routeLibraryRow .networkProviderText { gap:6px; }
-[data-network-page] .routeLibraryRow .networkProviderText strong { font-size:13px; }
-[data-network-page] .routeLibraryRow .networkProviderText small { font-size:11px; }
+[data-network-page] .routeCardHeading { display:flex; align-items:center; gap:10px; min-width:0; }
+[data-network-page] .routeCardIcon { display:grid; place-items:center; flex:0 0 36px; height:36px; border:1px solid var(--line); border-radius:9px; background:var(--panel); }
+[data-network-page] .routeCardTypes { display:flex; flex-wrap:wrap; gap:6px; min-width:0; color:var(--muted); font:500 11px/1.4 var(--ui-font); }
+[data-network-page] .routeCardTypes > span { padding:3px 7px; border:1px solid var(--line); border-radius:5px; overflow-wrap:anywhere; }
+[data-network-page] .routeLibraryRow[data-kind=relay] .routeCardTypes > span { color:var(--violet); }
+[data-network-page] .routeLibraryRow[data-kind=tls] .routeCardTypes > span { color:var(--green); }
+[data-network-page] .routeLibraryRow[data-kind=udp] .routeCardTypes > span { color:var(--amber); }
+[data-network-page] .routeLibraryRow[data-kind=cdn] .routeCardTypes > span { color:var(--cyan); }
+[data-network-page] .routeCardIdentity { display:grid; gap:6px; min-width:0; }
+[data-network-page] .routeCardIdentity strong { display:block; color:var(--text); font:600 16px/1.5 var(--ui-font); overflow-wrap:anywhere; word-break:normal; }
+[data-network-page] .routeLibraryRow:not([data-kind=relay]) .routeCardIdentity strong { font-family:var(--technical-font); font-size:15px; font-weight:500; }
+[data-network-page] .routeCardIdentity code { display:block; color:var(--muted); font:400 13px/1.5 var(--technical-font); overflow-wrap:anywhere; }
+[data-network-page] .routeCardFacts { display:grid; gap:9px; min-width:0; margin-top:auto; }
+[data-network-page] .routeCardFact { display:grid; grid-template-columns:84px minmax(0,1fr); align-items:baseline; gap:12px; min-width:0; font:400 12px/1.5 var(--ui-font); }
+[data-network-page] .routeCardFact > span:first-child { color:var(--dim); }
+[data-network-page] .routeCardFact > span:last-child { min-width:0; color:var(--muted); overflow-wrap:anywhere; }
+[data-network-page] .routeCardFooter { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding-top:14px; border-top:1px solid var(--line); }
+[data-network-page] .routeCardStatus { display:flex; align-items:center; gap:7px; min-width:0; }
+[data-network-page] .routeCardStatusDot { width:6px; height:6px; border-radius:50%; flex:0 0 6px; background:var(--dim); }
+[data-network-page] .routeCardOpen { display:flex; align-items:center; gap:7px; margin-left:auto; color:var(--dim); font:400 11px/1.4 var(--ui-font); }
+[data-network-page] .routeLibraryRow:hover .routeCardOpen { color:var(--cyan); }
+[data-network-page] .routeLibraryRow .networkRouteStatus { min-width:0; padding:0; border:0; background:none; white-space:normal; overflow-wrap:anywhere; font:500 12px/1.5 var(--ui-font); }
+[data-network-page] .routeLibraryRow[data-state=verified] .routeCardStatusDot { background:var(--green); }
+[data-network-page] .routeLibraryRow:is([data-state=connected],[data-state=listening],[data-state=present]) .routeCardStatusDot { background:var(--cyan); }
+[data-network-page] .routeLibraryRow:is([data-state=warning],[data-state=stale],[data-state=pending]) .routeCardStatusDot { background:var(--amber); }
+[data-network-page] .routeLibraryRow[data-state=error] .routeCardStatusDot { background:var(--red); }
 [data-network-page] .routeTypeIcon { display:block; flex-shrink:0; width:1em; height:1em; font-size:22px; }
 [data-network-page] .routeTypeIcon[data-kind=relay] { color:var(--violet); }
 [data-network-page] .routeTypeIcon[data-kind=cdn] { color:var(--cyan); }
@@ -40,20 +64,6 @@
 [data-network-page] .routeResourceIcon { display:grid; place-items:center; width:100%; height:100%; }
 [data-network-page] .routeResourceIcon .gateCountryFlag { flex:none; width:clamp(24px,2.2vw,32px); height:auto; aspect-ratio:3/2; margin:0; }
 [data-network-page] .routeResourceIcon .gateCountryFlag.unknown { width:auto; height:auto; aspect-ratio:auto; padding:0; border:0; background:none; overflow:visible; }
-[data-network-page] .routeLibraryRow { grid-template-columns:40px minmax(0,1fr) 8px; align-items:start; column-gap:12px; }
-[data-network-page] .routeLibraryRow .routeCardIcon { align-self:start; min-height:40px; margin-top:2px; border:1px solid var(--line); border-radius:10px; background:var(--panel-inset); color:var(--cyan); }
-[data-network-page] .routeLibraryRow .networkProviderText { align-self:start; }
-[data-network-page] .routeLibraryRow .networkProviderText strong { line-height:20px; }
-[data-network-page] .routeLibraryRow .networkProviderText small { line-height:16px; }
-[data-network-page] .routeLibraryRow .networkProviderIndicator { margin-top:8px; }
-[data-network-page] .routeCardFacts { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; grid-column:1/-1; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font:400 11px/1.4 var(--ui-font); }
-[data-network-page] .routeCardFacts > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-[data-network-page] .routeCardFacts { align-items:baseline; align-self:end; }
-[data-network-page] .routeLibraryRow .networkRouteStatus { justify-self:start; padding:0; border:0; background:none; font:500 11px/1.4 var(--ui-font); }
-[data-network-page] .routeLibraryRow[data-state=verified] .networkProviderIndicator { border-color:var(--green); background:var(--green); }
-[data-network-page] .routeLibraryRow:is([data-state=connected],[data-state=listening],[data-state=present]) .networkProviderIndicator { border-color:var(--cyan); background:var(--cyan); }
-[data-network-page] .routeLibraryRow:is([data-state=warning],[data-state=stale],[data-state=pending]) .networkProviderIndicator { border-color:var(--amber); background:var(--amber); }
-[data-network-page] .routeLibraryRow[data-state=error] .networkProviderIndicator { border-color:var(--red); background:var(--red); }
 [data-network-page] .routeLibraryEmpty { padding:40px 24px; text-align:center; }
 [data-network-page] .routeLibraryEmpty strong { color:var(--text); font-size:14px; font-weight:500; }
 [data-network-page] .routeLibraryEmpty p { color:var(--muted); font-size:13px; }

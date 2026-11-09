@@ -4,9 +4,6 @@
 маршрутизация и подписки Mihomo с модулями WireGuard, AmneziaWG,
 Shadowsocks, Xray, Hysteria2 и TUIC.
 
-PRO управляет VPN-подключениями через подписки Mihomo: правила, Relay, CDN, DNS
-и маршрутизация профилей. Отдельные Direct-подключения относятся к редакции Light.
-
 ## Требования
 
 - Ubuntu Server 22.04, 24.04, 26.04 или Debian 12/13;
@@ -43,9 +40,6 @@ sudo vps-control uninstall --yes
 ## Документация
 
 - [Подключение клиентских устройств](docs/CONNECTION_GUIDE.md)
-- [Лимиты подписок](docs/SUBSCRIPTION_LIMITS.md)
-- [Диагностика Relay](docs/RELAY_DIAGNOSTICS.md)
-- [Восстановление настроек защиты](docs/SECURITY_RECOVERY.md)
 - [Приватность](docs/PRIVACY_POLICY.md) · [Условия использования](docs/TERMS_OF_USE.md)
 
 Лицензия [MIT](LICENSE).

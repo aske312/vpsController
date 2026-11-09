@@ -14,6 +14,22 @@ from dns_routing import domain_dns_routes, mihomo_route_dns
 
 
 class RouteDnsTests(unittest.TestCase):
+    def test_max_and_russian_resources_resolve_directly_before_application_vpn(self):
+        item = profile()
+        item['routing'] = {'route_dns': True, 'direct_ru_sites': True,
+                           '_personal_rule_lines': ['PROCESS-NAME,chrome.exe,GATE.312']}
+        # Exercise the ordered routing-to-DNS mapping with an application-wide
+        # VPN rule present: the domain bypass must be known before that rule.
+        rules = manager.profile_rules(item['routing'])
+        policy = mihomo_route_dns(self.settings, rules, manager.MIHOMO_PROXY_GROUP)['nameserver-policy']
+        for domain in ('max.ru', 'oneme.ru', 'okcdn.ru', 'vkuser.net', 'rustore.team', 'tamtam.chat'):
+            with self.subTest(domain=domain):
+                # The earlier .ru suffix deliberately subsumes its children.
+                labels = domain.split('.')
+                candidates = [domain] + ['.' + '.'.join(labels[index:]) for index in range(len(labels))]
+                resolver = next(policy[key] for key in candidates if key in policy)
+                self.assertEqual(resolver, [self.settings['direct_nameserver'] + '#DIRECT'])
+
     def test_vk_portal_uses_direct_dns_with_direct_vk_routes(self):
         item = profile()
         item['routing'] = {'route_dns': True, 'direct_ru_sites': True}
