@@ -8,7 +8,7 @@ import * as chatFiles from '../../src/features/assistant/chat-files.ts';
 import * as answerFormat from '../../src/features/assistant/answer-format.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
-function mount(mode, status, catalog = []) {
+function mount(status, catalog = []) {
   const slots = [], effects = [], writes = [];
   let cursor = 0;
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
@@ -33,8 +33,12 @@ function mount(mode, status, catalog = []) {
   const requireActual = createRequire(import.meta.url), exported = {};
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
-  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const settings = {};
+  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+  const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
+  const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  new Function('require', 'exports', compiledSettings.outputText)(require, settings);
   new Function('require', 'exports', outputText)(require, exported);
   const request = async (path, options) => {
     if (path === '/assistant/models') return { models: catalog };
@@ -42,12 +46,19 @@ function mount(mode, status, catalog = []) {
     if (path === '/assistant/chat') return { result: { answer: 'OK', tools_used: [] } };
     return status;
   };
-  const props = { mode, request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {} };
+  const props = { request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
   return { writes, render() {
     cursor = 0;
     const tree = exported.AssistantView(props);
+    const expand = node => {
+      if (Array.isArray(node)) return node.map(expand);
+      if (!node?.props) return node;
+      if (node.type === settings.NoderaSettings) return expand(node.type(node.props));
+      return { ...node, props: { ...node.props, children: expand(node.props.children) } };
+    };
+    const expanded = expand(tree);
     for (const effect of effects.splice(0)) effect();
-    return tree;
+    return expanded;
   } };
 }
 function nodes(tree, predicate, disabled = false) {
@@ -65,32 +76,34 @@ function fixture() {
 }
 
 test('AI settings can be edited and submitted while NoderaBot is running', async () => {
-  const view = mount('agent', fixture());
+  const view = mount(fixture());
   view.render(); await Promise.resolve();
   let tree = view.render();
-  const url = nodes(tree, n => n.type === 'input' && n.props.type === 'url')[0];
-  assert.equal(url.disabled, false);
-  url.node.props.onChange({ target: { value: 'https://provider.example/v1' } });
+  assert.equal(nodes(tree, n => n.type === 'h1').length, 0);
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Подключения')[0].node.props.onClick();
   tree = view.render();
   const toggle = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox')[0];
   assert.equal(toggle.disabled, false);
   toggle.node.props.onChange({ target: { checked: true } });
   tree = view.render();
-  assert.equal(nodes(tree, n => n.type === 'button' && n.props.type === 'submit')[0].disabled, false);
-  await nodes(tree, n => n.type === 'form')[0].node.props.onSubmit({ preventDefault() {} });
+  const save = nodes(tree, n => n.type === 'button' && n.props.children === 'Сохранить')[0];
+  assert.equal(save.disabled, false);
+  save.node.props.onClick();
+  await Promise.resolve();
   assert.equal(view.writes.length, 1);
-  assert.equal(view.writes[0].component, 'ai-agent');
-  assert.equal(view.writes[0].provider_url, 'https://provider.example/v1');
+  assert.equal(view.writes[0].component, 'nodera');
   assert.equal(view.writes[0].modules['ai-agent'], true);
   assert.equal(view.writes[0].bot_token, null);
 });
 
 test('running NoderaBot still locks its own token and enable switch', async () => {
-  const view = mount('bot', fixture());
+  const view = mount(fixture());
   view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Telegram')[0].node.props.onClick();
   const tree = view.render();
-  assert.equal(nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox')[0].disabled, true);
-  assert.equal(nodes(tree, n => n.type === 'fieldset')[0].disabled, true);
+  const toggles = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox');
+  assert.equal(toggles[0].disabled, false);
+  assert.equal(toggles[1].disabled, true);
 });
 
 test('catalog mode loads any number of models and sends the chat selection without changing settings', async () => {
@@ -99,7 +112,7 @@ test('catalog mode loads any number of models and sends the chat selection witho
     provider_url: 'https://api.nyxos.shop/v1', modules: { 'ai-agent': true, 'nodera-bot': true } });
   Object.assign(status.modules[0], { enabled: true, configured: true });
   const models = Array.from({ length: 250 }, (_, i) => `model-${i}`);
-  const view = mount('agent', status, models);
+  const view = mount(status, models);
   view.render(); await Promise.resolve(); view.render(); await Promise.resolve();
   let tree = view.render();
   const selector = nodes(tree, n => n.type === 'button' && n.props['aria-label'] === 'Модель для запроса')[0];

@@ -56,6 +56,23 @@ class ComponentRegistryTests(unittest.TestCase):
                     self.assertEqual(component_registry.main(), 0)
                 self.assertEqual(output.getvalue().strip(), "existing" if owned else "fresh")
 
+    def test_nodera_preserves_legacy_ownership_without_claiming_an_unmanaged_runtime(self):
+        original_exists = Path.exists
+        self.registry.write_receipt("ai-agent", "installed")
+        units = {"vps-control-ai-agent.service"}
+        def exists(path):
+            if str(path.parent).replace("\\", "/").endswith("/etc/systemd/system"):
+                return path.name in units
+            if "/var/lib/vps-control-" in str(path).replace("\\", "/"):
+                return False
+            return original_exists(path)
+        with patch.object(Path, "exists", exists):
+            self.assertEqual(self.registry.management("nodera")["state"], "managed")
+            units.add("vps-control-nodera-bot.service")
+            self.assertEqual(self.registry.management("nodera")["state"], "unmanaged")
+            self.registry.write_receipt("nodera-bot", "installed")
+            self.assertEqual(self.registry.management("nodera")["state"], "managed")
+
     def test_changed_config_or_failed_backup_never_grants_control(self):
         self.config.write_text("changed")
         with self.assertRaises(RegistryError):

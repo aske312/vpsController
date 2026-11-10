@@ -1,0 +1,88 @@
+{
+  "id": "nodera",
+  "name": "Nodera",
+  "version": "1.0.0",
+  "installable": true,
+  "description": "AI, Telegram, MCP.",
+  "category": "assistant",
+  "category_name": "AI",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "python3-venv",
+    "ca-certificates"
+  ],
+  "minimum_free_mb": 384,
+  "requires_kernel_headers": false,
+  "service": "vps-control-ai-agent.service",
+  "removable": true,
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/systemd/system/vps-control-ai-agent.service"
+      },
+      {
+        "path": "/var/lib/vps-control-ai-agent/venv/bin/python"
+      },
+      {
+        "path": "/var/lib/vps-control-ai-agent/runner.py"
+      },
+      {
+        "path": "/var/lib/vps-control-ai-agent/version"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-nodera-bot.service"
+      },
+      {
+        "path": "/var/lib/vps-control-nodera-bot/venv/bin/python"
+      },
+      {
+        "path": "/var/lib/vps-control-nodera-bot/bot.py"
+      },
+      {
+        "path": "/var/lib/vps-control-nodera-bot/version"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "{data_dir}/assistant"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-ai-agent.service"
+      },
+      {
+        "path": "/var/lib/vps-control-ai-agent/version"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-nodera-bot.service"
+      },
+      {
+        "path": "/var/lib/vps-control-nodera-bot/version"
+      },
+      {
+        "path": "/var/lib/vps-control-nodera"
+      },
+      {
+        "path": "/var/lib/private/vps-control-nodera"
+      },
+      {
+        "path": "/var/lib/vps-control-ai-agent/nodera-version"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "{data_dir}/assistant"
+      },
+      {
+        "path": "/var/lib/vps-control-nodera"
+      },
+      {
+        "path": "/var/lib/private/vps-control-nodera"
+      }
+    ]
+  }
+}

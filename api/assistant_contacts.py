@@ -61,17 +61,19 @@ def observed(api, settings):
 def remember(api, settings, contact, actor):
     if str(contact.telegram_id) != actor or contact.is_bot:
         raise HTTPException(403, 'Контакт не соответствует отправителю')
+    user = next((a for a in settings['accounts'] if a['telegram_id'] == contact.telegram_id), {})
+    access = {'admin': bool(user.get('bot_access')), 'chat': bool(user.get('bot_access') or user.get('bot_chat_access'))}
     with control.operations.locked(api.DATA_DIR):
         known = observed(api, settings)
         previous = next((row for row in known if row['telegram_id'] == contact.telegram_id), None)
         if previous and previous['username'] == contact.username and previous['name'] == contact.name and time.time() - previous['seen_at'] < 3600:
-            return {'admin': any(a['telegram_id'] == contact.telegram_id and a.get('bot_access') for a in settings['accounts'])}
+            return access
         rows = [row for row in known if row['telegram_id'] != contact.telegram_id
                 and (not contact.username or row['username'] != contact.username)]
         rows.append({'telegram_id': contact.telegram_id, 'username': contact.username,
                      'name': contact.name, 'seen_at': int(time.time())})
         control.operations.atomic_json(path(api, settings), {'items': rows[-MAX_CONTACTS:]})
-    return {'admin': any(a['telegram_id'] == contact.telegram_id and a.get('bot_access') for a in settings['accounts'])}
+    return access
 
 
 def telegram_chat(token, identity):

@@ -1846,7 +1846,7 @@ release_protocol_ports() {
 
 install_protocol_image() {
   local image_id="${2:-}"
-  [[ "${image_id}" == "mihomo" || "${image_id}" == "ai-agent" || "${image_id}" == "nodera-bot" ]] || die "Отдельные модули Direct удалены; используйте Mihomo."
+  [[ "${image_id}" == "mihomo" || "${image_id}" == "nodera" ]] || die "Отдельные модули Direct удалены; используйте Mihomo."
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
   local image_dir="${INSTALL_DIR}/protocol-images"
   local manifest=""
@@ -1879,7 +1879,7 @@ PY
   installation_kind="$(DATA_DIR="${DATA_DIR}" WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
     python3 "${INSTALL_DIR}/api/component_registry.py" check-install --manifest "${manifest}" --data-dir "${DATA_DIR}")" \
     || die "компонент не разрешён к установке; проверьте принятие под управление в панели."
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then
+  if [[ "${image_id}" != "nodera" ]]; then
     prepare_protocol_ports "${image_id}"
     RESERVED_PROTOCOL_IMAGE="${image_id}"
   fi
@@ -1888,7 +1888,7 @@ PY
     || die "preflight модуля ${image_id} не пройден; установка не запускалась."
   apt-get -o DPkg::Lock::Timeout=300 check \
     || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then refresh_protocol_api_access; fi
+  if [[ "${image_id}" != "nodera" ]]; then refresh_protocol_api_access; fi
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
   DATA_DIR="${DATA_DIR}" WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
     python3 "${INSTALL_DIR}/api/component_registry.py" begin-install --manifest "${manifest}" --data-dir "${DATA_DIR}" \
@@ -1926,22 +1926,23 @@ PY
       CURRENT_ACTION=""
       die "не удалось установить ${image_id}; журнал: ${module_log}"
   fi
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg; fi
+  if [[ "${image_id}" != "nodera" ]]; then install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg; fi
   if [[ "${image_id}" == "wg" || "${image_id}" == "awg" ]]; then
     configure_vpn_firewall_policy
   fi
   # Protocol status/configuration is read live; installation does not change
   # the API code or environment and does not require an API restart.
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then sync_protocol_monitor; fi
+  if [[ "${image_id}" != "nodera" ]]; then sync_protocol_monitor; fi
   python3 "${INSTALL_DIR}/api/component_registry.py" record-install --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "компонент установлен, но запись управления не сохранена; проверьте состояние в панели."
   ok "Образ ${image_id} установлен."
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then release_protocol_ports "${image_id}"; fi
+  if [[ "${image_id}" != "nodera" ]]; then release_protocol_ports "${image_id}"; fi
   RESERVED_PROTOCOL_IMAGE=""
 }
 
 remove_protocol_image() {
   local image_id="${2:-}"
+  [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]] || die "Используйте компонент Nodera."
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
   local manifest
   manifest="$(find "${INSTALL_DIR}/protocol-images" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print | while read -r candidate; do
@@ -1956,14 +1957,17 @@ remove_protocol_image() {
   info "Удаление установленного протокола ${image_id}"
   python3 "${INSTALL_DIR}/api/component_registry.py" check-managed --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "сначала примите компонент под управление в панели."
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then refresh_protocol_api_access; fi
+  if [[ "${image_id}" == "nodera" ]]; then
+    python3 "${INSTALL_DIR}/api/component_registry.py" begin-install --manifest "${manifest}" --data-dir "${DATA_DIR}"
+  fi
+  if [[ "${image_id}" != "nodera" ]]; then refresh_protocol_api_access; fi
   DATA_DIR="${DATA_DIR}" INSTALL_DIR="${INSTALL_DIR}" ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then release_protocol_ports "${image_id}"; fi
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg; fi
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then sync_protocol_monitor; fi
+  if [[ "${image_id}" != "nodera" ]]; then release_protocol_ports "${image_id}"; fi
+  if [[ "${image_id}" != "nodera" ]]; then install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg; fi
+  if [[ "${image_id}" != "nodera" ]]; then sync_protocol_monitor; fi
   WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
     python3 "${INSTALL_DIR}/api/component_registry.py" record-removal --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "компонент удалён; не удалось отметить сохранённые данные."
@@ -1972,6 +1976,7 @@ remove_protocol_image() {
 
 purge_protocol_data() {
   local image_id="${2:-}" manifest
+  [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]] || die "Используйте компонент Nodera."
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
   manifest="$(python3 - "${INSTALL_DIR}/protocol-images" "${image_id}" <<'PY'
 import json, sys
@@ -2008,6 +2013,11 @@ cleanup_direct() {
 }
 
 update_protocol_image() {
+  [[ "${2:-}" != "ai-agent" && "${2:-}" != "nodera-bot" ]] || die "Используйте компонент Nodera."
+  if [[ "${2:-}" == "nodera" ]]; then
+    install_protocol_image "$@"
+    return
+  fi
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
   local image_dir="${INSTALL_DIR}/protocol-images"
@@ -2066,7 +2076,7 @@ update_protocol_image() {
   if [[ "${image_id}" == "mihomo" ]]; then
     systemctl restart vps-control-mihomo-manager.service
   fi
-  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then sync_protocol_monitor; fi
+  sync_protocol_monitor
   ok "Образ ${image_id} обновлён."
 }
 
@@ -2727,6 +2737,8 @@ PY
     service="${service_template/\{interface\}/${interface_value}}"
     [[ -n "${service}" ]] || continue
     if [[ "${image_id}" == "ai-agent" || "${image_id}" == "nodera-bot" ]]; then
+      continue # Nodera owns both internal runtimes.
+    elif [[ "${image_id}" == "nodera" ]]; then
       python3 "${INSTALL_DIR}/api/component_registry.py" check-managed --manifest "${manifest}" --data-dir "${DATA_DIR}" >/dev/null 2>&1 || continue
     else
       systemctl is-enabled --quiet "${service}" 2>/dev/null || continue
@@ -2759,7 +2771,7 @@ uninstall_app() {
     rm -f -- "${relay_private_unit}"
   done
   cleanup_installed_protocol_images
-  if [[ -f "${DATA_DIR}/components/nodera-bot/receipt.json" ]]; then
+  if [[ -f "${DATA_DIR}/components/nodera/receipt.json" || -f "${DATA_DIR}/components/nodera-bot/receipt.json" ]]; then
     rm -rf -- /var/lib/vps-control-nodera /var/lib/private/vps-control-nodera
   fi
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true

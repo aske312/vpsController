@@ -37,6 +37,24 @@ class ProviderCatalogTests(unittest.TestCase):
                 self.assertNotIn('secret-key', str(caught.exception))
                 factory.return_value.close.assert_called_once()
 
+    def test_optional_quota_returns_only_bounded_numeric_fields_from_the_same_origin(self):
+        response = MagicMock(status=200)
+        response.read.return_value = json.dumps({'data': {'object': 'token_usage',
+            'total_available': 0, 'unlimited_quota': False, 'name': 'private-name',
+            'user_quota': {'total_available': 321}}}).encode()
+        with patch.object(provider, 'PublicHTTPSConnection') as factory:
+            connection = factory.return_value
+            connection.getresponse.return_value = response
+            self.assertIsNone(provider.token_quota('https://provider.example/custom/v1', 'private-key'))
+            factory.assert_not_called()
+            self.assertEqual(provider.token_quota('https://provider.example/v1', 'private-key'),
+                             {'remaining': 0, 'unlimited': False, 'account_remaining': 321})
+            connection.request.assert_called_once_with('GET', '/api/usage/token/', headers={
+                'Authorization': 'Bearer private-key', 'Accept': 'application/json'})
+            response.status = 302
+            self.assertIsNone(provider.token_quota('https://provider.example/v1', 'private-key'))
+            self.assertEqual(connection.request.call_count, 2)
+
     def test_private_or_mixed_dns_answers_are_rejected_before_opening_socket(self):
         public = (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 443))
         private = (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('127.0.0.1', 443))

@@ -22,6 +22,10 @@ from pathlib import Path
 _lock = threading.RLock()
 MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024
 MAX_SNAPSHOT_FILES = 5000
+NODERA_SERVICES = {
+    "ai-agent": "vps-control-ai-agent.service",
+    "nodera-bot": "vps-control-nodera-bot.service",
+}
 
 
 class RegistryError(ValueError):
@@ -121,12 +125,34 @@ class ComponentRegistry:
     def management(self, image_id: str) -> dict:
         try:
             receipt = self.receipt(image_id)
+            if not receipt and image_id == "nodera":
+                receipt = self.nodera_predecessors()
         except RegistryError as exc:
             return {"state": "unknown", "reason": str(exc)}
         if not receipt:
             return {"state": "unmanaged", "reason": "Нужно явное принятие под управление; доступны просмотр и диагностика"}
         return {"state": "managed", "origin": receipt["origin"], "accepted_at": receipt.get("accepted_at"),
                 "retained": receipt.get("retained", False), "backup_id": receipt.get("backup_id"), "reason": "Компонент принят под управление"}
+
+    def nodera_predecessors(self):
+        """Carry forward existing ownership only for panel-managed runtimes."""
+        owned = []
+        detected = False
+        for component, unit in NODERA_SERVICES.items():
+            receipt = self.receipt(component)
+            runtime = Path("/var/lib", "vps-control-" + component)
+            present = (Path("/etc/systemd/system", unit).exists()
+                       or any((runtime / item).exists() for item in ("version", "runner.py", "bot.py", "venv/bin/python")))
+            if present and (not receipt or receipt.get("retained")):
+                return None
+            detected |= present
+            if receipt:
+                owned.append(receipt)
+        if owned and detected:
+            return {**owned[0], "retained": False}
+        if owned and all(receipt.get("retained") for receipt in owned):
+            return {**owned[0], "retained": True}
+        return None
 
     def require_managed(self, image_id: str, *, allow_retained=False) -> None:
         management = self.management(image_id)
@@ -216,6 +242,8 @@ class ComponentRegistry:
             ensure_stopped()
             backups = self.data_dir / "component-backups" / component_id(image_id)
             targets = list(dict.fromkeys([*paths, backups]))
+            if image_id == "nodera":
+                targets.extend(self.data_dir / "component-backups" / key for key in NODERA_SERVICES)
             if not paths:
                 raise RegistryError("Образ не описывает данные для полной очистки")
             for target in targets:
@@ -249,7 +277,10 @@ class ComponentRegistry:
                     temporary.replace(client_file)
                 finally:
                     temporary.unlink(missing_ok=True)
-            self.receipt_path(image_id).unlink()
+            self.receipt_path(image_id).unlink(missing_ok=image_id == "nodera")
+            if image_id == "nodera":
+                for key in NODERA_SERVICES:
+                    self.receipt_path(key).unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -273,6 +304,8 @@ def main() -> int:
                 if any((Path("/sys/class/net") / name).exists() for name in interfaces):
                     raise RegistryError("Сетевой интерфейс компонента ещё существует; данные не очищены")
                 units = {manifest.get("service", "").replace("{interface}", interface)}
+                if image_id == "nodera":
+                    units.update(NODERA_SERVICES.values())
                 patterns = ["vps-control-shadowsocks@*.service"] if image_id == "shadowsocks" else []
                 if image_id == "mihomo":
                     patterns = ["vps-control-mihomo-*.service", "vps-control-mihomo-*.target"]
@@ -282,7 +315,7 @@ def main() -> int:
                     units.update(line.split()[0] for line in response.stdout.splitlines() if line.strip())
                 for unit in units:
                     observed = observe_service(unit)
-                    if observed["unit_present"] is not False and observed["state"] not in {"inactive", "failed"}:
+                    if observed["unit_present"] is not False and (image_id == "nodera" or observed["state"] not in {"inactive", "failed"}):
                         raise RegistryError("Компонент запущен или его состояние неизвестно; данные не очищены")
             registry.purge(image_id, paths_from_manifest(manifest, interface, args.manifest.parents[2], args.data_dir, kind="data_paths"), ensure_stopped)
         elif args.action == "check-managed":
@@ -290,9 +323,11 @@ def main() -> int:
         elif args.action in {"record-install", "record-removal"}:
             if args.action == "record-removal":
                 interface = os.getenv(manifest.get("interface_env", ""), {"wg": "wg0", "awg": "awg0"}.get(image_id, ""))
-                unit = observe_service(manifest.get("service", "").replace("{interface}", interface))
-                if unit["unit_present"] is not False and unit["state"] not in {"inactive", "failed"}:
-                    raise RegistryError("Остановка компонента не подтверждена; удаление нельзя считать завершённым")
+                services = NODERA_SERVICES.values() if image_id == "nodera" else [manifest.get("service", "").replace("{interface}", interface)]
+                for service in services:
+                    unit = observe_service(service)
+                    if unit["unit_present"] is not False and (image_id == "nodera" or unit["state"] not in {"inactive", "failed"}):
+                        raise RegistryError("Остановка компонента не подтверждена; удаление нельзя считать завершённым")
             with registry.locked():
                 receipt = registry.receipt(image_id)
                 if receipt:
@@ -312,11 +347,12 @@ def main() -> int:
             elif not files or None in files or unit["unit_present"] is None:
                 raise RegistryError("Нельзя подтвердить отсутствие компонента; установка не запущена")
             if args.action == "check-install":
-                print("existing" if present or registry.receipt(image_id) else "fresh")
+                print("existing" if present or registry.management(image_id)["state"] == "managed" else "fresh")
             if args.action == "begin-install":
                 with registry.locked():
                     if not registry.receipt(image_id):
-                        registry.write_receipt(image_id, "installed", retained=False)
+                        previous = registry.nodera_predecessors() if image_id == "nodera" else None
+                        registry.write_receipt(image_id, previous["origin"] if previous else "installed", retained=False)
         return 0
     except (OSError, ValueError, KeyError) as exc:
         print(str(exc) if isinstance(exc, RegistryError) else "Не удалось проверить запись управления компонентом", file=__import__("sys").stderr)

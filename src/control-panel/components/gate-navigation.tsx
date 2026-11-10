@@ -35,8 +35,7 @@ export function GateNavigation({
   onNavigate,
 }: Props) {
   const mihomoInstalled = protocolImages.some((item) => item.id === "mihomo" && item.installed);
-  const agentInstalled = protocolImages.some((item) => item.id === "ai-agent" && item.installed);
-  const botInstalled = protocolImages.some((item) => item.id === "nodera-bot" && item.installed);
+  const noderaInstalled = protocolImages.some(item => item.id === "nodera" && item.installed);
 
   return (
     <aside className="gateSidebar">
@@ -50,10 +49,9 @@ export function GateNavigation({
           <NavButton active={activeTab === "overview"} icon="overview" label="Обзор" onClick={() => onNavigate("overview")} />
         </NavGroup>
 
-        {(mihomoInstalled || agentInstalled || botInstalled) && <NavGroup label="COMPONENTS">
+        {(mihomoInstalled || noderaInstalled) && <NavGroup label="COMPONENTS">
           {mihomoInstalled && <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />}
-          {agentInstalled && <NavButton active={activeTab === "ai-agent"} icon="mcp" label="AI-агент" onClick={() => onNavigate("ai-agent")} />}
-          {botInstalled && <NavButton active={activeTab === "telegram-bot"} icon="telegram" label="NoderaBot" onClick={() => onNavigate("telegram-bot")} />}
+          {noderaInstalled && <NavButton active={activeTab === "nodera"} icon="nodera" label="Nodera" tone="cyan" onClick={() => onNavigate("nodera")} />}
         </NavGroup>}
 
         <NavGroup label="SYSTEM">
@@ -91,7 +89,7 @@ function NavButton({
   onClick,
 }: {
   active: boolean;
-  icon: "overview" | "connections" | "mihomo" | "transport" | "network" | "security" | "application" | "services" | "mcp" | "telegram";
+  icon: "overview" | "connections" | "mihomo" | "transport" | "network" | "security" | "application" | "services" | "nodera";
   label: string;
   tone?: "blue" | "violet" | "cyan";
   compact?: boolean;
@@ -108,7 +106,8 @@ function NavButton({
 }
 
 function NavGlyph({ name }: { name: string }) {
-  if (name === "telegram" || name === "mcp" || name === "mihomo") return <ProtocolIcon protocol={name === "telegram" ? "nodera-bot" : name === "mcp" ? "ai-agent" : "mihomo"} />;
+  if (name === "nodera") return <ProtocolIcon protocol="nodera" />;
+  if (name === "mihomo") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 4.5v11L12 22l-8-4.5v-11L12 2Z"/><path d="m8 16V8l4 4 4-4v8"/></svg>;
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;
   if (name === "transport") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"/></svg>;

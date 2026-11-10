@@ -54,7 +54,7 @@ def require_idle(component):
             raise ValueError('Component has running requests; retry after they finish')
 
 
-def install(api, component):
+def install(api, component, *, start_bot=True):
     if component not in control.MODULES:
         raise ValueError('Unknown component')
     unit_path = assert_unit_owner(component)
@@ -105,7 +105,7 @@ def install(api, component):
         raise ValueError('NoderaBot service registration is not confirmed')
     version = __import__('json').loads((image / 'manifest.json').read_text())['version']
     (root / 'version').write_text(version + '\n'); (root / 'version').chmod(0o644)
-    if component == 'nodera-bot':
+    if component == 'nodera-bot' and start_bot:
         saved = control.read(api)
         if saved['modules']['nodera-bot'] and control.ready(saved, 'nodera-bot'):
             perform(api, 'start', restoring=True)
@@ -124,6 +124,40 @@ def remove(api, component):
     # Private settings, sessions and bot offsets are explicitly retained.
 
 
+def assert_nodera_unit_ownership(api):
+    for component in control.MODULES:
+        path = assert_unit_owner(component)
+        if not path.exists() and api.observe_service(unit_name(component)).get('unit_present') is True:
+            raise ValueError('A registered Nodera service is not owned by this image')
+
+
+def install_nodera(api):
+    import json
+    assert_nodera_unit_ownership(api)
+    require_idle('ai-agent')
+    install(api, 'ai-agent')
+    bot_was_running = api.observe_service(control.BOT_UNIT).get('active') is True
+    if bot_was_running:
+        checked(['systemctl', 'stop', control.BOT_UNIT])
+    try:
+        install(api, 'nodera-bot', start_bot=False)
+    finally:
+        if bot_was_running:
+            perform(api, 'start', restoring=True)
+    version = json.loads((api.INSTALL_DIR / 'protocol-images/nodera/manifest.json').read_text(encoding='utf-8'))['version']
+    path = control.runtime_directory() / 'nodera-version'
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(version + '\n')
+    temporary.replace(path)
+
+
+def remove_nodera(api):
+    assert_nodera_unit_ownership(api)
+    require_idle('ai-agent')
+    for component in control.MODULES:
+        remove(api, component)
+
+
 def perform(api, action, *, restoring=False):
     from fastapi import HTTPException
     if action not in ('start', 'stop', 'restart'):
@@ -131,7 +165,8 @@ def perform(api, action, *, restoring=False):
     if restoring:
         # The image installer owns admission. A retained receipt becomes
         # installed only after this post-install startup has completed.
-        control.ComponentRegistry(api.DATA_DIR).require_managed('nodera-bot', allow_retained=True)
+        registry = control.ComponentRegistry(api.DATA_DIR)
+        registry.require_managed('nodera' if registry.receipt('nodera') else 'nodera-bot', allow_retained=True)
         if not control.runtime_ready('nodera-bot'):
             raise HTTPException(409, 'Исполняемая часть NoderaBot не подтверждена')
     else:
@@ -163,7 +198,10 @@ if __name__ == '__main__':
         from service_state import observe_service
         api = SimpleNamespace(DATA_DIR=Path(os.getenv('DATA_DIR', '/var/lib/vps-control')),
                               INSTALL_DIR=Path(os.getenv('INSTALL_DIR', '/opt/vps-control')), observe_service=observe_service)
-        (install if sys.argv[1] == 'image-install' else remove)(api, sys.argv[2])
+        if sys.argv[2] == 'nodera':
+            (install_nodera if sys.argv[1] == 'image-install' else remove_nodera)(api)
+        else:
+            (install if sys.argv[1] == 'image-install' else remove)(api, sys.argv[2])
     else:
         import main as api
         from service_worker import execute_operation

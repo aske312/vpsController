@@ -45,6 +45,28 @@ class BotAccessTests(unittest.TestCase):
         self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 22}).status_code, 403)
         self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 11, 'is_bot': True}).status_code, 403)
 
+    def test_chat_role_has_personalization_but_cannot_run_server_commands(self):
+        headers = self.enabled_bot()
+        payload = self.payload()
+        payload.update(component='nodera', expected_revision=control.read(api)['revision'], bot_token=None)
+        payload['modules']['nodera-bot'] = True
+        payload['accounts'] = [{'telegram_id': 11, 'bot_chat_access': True, 'address_as': 'Саша'}]
+        self.observe.return_value['active'] = True
+        self.save(payload)
+        client = TestClient(api.app)
+        with patch.object(control, 'runtime_request', return_value={'ok': True, 'result': {'answer': 'Hello', 'tools_used': []}}):
+            self.assertEqual(client.post('/api/assistant/bot-chat', headers=headers, json={'prompt': 'Привет'}).status_code, 200)
+        self.assertEqual(client.post('/api/assistant/bot-command', headers=headers, json={'command': '/service mihomo stop'}).status_code, 403)
+        self.assertEqual(client.post('/api/assistant/control-tool', headers=headers, json={'name': 'vps_overview'}).status_code, 403)
+        settings = control.read(api)
+        self.assertIn('Саша', fixtures.runner.persona(settings, '11'))
+        self.assertNotIn('Саша', fixtures.runner.persona(settings, 'panel'))
+        payload.update(expected_revision=settings['revision'])
+        payload['accounts'][0]['bot_access'] = True
+        saved = self.save(payload)['settings']['accounts'][0]
+        self.assertEqual(saved['address_as'], '')
+        self.assertFalse(saved['bot_chat_access'])
+
     def test_live_admin_edits_revoke_both_ai_and_server_access_without_token_changes(self):
         headers = self.enabled_bot()
         self.observe.return_value['active'] = True

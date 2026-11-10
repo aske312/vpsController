@@ -382,6 +382,8 @@ DIRECT_IMAGE_IDS = frozenset(DIRECT_IMAGES)
 
 
 def require_subscription_component(image_id: str, _: None = Depends(require_token)):
+    if image_id in assistant_control.MODULES:
+        raise HTTPException(410, 'Откройте компонент Nodera')
     if image_id in DIRECT_IMAGE_IDS:
         raise HTTPException(410, 'Отдельные подключения Direct удалены. Используйте профили Mihomo.', headers={'Cache-Control': 'no-store'})
 
@@ -458,7 +460,8 @@ def assistant_conversations(telegram_id: int | None = None, _: None = Depends(re
 
 @app.get('/api/assistant/conversations/{identity}')
 def assistant_conversation(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
-    return assistant_control.assistant_memory.get(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+    api = sys.modules[__name__]
+    return assistant_control.assistant_memory.get(api, identity, str(telegram_id) if telegram_id else 'panel', settings=assistant_control.read(api))
 
 
 @app.delete('/api/assistant/conversations/{identity}')
@@ -471,23 +474,24 @@ def assistant_models(payload: assistant_control.Catalog, _: None = Depends(requi
     return assistant_control.model_catalog(sys.modules[__name__], payload)
 
 
-def require_nodera_bot(authorization: str | None = Header(default=None),
-                       actor: str = Header(default='', alias='X-MCP-Actor')) -> None:
-    assistant_control.authorize_bot(sys.modules[__name__], authorization, actor)
-
-
-@app.post('/api/assistant/bot-chat', dependencies=[Depends(require_nodera_bot)])
-def nodera_chat(payload: assistant_control.Chat, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
-    return assistant_control.chat_request(sys.modules[__name__], payload, actor, 'bot')
-
-
-@app.post('/api/assistant/bot-command', dependencies=[Depends(require_nodera_bot)])
-def nodera_command(payload: assistant_commands.Command, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
-    return {'text': assistant_commands.execute(sys.modules[__name__], actor, payload.command)}
-
-
 def require_nodera_bot_transport(authorization: str | None = Header(default=None)) -> dict:
     return assistant_control.authorize_bot_transport(sys.modules[__name__], authorization)
+
+
+@app.post('/api/assistant/bot-chat')
+def nodera_chat(payload: assistant_control.Chat, settings: dict = Depends(require_nodera_bot_transport),
+                actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    assistant_control.require_bot_actor(settings, actor, chat=True)
+    return assistant_control.chat_request(sys.modules[__name__], payload, actor, 'bot', settings=settings)
+
+
+@app.post('/api/assistant/bot-command')
+def nodera_command(payload: assistant_commands.Command, settings: dict = Depends(require_nodera_bot_transport),
+                   actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    command = payload.command.strip().split(maxsplit=1)
+    model_command = bool(command and command[0].split('@')[0].lower() in ('/models', '/model'))
+    assistant_control.require_bot_actor(settings, actor, chat=model_command)
+    return {'text': assistant_commands.execute(sys.modules[__name__], actor, payload.command)}
 
 
 @app.post('/api/assistant/bot-contact')
@@ -3914,7 +3918,14 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
     repo = {"vless-reality-xhttp": XRAY_GITHUB_REPO, "mihomo": MIHOMO_GITHUB_REPO,
             "hysteria2": HYSTERIA2_GITHUB_REPO, "tuic": SING_BOX_GITHUB_REPO, "trojan": SING_BOX_GITHUB_REPO}.get(image_id)
     update_available_override: bool | None = None
-    if image_id in assistant_control.MODULES:
+    if image_id == "nodera":
+        try:
+            installed_version = (assistant_control.runtime_directory() / 'nodera-version').read_text().strip() if installed else ''
+        except FileNotFoundError:
+            installed_version = ''
+        available_version = str(manifest.get('version', ''))
+        update_available_override = bool(installed and installed_version != available_version)
+    elif image_id in assistant_control.MODULES:
         try:
             installed_version = (assistant_control.runtime_directory(image_id) / 'version').read_text().strip() if installed else ''
         except FileNotFoundError:
@@ -3953,7 +3964,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
     if not package and image_id in {"mihomo", "hysteria2", "tuic", "trojan"}:
         update_available_override = newer_release(installed_version, available_version)
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
-    update_breaking = update_available and version_major(installed_version) != version_major(available_version)
+    update_breaking = bool(installed_version and update_available and version_major(installed_version) != version_major(available_version))
     return {
         "installed_version": installed_version,
         "available_version": available_version,
@@ -3983,7 +3994,7 @@ def protocol_image_manifests(*, include_versions: bool = True, include_retired: 
         except (OSError, json.JSONDecodeError):
             continue
         image_id = str(manifest.get("id", ""))
-        if image_id in DIRECT_IMAGE_IDS and not include_retired:
+        if (image_id in DIRECT_IMAGE_IDS or image_id in assistant_control.MODULES) and not include_retired:
             continue
         installer = str(manifest.get("installer", ""))
         uninstaller = str(manifest.get("uninstaller", ""))
@@ -4004,14 +4015,19 @@ def protocol_image_manifests(*, include_versions: bool = True, include_retired: 
         # fixed systemd unit, while WG-like images may still interpolate one.
         service = service_template.replace("{interface}", interface) if service_template else ""
         candidates.append((manifest, image_id, uninstaller, installable, interface, service, service_template))
-    prime_services([item[5] for item in candidates])
+    prime_services([item[5] for item in candidates] + ([assistant_control.BOT_UNIT] if any(item[1] == "nodera" for item in candidates) else []))
     for manifest, image_id, uninstaller, installable, interface, service, service_template in candidates:
         # Shared wg/awg templates alone do not prove a Direct instance exists.
         # Legacy installed means detected; component_state carries the full
         # installation proof, and management separately controls mutations.
         unit = observe_service(service)
+        if image_id == "nodera":
+            bot_unit = observe_service(assistant_control.BOT_UNIT)
+        else:
+            bot_unit = {}
         files = image_files(manifest, interface, INSTALL_DIR)
-        installed = any(value is True for value in files) or unit["active"] or ("@" not in service_template and unit["unit_present"] is True)
+        installed = (any(value is True for value in files) or unit["active"] or
+                     ("@" not in service_template and unit["unit_present"] is True) or bot_unit.get("unit_present") is True)
         versions = protocol_version_info(manifest, image_id, installed) if include_versions else {}
         diagnostics = (network_diagnostic_cache if image_id in ("wg", "awg") else direct_diagnostic_cache).get(image_id)
         images[image_id] = {
@@ -4031,6 +4047,12 @@ def protocol_image_manifests(*, include_versions: bool = True, include_retired: 
             "component_state": component_state(image_id, manifest, files, unit, versions.get("installed_version", ""), diagnostics, action),
             "management": ComponentRegistry(DATA_DIR).management(image_id),
         }
+        if image_id == "nodera" and installed and bot_unit.get("unit_present") is not True:
+            images[image_id]["component_state"]["installation"] = {
+                "state": "incomplete" if bot_unit.get("unit_present") is False else None,
+                "reason": "Регистрация службы Telegram не подтверждена",
+                "checked_at": unit["runtime"]["checked_at"],
+            }
         if images[image_id]["management"].get("retained") and not unit["active"]:
             images[image_id]["installed"] = False
             images[image_id]["component_state"]["installation"] = {
@@ -4042,7 +4064,8 @@ def protocol_image_manifests(*, include_versions: bool = True, include_retired: 
 
 @app.get("/api/protocol-images")
 def protocol_images(_: None = Depends(require_token)) -> dict:
-    return {"items": [item for key, item in protocol_image_manifests().items() if key not in DIRECT_IMAGE_IDS]}
+    return {"items": [item for key, item in protocol_image_manifests().items()
+                      if key not in DIRECT_IMAGE_IDS and key not in assistant_control.MODULES]}
 
 
 def adoption_plan(image_id: str) -> tuple[dict, list[Path], dict]:
@@ -4061,7 +4084,19 @@ def adoption_plan(image_id: str) -> tuple[dict, list[Path], dict]:
     if not manifest:
         raise HTTPException(status_code=404, detail="Описание компонента не найдено")
     blockers = []
-    if image["component_state"]["installation"]["state"] != "installed":
+    if image_id == "nodera" and image["installed"] and image["component_state"]["installation"]["state"] != "installed":
+        from assistant_worker import assert_unit_owner, unit_name
+        confirmed = []
+        for component in assistant_control.MODULES:
+            observed = observe_service(unit_name(component))
+            owned = assert_unit_owner(component).is_file()
+            if observed.get("unit_present") is True and owned and assistant_control.runtime_ready(component):
+                confirmed.append(component)
+            elif observed.get("unit_present") is not False or owned or assistant_control.runtime_ready(component):
+                blockers.append("Не подтверждена принадлежность одной из служб Nodera")
+        if not confirmed:
+            blockers.append("Не найдено готовой службы Nodera")
+    elif image["component_state"]["installation"]["state"] != "installed":
         blockers.append("Не подтверждены обязательные файлы, регистрация службы или версия")
     if image["component_state"]["operation"]:
         blockers.append("Дождитесь подтверждённого завершения текущей операции")

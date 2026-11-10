@@ -11,6 +11,8 @@ const paths = {
   users: 'M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21v-2a7 7 0 0 1 14 0v2M16 4a4 4 0 0 1 0 8M18 15a5 5 0 0 1 4 4v2',
   person: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21v-2a8 8 0 0 1 16 0v2',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
+  gear: 'M10 3h4l.6 2.2 2 .9 2.1-.7 2 3.5-1.6 1.6v2.3l1.6 1.6-2 3.5-2.1-.7-2 .9L14 21h-4l-.6-2.2-2-.9-2.1.7-2-3.5 1.6-1.6v-2.3L3.3 8.9l2-3.5 2.1.7 2-.9L10 3ZM15 12a3 3 0 1 0-6 0 3 3 0 1 0 6 0Z',
+  telegram: 'm3 10 18-7-4 18-5-5-3 3v-5L3 10Zm6 4 8-7',
 };
 export function ChatIcon({ name }: { name: keyof typeof paths }) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>;

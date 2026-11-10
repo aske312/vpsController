@@ -52,8 +52,8 @@ export function componentPresentation(image: ProtocolImage, healthReason?: strin
     badge,
     canInstall,
     canAdopt: image.installed && image.management?.state === "unmanaged" && !observed?.operation,
-    canUpdate: !readOnly && installation === "installed" && !observed?.operation && Boolean(image.update_available),
-    canRemove: Boolean(image.installed && image.removable && !readOnly && ["installed", "incomplete"].includes(installation || "") && !observed?.operation),
+    canUpdate: !readOnly && (installation === "installed" || image.id === "nodera" && image.installed) && !observed?.operation && Boolean(image.update_available),
+    canRemove: Boolean(image.installed && image.removable && !readOnly && (image.id === "nodera" || ["installed", "incomplete"].includes(installation || "")) && !observed?.operation),
     readOnly,
   };
 }

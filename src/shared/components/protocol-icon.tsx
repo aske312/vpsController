@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 const protocolAssets: Record<string, string> = {
-  "ai-agent": "ai-agent.svg", "nodera-bot": "nodera-bot.svg",
+  nodera: "ai-agent.svg", "ai-agent": "ai-agent.svg", "nodera-bot": "nodera-bot.svg",
   wg: "WG", awg: "AWG", shadowsocks: "SS", hysteria2: "HY2", tuic: "TUIC",
   trojan: "TRJ", openvpn: "OVPN", ikev2: "IKE", mihomo: "Mi",
   "vless-reality-xhttp": "VLESS", "transport-wg": "WG", "transport-awg": "AWG",

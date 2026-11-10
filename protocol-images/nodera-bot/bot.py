@@ -114,7 +114,8 @@ async def identify(settings, sender):
                   'name': sender.get('first_name', '')[:80], 'is_bot': sender.get('is_bot', False)})
         if response.status_code != 200:
             return False
-        return response.json().get('admin') is True
+        access = response.json()
+        return True if access.get('admin') is True else 'chat' if access.get('chat') is True else False
 
 
 def public_reply(sender, command):
@@ -126,16 +127,20 @@ def public_reply(sender, command):
     return 'Я Нодера 👋 Для получения доступа обратитесь к владельцу бота. Ваш Telegram ID можно узнать командой /id.'
 
 
-async def reply(settings, sender, prompt, admin):
+async def reply(settings, sender, prompt, access):
     command = prompt.split()[0].split('@')[0].lower()
-    if command in ('/id', '/userid') or not admin:
+    if command in ('/id', '/userid') or not access:
         return public_reply(sender, command)
+    if access == 'chat' and command in ('/help', '/start'):
+        return 'Привет! Я Нодера 👋 Напишите вопрос. /models — модели, /model <ID> — выбрать модель.'
     if command in ('/start', '/help'):
         try:
             return 'Привет! Я Нодера 👋 У вас доступ администратора бота.\n' + await server_command(settings, sender['id'], '/help')
         except Exception:
             return 'Команды сервера сейчас недоступны. Проверьте панель и повторите /help.'
     if command.startswith('/'):
+        if access == 'chat' and command not in ('/models', '/model'):
+            return 'Вам доступен чат. /help — доступные команды.'
         try:
             return await server_command(settings, sender['id'], prompt)
         except Exception:
@@ -175,20 +180,21 @@ async def bot(settings):
                     last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
                     if len(last) >= 1000: continue
                 last[actor] = time.monotonic()
-                try: admin = await identify(settings, sender)
-                except Exception: admin = False
+                try: access = await identify(settings, sender)
+                except Exception: access = False
+                admin = access is True
                 if menus.get(actor) is not admin:
                     try:
                         await command_menu(settings, actor, admin)
                         if len(menus) >= 1000: menus.clear()
                         menus[actor] = admin
                     except Exception: logging.error('NoderaBot private command menu could not be updated')
-                answer = await reply(settings, sender, prompt, admin)
-                if admin:
-                    # An AI request may outlive an administrator revocation.
-                    try: still_admin = await identify(settings, sender)
-                    except Exception: still_admin = False
-                    if not still_admin: answer = public_reply(sender, '')
+                answer = await reply(settings, sender, prompt, access)
+                if access:
+                    # A request can outlive a permission change.
+                    try: current_access = await identify(settings, sender)
+                    except Exception: current_access = False
+                    if current_access != access: answer = public_reply(sender, '')
                 for chunk in telegram_chunks(answer):
                     await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML')
         except Exception:

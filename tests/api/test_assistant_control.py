@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from tests.api.support import api, load_module
+from tests.api.support import api, load_module, ROOT
 import assistant_control as control
 import assistant_worker as worker
 runner = load_module('assistant_image_runner', 'protocol-images/ai-agent/runner.py')
@@ -42,6 +42,58 @@ class AssistantTests(unittest.TestCase):
 
     def save(self, payload=None):
         return control.configure(api, control.Settings.model_validate(payload or self.payload()))
+
+    def test_nodera_keeps_separate_api_keys_when_switching_and_never_reuses_a_key_at_another_url(self):
+        legacy = self.save()['settings']
+        first = legacy['providers'][0]
+        second = {'id': 'b' * 32, 'name': 'Second', 'provider_url': first['provider_url'],
+                  'model_mode': 'catalog', 'api_key': 'second-private-key'}
+        payload = self.payload()
+        payload.update(component='nodera', expected_revision=legacy['revision'], active_provider=second['id'],
+                       providers=[{k: v for k, v in first.items() if k != 'api_key_configured'}, second],
+                       bot_token=None)
+        self.observe.return_value['active'] = True
+        result = self.save(payload)
+        self.assertNotIn('secret-ai', json.dumps(result))
+        self.assertNotIn('second-private-key', json.dumps(result))
+        self.assertEqual(control.read(api)['api_key'], 'second-private-key')
+        with patch.object(control.assistant_provider, 'catalog', return_value=['model']) as catalog:
+            control.model_catalog(api, control.Catalog(provider_url=first['provider_url'], provider_id=first['id']))
+            catalog.assert_called_once_with(first['provider_url'], 'secret-ai')
+        payload.update(expected_revision=result['settings']['revision'], active_provider=first['id'])
+        payload['providers'][0]['provider_url'] = 'https://different.example/v1'
+        second['api_key'] = None
+        self.save(payload)
+        value = control.read(api)
+        self.assertFalse(value['api_key'])
+        self.assertEqual(value['providers'][1]['api_key'], 'second-private-key')
+        legacy_config = json.loads((self.root / 'assistant/ai-agent' / (value['revision'] + '.json')).read_text())
+        self.assertNotIn('providers', legacy_config)
+        self.assertNotIn('address_as', legacy_config['accounts'][0])
+
+    def test_provider_usage_records_only_reported_tokens(self):
+        self.save()
+        value = control.read(api)
+        identity = control.active_provider(value)
+        control.provider_usage(api, value, {'usage': {'prompt_tokens': 41, 'completion_tokens': 9}})
+        control.provider_usage(api, value, {})
+        self.assertEqual(control.status(api)['provider_usage'][identity], {
+            'requests': 2, 'prompt_tokens': 41, 'completion_tokens': 9, 'reported_requests': 1,
+        })
+
+    def test_bundle_installs_both_runtimes_and_restarts_only_a_running_bot(self):
+        bundle = types.SimpleNamespace(DATA_DIR=self.root, INSTALL_DIR=ROOT, observe_service=self.observe)
+        for active in (False, True):
+            self.observe.return_value['active'] = active
+            with (patch.object(worker, 'assert_nodera_unit_ownership'), patch.object(worker, 'require_idle'),
+                  patch.object(worker, 'install') as install, patch.object(worker, 'perform') as perform,
+                  patch.object(worker, 'checked') as checked):
+                worker.install_nodera(bundle)
+            self.assertEqual([call.args[1] for call in install.call_args_list], ['ai-agent', 'nodera-bot'])
+            self.assertEqual(install.call_args.kwargs, {'start_bot': False})
+            self.assertEqual(checked.called, active)
+            self.assertEqual(perform.called, active)
+            self.assertEqual((control.runtime_directory() / 'nodera-version').read_text().strip(), '1.0.0')
 
     def test_two_modules_and_mcp_options_have_no_false_health_claims(self):
         with patch.object(control, 'runtime_ready', return_value=False):

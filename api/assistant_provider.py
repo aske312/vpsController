@@ -56,3 +56,34 @@ def catalog(url, key):
         return result
     finally:
         connection.close()
+
+
+def token_quota(url, key):
+    """Read optional New API quota on the same origin, without following redirects."""
+    parsed = urllib.parse.urlsplit(base_url(url))
+    if parsed.path != '/v1':
+        return None
+    connection = PublicHTTPSConnection(parsed.hostname, timeout=5, context=ssl.create_default_context())
+    try:
+        connection.request('GET', '/api/usage/token/', headers={'Authorization': 'Bearer ' + key, 'Accept': 'application/json'})
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        raw = response.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            return None
+        data = json.loads(raw).get('data', {})
+        if data.get('object') != 'token_usage' or type(data.get('unlimited_quota')) is not bool:
+            return None
+        remaining = data.get('total_available')
+        if type(remaining) is not int or abs(remaining) > 10**15:
+            return None
+        result = {'unlimited': data['unlimited_quota'], 'remaining': remaining}
+        account = data.get('user_quota')
+        if isinstance(account, dict) and type(account.get('total_available')) is int and abs(account['total_available']) <= 10**15:
+            result['account_remaining'] = account['total_available']
+        return result
+    except (AttributeError, ValueError, OSError, http.client.HTTPException):
+        return None
+    finally:
+        connection.close()

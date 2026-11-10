@@ -47,9 +47,12 @@ def _read(file):
     return record
 
 
-def get(api, identity, actor='panel', channel='panel'):
+def get(api, identity, actor='panel', channel='panel', *, settings=None):
     with operations.locked(api.DATA_DIR):
-        record = _read(path(api, identity, actor, channel))
+        file = path(api, identity, actor, channel)
+        if settings is not None and file.exists() and file.stat().st_mtime < time.time() - settings.get('memory_days', 30) * 86400:
+            file.unlink()
+        record = _read(file)
     if not record:
         raise HTTPException(404, 'Диалог не найден. Создайте новый чат')
     return record

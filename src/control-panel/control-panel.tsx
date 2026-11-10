@@ -172,7 +172,7 @@ export function ControlPanel() {
     // Restore browser-only credentials after hydration.
     setToken(sessionStorage.getItem("312-token") || "");
     const savedTab = sessionStorage.getItem("312-reload-tab");
-    if (savedTab && ["overview", "mihomo", "dns", "network", "security", "application", "services", "ai-agent", "telegram-bot"].includes(savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
+    if (savedTab && ["overview", "mihomo", "dns", "network", "security", "application", "services", "nodera", "ai-agent", "telegram-bot"].includes(savedTab)) setTab((savedTab === "dns" ? "network" : ["ai-agent", "telegram-bot"].includes(savedTab) ? "nodera" : savedTab) as Tab);
     sessionStorage.removeItem("312-reload-tab");
     sessionStorage.removeItem("312-reload-channel");
     const savedNotice = sessionStorage.getItem("312-notice");
@@ -433,7 +433,7 @@ export function ControlPanel() {
       else if (tab === "services") await loadServices(showBusy);
       else if (tab === "dns") { setTab("network"); setNetworkRefreshKey((value) => value + 1); }
       else if (tab === "network") setNetworkRefreshKey((value) => value + 1);
-      else if (tab === "ai-agent" || tab === "telegram-bot") setMcpRefreshKey((value) => value + 1);
+      else if (tab === "nodera") setMcpRefreshKey((value) => value + 1);
       else if (tab === "mihomo") {
         if (showBusy) setMihomoRefreshKey((value) => value + 1);
         await loadOverview(showBusy);
@@ -1075,7 +1075,9 @@ export function ControlPanel() {
       title: `Обновить ${image.name}?`,
       message: image.update_breaking
         ? `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Это смена старшей версии протокола — после обновления может понадобиться пересоздать подключения, использующие этот протокол.`
-        : image.id === "awg"
+        : image.id === "nodera"
+          ? "Будут обновлены среда чата и Telegram-служба Nodera. Работающий бот кратковременно перезапустится."
+          : image.id === "awg"
           ? `В репозитории Amnezia доступна новая сборка AWG. Пакеты и модуль ядра будут обновлены без изменения существующей конфигурации.`
         : image.id === "vless-reality-xhttp"
           ? `Доступна версия Xray ${image.available_version} (сейчас ${image.installed_version || "—"}). После проверки бинарника служба VLESS будет кратковременно перезапущена, конфигурация и подключения сохранятся.`
@@ -1410,7 +1412,7 @@ export function ControlPanel() {
     onLogout={() => { void (async () => { if (await canLeaveSection()) { invalidateApiSession(token, false); clearSession(); } })(); }}
     operationHistory={<OperationHistory token={token} />}
   >
-      {tab !== "overview" && tab !== "network" && tab !== "ai-agent" && tab !== "telegram-bot" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && tab !== "network" && tab !== "nodera" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
       {tab === "overview" && (
         <OverviewDashboard
@@ -1431,7 +1433,7 @@ export function ControlPanel() {
           onAdoptProtocol={(image) => void adoptProtocol(image)}
           onPurgeProtocol={(image) => void purgeProtocol(image)}
           onRemoveProtocol={(image) => void removeProtocol(image)}
-          onOpenComponent={(image) => { if (image.id === "ai-agent" || image.id === "nodera-bot") void navigateTo(image.id === "ai-agent" ? "ai-agent" : "telegram-bot"); }}
+          onOpenComponent={(image) => { if (image.id === "nodera") void navigateTo("nodera"); }}
         />
       )}
 
@@ -1458,7 +1460,7 @@ export function ControlPanel() {
 
       {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} cloudflare={{ change: cdnCommand.change, pending: cdnCommand.pending, blocked: busy || application?.recovery?.application_required === true }} />}
 
-      {(tab === "ai-agent" || tab === "telegram-bot") && <AssistantView key={tab} mode={tab === "ai-agent" ? "agent" : "bot"} request={request} refreshKey={mcpRefreshKey} busy={busy} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} />}
+      {tab === "nodera" && <AssistantView request={request} refreshKey={mcpRefreshKey} busy={busy || actionNeedsPolling} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}

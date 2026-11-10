@@ -36,6 +36,8 @@ class Account(BaseModel):
     telegram_id: int = Field(strict=True, gt=0, le=2**52)
     name: str = Field(default='', max_length=80)
     bot_access: StrictBool = False
+    bot_chat_access: StrictBool = False
+    address_as: str = Field(default='', max_length=80)
     telegram_access: StrictBool = False
     vps_access: StrictBool = False
     excluded_dialogs: list[int] = Field(default_factory=list, max_length=100)
@@ -56,10 +58,20 @@ class Account(BaseModel):
         return value
 
 
+class Provider(BaseModel):
+    model_config = {'extra': 'forbid'}
+    id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    name: str = Field(min_length=1, max_length=80)
+    provider_url: str = Field(min_length=1, max_length=512)
+    model: str = Field(default='', max_length=128)
+    model_mode: Literal['single', 'catalog'] = 'single'
+    api_key: str | None = Field(default=None, max_length=2048)
+
+
 class Settings(BaseModel):
     model_config = {'extra': 'forbid'}
     expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
-    component: Literal['ai-agent', 'nodera-bot']
+    component: Literal['ai-agent', 'nodera-bot', 'nodera']
     modules: dict[str, StrictBool]
     mcp: dict[str, StrictBool]
     mcp_installed: list[Literal['telegram-mcp', 'vps-controller-mcp']] | None = None
@@ -68,6 +80,8 @@ class Settings(BaseModel):
     model: str = Field(default='', max_length=128)
     model_mode: Literal['single', 'catalog'] = 'single'
     api_key: str | None = Field(default=None, max_length=2048)
+    providers: list[Provider] | None = Field(default=None, max_length=12)
+    active_provider: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     assistant_style: Literal['balanced', 'concise', 'friendly', 'technical'] = 'balanced'
     assistant_instructions: str = Field(default='', max_length=4000)
     memory_enabled: StrictBool = True
@@ -127,6 +141,14 @@ class Settings(BaseModel):
 
     @model_validator(mode='after')
     def unique_accounts(self):
+        if self.providers is not None:
+            ids = {provider.id for provider in self.providers}
+            if len(ids) != len(self.providers) or (self.providers and self.active_provider not in ids) or (not self.providers and self.active_provider):
+                raise ValueError('Укажите активное подключение из списка API')
+            for provider in self.providers:
+                provider.provider_url = self.provider(provider.provider_url)
+                if not provider.provider_url or provider.model and not assistant_provider.model_id(provider.model):
+                    raise ValueError('Укажите адрес и модель подключения')
         if self.mcp_installed is not None:
             self.mcp_installed = list(dict.fromkeys(self.mcp_installed))
             if any(enabled and key not in self.mcp_installed for key, enabled in self.mcp.items()):
@@ -189,6 +211,8 @@ class Catalog(BaseModel):
     model_config = {'extra': 'forbid'}
     provider_url: str = Field(max_length=512)
     api_key: str | None = Field(default=None, max_length=2048)
+    provider_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    include_quota: StrictBool = False
 
     @field_validator('provider_url')
     @classmethod
@@ -260,6 +284,17 @@ def _read(api):
                     'bot_access': False, 'telegram_access': False, 'vps_access': False, 'excluded_dialogs': [], 'session': ''})
                 item.update(account)
             assembled.update(settings)
+        extensions = operations.read(directory(api) / 'ai-agent' / (revision + '.nodera.json'))
+        for key in ('providers', 'active_provider'):
+            if key in extensions:
+                assembled[key] = extensions[key]
+        options = extensions.get('accounts', {})
+        if not isinstance(options, dict) or any(not isinstance(item, dict) for item in options.values()):
+            raise operations.OperationConflict('Настройки доступа Nodera повреждены')
+        for identity, account in accounts.items():
+            for key in ('address_as', 'bot_chat_access'):
+                if key in options.get(str(identity), {}):
+                    account[key] = options[str(identity)][key]
         assembled['accounts'] = list(accounts.values())
         value = assembled
     if not value:
@@ -297,16 +332,21 @@ def store(api, value):
     ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
     ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30))})
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
-              accounts=[{key: item for key, item in a.items() if key != 'bot_access'} for a in value['accounts']])
+              accounts=[{key: item for key, item in a.items() if key not in ('bot_access', 'bot_chat_access', 'address_as')} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
            'accounts': [{key: a.get(key, False if key == 'bot_access' else '') for key in ('telegram_id', 'name', 'bot_access')}
                         for a in value['accounts']]}
+    # Keep the active connection and legacy ACL readable after an application rollback.
+    extensions = {key: value[key] for key in ('providers', 'active_provider') if key in value}
+    extensions['accounts'] = {str(account['telegram_id']): {key: account[key] for key in ('bot_chat_access', 'address_as') if key in account}
+                              for account in value['accounts']}
     for component, settings in (('ai-agent', ai), ('nodera-bot', bot)):
         operations.atomic_json(directory(api) / component / (revision + '.json'), settings)
+    operations.atomic_json(directory(api) / 'ai-agent' / (revision + '.nodera.json'), extensions)
     operations.atomic_json(directory(api) / 'settings.json', {'schema': 2, 'revision': revision, 'control_token': value['control_token']})
     for component in MODULES:
         for path in (directory(api) / component).glob('*.json'):
-            if re.fullmatch(r'[0-9a-f]{32}\.json', path.name) and path.stem != revision:
+            if re.fullmatch(r'[0-9a-f]{32}(?:\.nodera)?\.json', path.name) and path.name.split('.')[0] != revision:
                 path.unlink(missing_ok=True)
 
 
@@ -321,7 +361,8 @@ def migrate_settings(api):
 
 def require_installed(api, component):
     try:
-        ComponentRegistry(api.DATA_DIR).require_managed(component)
+        registry = ComponentRegistry(api.DATA_DIR)
+        registry.require_managed('nodera' if registry.receipt('nodera') else component)
     except RegistryError as exc:
         raise HTTPException(409, str(exc)) from None
     if not runtime_ready(component):
@@ -332,13 +373,48 @@ def require_installed(api, component):
 
 
 def public(value):
-    hidden = {'api_key', 'bot_token', 'telegram_api_hash', 'control_token', 'session'}
+    hidden = {'api_key', 'bot_token', 'telegram_api_hash', 'control_token', 'session', 'providers'}
     result = {key: item for key, item in value.items() if key not in hidden}
     for key in ('api_key', 'bot_token', 'telegram_api_hash'):
         result[key + '_configured'] = bool(value.get(key))
     result['accounts'] = [{key: item for key, item in account.items() if key != 'session'} |
                           {'session_configured': bool(account.get('session'))} for account in value['accounts']]
+    result['providers'] = [{key: item for key, item in provider.items() if key != 'api_key'} |
+                           {'api_key_configured': bool(provider.get('api_key'))} for provider in providers(value)]
+    result['active_provider'] = active_provider(value)
     return result
+
+
+def providers(value):
+    if value.get('providers') is not None:
+        return value['providers']
+    if not value.get('provider_url'):
+        return []
+    url = assistant_provider.base_url(value['provider_url'])
+    return [{'id': uuid.uuid5(uuid.NAMESPACE_URL, url).hex, 'name': urllib.parse.urlsplit(url).hostname,
+             'provider_url': url, 'model': value.get('model', ''), 'model_mode': value.get('model_mode', 'single'),
+             'api_key': value.get('api_key', '')}]
+
+
+def active_provider(value):
+    entries = providers(value)
+    return value.get('active_provider', entries[0]['id'] if entries else None)
+
+
+def apply_providers(value, old, submitted):
+    previous = {entry['id']: entry for entry in providers(old)}
+    entries = submitted['providers']
+    for entry in entries:
+        prior = previous.get(entry['id'], {})
+        if entry['api_key'] is None:
+            entry['api_key'] = prior.get('api_key', '') if prior.get('provider_url') == entry['provider_url'] else ''
+        if entry['model_mode'] == 'catalog':
+            entry['model'] = ''
+    value['providers'] = entries
+    value['active_provider'] = submitted['active_provider']
+    active = next((entry for entry in entries if entry['id'] == value['active_provider']), {})
+    for key in ('provider_url', 'model', 'api_key', 'model_mode'):
+        value[key] = active.get(key, 'single' if key == 'model_mode' else '')
 
 
 def ready(value, module):
@@ -358,10 +434,13 @@ def status(api):
     observations = {key: api.observe_service(AGENT_UNIT if key == 'ai-agent' else BOT_UNIT) for key in MODULES}
     installed = {key: runtime_ready(key) and observations[key].get('unit_present') is True for key in MODULES}
     modules = []
-    for key, name in zip(MODULES, ('NoderaBot', 'AI-agent')):
+    registry = ComponentRegistry(api.DATA_DIR)
+    combined = registry.management('nodera')
+    has_receipt = registry.receipt_path('nodera').exists()
+    for key, name in zip(MODULES, ('Telegram', 'Nodera')):
         modules.append({'id': key, 'name': name, 'enabled': value['modules'][key],
                         'configured': ready(value, key), 'installed': installed[key],
-                        'management': ComponentRegistry(api.DATA_DIR).management(key),
+                        'management': combined if has_receipt or combined['state'] == 'managed' else registry.management(key),
                         'execution': 'service' if key == 'nodera-bot' else 'on-demand'})
     try:
         bot_version = (runtime_directory('nodera-bot') / 'version').read_text().strip()
@@ -372,12 +451,23 @@ def status(api):
     except (OSError, ValueError):
         agent_version = ()
     try:
-        available_version = json.loads((Path(__file__).resolve().parents[1] / 'protocol-images/ai-agent/manifest.json').read_text())['version']
+        available_version = json.loads((Path(__file__).resolve().parents[1] / 'protocol-images/nodera/manifest.json').read_text(encoding='utf-8'))['version']
     except (OSError, ValueError, KeyError):
         available_version = ''
+    try:
+        nodera_version = (runtime_directory() / 'nodera-version').read_text().strip()
+    except OSError:
+        nodera_version = ''
+    try:
+        usage = provider_usage(api, value)
+    except (OSError, ValueError, operations.OperationConflict):
+        usage = {}
     return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
+            'provider_usage': {entry['id']: usage[entry['id']] for entry in providers(value) if entry['id'] in usage},
+            'nodera_version': nodera_version, 'nodera_available_version': available_version,
+            'nodera_management': combined,
             'chat_attachments': agent_version >= (1, 1, 0),
-            'agent_version': '.'.join(map(str, agent_version)), 'agent_available_version': available_version,
+            'agent_version': '.'.join(map(str, agent_version)),
             'chat_persona': agent_version >= (1, 2, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'installed': key in value['mcp_installed'],
@@ -390,15 +480,23 @@ def status(api):
 
 
 def configure(api, payload):
-    require_installed(api, payload.component)
+    unified = payload.component == 'nodera'
+    if not unified:
+        require_installed(api, payload.component)
+    else:
+        require_installed(api, 'ai-agent' if runtime_ready('ai-agent') else 'nodera-bot')
     bot = api.observe_service(BOT_UNIT)
     if payload.component == 'nodera-bot' and not bot.get('active') and bot.get('unit_present') is not False and bot.get('state') not in ('inactive', 'failed'):
         raise HTTPException(409, 'Состояние NoderaBot не подтверждено. Обновите раздел перед изменением настроек')
     with operations.locked(api.DATA_DIR):
         old = _read(api)
-        if payload.component == 'nodera-bot' and bot.get('active') and (
-                payload.modules['nodera-bot'] != old['modules']['nodera-bot']
-                or payload.bot_token is not None and payload.bot_token != old.get('bot_token', '')):
+        bot_changes = (payload.modules['nodera-bot'] != old['modules']['nodera-bot']
+                       or payload.bot_token is not None and payload.bot_token != old.get('bot_token', ''))
+        if unified and bot_changes:
+            require_installed(api, 'nodera-bot')
+            if not bot.get('active') and bot.get('state') not in ('inactive', 'failed'):
+                raise HTTPException(409, 'Состояние Telegram-бота не подтверждено')
+        if (unified or payload.component == 'nodera-bot') and bot.get('active') and bot_changes:
             raise HTTPException(409, 'Для изменения токена или включения NoderaBot сначала остановите его. Список администраторов можно менять без остановки')
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
@@ -409,26 +507,51 @@ def configure(api, payload):
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         if submitted['mcp_installed'] is None:
             submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
-        keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'memory_enabled', 'memory_days') if payload.component == 'ai-agent' else ('bot_token',)
+        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'memory_enabled', 'memory_days')
+        keys = ai_keys + ('bot_token',) if unified else ai_keys if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
-        if payload.component == 'ai-agent' and value.get('model_mode') == 'catalog':
+        if unified and submitted['providers'] is not None:
+            apply_providers(value, old, submitted)
+        elif payload.component == 'ai-agent' and old.get('providers'):
+            if not submitted['provider_url']:
+                raise HTTPException(422, 'Удалите подключение в разделе Nodera')
+            active = active_provider(old)
+            entries = [{**entry, **{key: submitted[key] for key in ('provider_url', 'model', 'api_key', 'model_mode')}}
+                       if entry['id'] == active else dict(entry) for entry in providers(old)]
+            apply_providers(value, old, {'active_provider': active, 'providers': entries})
+        elif payload.component == 'ai-agent':
+            value.pop('providers', None)
+            value.pop('active_provider', None)
+        if value.get('model_mode') == 'catalog':
             value['model'] = ''
-        value['modules'][payload.component] = submitted['modules'][payload.component]
+        if unified:
+            value['modules'].update(submitted['modules'])
+        else:
+            value['modules'][payload.component] = submitted['modules'][payload.component]
         for key in ('api_key', 'bot_token', 'telegram_api_hash'):
             if value.get(key) is None:
                 value[key] = old.get(key, '')
         previous = {a['telegram_id']: a for a in old['accounts']}
-        for account in submitted['accounts']:
+        for account, submitted_account in zip(submitted['accounts'], payload.accounts):
             prior = previous.pop(account['telegram_id'], {})
-            if payload.component == 'ai-agent':
+            for key in ('address_as', 'bot_chat_access'):
+                if key not in submitted_account.model_fields_set:
+                    account[key] = prior.get(key, account[key])
+            if unified:
+                if account['session'] is None:
+                    account['session'] = prior.get('session', '')
+                if account['bot_access']:
+                    account.update(address_as='', bot_chat_access=False)
+            elif payload.component == 'ai-agent':
                 account['bot_access'] = prior.get('bot_access', False)
+                account['bot_chat_access'] = prior.get('bot_chat_access', False)
                 if account['session'] is None: account['session'] = prior.get('session', '')
             else:
-                for key, default in (('telegram_access', False), ('vps_access', False), ('session', ''), ('excluded_dialogs', [])):
+                for key, default in (('telegram_access', False), ('vps_access', False), ('session', ''), ('excluded_dialogs', []), ('address_as', '')):
                     account[key] = prior.get(key, default)
             value['accounts'].append(account)
         for prior in previous.values():
-            if payload.component == 'ai-agent' and prior.get('bot_access'):
+            if payload.component == 'ai-agent' and (prior.get('bot_access') or prior.get('bot_chat_access')):
                 value['accounts'].append({**prior, 'telegram_access': False, 'vps_access': False, 'session': '', 'excluded_dialogs': []})
             elif payload.component == 'nodera-bot' and (prior.get('session') or prior.get('telegram_access') or prior.get('vps_access')):
                 value['accounts'].append({**prior, 'bot_access': False})
@@ -438,21 +561,47 @@ def configure(api, payload):
     return status(api)
 
 
+def provider_usage(api, value, result=None):
+    path = directory(api) / 'ai-agent' / 'provider-usage.json'
+    if result is None:
+        return operations.read(path)
+    identity = active_provider(value)
+    if not identity:
+        return {}
+    usage = result.get('usage', {})
+    with operations.locked(api.DATA_DIR):
+        current_ids = {entry['id'] for entry in providers(_read(api))}
+        if identity not in current_ids:
+            return {}
+        rows = {key: row for key, row in operations.read(path).items() if key in current_ids}
+        row = rows.setdefault(identity, {'requests': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'reported_requests': 0})
+        row['requests'] += 1
+        if isinstance(usage, dict) and all(type(usage.get(key)) is int and 0 <= usage[key] <= 10**9 for key in ('prompt_tokens', 'completion_tokens')):
+            row['reported_requests'] += 1
+            for key in ('prompt_tokens', 'completion_tokens'):
+                row[key] += usage[key]
+        operations.atomic_json(path, rows)
+    return rows
+
+
 def model_catalog(api, payload):
     require_installed(api, 'ai-agent')
     value = read(api)
     key = payload.api_key
     if key is None:
-        old_url = value.get('provider_url', '')
-        if not old_url or assistant_provider.base_url(old_url) != payload.provider_url:
+        provider = next((entry for entry in providers(value) if entry['id'] == (payload.provider_id or active_provider(value))), {})
+        if provider.get('provider_url') != payload.provider_url:
             raise HTTPException(409, 'Для нового адреса провайдера введите API-ключ заново')
-        key = value.get('api_key', '')
+        key = provider.get('api_key', '')
     if not key:
         raise HTTPException(422, 'Укажите API-ключ для загрузки каталога')
     if not _runtime_slots.acquire(blocking=False):
         raise HTTPException(429, 'Два запроса к модулям уже выполняются; дождитесь завершения')
     try:
-        return {'models': assistant_provider.catalog(payload.provider_url, key)}
+        result = {'models': assistant_provider.catalog(payload.provider_url, key)}
+        if payload.include_quota:
+            result['quota'] = assistant_provider.token_quota(payload.provider_url, key)
+        return result
     except ValueError as exc:
         # Forward only our own validation messages, never provider bodies/URLs.
         message = str(exc)
@@ -465,14 +614,14 @@ def model_catalog(api, payload):
         _runtime_slots.release()
 
 
-def chat_request(api, payload, actor='panel', channel='panel'):
-    settings = read(api)
+def chat_request(api, payload, actor='panel', channel='panel', *, settings=None):
+    settings = read(api) if settings is None else settings
     files = [item.model_dump() for item in payload.attachments]
     body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files,
             'history': [item.model_dump() for item in payload.history]}
     if channel == 'bot' and settings.get('model_mode') == 'catalog' and not body['model']:
         preference = operations.read(bot_model_path(api, actor))
-        if preference.get('provider_url') == settings.get('provider_url'):
+        if model_preference_matches(preference, settings):
             body['model'] = preference.get('model')
         if not body['model']:
             return {'ok': True, 'result': {'answer': 'Выберите модель: /models — список, /model <ID> — выбор. После этого можно написать Нодере.', 'tools_used': []}}
@@ -482,10 +631,16 @@ def chat_request(api, payload, actor='panel', channel='panel'):
             recent = assistant_memory.listing(api, settings, actor, channel)['items']
             identity = recent[0]['id'] if recent else None
         if identity:
-            body['history'] = assistant_memory.context(assistant_memory.get(api, identity, actor, channel), files)
+            body['history'] = assistant_memory.context(assistant_memory.get(api, identity, actor, channel, settings=settings), files)
         else:
             identity = uuid.uuid4().hex
+    body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
+    try:
+        usage = provider_usage(api, settings, output['result'])
+        output['provider_usage'] = {entry['id']: usage[entry['id']] for entry in providers(settings) if entry['id'] in usage}
+    except (OSError, ValueError, KeyError, TypeError, operations.OperationConflict):
+        pass  # A statistics write must not discard a completed response.
     if settings.get('memory_enabled', True):
         try:
             assistant_memory.append(api, identity, actor, channel, payload.prompt, files, output['result'], body['model'] or settings.get('model', ''), settings)
@@ -501,20 +656,26 @@ def bot_model_path(api, actor):
     return directory(api) / 'nodera-bot' / 'model-choice' / (str(actor) + '.json')
 
 
+def model_preference_matches(preference, settings):
+    url = settings.get('provider_url', '')
+    previous_id = preference.get('provider_id', uuid.uuid5(uuid.NAMESPACE_URL, url).hex)
+    return preference.get('provider_url') == url and previous_id == active_provider(settings)
+
+
 def bot_models(api, actor, model=None, page=1):
     settings = read(api)
     if settings.get('model_mode', 'single') != 'catalog':
         return 'Одна модель: ' + (settings.get('model') or 'не настроена')
     if model is None and page is None:
         preference = operations.read(bot_model_path(api, actor))
-        return 'Модель: ' + (preference.get('model', '') if preference.get('provider_url') == settings.get('provider_url') else '') + '\n/models — каталог; /model <ID> — выбрать'
-    catalog = model_catalog(api, Catalog(provider_url=settings['provider_url']))['models']
+        return 'Модель: ' + (preference.get('model', '') if model_preference_matches(preference, settings) else '') + '\n/models — каталог; /model <ID> — выбрать'
+    catalog = model_catalog(api, Catalog(provider_url=settings['provider_url'], provider_id=active_provider(settings)))['models']
     if model is not None:
         if model not in catalog:
             raise HTTPException(409, 'Модель недоступна вашему API-ключу. Используйте /models')
         with operations.locked(api.DATA_DIR):
             file = bot_model_path(api, actor); file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            operations.atomic_json(file, {'model': model, 'provider_url': settings['provider_url']})
+            operations.atomic_json(file, {'model': model, 'provider_url': settings['provider_url'], 'provider_id': active_provider(settings)})
         return 'Выбрана модель: ' + model
     pages = max(1, (len(catalog) + 39) // 40)
     if not 1 <= page <= pages:
@@ -531,6 +692,9 @@ def runtime_request(api, mode, body):
     value = read(api)
     value['server_name'] = socket.gethostname()
     body = dict(body)
+    expected_revision = body.pop('settings_revision', None)
+    if expected_revision and value['revision'] != expected_revision:
+        raise HTTPException(409, 'Настройки Nodera изменились. Обновите раздел и повторите запрос.')
     if body.get('attachments') or body.get('history'):
         try:
             version = tuple(map(int, (runtime_directory() / 'version').read_text().strip().split('.')))
@@ -556,6 +720,7 @@ def runtime_request(api, mode, body):
         value = {**value, 'model': selected_model}
     if value.get('provider_url'):
         value = {**value, 'provider_url': assistant_provider.base_url(value['provider_url'])}
+    value.pop('providers', None)
     if component == 'ai-agent' and value['modules']['nodera-bot']:
         actor = str(body.get('actor', ''))
         value = {**value, 'accounts': [{**account, 'vps_access': True} if str(account['telegram_id']) == actor and account.get('bot_access') else account for account in value['accounts']]}
@@ -625,10 +790,15 @@ def authorize_bot_transport(api, authorization):
     return value
 
 
-def authorize_bot(api, authorization, actor):
+def authorize_bot(api, authorization, actor, *, chat=False):
     value = authorize_bot_transport(api, authorization)
-    if not any(str(a['telegram_id']) == actor and a.get('bot_access') for a in value['accounts']):
-        raise HTTPException(403, 'Доступ администратора NoderaBot не выдан')
+    require_bot_actor(value, actor, chat=chat)
+    return value
+
+
+def require_bot_actor(value, actor, *, chat=False):
+    if not any(str(a['telegram_id']) == actor and (a.get('bot_access') or chat and a.get('bot_chat_access')) for a in value['accounts']):
+        raise HTTPException(403, 'Доступ к этому действию в Telegram не выдан')
 
 
 def control_tool(api, name):

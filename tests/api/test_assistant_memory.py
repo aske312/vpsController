@@ -18,7 +18,7 @@ class AssistantMemoryTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.env = SimpleNamespace(DATA_DIR=self.root)
-        self.settings = {'memory_enabled': True, 'memory_days': 30, 'model': 'test', 'api_key': 'never-cache-this-key'}
+        self.settings = {'revision': 'a' * 32, 'memory_enabled': True, 'memory_days': 30, 'model': 'test', 'api_key': 'never-cache-this-key'}
         self.identity = uuid.uuid4().hex
 
     def save(self, identity=None, actor='panel', channel='panel', files=None):
