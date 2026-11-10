@@ -4,6 +4,24 @@ set -Eeuo pipefail
 ROOT=/opt/vps-control/protocol-images/mihomo
 PYTHON=/opt/vps-control/venv/bin/python
 
+# Older updaters already execute this file from the newly installed payload.
+# Keep the migration here: functions added to the main updater are not loaded
+# by an update process that started from the previous release.
+ensure_subscription_signer() {
+  local signing_key="${PRO_SUBSCRIPTION_SIGNING_KEY:-}" environment_file="${ENV_FILE:-/etc/vps-control/environment}"
+  if [[ -z "$signing_key" ]]; then
+    [[ -f "$environment_file" ]] || environment_file=/etc/vps-control.env
+    if [[ -f "$environment_file" ]]; then
+      signing_key="$(sed -n 's/^PRO_SUBSCRIPTION_SIGNING_KEY=//p' "$environment_file" | tail -n 1 | tr -d '\r')"
+      if [[ "$signing_key" == \"*\" && "$signing_key" == *\" ]]; then
+        signing_key="${signing_key:1:${#signing_key}-2}"
+      fi
+    fi
+  fi
+  "$PYTHON" "$ROOT/../../api/subscription_signing.py" --ensure \
+    "${signing_key:-/etc/vps-control/subscription-signing.pem}" >/dev/null
+}
+
 refresh_limits_service() {
   local unit="$1" previous_pid="$2" current_pid
   systemctl enable "$unit"
@@ -22,6 +40,8 @@ refresh_limits_service() {
   echo "Subscription limits service did not load the updated runtime" >&2
   return 1
 }
+
+ensure_subscription_signer
 
 previous_pid="$(systemctl show vps-control-subscription-limits.service --property=MainPID --value 2>/dev/null || true)"
 if ! command -v nft >/dev/null 2>&1; then
