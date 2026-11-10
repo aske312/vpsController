@@ -128,8 +128,20 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const result = checks[componentId];
   const setupMessage = !agentView && !selectedComponent.configured ? "Для запуска задайте токен, добавьте пользователя и включите бота." : "";
   return <div className={`mcpWorkspace ${agentView ? "agentWorkspace" : "botWorkspace"}`}>
+    <section className="mcpHero" aria-label={agentView ? "Обзор AI-агента" : "Обзор NoderaBot"}>
+      <div className="mcpHeroContent">
+        <p className="eyebrow">{agentView ? "AI WORKSPACE" : "TELEGRAM BOT"}</p>
+        <div className="mcpIdentity"><ProtocolIcon protocol={componentId}/><h1>{agentView ? "AI-агент" : "NoderaBot"}</h1><span className="mcpBadge">{!agentView && !selectedComponent.configured ? "Нужна настройка" : moduleState(status, componentId)}</span></div>
+        <p className="mcpHeroLead">{agentView ? "Диалог с AI и подключённые инструменты управления." : "Личный доступ к серверу и AI-агенту через Telegram."}</p>
+        <dl className="mcpHeroFacts">
+          <div><dt>{agentView ? "МОДЕЛЬ" : "ПОДКЛЮЧЕНИЕ"}</dt><dd>{agentView ? status.settings.model || "Не задана" : status.settings.bot_token_configured ? "Токен сохранён" : "Не настроено"}</dd></div>
+          <div><dt>{agentView ? "MCP-МОДУЛИ" : "РЕЖИМ"}</dt><dd>{agentView ? `${status.mcp_modules.filter(item => item.enabled).length} / ${status.mcp_modules.length}` : "Long polling"}</dd></div>
+          <div><dt>ПОЛЬЗОВАТЕЛИ</dt><dd>{status.settings.accounts.filter(item => agentView ? item.telegram_access || item.vps_access : item.bot_access).length}</dd></div>
+        </dl>
+      </div>
+    </section>
     <header className="mcpToolbar">
-      <div className="mcpIdentity"><ProtocolIcon protocol={componentId}/><h1>{agentView ? "AI-агент" : "NoderaBot"}</h1><span className="mcpBadge">{!agentView && !selectedComponent.configured ? "Нужна настройка" : moduleState(status, componentId)}</span></div>
+      {!agentView && <span className="mcpSectionLabel">Настройки бота</span>}
       {agentView ? <div className="mcpTabs" role="tablist" aria-label="Разделы AI-агента">{(["chat", "settings"] as const).map((value, index) => <button key={value} id={`${tabsId}-${value}-tab`} type="button" role="tab" aria-selected={panel === value} aria-controls={`${tabsId}-${value}`} tabIndex={panel === value ? 0 : -1} onClick={() => setPanel(value)} onKeyDown={event => {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault(); const next = event.key === "Home" ? "chat" : event.key === "End" ? "settings" : index === 0 ? "settings" : "chat";

@@ -1,29 +1,29 @@
 .gateNavGlyph .protocolIcon { width:22px; height:22px; object-fit:contain; }
-.mcpWorkspace { display:grid; gap:10px; min-width:0; padding:12px 0 20px; color:var(--text); font-size:12px; }
+.mcpWorkspace { display:grid; gap:12px; min-width:0; padding:0 0 20px; color:var(--text); font-size:12px; }
 .mcpWorkspace [hidden] { display:none !important; }
 .mcpToolbar,.mcpIdentity,.mcpActions,.mcpSettingsHead,.mcpConnectionFoot,.mcpChatHead,.mcpScope { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.mcpToolbar { justify-content:space-between; min-height:38px; }
+.mcpToolbar { justify-content:space-between; min-height:0; }
 .mcpIdentity { gap:7px; min-width:0; }
 .mcpIdentity .protocolIcon { width:30px; height:30px; }
-.mcpWorkspace .mcpIdentity h1 { font-size:19px; font-weight:650; margin:0; letter-spacing:-.35px; }
-.mcpBadge { font-size:11px; color:var(--muted); padding:4px 7px; border:1px solid var(--cc-line); border-radius:5px; }
-.mcpTabs { display:flex; padding:3px; gap:3px; border:1px solid var(--cc-line); border-radius:7px; background:var(--cc-inset); }
-.mcpTabs button { display:flex; align-items:center; gap:6px; min-width:88px; height:28px; padding:4px 12px; border:0; border-radius:4px; background:transparent; color:var(--muted); font:500 12px var(--ui-font); cursor:pointer; }
-.mcpTabs button[aria-selected=true] { color:var(--cyan); background:color-mix(in srgb,var(--cyan) 10%,transparent); }
+.mcpWorkspace .mcpIdentity h1 { font-size:30px; line-height:1.1; font-weight:700; margin:0; letter-spacing:-.35px; }
+.mcpBadge { font-size:11px; color:var(--muted); padding:5px 9px; border:1px solid rgba(91,116,141,.22); border-radius:999px; background:rgba(7,15,24,.66); }
+.mcpTabs { display:flex; width:100%; padding:5px; gap:4px; border:1px solid rgba(91,116,141,.22); border-radius:14px; background:rgba(7,15,23,.93); }
+.mcpTabs button { display:flex; align-items:center; gap:6px; min-width:100px; height:36px; padding:0 14px; border:1px solid transparent; border-radius:10px; background:transparent; color:var(--muted); font:500 12px var(--ui-font); cursor:pointer; }
+.mcpTabs button[aria-selected=true] { color:#c5d5e4; border-color:rgba(116,145,176,.28); background:rgba(49,73,99,.24); }
 .mcpTabs i { width:5px; height:5px; border-radius:50%; background:var(--amber); }
-.mcpWorkspace .ghostButton,.mcpWorkspace .primaryButton { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; min-height:30px; height:auto; padding:6px 10px; font:500 12px/1.3 var(--ui-font); border-radius:5px; }
-.mcpWorkspace .primaryButton { background:color-mix(in srgb,var(--green) 15%,var(--panel)); color:var(--green); border:1px solid color-mix(in srgb,var(--green) 30%,transparent); }
+.mcpWorkspace .ghostButton,.mcpWorkspace .primaryButton { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; min-height:34px; height:auto; padding:6px 10px; font:500 12px/1.3 var(--ui-font); border-radius:8px; }
+.mcpWorkspace .primaryButton { background:rgba(18,82,67,.25); color:var(--green); border:1px solid color-mix(in srgb,var(--green) 30%,transparent); }
 .mcpWorkspace .primaryButton:hover:not(:disabled) { background:color-mix(in srgb,var(--green) 24%,var(--panel)); }
 .mcpWorkspace p { margin:0; line-height:1.5; color:var(--muted); }
 .mcpWorkspace label { display:grid; gap:5px; min-width:0; color:var(--muted); font-size:11px; }
 .mcpWorkspace .mcpToggle,.mcpWorkspace .mcpAccountRights label { display:flex; align-items:center; gap:6px; font-size:12px; }
-.mcpWorkspace input:not([type=checkbox]),.mcpWorkspace select,.mcpWorkspace textarea { width:100%; min-width:0; border:1px solid var(--cc-line); border-radius:5px; padding:7px 9px; background:var(--cc-inset); color:var(--text); font:12px/1.4 var(--ui-font); }
+.mcpWorkspace input:not([type=checkbox]),.mcpWorkspace select,.mcpWorkspace textarea { width:100%; min-width:0; border:1px solid rgba(91,116,141,.22); border-radius:8px; min-height:38px; padding:8px 10px; background:rgba(5,13,22,.68); color:var(--text); font:12px/1.4 var(--ui-font); }
 .mcpWorkspace input[type=checkbox] { width:14px; height:14px; accent-color:var(--cyan); }
 .mcpWorkspace :is(button,input,select,textarea,summary):focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
 .mcpWorkspace :is(button,input,select,textarea):disabled { opacity:.5; cursor:not-allowed; }
-.mcpSettings { display:grid; gap:12px; padding:14px; border:1px solid var(--cc-line); border-radius:9px; background:var(--cc-surface); }
-.mcpSettingsHead { justify-content:space-between; padding-bottom:9px; border-bottom:1px solid var(--cc-line); }
-.mcpConnection,.mcpSkills,.mcpAccounts { min-width:0; padding:10px 0 0; margin:0; border:0; border-top:1px solid var(--cc-line); }
+.mcpSettings { display:grid; gap:12px; padding:16px 18px; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(145deg,rgba(10,21,30,.96),rgba(5,13,20,.94)); }
+.mcpSettingsHead { justify-content:space-between; padding-bottom:9px; border-bottom:1px solid rgba(91,116,141,.22); }
+.mcpConnection,.mcpSkills,.mcpAccounts { min-width:0; padding:12px 0 0; margin:0; border:0; border-top:1px solid rgba(91,116,141,.22); }
 .mcpWorkspace legend { padding:0 9px 0 0; color:var(--text); font-weight:600; font-size:12px; }
 .mcpFields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; align-items:start; }
 .mcpFields.providerFields { grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr) minmax(0,1.2fr); }
@@ -34,7 +34,7 @@
 .mcpConnectionFoot { justify-content:space-between; margin-top:9px; }
 .mcpWorkspace small { color:var(--muted); font-size:11px; line-height:1.4; }
 .mcpModuleGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-.mcpModule { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--cc-line); border-radius:6px; background:var(--cc-inset); }
+.mcpModule { display:flex; flex-direction:column; gap:8px; min-width:0; padding:12px; border:1px solid rgba(91,116,141,.22); border-radius:11px; background:rgba(5,13,22,.68); }
 .mcpModule > header,.mcpModule > footer { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 .mcpModule > footer { margin-top:auto; }
 .mcpModule > p { font-size:11px; }
@@ -42,33 +42,33 @@
 .mcpWorkspace .mcpToolList { padding-top:5px; color:var(--muted); font:10px/1.5 var(--technical-font); overflow-wrap:anywhere; }
 .mcpScope { margin-top:9px; }
 .mcpActor { width:min(100%,330px); }
-.mcpAccount { margin:8px 0; padding:9px; border:1px solid var(--cc-line); border-radius:6px; background:var(--cc-inset); }
+.mcpAccount { margin:8px 0; padding:9px; border:1px solid rgba(91,116,141,.22); border-radius:11px; background:rgba(5,13,22,.68); }
 .mcpAccountRow { display:grid; grid-template-columns:minmax(110px,.7fr) minmax(120px,1fr) auto auto; align-items:end; gap:9px; }
 .mcpAccountRights { display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-height:32px; }
 .mcpAccountAdvanced { margin-top:8px; }
 .mcpAccountAdvanced .mcpFields { margin:8px 0 5px; }
 .mcpWorkspace .mcpRemove { color:var(--red); }
-.mcpWorkspace .mcpNotice { margin:0; padding:8px 10px; border:1px solid var(--cc-line); border-radius:6px; color:var(--muted); background:color-mix(in srgb,var(--blue) 6%,transparent); font-size:11px; }
+.mcpWorkspace .mcpNotice { margin:0; padding:8px 10px; border:1px solid rgba(91,116,141,.22); border-radius:11px; color:var(--muted); background:rgba(27,48,67,.24); font-size:11px; }
 .mcpWorkspace .error { color:var(--red); }
 .mcpWorkspace .mcpCheck { padding-top:6px; font-size:11px; }
-.mcpChat { display:grid; grid-template-rows:auto 1fr auto auto; min-height:340px; border:1px solid var(--cc-line); border-radius:9px; background:var(--cc-surface); overflow:hidden; }
-.mcpChatHead { padding:10px 12px; border-bottom:1px solid var(--cc-line); }
+.mcpChat { display:grid; grid-template-rows:auto 1fr auto auto; min-height:340px; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(145deg,rgba(10,21,30,.96),rgba(5,13,20,.94)); overflow:hidden; }
+.mcpChatHead { padding:10px 12px; border-bottom:1px solid rgba(91,116,141,.22); }
 .mcpChatHead > span { margin-left:auto; color:var(--muted); font:11px var(--technical-font); }
 .mcpChatHead .mcpActor { display:flex; align-items:center; gap:7px; }
-.mcpTranscript { display:grid; align-content:start; gap:16px; min-height:250px; max-height:calc(100dvh - 310px); overflow:auto; padding:16px; }
+.mcpTranscript { display:grid; align-content:start; gap:16px; min-height:250px; max-height:520px; overflow:auto; padding:16px; }
 .mcpChatEmpty { display:grid; justify-items:center; align-content:center; min-height:230px; gap:8px; text-align:center; }
-.mcpChatEmpty .protocolIcon { width:54px; height:54px; opacity:.85; }
+.mcpChatEmpty .protocolIcon { width:54px; height:54px; opacity:.65; }
 .mcpWorkspace .mcpChatEmpty h2 { margin:0; font-size:18px; font-weight:600; }
 .mcpChatEmpty p { font-size:12px; }
 .mcpChatEmpty > div { display:flex; flex-wrap:wrap; justify-content:center; gap:7px; margin-top:8px; }
-.mcpChatEmpty button { padding:6px 9px; border:1px solid var(--cc-line); border-radius:5px; color:var(--muted); background:var(--cc-inset); font:11px var(--ui-font); cursor:pointer; }
+.mcpChatEmpty button { padding:6px 9px; border:1px solid rgba(91,116,141,.22); border-radius:8px; color:var(--muted); background:rgba(5,13,22,.68); font:11px var(--ui-font); cursor:pointer; }
 .mcpTurn { display:grid; gap:10px; min-width:0; }
 .mcpUserMessage { justify-self:end; max-width:85%; padding:9px 12px; border:1px solid color-mix(in srgb,var(--cyan) 22%,transparent); border-radius:8px 8px 2px 8px; background:color-mix(in srgb,var(--cyan) 7%,transparent); white-space:pre-wrap; overflow-wrap:anywhere; }
 .mcpAnswer { padding:2px 0 5px; min-width:0; }
-.mcpAnswer > small { color:var(--violet); }
+.mcpAnswer > small { color:#90a8bd; }
 .mcpWorkspace .mcpAnswer > p { margin-top:5px; color:inherit; white-space:pre-wrap; overflow-wrap:anywhere; }
 .mcpAnswer details { margin-top:6px; }
-.mcpComposer { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:9px; padding:10px 12px 5px; border-top:1px solid var(--cc-line); }
+.mcpComposer { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:9px; padding:10px 12px 5px; border-top:1px solid rgba(91,116,141,.22); }
 .mcpComposer .mcpPrompt { font-size:0; gap:0; }
 .mcpComposer textarea { resize:vertical; min-height:52px; max-height:160px; }
 .mcpWorkspace .mcpChatHint { padding:2px 12px 10px; font-size:10px; color:var(--dim); }
@@ -78,7 +78,7 @@
   .mcpAccountRow .mcpRemove { justify-self:end; }
 }
 @media(max-width:480px) {
-  .mcpWorkspace { padding-top:8px; }
+  .mcpWorkspace { padding-top:0; }
   .mcpToolbar { gap:8px; }
   .mcpTabs { margin-left:auto; }
   .mcpIdentity .mcpBadge { flex-basis:auto; font-size:10px; }
@@ -91,4 +91,44 @@
   .mcpChatHead .mcpActor { width:100%; }
   .mcpComposer { grid-template-columns:minmax(0,1fr); }
   .mcpComposer > button { justify-self:end; }
+}
+
+/* The same illustrated command surface used by the other workspaces. */
+.mcpWorkspace,.mcpWorkspace *,.mcpWorkspace *::before,.mcpWorkspace *::after { box-sizing:border-box; }
+.gateShell .content:has(.mcpWorkspace) > .gateSectionIntro { display:none; }
+.mcpHero { position:relative; isolation:isolate; overflow:hidden; min-width:0; border:1px solid rgba(91,116,141,.22); border-radius:20px; background:#07101a; }
+.mcpHero::before { content:""; position:absolute; inset:0; z-index:-2; background:url('/gate-art/ai-agent.webp') right 12% / auto 185% no-repeat; opacity:.85; pointer-events:none; }
+.botWorkspace .mcpHero::before { background-image:url('/gate-art/nodera-bot.webp'); }
+.mcpHero::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(7,16,26,.99),rgba(7,16,26,.93) 45%,rgba(7,16,26,.3) 75%,rgba(7,16,26,.08)); pointer-events:none; }
+.mcpHeroContent { width:70%; min-height:210px; display:grid; align-content:center; gap:10px; padding:22px 24px; }
+.mcpWorkspace .mcpHeroContent .eyebrow { color:#758e9f; font:700 9px/1.2 var(--font-mono),monospace; letter-spacing:.14em; }
+.mcpWorkspace .mcpHeroLead { max-width:480px; color:#91a6b5; font-size:12px; }
+.mcpHeroFacts { display:grid; grid-template-columns:1.4fr 1fr 1fr; max-width:590px; margin:4px 0 0; border:1px solid rgba(91,116,141,.18); border-radius:12px; background:rgba(5,13,22,.65); overflow:hidden; }
+.mcpHeroFacts > div { min-width:0; display:grid; gap:6px; padding:10px 12px; border-right:1px solid rgba(91,116,141,.15); }
+.mcpHeroFacts > div:last-child { border-right:0; }
+.mcpHeroFacts dt { color:#748a99; font:700 8px/1.2 var(--font-mono),monospace; letter-spacing:.09em; }
+.mcpHeroFacts dd { margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#dce7ef; font:600 12px/1.3 var(--font-mono),monospace; }
+.mcpSectionLabel { color:#8196a5; font-size:12px; padding-left:3px; }
+.mcpChat { position:relative; isolation:isolate; }
+.mcpChat::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(5,13,22,.98),rgba(5,13,22,.88)),url('/gate-art/ai-agent.webp') right center / cover no-repeat; pointer-events:none; }
+.mcpChatHead,.mcpComposer { background:rgba(5,13,22,.45); }
+.mcpChatEmpty .protocolIcon { padding:10px; border:1px solid rgba(116,145,176,.22); border-radius:16px; background:rgba(22,38,53,.5); }
+.mcpWorkspace .mcpAccountRights label { font-size:11px; }
+@media(max-width:800px) {
+ .mcpHeroContent { width:85%; }
+ .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.98),rgba(7,16,26,.8) 55%,rgba(7,16,26,.25)); }
+}
+@media(max-width:480px) {
+ .mcpHeroContent { width:100%; min-height:200px; padding:18px 14px; gap:10px; }
+ .mcpHero::before { background-position:72% center; background-size:cover; opacity:.55; }
+ .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.96),rgba(7,16,26,.63)); }
+ .mcpWorkspace .mcpIdentity h1 { font-size:26px; }
+ .mcpIdentity { gap:7px; }
+ .mcpIdentity .mcpBadge { font-size:9px; padding:4px 6px; }
+ .mcpIdentity .protocolIcon { width:26px; height:26px; }
+ .mcpHeroFacts > div { padding:9px 8px; }
+ .mcpHeroFacts dd { font-size:10px; }
+ .mcpHeroFacts dt { font-size:7px; letter-spacing:.03em; }
+ .mcpSettings { padding:12px; }
+ .mcpTabs button { flex:1; }
 }
