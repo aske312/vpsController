@@ -114,6 +114,12 @@
 .mcpChatHead,.mcpComposer { background:rgba(5,13,22,.45); }
 .mcpChatEmpty .protocolIcon { padding:10px; border:1px solid rgba(116,145,176,.22); border-radius:16px; background:rgba(22,38,53,.5); }
 .mcpWorkspace .mcpAccountRights label { font-size:11px; }
+.mcpUserLookup { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:8px; max-width:680px; margin:8px 0 14px; }
+.mcpUserLookup > small,.mcpFoundUser { grid-column:1 / -1; }
+.mcpFoundUser { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:12px; border:1px solid rgba(91,116,141,.22); border-radius:12px; background:rgba(5,13,22,.65); }
+.mcpFoundUser > span { min-width:0; overflow-wrap:anywhere; }
+.mcpFoundUser small { display:block; margin-top:4px; }
+@media(max-width:480px) { .mcpUserLookup { grid-template-columns:minmax(0,1fr); } .mcpUserLookup > button { justify-self:start; } }
 @media(max-width:800px) {
  .mcpHeroContent { width:85%; }
  .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.98),rgba(7,16,26,.8) 55%,rgba(7,16,26,.25)); }

@@ -270,7 +270,7 @@ def ready(value, module):
     if module == 'ai-agent':
         return bool(value.get('provider_url') and value.get('model') and value.get('api_key'))
     if module == 'nodera-bot':
-        return bool(value.get('bot_token') and any(a.get('bot_access') for a in value['accounts']))
+        return bool(value.get('bot_token'))
     if module == 'telegram-mcp':
         return bool(value.get('telegram_api_id') and value.get('telegram_api_hash') and
                     any(a.get('session') and a['telegram_access'] for a in value['accounts']))
@@ -287,10 +287,15 @@ def status(api):
                         'configured': ready(value, key), 'installed': installed[key],
                         'management': ComponentRegistry(api.DATA_DIR).management(key),
                         'execution': 'service' if key == 'nodera-bot' else 'on-demand'})
+    try:
+        bot_version = (runtime_directory('nodera-bot') / 'version').read_text().strip()
+    except OSError:
+        bot_version = ''
     return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'vpsController MCP'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
+            'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
             'tools': {'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components']}}
@@ -299,12 +304,14 @@ def status(api):
 def configure(api, payload):
     require_installed(api, payload.component)
     bot = api.observe_service(BOT_UNIT)
-    if bot.get('active'):
-        raise HTTPException(409, 'Остановите NoderaBot перед изменением настроек; затем запустите его с новой конфигурацией')
-    if bot.get('unit_present') is not False and bot.get('state') not in ('inactive', 'failed'):
+    if not bot.get('active') and bot.get('unit_present') is not False and bot.get('state') not in ('inactive', 'failed'):
         raise HTTPException(409, 'Состояние NoderaBot не подтверждено. Обновите раздел перед изменением настроек')
     with operations.locked(api.DATA_DIR):
         old = _read(api)
+        if bot.get('active') and (payload.component != 'nodera-bot'
+                or payload.modules['nodera-bot'] != old['modules']['nodera-bot']
+                or payload.bot_token is not None and payload.bot_token != old.get('bot_token', '')):
+            raise HTTPException(409, 'Для изменения токена или включения NoderaBot сначала остановите его. Список администраторов можно менять без остановки')
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
@@ -344,6 +351,9 @@ def runtime_request(api, mode, body):
     python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
     body = dict(body)
+    if component == 'ai-agent' and value['modules']['nodera-bot']:
+        actor = str(body.get('actor', ''))
+        value = {**value, 'accounts': [{**account, 'vps_access': True} if str(account['telegram_id']) == actor and account.get('bot_access') else account for account in value['accounts']]}
     if component == 'nodera-bot':
         token = body.pop('bot_token', None)
         token = value.get('bot_token') if token is None else token
@@ -392,21 +402,28 @@ def authorize_control(api, authorization, actor):
         raise HTTPException(401, 'Нужен служебный токен MCP', headers={'WWW-Authenticate': 'Bearer'})
     if not value['mcp']['vps-controller-mcp']:
         raise HTTPException(403, 'Модуль vpsController MCP выключен')
-    if actor != 'panel' and not any(str(a['telegram_id']) == actor and a['vps_access'] for a in value['accounts']):
+    if actor != 'panel' and not any(str(a['telegram_id']) == actor and (a['vps_access'] or value['modules']['nodera-bot'] and a.get('bot_access')) for a in value['accounts']):
         raise HTTPException(403, 'Пользователю не разрешён контур vpsController')
     require_installed(api, 'ai-agent')
 
 
-def authorize_bot(api, authorization, actor):
+def authorize_bot_transport(api, authorization):
     if not authorization or not re.fullmatch(r'Bearer [A-Za-z0-9_-]{32,128}', authorization):
         raise HTTPException(401, 'Нужен служебный токен бота', headers={'WWW-Authenticate': 'Bearer'})
     value = read(api)
     expected = value.get('control_token', '')
     if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
         raise HTTPException(401, 'Нужен служебный токен бота', headers={'WWW-Authenticate': 'Bearer'})
-    if not value['modules']['nodera-bot'] or not any(str(a['telegram_id']) == actor and a.get('bot_access') for a in value['accounts']):
-        raise HTTPException(403, 'Доступ к NoderaBot не выдан')
+    if not value['modules']['nodera-bot'] or not value.get('bot_token'):
+        raise HTTPException(403, 'NoderaBot выключен или не настроен')
     require_installed(api, 'nodera-bot')
+    return value
+
+
+def authorize_bot(api, authorization, actor):
+    value = authorize_bot_transport(api, authorization)
+    if not any(str(a['telegram_id']) == actor and a.get('bot_access') for a in value['accounts']):
+        raise HTTPException(403, 'Доступ администратора NoderaBot не выдан')
 
 
 def control_tool(api, name):

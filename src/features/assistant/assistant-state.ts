@@ -16,6 +16,7 @@ export type Draft = Omit<Settings, "revision" | "accounts"> & {
 };
 export type Observation = { active?: boolean; unit_present?: boolean | null; state?: string; runtime?: { state: string; reason?: string } };
 export type McpStatus = {
+  bot_live_access?: boolean;
   settings: Settings; runtime_installed: boolean; bot: Observation; agent?: Observation; legacy_bot: Observation;
   modules: { id: ModuleId; name: string; enabled: boolean; configured: boolean; installed: boolean; management: {state: string; retained?: boolean}; execution: "service" | "on-demand" }[];
   mcp_modules: { id: McpId; name: string; enabled: boolean; configured: boolean; execution: "on-demand" }[];

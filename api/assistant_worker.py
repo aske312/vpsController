@@ -134,6 +134,9 @@ def perform(api, action, *, restoring=False):
         settings = control.read(api)
         if not settings['modules']['nodera-bot'] or not control.ready(settings, 'nodera-bot'):
             raise HTTPException(409, 'Сохраните настройки NoderaBot перед запуском')
+        version = (control.runtime_directory('nodera-bot') / 'version').read_text().strip()
+        if not any(a.get('bot_access') for a in settings['accounts']) and version.startswith('1.0.'):
+            raise HTTPException(409, 'Для запуска без администраторов обновите компонент NoderaBot до версии 1.1.0 или новее')
         legacy = api.observe_service('tg-agent-gateway.service')
         if legacy.get('active') or legacy.get('unit_present') is not False and legacy.get('state') not in ('inactive', 'failed'):
             raise HTTPException(409, 'Остановка прежнего Telegram-бота не подтверждена')

@@ -17,10 +17,6 @@ logging.basicConfig(level=logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
 
 
-def account(settings, actor):
-    return next((a for a in settings['accounts'] if a['telegram_id'] == actor and a.get('bot_access')), None)
-
-
 async def bot_api(settings, method, **payload):
     async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
         response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload)
@@ -41,9 +37,44 @@ async def agent_request(settings, actor, prompt):
         return response.json()['result']['answer']
 
 
+async def identify(settings, sender):
+    """The gateway reads current permissions; credential snapshots are not ACLs."""
+    async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+        response = await client.post('http://127.0.0.1:8000/api/assistant/bot-contact',
+            headers={'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(sender['id'])},
+            json={'telegram_id': sender['id'], 'username': sender.get('username', ''),
+                  'name': sender.get('first_name', '')[:80], 'is_bot': sender.get('is_bot', False)})
+        if response.status_code != 200:
+            return False
+        return response.json().get('admin') is True
+
+
+def public_reply(sender, command):
+    if command in ('/id', '/userid'):
+        tag = '\nТег: @' + sender['username'] if sender.get('username') else ''
+        return f"Ваш Telegram ID: {sender['id']}{tag}\nПередайте ID владельцу бота, если вам нужен доступ администратора."
+    if command in ('/start', '/help'):
+        return 'Привет! Я Нодера 👋\nМогу подсказать ваш Telegram ID: /id. Доступ к серверу выдаёт владелец бота.'
+    return 'Я Нодера 👋 Для получения доступа обратитесь к владельцу бота. Ваш Telegram ID можно узнать командой /id.'
+
+
+async def reply(settings, sender, prompt, admin):
+    command = prompt.split()[0].split('@')[0].lower()
+    if command in ('/id', '/userid') or not admin:
+        return public_reply(sender, command)
+    if command in ('/start', '/help'):
+        return 'Привет! Я Нодера 👋\nУ вас доступ администратора бота. Задайте вопрос о сервере.\n/id — ваш Telegram ID\n/status — состояние бота'
+    if command == '/status':
+        return 'NoderaBot принимает ваши команды. Серверные инструменты доступны через настроенный AI-agent и MCP.'
+    try:
+        return await agent_request(settings, sender['id'], prompt)
+    except Exception:
+        return 'AI-agent сейчас недоступен. Команды бота доступны.'
+
+
 async def bot(settings):
-    if not settings['modules']['nodera-bot'] or not settings.get('bot_token') or not any(a.get('bot_access') for a in settings['accounts']):
-        raise ValueError('Нужны настройки и разрешённые пользователи NoderaBot')
+    if not settings['modules']['nodera-bot'] or not settings.get('bot_token'):
+        raise ValueError('Нужен токен включённого NoderaBot')
     if (await bot_api(settings, 'getWebhookInfo')).get('url'):
         raise ValueError('У бота установлен webhook; long polling не запущен')
     state_root = Path(os.environ.get('STATE_DIRECTORY', tempfile.gettempdir()))
@@ -58,19 +89,23 @@ async def bot(settings):
                 temporary = state_file.with_suffix('.tmp')
                 temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
                 message = update.get('message', {})
-                actor = message.get('from', {}).get('id')
-                if message.get('chat', {}).get('type') != 'private' or not account(settings, actor): continue
+                sender = message.get('from', {})
+                actor = sender.get('id')
+                if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
                 prompt = message.get('text', '').strip()
                 if not prompt or time.monotonic() - last.get(actor, 0) < 3: continue
+                if len(last) >= 1000:
+                    last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
+                    if len(last) >= 1000: continue
                 last[actor] = time.monotonic()
-                command = prompt.split()[0].split('@')[0]
-                if command in ('/start', '/help'):
-                    answer = 'NoderaBot. /status — состояние бота. Для вопросов AI отдельно установите и настройте AI-agent в панели.'
-                elif command == '/status':
-                    answer = 'NoderaBot принимает ваши команды. AI-agent — отдельный устанавливаемый компонент приложения.'
-                else:
-                    try: answer = await agent_request(settings, actor, prompt)
-                    except Exception: answer = 'AI-agent сейчас недоступен. Команды бота доступны.'
+                try: admin = await identify(settings, sender)
+                except Exception: admin = False
+                answer = await reply(settings, sender, prompt, admin)
+                if admin:
+                    # An AI request may outlive an administrator revocation.
+                    try: still_admin = await identify(settings, sender)
+                    except Exception: still_admin = False
+                    if not still_admin: answer = public_reply(sender, '')
                 for start in range(0, min(len(answer), 12000), 3500):
                     await bot_api(settings, 'sendMessage', chat_id=actor, text=answer[start:start+3500])
         except Exception:

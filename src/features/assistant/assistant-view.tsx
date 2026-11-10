@@ -33,6 +33,8 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const [error, setError] = useState("");
   const [working, setWorking] = useState("");
   const [actor, setActor] = useState("");
+  const [username, setUsername] = useState("");
+  const [foundUser, setFoundUser] = useState<{ telegram_id: number; username: string; name: string } | null>(null);
   const [prompt, setPrompt] = useState("");
   const [turns, setTurns] = useState<{ id: number; question: string; answer?: string; tools?: string[]; error?: string }[]>([]);
   const nextTurn = useRef(0);
@@ -99,6 +101,22 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     try { await admitOperation("/assistant/action", { method: "POST", body: JSON.stringify({ action }) }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Команда не принята"); }
   }
+  async function lookupUser() {
+    if (!username.trim() || writing.current) return;
+    writing.current = true; setWorking("lookup"); setError(""); setFoundUser(null);
+    try { setFoundUser(await request("/assistant/bot-users/lookup", { method: "POST", body: JSON.stringify({ username: username.trim() }) })); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Пользователь не найден"); }
+    finally { writing.current = false; setWorking(""); }
+  }
+  function addFoundUser() {
+    if (!foundUser || !draft) return;
+    const existing = draft.accounts.find(item => item.telegram_id === foundUser.telegram_id);
+    patch({ accounts: existing ? draft.accounts.map(item => item === existing ? { ...item, bot_access: true } : item) : [...draft.accounts, {
+      telegram_id: foundUser.telegram_id, name: `${foundUser.name} (@${foundUser.username})`.trim().slice(0, 80), bot_access: true,
+      telegram_access: false, vps_access: false, excluded_dialogs: [], excluded_dialogs_text: "", session: null, session_configured: false,
+    }] });
+    setFoundUser(null); setUsername("");
+  }
   async function send() {
     if (!prompt.trim() || writing.current) return;
     const id = ++nextTurn.current;
@@ -119,16 +137,17 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   if (!selectedComponent?.installed) return <section className="mcpWorkspace"><p>Установите {agentView ? "AI-agent" : "NoderaBot"} в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = selectedComponent.management?.state !== "managed" || selectedComponent.management?.retained;
   const blocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
-  const settingsBlocked = blocked || status.bot.active === true;
+  const credentialsBlocked = blocked || status.bot.active === true;
+  const settingsBlocked = blocked || agentView && status.bot.active === true;
   const conflict = status.settings.revision !== draft.expected_revision;
   const settingsVisible = !agentView || panel === "settings";
-  const canStartBot = !agentView && draft.modules["nodera-bot"] && Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured) && draft.accounts.some(account => account.bot_access && account.telegram_id > 0);
+  const canStartBot = !agentView && draft.modules["nodera-bot"] && Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured);
   const canCheckConnection = agentView ? !dirty && selectedComponent.enabled && selectedComponent.configured : Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured);
   const changeAccount = (index: number, update: Partial<Draft["accounts"][number]>) => patch({ accounts: draft.accounts.map((item, i) => i === index ? { ...item, ...update } : item) });
   const chooseActor = (value: string) => { setActor(value); setTurns([]); };
   const actorSelect = <label className="mcpActor">Контур<select value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор · VPS</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id} · {item.telegram_id}</option>)}</select></label>;
   const result = checks[componentId];
-  const setupMessage = !agentView && !selectedComponent.configured ? "Для запуска задайте токен, добавьте пользователя и включите бота." : "";
+  const setupMessage = !agentView && !selectedComponent.configured ? "Для запуска сохраните токен и включите бота. Затем отправьте ему /id и добавьте себя в администраторы." : "";
   return <div className={`mcpWorkspace ${agentView ? "agentWorkspace" : "botWorkspace"}`}>
     <section className="mcpHero" aria-label={agentView ? "Обзор AI-агента" : "Обзор NoderaBot"}>
       <div className="mcpHeroContent">
@@ -138,7 +157,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
         <dl className="mcpHeroFacts">
           <div><dt>{agentView ? "МОДЕЛЬ" : "ПОДКЛЮЧЕНИЕ"}</dt><dd>{agentView ? status.settings.model || "Не задана" : status.settings.bot_token_configured ? "Токен сохранён" : "Не настроено"}</dd></div>
           <div><dt>{agentView ? "MCP-МОДУЛИ" : "РЕЖИМ"}</dt><dd>{agentView ? `${status.mcp_modules.filter(item => item.enabled).length} / ${status.mcp_modules.length}` : "Long polling"}</dd></div>
-          <div><dt>ПОЛЬЗОВАТЕЛИ</dt><dd>{status.settings.accounts.filter(item => agentView ? item.telegram_access || item.vps_access : item.bot_access).length}</dd></div>
+          <div><dt>{agentView ? "ПОЛЬЗОВАТЕЛИ" : "АДМИНИСТРАТОРЫ"}</dt><dd>{status.settings.accounts.filter(item => agentView ? item.telegram_access || item.vps_access : item.bot_access).length}</dd></div>
         </dl>
       </div>
     </section>
@@ -153,6 +172,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     </header>
     {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
     {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
+    {!agentView && status.bot_live_access === false && <p className="mcpNotice">Для гостевых ответов, /id и поиска по @username обновите компонент NoderaBot в «Обзоре» до версии 1.1.0 или новее.</p>}
     {!agentView && status.legacy_bot.active && <p className="mcpNotice">Работает прежний Telegram-бот. Для запуска NoderaBot нужно отдельное переключение.</p>}
     {error && <p className="mcpNotice error" role="alert">{error}</p>}
     {message && <p className="mcpNotice" role="status">{message}</p>}
@@ -168,11 +188,12 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     </section>}
     <section id={`${tabsId}-settings`} role={agentView ? "tabpanel" : undefined} aria-labelledby={agentView ? `${tabsId}-settings-tab` : undefined} hidden={!settingsVisible}>
       <form className="mcpSettings" onSubmit={event => { event.preventDefault(); void save(canStartBot && !status.bot.active); }}>
-        <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={settingsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={() => { setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false; }}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
-        {status.bot.active && <p className="mcpNotice">Для изменения настроек остановите NoderaBot.</p>}
+        <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={credentialsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={() => { setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false; }}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
+        {status.bot.active && <p className="mcpNotice">{agentView ? "Для изменения настроек остановите NoderaBot." : "Администраторов можно менять без остановки. Для смены токена или включения сначала остановите бота."}</p>}
         {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки для загрузки актуальной версии.</p>}
         {setupMessage && <p className="mcpNotice">{setupMessage}</p>}
-        <fieldset disabled={settingsBlocked} className="mcpConnection"><legend>{agentView ? "Подключение к AI" : "Подключение бота"}</legend>
+        {!agentView && <p className="mcpFieldHint">Гости получают приветствие, справку и свой /id. AI, MCP и сведения о сервере доступны только администраторам бота; доступ к веб-панели этим не выдаётся.</p>}
+        <fieldset disabled={credentialsBlocked} className="mcpConnection"><legend>{agentView ? "Подключение к AI" : "Подключение бота"}</legend>
           <div className={`mcpFields ${agentView ? "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://…/v1" onChange={event => patch({ provider_url: event.target.value })}/></label><label>Модель<input value={draft.model} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label><Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
         </fieldset>
         <div className="mcpConnectionStatus"><div className="mcpConnectionFoot"><small>{agentView ? "API chat/completions с поддержкой инструментов." : "Токен можно проверить до сохранения, включения бота и добавления пользователей."}</small><button type="button" className="ghostButton" disabled={blocked || !canCheckConnection} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
@@ -186,12 +207,16 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
             {checked && checked.revision === status.settings.revision && checked.actor === actor && <p className={checked.ok ? "mcpCheck" : "mcpCheck error"} role="status">{checked.text}</p>}
           </article>;
         })}</div><div className="mcpScope">{actorSelect}<small>Контур определяет права для проверок MCP и чата.</small></div></fieldset>}
-        <fieldset disabled={settingsBlocked} className="mcpAccounts"><legend>{agentView ? "Пользователи и права MCP" : "Разрешённые пользователи"}</legend>
+        <fieldset disabled={settingsBlocked} className="mcpAccounts"><legend>{agentView ? "Пользователи и права MCP" : "Администраторы бота"}</legend>
+          {agentView && draft.modules["nodera-bot"] && draft.accounts.some(item => item.bot_access) && <p className="mcpFieldHint">Администраторы включённого NoderaBot наследуют доступ к VPS. Чтобы снять его, уберите роль администратора в настройках бота.</p>}
+          {!agentView && <div className="mcpUserLookup"><label>Добавить по @username<input value={username} maxLength={65} placeholder="@aske312" onChange={event => { setUsername(event.target.value); setFoundUser(null); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void lookupUser(); } }} /></label><button type="button" className="ghostButton" disabled={!username.trim()} onClick={() => void lookupUser()}>{working === "lookup" ? "Ищем…" : "Найти пользователя"}</button><small>Пользователь должен сначала написать этому боту /start или /id. Тег проверяется в Telegram, доступ сохраняется за числовым ID.</small>
+            {foundUser && <div className="mcpFoundUser"><span><strong>@{foundUser.username}</strong> · {foundUser.name}<small>Telegram ID: {foundUser.telegram_id}</small></span><button type="button" className="ghostButton" disabled={draft.accounts.some(item => item.telegram_id === foundUser.telegram_id && item.bot_access) || draft.accounts.length >= 30 && !draft.accounts.some(item => item.telegram_id === foundUser.telegram_id)} onClick={addFoundUser}>Добавить администратора</button></div>}
+          </div>}
           {!draft.accounts.length && <p className="mcpFieldHint">Добавьте Telegram ID пользователя.</p>}
-          {draft.accounts.map((item, index) => <article className="mcpAccount" key={index}><div className="mcpAccountRow"><label>Telegram ID<input type="number" min={1} required value={item.telegram_id || ""} onChange={event => changeAccount(index, { telegram_id: Number(event.target.value) })}/></label><label>Имя<input value={item.name} maxLength={80} onChange={event => changeAccount(index, { name: event.target.value })}/></label><div className="mcpAccountRights">{agentView ? <><label><input type="checkbox" checked={item.telegram_access} onChange={event => changeAccount(index, { telegram_access: event.target.checked })}/>Telegram</label><label><input type="checkbox" checked={item.vps_access} onChange={event => changeAccount(index, { vps_access: event.target.checked })}/>VPS</label></> : <label><input type="checkbox" checked={item.bot_access} onChange={event => changeAccount(index, { bot_access: event.target.checked })}/>Доступ к боту</label>}</div><button type="button" className="ghostButton mcpRemove" aria-label={`Удалить пользователя ${item.name || item.telegram_id || index + 1}`} onClick={() => patch({ accounts: draft.accounts.filter((_, i) => i !== index) })}>Удалить</button></div>
+          {draft.accounts.map((item, index) => <article className="mcpAccount" key={index}><div className="mcpAccountRow"><label>Telegram ID<input type="number" min={1} required value={item.telegram_id || ""} onChange={event => changeAccount(index, { telegram_id: Number(event.target.value) })}/></label><label>Имя<input value={item.name} maxLength={80} onChange={event => changeAccount(index, { name: event.target.value })}/></label><div className="mcpAccountRights">{agentView ? <><label><input type="checkbox" checked={item.telegram_access} onChange={event => changeAccount(index, { telegram_access: event.target.checked })}/>Telegram</label><label><input type="checkbox" checked={item.vps_access || draft.modules["nodera-bot"] && item.bot_access} disabled={draft.modules["nodera-bot"] && item.bot_access} onChange={event => changeAccount(index, { vps_access: event.target.checked })}/>VPS</label></> : <label><input type="checkbox" checked={item.bot_access} onChange={event => changeAccount(index, { bot_access: event.target.checked })}/>Администратор</label>}</div><button type="button" className="ghostButton mcpRemove" aria-label={`Удалить пользователя ${item.name || item.telegram_id || index + 1}`} onClick={() => patch({ accounts: draft.accounts.filter((_, i) => i !== index) })}>Удалить</button></div>
             {agentView && <details className="mcpAccountAdvanced"><summary>Сессия и исключения</summary><div className="mcpFields"><Secret label="Telethon StringSession" configured={item.session_configured} value={item.session} onChange={session => changeAccount(index, { session })}/><label>Исключённые ID диалогов<input value={item.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => changeAccount(index, { excluded_dialogs_text: event.target.value })}/></label></div><small>Сессия принадлежит этому Telegram ID. Подключение по QR пока недоступно.</small></details>}
           </article>)}
-          <button type="button" className="ghostButton" disabled={draft.accounts.length >= 30} onClick={() => patch({ accounts: [...draft.accounts, { telegram_id: 0, name: "", bot_access: false, telegram_access: false, vps_access: false, excluded_dialogs: [], excluded_dialogs_text: "", session: null, session_configured: false }] })}>Добавить пользователя</button>
+          <button type="button" className="ghostButton" disabled={draft.accounts.length >= 30} onClick={() => patch({ accounts: [...draft.accounts, { telegram_id: 0, name: "", bot_access: !agentView, telegram_access: false, vps_access: false, excluded_dialogs: [], excluded_dialogs_text: "", session: null, session_configured: false }] })}>Добавить пользователя</button>
         </fieldset>
       </form>
     </section>
