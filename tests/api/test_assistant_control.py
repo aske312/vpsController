@@ -170,6 +170,29 @@ class AssistantTests(unittest.TestCase):
         self.save()
         self.assertTrue(control.read(api)['modules']['ai-agent'])
 
+    def test_mcp_modules_add_remove_and_enable_preserve_account_sessions(self):
+        payload = self.payload()
+        saved = self.save(payload)
+        before = control.read(api)['accounts'][0]['session']
+        payload.update(expected_revision=saved['settings']['revision'], mcp_installed=['telegram-mcp'])
+        payload['mcp']['vps-controller-mcp'] = False
+        saved = self.save(payload)
+        self.assertFalse(next(row for row in saved['mcp_modules'] if row['id'] == 'vps-controller-mcp')['installed'])
+        payload['mcp']['vps-controller-mcp'] = True
+        with self.assertRaises(ValueError): control.Settings.model_validate(payload)
+        payload.update(expected_revision=saved['settings']['revision'], mcp_installed=[])
+        payload['mcp'] = {key: False for key in control.MCP_MODULES}
+        self.save(payload)
+        self.assertEqual(control.read(api)['accounts'][0]['session'], before)
+        self.assertFalse(any(control.read(api)['mcp'].values()))
+
+    def test_old_runtime_rejects_files_instead_of_silently_ignoring_them(self):
+        self.save()
+        self.observe.return_value['active'] = True
+        with self.assertRaises(api.HTTPException) as caught:
+            control.runtime_request(api, '--chat', {'prompt': 'Read', 'attachments': [{'name': 'a.txt', 'mime': 'text/plain', 'data': 'dGV4dA=='}]})
+        self.assertEqual(caught.exception.status_code, 409)
+
     def test_catalog_uses_draft_or_saved_key_without_saving_or_leaking_it_to_another_provider(self):
         self.save()
         before = control.read(api)

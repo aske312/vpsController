@@ -130,6 +130,71 @@
 .mcpFoundUser { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:12px; border:1px solid rgba(91,116,141,.22); border-radius:12px; background:rgba(5,13,22,.65); }
 .mcpFoundUser > span { min-width:0; overflow-wrap:anywhere; }
 .mcpFoundUser small { display:block; margin-top:4px; }
+.agentWorkspace .mcpSettings { grid-template-columns:minmax(0,1fr); gap:10px; }
+.agentWorkspace .mcpProviderSection { padding:10px; gap:8px; }
+.agentWorkspace .mcpConnection { display:flex; flex-wrap:wrap; align-items:end; gap:8px 10px; }
+.agentWorkspace .mcpModelMode { flex:0 1 180px; margin:0; }
+.agentWorkspace .mcpProviderSection .mcpFields { flex:1 1 420px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.agentWorkspace .mcpCatalog { flex-basis:100%; margin-top:0; }
+.agentWorkspace .mcpConnectionFoot { margin:0; justify-content:flex-end; }
+.agentWorkspace .mcpSkills { padding:0; border:0; }
+.mcpSkills legend { display:flex; align-items:center; gap:10px; }
+.mcpSkills legend small { font-weight:400; }
+.mcpModuleGrid { grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr)); align-items:start; }
+.mcpModule { gap:8px; padding:12px; }
+.mcpModuleIdentity { display:flex; align-items:center; gap:8px; min-width:0; }
+.mcpModuleIdentity strong { overflow-wrap:anywhere; }
+.mcpModuleIcon { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--line); border-radius:8px; color:var(--cyan); background:rgba(97,207,216,.06); }
+.mcpModule.isInstalled { border-color:rgba(97,207,216,.2); }
+.mcpModule > footer { padding-top:4px; }
+.mcpModule > footer .mcpToggle { margin-left:auto; font-size:11px; }
+.mcpScope { margin-top:8px; }
+.mcpModuleCredentials { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); gap:9px; align-items:end; }
+.mcpModuleCredentials .mcpActor { width:100%; }
+.agentWorkspace .mcpAccounts { padding-top:10px; }
+.agentWorkspace .mcpAccount { padding:9px; }
+.agentWorkspace .mcpAccountAdvanced { margin-top:8px; padding-top:8px; }
+.mcpWorkspace .mcpIconButton { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:32px; height:32px; min-height:32px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; }
+.mcpWorkspace .mcpIconButton:hover:not(:disabled) { background:rgba(116,145,176,.12); color:var(--text); }
+.mcpWorkspace svg { flex-shrink:0; }
+.mcpChatHead { padding:8px 12px; }
+.mcpChatHead > span { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:0; }
+.mcpChatHead .mcpActor { display:flex; align-items:center; gap:6px; flex:0 1 250px; font-size:0; }
+.mcpChatHead .mcpActor select { padding:5px 8px; min-height:32px; border-color:transparent; background:transparent; }
+.mcpChat.isDragging { outline:2px dashed var(--cyan); outline-offset:-4px; }
+.mcpChatEmpty { min-height:170px; }
+.mcpChatEmpty .protocolIcon { width:44px; height:44px; padding:8px; border-radius:12px; }
+.mcpWorkspace .mcpChatEmpty h2 { font-size:20px; }
+.mcpChat .mcpComposer { position:relative; display:flex; flex-direction:column; align-items:stretch; gap:8px; margin:0 12px 8px; padding:10px; border:1px solid var(--line-strong); border-radius:20px; background:rgba(12,24,33,.94); }
+.mcpChat .mcpComposer textarea { min-height:54px; max-height:160px; padding:4px 5px; border:0; border-radius:0; background:transparent; resize:none; }
+.mcpChat .mcpComposer textarea:focus-visible { outline:none; }
+.mcpChat .mcpComposer:focus-within { border-color:var(--cyan); box-shadow:0 0 0 1px rgba(97,207,216,.1); }
+.mcpComposerTools { display:flex; align-items:center; gap:5px; min-width:0; }
+.mcpModelControl { position:relative; min-width:0; }
+.mcpModelButton { display:flex; align-items:center; gap:5px; max-width:320px; min-width:0; min-height:32px; padding:5px 9px; border:0; border-radius:10px; color:var(--text); background:transparent; font:500 12px var(--ui-font); cursor:pointer; }
+.mcpModelButton:hover:not(:disabled) { background:rgba(116,145,176,.12); }
+.mcpModelButton > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcpSendButton { display:grid; place-items:center; flex-shrink:0; width:34px; height:34px; margin-left:auto; padding:0; border:0; border-radius:50%; background:var(--text); color:var(--bg); cursor:pointer; }
+.mcpWorkspace .mcpSendButton:disabled { opacity:.25; }
+.mcpMenuBackdrop { position:fixed; inset:0; z-index:10; border:0; background:transparent; cursor:default; }
+.mcpModelMenu { position:absolute; bottom:calc(100% + 9px); left:0; z-index:11; display:grid; gap:5px; width:340px; max-width:calc(100cqw - 60px); padding:8px; border:1px solid var(--line-strong); border-radius:14px; background:var(--panel); box-shadow:0 12px 40px rgba(0,0,0,.4); }
+.mcpModelSearch { display:flex; align-items:center; gap:6px; padding:0 3px; }
+.mcpModelSearch > input { flex:1; }
+.mcpModelMenu [role=listbox] { max-height:230px; overflow:auto; }
+.mcpModelMenu [role=option] { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:34px; text-align:left; padding:7px 8px; border:0; border-radius:7px; background:transparent; color:var(--text); font:12px/1.4 var(--ui-font); cursor:pointer; }
+.mcpModelMenu [role=option] > span { overflow-wrap:anywhere; min-width:0; }
+.mcpModelMenu [role=option]:hover,.mcpModelMenu [role=option][aria-selected=true] { background:rgba(97,207,216,.1); }
+.mcpModelMenu > small,.mcpModelMenu p { padding:4px 8px; font-size:10px; }
+.mcpFileList { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+.mcpFileChip { display:inline-flex; align-items:center; gap:6px; max-width:100%; min-width:0; padding:5px 7px; border:1px solid var(--line); border-radius:9px; background:rgba(7,15,24,.8); color:var(--muted); font-size:11px; }
+.mcpFileChip > span { min-width:0; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcpFileChip > img { width:36px; height:36px; border-radius:5px; object-fit:cover; }
+.mcpFileChip .mcpIconButton { width:22px; height:22px; min-height:22px; }
+.mcpUserMessage .mcpFileList { margin-bottom:7px; }
+.mcpAnswer > .mcpIconButton { margin-top:5px; }
+.mcpSpinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:mcpSpin .8s linear infinite; }
+@keyframes mcpSpin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .mcpSpinner { animation:none; } }
 .mcpTabs { width:auto; padding:4px; }
 .mcpTabs button { min-height:34px; height:auto; min-width:96px; }
 .mcpWorkspace legend { padding-bottom:9px; }
@@ -155,6 +220,12 @@
  .mcpAccountRow .mcpRemove { justify-self:end; }
 }
 @container (max-width:480px) {
+ .agentWorkspace .mcpModelMode { flex-basis:100%; }
+ .agentWorkspace .mcpProviderSection .mcpFields { flex-basis:100%; grid-template-columns:minmax(0,1fr); }
+ .mcpModelButton { max-width:190px; font-size:11px; }
+ .mcpModelMenu { left:-30px; }
+ .mcpChat .mcpComposer { margin:0 8px 7px; padding:8px; }
+ .mcpChatHead .mcpActor { flex:1 1 100%; max-width:none; }
  .mcpSettings { padding:10px; gap:10px; }
  .mcpProviderSection { padding:10px; }
  .mcpProviderSection .mcpFields,.mcpModuleGrid,.mcpFields { grid-template-columns:minmax(0,1fr); }

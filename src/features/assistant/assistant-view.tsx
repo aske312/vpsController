@@ -1,8 +1,11 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
+import { ChatIcon } from "./chat-icon";
+import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import type { SystemAction } from "../../control-panel/system-operation";
 import { changed, chatModels, makeDraft, moduleState, settingsPayload, type Draft, type McpStatus, type ModuleId, type McpId } from "./assistant-state";
@@ -16,8 +19,8 @@ type Props = {
   admitOperation: (path: string, options: RequestInit) => Promise<SystemAction | null | undefined>;
 };
 const descriptions: Record<ModuleId, string> = {
-  "telegram-mcp": "Чтение личного Telegram через сессию выбранного пользователя.",
-  "vps-controller-mcp": "Обзор сервера, состояние служб и установленные компоненты.",
+  "telegram-mcp": "Диалоги, история и поиск в Telegram.",
+  "vps-controller-mcp": "Метрики VPS, службы и компоненты.",
   "nodera-bot": "Telegram-интерфейс агента. Принимает сообщения разрешённых пользователей в личном чате.",
   "ai-agent": "Запросы к AI-провайдеру и вызовы разрешённых MCP-инструментов.",
 };
@@ -40,8 +43,18 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState("");
   const [model, setModel] = useState("");
+  const [modelMenu, setModelMenu] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
+  const [files, setFiles] = useState<ChatFile[]>([]);
+  const [readingFiles, setReadingFiles] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [copied, setCopied] = useState<number>();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const transcript = useRef<HTMLDivElement>(null);
+  const modelButton = useRef<HTMLButtonElement>(null);
+  const fileRead = useRef(false);
   const catalogVersion = useRef(0);
-  const [turns, setTurns] = useState<{ id: number; question: string; model: string; answer?: string; tools?: string[]; error?: string }[]>([]);
+  const [turns, setTurns] = useState<{ id: number; question: string; model: string; files: ChatFile[]; answer?: string; tools?: string[]; error?: string }[]>([]);
   const nextTurn = useRef(0);
   const [checks, setChecks] = useState<Partial<Record<ModuleId, { ok: boolean; text: string; revision: string; actor: string }>>>({});
   const version = useRef(0);
@@ -86,6 +99,15 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     if (catalogRevision && savedProviderUrl && !dirtyRef.current) void loadModels(savedProviderUrl, null);
   }, [catalogRevision, savedProviderUrl, loadModels]);
   useEffect(() => () => { catalogVersion.current += 1; }, []);
+  useEffect(() => { transcript.current?.scrollTo({ top: transcript.current.scrollHeight, behavior: "smooth" }); }, [turns]);
+  async function attachFiles(incoming: File[]) {
+    if (!incoming.length || fileRead.current || writing.current) return;
+    if (!status?.chat_attachments) { setError("Для файлов обновите компонент AI-agent в Обзоре"); return; }
+    fileRead.current = true; setReadingFiles(true); setError("");
+    try { const added = await readChatFiles(incoming, files); if (client.current === request) setFiles(current => [...current, ...added]); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось добавить файл"); }
+    finally { fileRead.current = false; setReadingFiles(false); }
+  }
   function patch(update: Partial<Draft>) {
     dirtyRef.current = true;
     if ("provider_url" in update || "api_key" in update) {
@@ -108,7 +130,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
       const next = await request<McpStatus>("/assistant", { method: "PUT", body: JSON.stringify({ ...settingsPayload(draft), component: agentView ? "ai-agent" : "nodera-bot" }) });
       if (client.current !== request) return;
       setStatus(next); setDraft(makeDraft(next.settings)); dirtyRef.current = false;
-      setChecks({}); setMessage("Настройки сохранены. Подключения проверяются отдельно.");
+      setChecks({}); setMessage("Настройки сохранены");
       if (startBot && next.modules.find(item => item.id === "nodera-bot")?.configured && next.settings.modules["nodera-bot"]) {
         await admitOperation("/assistant/action", { method: "POST", body: JSON.stringify({ action: "start" }) });
         setMessage("Настройки сохранены. Команда запуска принята.");
@@ -152,14 +174,17 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     setFoundUser(null); setUsername("");
   }
   async function send() {
-    if (!prompt.trim() || !selectedModel || writing.current) return;
+    if (!(prompt.trim() || files.length) || !selectedModel || writing.current || fileRead.current) return;
     const id = ++nextTurn.current;
     const question = prompt.trim();
-    writing.current = true; setWorking("chat"); setError(""); setPrompt("");
-    setTurns(current => [...current, { id, question, model: selectedModel }]);
+    const attached = files;
+    const history = status?.chat_attachments ? chatHistory(turns, attached) : [];
+    writing.current = true; setWorking("chat"); setError(""); setPrompt(""); setFiles([]); setModelMenu(false);
+    setTurns(current => [...current, { id, question, model: selectedModel, files: attached }]);
     try {
       const result = await request<{ result: { answer: string; tools_used: string[] } }>("/assistant/chat", {
-        method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null, model: selectedModel }),
+        method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null, model: selectedModel,
+          attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history }),
       });
       if (client.current === request) setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.result.answer, tools: result.result.tools_used } : turn));
     } catch (cause) { setTurns(current => current.map(turn => turn.id === id ? { ...turn, error: cause instanceof Error ? cause.message : "AI не ответил" } : turn)); }
@@ -169,10 +194,11 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const componentId = agentView ? "ai-agent" : "nodera-bot";
   const availableModels = chatModels(status.settings, catalog);
   const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : "") : status.settings.model;
+  const matchingModels = availableModels.filter(id => id.toLowerCase().includes(modelSearch.toLowerCase()));
   const selectedComponent = status.modules.find(item => item.id === componentId);
   if (!selectedComponent?.installed) return <section className="mcpWorkspace"><p>Установите {agentView ? "AI-agent" : "NoderaBot"} в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = selectedComponent.management?.state !== "managed" || selectedComponent.management?.retained;
-  const blocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
+  const blocked = busy || Boolean(working) || readingFiles || Boolean(loadError) || Boolean(readOnly);
   const credentialsBlocked = blocked || !agentView && status.bot.active === true;
   const settingsBlocked = blocked;
   const conflict = status.settings.revision !== draft.expected_revision;
@@ -180,7 +206,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const canStartBot = !agentView && draft.modules["nodera-bot"] && Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured);
   const canCheckConnection = agentView ? !dirty && selectedComponent.enabled && selectedComponent.configured : Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured);
   const changeAccount = (index: number, update: Partial<Draft["accounts"][number]>) => patch({ accounts: draft.accounts.map((item, i) => i === index ? { ...item, ...update } : item) });
-  const chooseActor = (value: string) => { setActor(value); setTurns([]); };
+  const chooseActor = (value: string) => { setActor(value); setTurns([]); setFiles([]); setCopied(undefined); };
   const actorSelect = <label className="mcpActor">Контур<select value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор · VPS</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id} · {item.telegram_id}</option>)}</select></label>;
   const result = checks[componentId];
   const setupMessage = !agentView && !selectedComponent.configured ? "Для запуска сохраните токен и включите бота. Затем отправьте ему /id и добавьте себя в администраторы." : "";
@@ -212,16 +238,22 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     {!agentView && status.legacy_bot.active && <p className="mcpNotice">Работает прежний Telegram-бот. Для запуска NoderaBot нужно отдельное переключение.</p>}
     {error && <p className="mcpNotice error" role="alert">{error}</p>}
     {message && <p className="mcpNotice" role="status">{message}</p>}
-    {agentView && <section id={`${tabsId}-chat`} role="tabpanel" aria-labelledby={`${tabsId}-chat-tab`} hidden={panel !== "chat"} className="mcpChat">
-      <div className="mcpChatHead">{status.settings.accounts.length > 0 && actorSelect}{status.settings.model_mode === "catalog" ? <><label className="mcpActor mcpModelPicker">Модель<select aria-label="Модель для запроса" value={selectedModel} disabled={blocked || dirty || catalogLoading} onChange={event => setModel(event.target.value)}><option value="">{catalogLoading ? "Загрузка моделей…" : availableModels.length ? `Выберите модель · ${availableModels.length}` : "Загрузите каталог"}</option>{availableModels.map(id => <option key={id} value={id}>{id}</option>)}</select></label><button type="button" className="ghostButton" disabled={blocked || dirty || catalogLoading || !status.settings.api_key_configured} onClick={() => void loadModels(savedProviderUrl, null)}>{catalogLoading ? "Загрузка…" : "Обновить"}</button></> : <span>{status.settings.model || "Модель не настроена"}</span>}{!selectedComponent.configured && <button type="button" className="ghostButton" onClick={() => setPanel("settings")}>Подключить AI</button>}</div>
-      {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}. Повторите загрузку каталога.</p>}
+    {agentView && <section id={`${tabsId}-chat`} role="tabpanel" aria-labelledby={`${tabsId}-chat-tab`} hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!blocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
+      <div className="mcpChatHead">{status.settings.accounts.length > 0 && actorSelect}<span>{selectedModel || "Новый диалог"}</span><button type="button" className="mcpIconButton" aria-label="Новый чат" title="Новый чат" disabled={blocked || !turns.length} onClick={() => { setTurns([]); setFiles([]); setPrompt(""); setCopied(undefined); }}><ChatIcon name="new"/></button>{!selectedComponent.configured && <button type="button" className="ghostButton" onClick={() => setPanel("settings")}>Подключить AI</button>}</div>
+      {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}</p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните изменения во вкладке «Настройки».</p>}
-      <div className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
-        {!turns.length && <div className="mcpChatEmpty"><h2>{status.settings.model_mode === "catalog" && !selectedModel ? "Выберите модель выше" : "Задайте вопрос"}</h2><p>Ответы появятся здесь.</p>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
-        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.question}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>{turn.model || "AI-агент"}</small><p>{turn.error || turn.answer || "Обрабатывает запрос…"}</p>{turn.tools?.length ? <p className="mcpToolList">Инструменты: {turn.tools.join(" · ")}</p> : null}</article></div>)}
+      <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
+        {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="ai-agent"/><h2>Чем помочь?</h2>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
+        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>{turn.model || "AI-агент"}</small><p>{turn.error || turn.answer || "Обрабатывает запрос…"}</p>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article></div>)}
       </div>
-      <div className="mcpComposer"><label className="mcpPrompt">Сообщение<textarea value={prompt} maxLength={12000} rows={2} disabled={blocked} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); if (!blocked && !dirty && prompt.trim() && selectedModel && selectedComponent.enabled && selectedComponent.configured) void send(); } }} placeholder="Запрос к агенту…" /></label><button type="button" className="primaryButton" disabled={blocked || dirty || !prompt.trim() || !selectedModel || !selectedComponent.enabled || !selectedComponent.configured} onClick={() => void send()}>{working === "chat" ? "Ожидание…" : "Отправить"}</button></div>
-      <p className="mcpChatHint">Каждый запрос — отдельный контекст. Данные вызванных инструментов передаются AI-провайдеру.</p>
+      <div className="mcpComposer">
+        {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={blocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}
+        <label className="mcpPrompt">Сообщение<textarea value={prompt} maxLength={12000} rows={2} disabled={blocked} onChange={event => { setPrompt(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`; }} onPaste={event => { const incoming = Array.from(event.clipboardData.files); if (incoming.length) { event.preventDefault(); void attachFiles(incoming); } }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) { event.preventDefault(); if (!blocked && !dirty && (prompt.trim() || files.length) && selectedModel && selectedComponent.enabled && selectedComponent.configured) void send(); } }} placeholder="Спросите что-нибудь…" /></label>
+        <div className="mcpComposerTools"><input ref={fileInput} type="file" aria-label="Файлы к сообщению" accept={fileAccept} multiple hidden onChange={event => { const incoming = Array.from(event.target.files ?? []); event.target.value = ""; void attachFiles(incoming); }}/><button type="button" className="mcpIconButton" aria-label="Добавить файлы или изображения" title={status.chat_attachments ? "Файлы и изображения · до 2 МБ каждый" : "Обновите компонент AI-agent для файлов"} disabled={blocked || !status.chat_attachments} onClick={() => fileInput.current?.click()}><ChatIcon name="plus"/></button>
+          <div className="mcpModelControl" onKeyDown={event => { if (event.key === "Escape") { setModelMenu(false); modelButton.current?.focus(); } }}><button type="button" ref={modelButton} className="mcpModelButton" aria-label="Модель для запроса" aria-haspopup="dialog" aria-expanded={modelMenu} disabled={blocked || dirty || status.settings.model_mode !== "catalog"} onClick={() => { setModelMenu(current => !current); setModelSearch(""); }}><span>{selectedModel || (catalogLoading ? "Загрузка моделей…" : "Выбрать модель")}</span><ChatIcon name="chevron"/></button>{modelMenu && <><button type="button" className="mcpMenuBackdrop" aria-label="Закрыть выбор модели" onClick={() => setModelMenu(false)}/><div className="mcpModelMenu" onKeyDown={event => { const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]')); const index = options.indexOf(document.activeElement as HTMLButtonElement); if (options.length && (["ArrowDown", "ArrowUp"].includes(event.key) || index >= 0 && ["Home", "End"].includes(event.key))) { event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : event.key === "ArrowDown" ? (index + 1) % options.length : (index - 1 + options.length) % options.length; options[next].focus(); } }} role="dialog" aria-label="Выбор модели"><div className="mcpModelSearch"><ChatIcon name="search"/><input aria-label="Найти модель" placeholder="Поиск моделей" value={modelSearch} onChange={event => setModelSearch(event.target.value)} autoFocus/><button type="button" className="mcpIconButton" aria-label="Обновить модели" disabled={catalogLoading} onClick={() => void loadModels(savedProviderUrl, null)}><ChatIcon name="refresh"/></button></div><div role="listbox" aria-label="Доступные модели">{matchingModels.slice(0, 100).map(id => <button type="button" role="option" aria-selected={id === selectedModel} key={id} onClick={() => { setModel(id); setModelMenu(false); modelButton.current?.focus(); }}><span>{id}</span>{id === selectedModel && <ChatIcon name="check"/>}</button>)}{!matchingModels.length && <p>{catalogLoading ? "Загрузка…" : "Модели не найдены"}</p>}</div><small>{matchingModels.length} моделей{matchingModels.length > 100 ? " · уточните поиск" : ""}</small></div></>}</div>
+          <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title="Отправить" disabled={blocked || dirty || !(prompt.trim() || files.length) || !selectedModel || !selectedComponent.enabled || !selectedComponent.configured} onClick={() => void send()}>{working === "chat" || readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
+      </div>
+      <p className="mcpChatHint">Shift+Enter — новая строка · файлы передаются выбранному AI-провайдеру</p>
     </section>}
     <section id={`${tabsId}-settings`} role={agentView ? "tabpanel" : undefined} aria-labelledby={agentView ? `${tabsId}-settings-tab` : undefined} hidden={!settingsVisible}>
       <form className="mcpSettings" onSubmit={event => { event.preventDefault(); void save(canStartBot && !status.bot.active); }}>
@@ -231,29 +263,29 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
         {setupMessage && <p className="mcpNotice">{setupMessage}</p>}
         {!agentView && <p className="mcpFieldHint">Гости получают приветствие, справку и свой /id. AI, MCP и сведения о сервере доступны только администраторам бота; доступ к веб-панели этим не выдаётся.</p>}
         <div className="mcpProviderSection"><fieldset disabled={credentialsBlocked} className="mcpConnection"><legend>{agentView ? "Подключение к AI" : "Подключение бота"}</legend>
-          {agentView && <label className="mcpModelMode">Модели<select value={draft.model_mode ?? "single"} onChange={event => patch({ model_mode: event.target.value as "single" | "catalog" })}><option value="single">Одна модель · вручную по ID</option><option value="catalog">Авто · каталог провайдера, выбор в чате</option></select></label>}
+          {agentView && <label className="mcpModelMode">Модели<select value={draft.model_mode ?? "single"} onChange={event => patch({ model_mode: event.target.value as "single" | "catalog" })}><option value="single">Одна модель</option><option value="catalog">Авто · каталог API</option></select></label>}
           <div className={`mcpFields ${agentView ? draft.model_mode === "catalog" ? "catalogProviderFields" : "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://api.nyxos.shop/v1" onChange={event => patch({ provider_url: event.target.value })}/></label>{draft.model_mode !== "catalog" && <label>Модель<input value={draft.model} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label>}<Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
-          {agentView && draft.model_mode === "catalog" && <div className="mcpCatalog"><button type="button" className="ghostButton" disabled={catalogLoading || !draft.provider_url || !(draft.api_key || draft.api_key === null && draft.api_key_configured)} onClick={() => void loadModels(draft.provider_url, draft.api_key)}>{catalogLoading ? "Загрузка моделей…" : "Проверить каталог"}</button>{catalog.length > 0 && <span>Доступно моделей: {catalog.length}</span>}<small>Укажите только Base URL и API-ключ. Все доступные модели загружаются автоматически. Выбор модели — в чате перед запросом.</small>{catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}</div>}
+          {agentView && draft.model_mode === "catalog" && <div className="mcpCatalog"><button type="button" className="ghostButton" disabled={catalogLoading || !draft.provider_url || !(draft.api_key || draft.api_key === null && draft.api_key_configured)} onClick={() => void loadModels(draft.provider_url, draft.api_key)}>{catalogLoading ? "Загрузка…" : "Загрузить модели"}</button>{catalog.length > 0 && <span>{catalog.length} моделей · выбор в чате</span>}{catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}</div>}
         </fieldset>
-        <div className="mcpConnectionStatus"><div className="mcpConnectionFoot"><small>{agentView ? "API chat/completions с поддержкой инструментов." : "Токен можно проверить до сохранения, включения бота и добавления пользователей."}</small><button type="button" className="ghostButton" disabled={blocked || !canCheckConnection} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
+        {!(agentView && draft.model_mode === "catalog") && <div className="mcpConnectionStatus"><div className="mcpConnectionFoot">{!agentView && <small>Токен можно проверить до сохранения.</small>}<button type="button" className="ghostButton" disabled={blocked || !canCheckConnection} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
           {result && result.revision === status.settings.revision && result.actor === actor && <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>}
-        </div></div>
-        {agentView && <fieldset disabled={settingsBlocked} className="mcpSkills"><legend>MCP-подключения</legend><div className="mcpModuleGrid">{status.mcp_modules.map(skill => {
+        </div>}</div>
+        {agentView && <fieldset disabled={settingsBlocked} className="mcpSkills"><legend>MCP-модули <small>{draft.mcp_installed?.length ?? 0} добавлено</small></legend><div className="mcpModuleGrid">{status.mcp_modules.map(skill => {
           const checked = checks[skill.id];
-          return <article className="mcpModule" key={skill.id}><header><label className="mcpToggle"><input type="checkbox" checked={draft.mcp[skill.id as McpId]} onChange={event => patch({ mcp: { ...draft.mcp, [skill.id]: event.target.checked } })}/><strong>{skill.name}</strong></label><span className="mcpBadge">{moduleState(status, skill.id)}</span></header><p>{descriptions[skill.id]}</p>
-            {skill.id === "telegram-mcp" && draft.mcp[skill.id] && <div className="mcpFields"><label>Telegram API ID<input type="number" min={1} value={draft.telegram_api_id ?? ""} onChange={event => patch({ telegram_api_id: event.target.value ? Number(event.target.value) : null })}/></label><Secret label="Telegram API hash" configured={draft.telegram_api_hash_configured} value={draft.telegram_api_hash} onChange={telegram_api_hash => patch({ telegram_api_hash })}/></div>}
-            <p className="mcpToolList">{status.tools[skill.id].join(" · ")}</p><footer><span>{status.tools[skill.id].length} инструмента</span><button type="button" className="ghostButton" disabled={blocked || dirty || !skill.enabled || !skill.configured || skill.id === "telegram-mcp" && !actor} onClick={() => void check(skill.id)}>{working === skill.id ? "Проверяем…" : "Проверить"}</button></footer>
+          const installed = draft.mcp_installed?.includes(skill.id) === true;
+          return <article className={`mcpModule ${installed ? "isInstalled" : ""}`} key={skill.id}><header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name="module"/></span><strong>{skill.name}</strong></div>{installed && <button type="button" className="mcpIconButton" aria-label={`Удалить модуль ${skill.name}`} title="Удалить модуль" onClick={() => patch({ mcp_installed: draft.mcp_installed?.filter(id => id !== skill.id), mcp: { ...draft.mcp, [skill.id]: false } })}><ChatIcon name="close"/></button>}</header><p>{skill.description ?? descriptions[skill.id]}</p>
+            <footer><span>{status.tools[skill.id].length} инструмента</span>{installed ? <><label className="mcpToggle"><input type="checkbox" aria-label={`Включить ${skill.name}`} checked={draft.mcp[skill.id as McpId]} onChange={event => patch({ mcp: { ...draft.mcp, [skill.id]: event.target.checked } })}/>Включён</label><button type="button" className="ghostButton" disabled={blocked || dirty || !skill.enabled || !skill.configured || skill.id === "telegram-mcp" && !actor} onClick={() => void check(skill.id)}>{working === skill.id ? "Проверяем…" : "Проверить"}</button></> : <button type="button" className="ghostButton" onClick={() => patch({ mcp_installed: [...(draft.mcp_installed ?? []), skill.id] })}><ChatIcon name="plus"/>Добавить</button>}</footer>
             {checked && checked.revision === status.settings.revision && checked.actor === actor && <p className={checked.ok ? "mcpCheck" : "mcpCheck error"} role="status">{checked.text}</p>}
           </article>;
-        })}</div><div className="mcpScope">{actorSelect}<small>Контур определяет права для проверок MCP и чата.</small></div></fieldset>}
+        })}</div>{draft.mcp_installed?.includes("telegram-mcp") && <div className="mcpScope mcpModuleCredentials"><label>Telegram API ID<input type="number" min={1} value={draft.telegram_api_id ?? ""} onChange={event => patch({ telegram_api_id: event.target.value ? Number(event.target.value) : null })}/></label><Secret label="Telegram API hash" configured={draft.telegram_api_hash_configured} value={draft.telegram_api_hash} onChange={telegram_api_hash => patch({ telegram_api_hash })}/>{actorSelect}</div>}</fieldset>}
         <fieldset disabled={settingsBlocked} className="mcpAccounts"><legend>{agentView ? "Пользователи и права MCP" : "Администраторы бота"}</legend>
-          {agentView && draft.modules["nodera-bot"] && draft.accounts.some(item => item.bot_access) && <p className="mcpFieldHint">Администраторы включённого NoderaBot наследуют доступ к VPS. Чтобы снять его, уберите роль администратора в настройках бота.</p>}
+          {agentView && draft.modules["nodera-bot"] && draft.accounts.some(item => item.bot_access) && <p className="mcpFieldHint">Администраторы бота имеют доступ к VPS.</p>}
           {!agentView && <div className="mcpUserLookup"><label>Добавить по @username<input value={username} maxLength={65} placeholder="@aske312" onChange={event => { setUsername(event.target.value); setFoundUser(null); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void lookupUser(); } }} /></label><button type="button" className="ghostButton" disabled={!username.trim()} onClick={() => void lookupUser()}>{working === "lookup" ? "Ищем…" : "Найти пользователя"}</button><small>Пользователь должен сначала написать этому боту /start или /id. Тег проверяется в Telegram, доступ сохраняется за числовым ID.</small>
             {foundUser && <div className="mcpFoundUser"><span><strong>@{foundUser.username}</strong> · {foundUser.name}<small>Telegram ID: {foundUser.telegram_id}</small></span><button type="button" className="ghostButton" disabled={draft.accounts.some(item => item.telegram_id === foundUser.telegram_id && item.bot_access) || draft.accounts.length >= 30 && !draft.accounts.some(item => item.telegram_id === foundUser.telegram_id)} onClick={addFoundUser}>Добавить администратора</button></div>}
           </div>}
           {!draft.accounts.length && <p className="mcpFieldHint">Добавьте Telegram ID пользователя.</p>}
           {draft.accounts.map((item, index) => <article className="mcpAccount" key={index}><div className="mcpAccountRow"><label>Telegram ID<input type="number" min={1} required value={item.telegram_id || ""} onChange={event => changeAccount(index, { telegram_id: Number(event.target.value) })}/></label><label>Имя<input value={item.name} maxLength={80} onChange={event => changeAccount(index, { name: event.target.value })}/></label><div className="mcpAccountRights">{agentView ? <><label><input type="checkbox" checked={item.telegram_access} onChange={event => changeAccount(index, { telegram_access: event.target.checked })}/>Telegram</label><label><input type="checkbox" checked={item.vps_access || draft.modules["nodera-bot"] && item.bot_access} disabled={draft.modules["nodera-bot"] && item.bot_access} onChange={event => changeAccount(index, { vps_access: event.target.checked })}/>VPS</label></> : <label><input type="checkbox" checked={item.bot_access} onChange={event => changeAccount(index, { bot_access: event.target.checked })}/>Администратор</label>}</div><button type="button" className="ghostButton mcpRemove" aria-label={`Удалить пользователя ${item.name || item.telegram_id || index + 1}`} onClick={() => patch({ accounts: draft.accounts.filter((_, i) => i !== index) })}>Удалить</button></div>
-            {agentView && <div className="mcpAccountAdvanced"><div className="mcpFields"><Secret label="Telethon StringSession" configured={item.session_configured} value={item.session} onChange={session => changeAccount(index, { session })}/><label>Исключённые ID диалогов<input value={item.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => changeAccount(index, { excluded_dialogs_text: event.target.value })}/></label></div><small>Сессия принадлежит этому Telegram ID. Подключение по QR пока недоступно.</small></div>}
+            {agentView && <div className="mcpAccountAdvanced"><div className="mcpFields"><Secret label="Telegram-сессия" configured={item.session_configured} value={item.session} onChange={session => changeAccount(index, { session })}/><label>Исключённые диалоги<input value={item.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => changeAccount(index, { excluded_dialogs_text: event.target.value })}/></label></div></div>}
           </article>)}
           <button type="button" className="ghostButton" disabled={draft.accounts.length >= 30} onClick={() => patch({ accounts: [...draft.accounts, { telegram_id: 0, name: "", bot_access: !agentView, telegram_access: false, vps_access: false, excluded_dialogs: [], excluded_dialogs_text: "", session: null, session_configured: false }] })}>Добавить пользователя</button>
         </fieldset>

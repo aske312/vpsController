@@ -449,7 +449,9 @@ def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'noder
 @app.post('/api/assistant/chat')
 def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
     return assistant_control.runtime_request(sys.modules[__name__], '--chat',
-        {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel', 'model': payload.model})
+        {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel', 'model': payload.model,
+         'attachments': [item.model_dump() for item in payload.attachments],
+         'history': [item.model_dump() for item in payload.history]})
 
 
 @app.post('/api/assistant/models')
@@ -464,7 +466,10 @@ def require_nodera_bot(authorization: str | None = Header(default=None),
 
 @app.post('/api/assistant/bot-chat', dependencies=[Depends(require_nodera_bot)])
 def nodera_chat(payload: assistant_control.Chat, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
-    return assistant_control.runtime_request(sys.modules[__name__], '--chat', {'prompt': payload.prompt, 'actor': actor})
+    return assistant_control.runtime_request(sys.modules[__name__], '--chat',
+        {'prompt': payload.prompt, 'actor': actor, 'model': payload.model,
+         'attachments': [item.model_dump() for item in payload.attachments],
+         'history': [item.model_dump() for item in payload.history]})
 
 
 @app.post('/api/assistant/bot-command', dependencies=[Depends(require_nodera_bot)])

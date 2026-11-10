@@ -60,6 +60,7 @@ class Settings(BaseModel):
     component: Literal['ai-agent', 'nodera-bot']
     modules: dict[str, StrictBool]
     mcp: dict[str, StrictBool]
+    mcp_installed: list[Literal['telegram-mcp', 'vps-controller-mcp']] | None = None
     bot_token: str | None = Field(default=None, max_length=256)
     provider_url: str = Field(default='', max_length=512)
     model: str = Field(default='', max_length=128)
@@ -120,17 +121,54 @@ class Settings(BaseModel):
 
     @model_validator(mode='after')
     def unique_accounts(self):
+        if self.mcp_installed is not None:
+            self.mcp_installed = list(dict.fromkeys(self.mcp_installed))
+            if any(enabled and key not in self.mcp_installed for key, enabled in self.mcp.items()):
+                raise ValueError('Сначала добавьте включаемый MCP-модуль')
         ids = [a.telegram_id for a in self.accounts]
         if len(set(ids)) != len(ids):
             raise ValueError('Telegram ID пользователей не должны повторяться')
         return self
 
 
+class ChatAttachment(BaseModel):
+    model_config = {'extra': 'forbid'}
+    name: str = Field(min_length=1, max_length=160, pattern=r'^[^\x00-\x1f/\\]+$')
+    mime: Literal['image/png', 'image/jpeg', 'image/webp', 'application/pdf',
+                  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+    data: str = Field(min_length=1, max_length=2800000)
+
+
+class ChatMessage(BaseModel):
+    model_config = {'extra': 'forbid'}
+    role: Literal['user', 'assistant']
+    content: str = Field(min_length=1, max_length=8000)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode='after')
+    def user_files_only(self):
+        if self.role != 'user' and self.attachments:
+            raise ValueError('Файлы допустимы только в сообщениях пользователя')
+        return self
+
+
 class Chat(BaseModel):
     model_config = {'extra': 'forbid'}
-    prompt: str = Field(min_length=1, max_length=12000)
+    prompt: str = Field(default='', max_length=12000)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=12)
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
     model: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode='after')
+    def bounded_content(self):
+        if not self.prompt.strip() and not self.attachments:
+            raise ValueError('Введите сообщение или добавьте файл')
+        if sum(len(item.data) for item in self.attachments + [file for row in self.history for file in row.attachments]) > 8400000:
+            raise ValueError('Общий размер вложений превышен')
+        if sum(len(item.content) for item in self.history) > 24000:
+            raise ValueError('История диалога превышает лимит')
+        return self
 
     @field_validator('model')
     @classmethod
@@ -219,12 +257,13 @@ def _read(api):
         value = assembled
     if not value:
         return {'revision': '0' * 32, 'modules': {key: False for key in MODULES},
-                'mcp': {key: False for key in MCP_MODULES},
+                'mcp': {key: False for key in MCP_MODULES}, 'mcp_installed': [],
                 'provider_url': '', 'model': '', 'accounts': [], 'telegram_api_id': None}
     try:
         Settings.model_validate({key: item for key, item in value.items() if key not in ('revision', 'control_token')} | {'expected_revision': value['revision'], 'component': 'ai-agent'})
     except (ValueError, KeyError):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
+    value.setdefault('mcp_installed', list(MCP_MODULES))
     return value
 
 
@@ -245,6 +284,7 @@ def store(api, value):
     revision = value['revision']
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
+    ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
               accounts=[{key: item for key, item in a.items() if key != 'bot_access'} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -316,8 +356,14 @@ def status(api):
         bot_version = (runtime_directory('nodera-bot') / 'version').read_text().strip()
     except OSError:
         bot_version = ''
+    try:
+        agent_version = tuple(map(int, (runtime_directory() / 'version').read_text().strip().split('.')))
+    except (OSError, ValueError):
+        agent_version = ()
     return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
+            'chat_attachments': agent_version >= (1, 1, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
+                             'installed': key in value['mcp_installed'],
                              'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'vpsController MCP'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
@@ -341,7 +387,9 @@ def configure(api, payload):
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
-        keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp') if payload.component == 'ai-agent' else ('bot_token',)
+        if submitted['mcp_installed'] is None:
+            submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
+        keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed') if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         if payload.component == 'ai-agent' and value.get('model_mode') == 'catalog':
             value['model'] = ''
@@ -405,6 +453,13 @@ def runtime_request(api, mode, body):
     python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
     body = dict(body)
+    if body.get('attachments') or body.get('history'):
+        try:
+            version = tuple(map(int, (runtime_directory() / 'version').read_text().strip().split('.')))
+        except (OSError, ValueError):
+            version = ()
+        if version < (1, 1, 0):
+            raise HTTPException(409, 'Обновите компонент AI-agent в Обзоре для файлов и истории диалога')
     selected_model = body.pop('model', None)
     if component == 'ai-agent' and mode == '--check' and body.get('module') == 'ai-agent' and value.get('model_mode') == 'catalog':
         result = model_catalog(api, Catalog(provider_url=value['provider_url']))

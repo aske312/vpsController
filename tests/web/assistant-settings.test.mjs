@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
+import * as chatFiles from '../../src/features/assistant/chat-files.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
 function mount(mode, status, catalog = []) {
@@ -31,7 +32,7 @@ function mount(mode, status, catalog = []) {
   const requireActual = createRequire(import.meta.url), exported = {};
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
-  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers
+  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './chat-files' ? chatFiles : name === './chat-icon' ? { ChatIcon() {} }
     : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   new Function('require', 'exports', outputText)(require, exported);
   const request = async (path, options) => {
@@ -100,16 +101,21 @@ test('catalog mode loads any number of models and sends the chat selection witho
   const view = mount('agent', status, models);
   view.render(); await Promise.resolve(); view.render(); await Promise.resolve();
   let tree = view.render();
-  const selector = nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Модель для запроса')[0];
-  assert.equal(nodes(selector.node, n => n.type === 'option').length, models.length + 1);
-  assert.equal(selector.node.props.value, '');
+  const selector = nodes(tree, n => n.type === 'button' && n.props['aria-label'] === 'Модель для запроса')[0];
+  assert.equal(selector.node.props['aria-expanded'], false);
   assert.equal(selector.disabled, false);
-  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello' } });
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello', style: {}, scrollHeight: 48 } });
   tree = view.render();
   nodes(tree, n => n.type === 'textarea')[0].node.props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
   assert.equal(view.writes.length, 0);
-  selector.node.props.onChange({ target: { value: 'model-249' } });
-  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello' } });
+  selector.node.props.onClick();
+  tree = view.render();
+  nodes(tree, n => n.type === 'input' && n.props['aria-label'] === 'Найти модель')[0].node.props.onChange({ target: { value: 'model-249' } });
+  tree = view.render();
+  const options = nodes(tree, n => n.props.role === 'option');
+  assert.equal(options.length, 1);
+  options[0].node.props.onClick();
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello', style: {}, scrollHeight: 48 } });
   tree = view.render();
   nodes(tree, n => n.type === 'textarea')[0].node.props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
   await Promise.resolve();
