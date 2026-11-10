@@ -163,6 +163,13 @@ class AssistantTests(unittest.TestCase):
             control.runtime_request(api, '--chat', {'prompt': 'test'})
         self.assertEqual(caught.exception.status_code, 409)
 
+    def test_unauthenticated_service_requests_do_not_read_or_create_private_storage(self):
+        with patch.object(control, 'read', side_effect=AssertionError('Unauthenticated storage access')):
+            for authorize in (control.authorize_control, control.authorize_bot):
+                with self.assertRaises(api.HTTPException) as caught:
+                    authorize(api, None, '')
+                self.assertEqual(caught.exception.status_code, 401)
+
 
 class AgentRuntimeTests(unittest.TestCase):
     def test_mcp_scope_is_bound_to_selected_user_and_panel_has_no_telegram_session(self):

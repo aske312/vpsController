@@ -200,6 +200,9 @@ def _read(api):
 
 
 def read(api):
+    # Observing an unused optional component must not create its data directory.
+    if not (directory(api) / 'settings.json').exists():
+        return _read(api)
     with operations.locked(api.DATA_DIR):
         return _read(api)
 
@@ -366,6 +369,8 @@ def runtime_request(api, mode, body):
 
 
 def authorize_control(api, authorization, actor):
+    if not authorization or not re.fullmatch(r'Bearer [A-Za-z0-9_-]{32,128}', authorization):
+        raise HTTPException(401, 'Нужен служебный токен MCP', headers={'WWW-Authenticate': 'Bearer'})
     value = read(api)
     expected = value.get('control_token', '')
     if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
@@ -378,6 +383,8 @@ def authorize_control(api, authorization, actor):
 
 
 def authorize_bot(api, authorization, actor):
+    if not authorization or not re.fullmatch(r'Bearer [A-Za-z0-9_-]{32,128}', authorization):
+        raise HTTPException(401, 'Нужен служебный токен бота', headers={'WWW-Authenticate': 'Bearer'})
     value = read(api)
     expected = value.get('control_token', '')
     if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
