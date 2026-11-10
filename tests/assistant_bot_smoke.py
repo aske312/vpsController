@@ -21,6 +21,7 @@ async def main():
     async def transport(settings, method, **payload):
         nonlocal calls
         if method == 'getWebhookInfo': return {'url': ''}
+        if method == 'setMyCommands': return True
         if method == 'getUpdates':
             calls += 1
             if calls > 1: raise asyncio.CancelledError()
@@ -33,10 +34,11 @@ async def main():
         if method == 'sendMessage': sent.append(payload); return {}
         raise AssertionError(method)
     async def identify(settings, sender): return sender['id'] == 11
-    with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', identify), patch.object(bot, 'agent_request', new=AsyncMock(side_effect=AssertionError('Unexpected AI request'))):
+    with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', identify), patch.object(bot, 'server_command', new=AsyncMock(return_value='NoderaBot server status')) as server, patch.object(bot, 'agent_request', new=AsyncMock(side_effect=AssertionError('Unexpected AI request'))):
         try: await bot.bot(settings)
         except asyncio.CancelledError: pass
         assert json.loads((Path(folder) / 'offset.json').read_text())['offset'] == 5
+        server.assert_awaited_once_with(settings, 11, '/status')
     assert len(sent) == 3
     assert 'NoderaBot' in next(row['text'] for row in sent if row['chat_id']==11)
     assert '23' in next(row['text'] for row in sent if row['chat_id']==23)

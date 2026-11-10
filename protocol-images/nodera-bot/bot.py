@@ -16,6 +16,36 @@ import httpx
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
 
+PUBLIC_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка'), ('id', 'Мой Telegram ID')]
+ADMIN_COMMANDS = PUBLIC_COMMANDS + [
+    ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
+    ('services', 'Службы и доступные действия'), ('components', 'Установленные компоненты'),
+    ('service', 'Управление: ID start|stop|restart'), ('confirm', 'Подтвердить действие: код'),
+    ('cancel', 'Отменить ожидающее подтверждение'), ('operation', 'Результат операции: ID')]
+
+
+async def command_menu(settings, actor=None, admin=False):
+    scope = {'type': 'chat', 'chat_id': actor} if actor else {'type': 'all_private_chats'}
+    await bot_api(settings, 'setMyCommands', scope=scope,
+                  commands=[{'command': name, 'description': description} for name, description in (ADMIN_COMMANDS if admin else PUBLIC_COMMANDS)])
+
+
+async def server_command(settings, actor, prompt):
+    if len(prompt) > 256:
+        return 'Команда слишком длинная. /help — формат команд.'
+    async with httpx.AsyncClient(timeout=45, trust_env=False) as client:
+        response = await client.post('http://127.0.0.1:8000/api/assistant/bot-command',
+            headers={'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)},
+            json={'command': prompt})
+        if response.status_code != 200:
+            if response.status_code in (401, 403):
+                return 'Доступ администратора бота не подтверждён.'
+            if response.status_code in (404, 409):
+                detail = response.json().get('detail')
+                if isinstance(detail, str): return detail[:1000]
+            return 'Команда не выполнена. Проверьте состояние в панели; если подтверждение уже отправлено, используйте /operation с ID операции.'
+        return response.json()['text']
+
 
 async def bot_api(settings, method, **payload):
     async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
@@ -63,9 +93,15 @@ async def reply(settings, sender, prompt, admin):
     if command in ('/id', '/userid') or not admin:
         return public_reply(sender, command)
     if command in ('/start', '/help'):
-        return 'Привет! Я Нодера 👋\nУ вас доступ администратора бота. Задайте вопрос о сервере.\n/id — ваш Telegram ID\n/status — состояние бота'
-    if command == '/status':
-        return 'NoderaBot принимает ваши команды. Серверные инструменты доступны через настроенный AI-agent и MCP.'
+        try:
+            return 'Привет! Я Нодера 👋 У вас доступ администратора бота.\n' + await server_command(settings, sender['id'], '/help')
+        except Exception:
+            return 'Команды сервера сейчас недоступны. Проверьте панель и повторите /help.'
+    if command.startswith('/'):
+        try:
+            return await server_command(settings, sender['id'], prompt)
+        except Exception:
+            return 'Не удалось получить результат команды. Проверьте панель или /operation с ID операции. Не повторяйте изменение, пока не проверите его результат.'
     try:
         return await agent_request(settings, sender['id'], prompt)
     except Exception:
@@ -77,10 +113,13 @@ async def bot(settings):
         raise ValueError('Нужен токен включённого NoderaBot')
     if (await bot_api(settings, 'getWebhookInfo')).get('url'):
         raise ValueError('У бота установлен webhook; long polling не запущен')
+    try: await command_menu(settings)
+    except Exception: logging.error('NoderaBot command menu could not be updated')
     state_root = Path(os.environ.get('STATE_DIRECTORY', tempfile.gettempdir()))
     state_file = state_root / 'offset.json'
     offset = json.loads(state_file.read_text()).get('offset', 0) if state_file.exists() else 0
     last = {}
+    menus = {}
     while True:
         try:
             updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message'])
@@ -100,6 +139,12 @@ async def bot(settings):
                 last[actor] = time.monotonic()
                 try: admin = await identify(settings, sender)
                 except Exception: admin = False
+                if menus.get(actor) is not admin:
+                    try:
+                        await command_menu(settings, actor, admin)
+                        if len(menus) >= 1000: menus.clear()
+                        menus[actor] = admin
+                    except Exception: logging.error('NoderaBot private command menu could not be updated')
                 answer = await reply(settings, sender, prompt, admin)
                 if admin:
                     # An AI request may outlive an administrator revocation.

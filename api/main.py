@@ -47,6 +47,7 @@ import application_recovery
 import operation_policy
 import assistant_control
 import assistant_contacts
+import assistant_commands
 import network_routes
 import network_probe
 import network_check_targets
@@ -459,6 +460,11 @@ def require_nodera_bot(authorization: str | None = Header(default=None),
 @app.post('/api/assistant/bot-chat', dependencies=[Depends(require_nodera_bot)])
 def nodera_chat(payload: assistant_control.Chat, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
     return assistant_control.runtime_request(sys.modules[__name__], '--chat', {'prompt': payload.prompt, 'actor': actor})
+
+
+@app.post('/api/assistant/bot-command', dependencies=[Depends(require_nodera_bot)])
+def nodera_command(payload: assistant_commands.Command, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return {'text': assistant_commands.execute(sys.modules[__name__], actor, payload.command)}
 
 
 def require_nodera_bot_transport(authorization: str | None = Header(default=None)) -> dict:

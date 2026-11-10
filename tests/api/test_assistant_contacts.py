@@ -133,6 +133,7 @@ class BotAccessTests(unittest.TestCase):
         async def transport(settings, method, **payload):
             nonlocal polls
             if method == 'getWebhookInfo': return {'url': ''}
+            if method == 'setMyCommands': return True
             if method == 'sendMessage': sent.append(payload['text']); return {}
             if method == 'getUpdates':
                 polls += 1
