@@ -193,6 +193,17 @@ class AssistantTests(unittest.TestCase):
             control.runtime_request(api, '--chat', {'prompt': 'Read', 'attachments': [{'name': 'a.txt', 'mime': 'text/plain', 'data': 'dGV4dA=='}]})
         self.assertEqual(caught.exception.status_code, 409)
 
+    def test_persona_and_cache_settings_persist_and_legacy_clients_preserve_them(self):
+        payload = self.payload()
+        payload.update(assistant_style='friendly', assistant_instructions='Use exact units', memory_enabled=True, memory_days=7)
+        saved = self.save(payload)
+        self.assertEqual(saved['settings']['assistant_style'], 'friendly')
+        self.assertEqual(control.read(api)['memory_days'], 7)
+        legacy = self.payload(); legacy['expected_revision'] = saved['settings']['revision']
+        self.save(legacy)
+        self.assertEqual(control.read(api)['assistant_instructions'], 'Use exact units')
+        self.assertEqual(control.read(api)['memory_days'], 7)
+
     def test_catalog_uses_draft_or_saved_key_without_saving_or_leaking_it_to_another_provider(self):
         self.save()
         before = control.read(api)

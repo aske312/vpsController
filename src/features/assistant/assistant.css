@@ -1,265 +1,199 @@
 .gateNavGlyph .protocolIcon { width:22px; height:22px; object-fit:contain; }
-.mcpWorkspace { container-type:inline-size; display:grid; gap:10px; min-width:0; padding:0 0 20px; color:var(--text); font-size:12px; }
-.mcpWorkspace [hidden] { display:none !important; }
-.mcpToolbar,.mcpIdentity,.mcpActions,.mcpSettingsHead,.mcpConnectionFoot,.mcpChatHead,.mcpScope { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.mcpToolbar { justify-content:space-between; min-height:0; }
-.mcpIdentity { gap:7px; min-width:0; }
-.mcpIdentity .protocolIcon { width:30px; height:30px; }
-.mcpWorkspace .mcpIdentity h1 { font-size:30px; line-height:1.1; font-weight:700; margin:0; letter-spacing:-.35px; }
-.mcpBadge { font-size:11px; color:var(--muted); padding:5px 9px; border:1px solid rgba(91,116,141,.22); border-radius:999px; background:rgba(7,15,24,.66); }
-.mcpTabs { display:flex; width:100%; padding:5px; gap:4px; border:1px solid rgba(91,116,141,.22); border-radius:14px; background:rgba(7,15,23,.93); }
-.mcpTabs button { display:flex; align-items:center; gap:6px; min-width:100px; height:36px; padding:0 14px; border:1px solid transparent; border-radius:10px; background:transparent; color:var(--muted); font:500 12px var(--ui-font); cursor:pointer; }
-.mcpTabs button[aria-selected=true] { color:#c5d5e4; border-color:rgba(116,145,176,.28); background:rgba(49,73,99,.24); }
-.mcpTabs i { width:5px; height:5px; border-radius:50%; background:var(--amber); }
-.mcpWorkspace .ghostButton,.mcpWorkspace .primaryButton { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; min-height:34px; height:auto; padding:6px 10px; font:500 12px/1.3 var(--ui-font); border-radius:8px; }
-.mcpWorkspace .primaryButton { background:rgba(18,82,67,.25); color:var(--green); border:1px solid color-mix(in srgb,var(--green) 30%,transparent); }
-.mcpWorkspace .primaryButton:hover:not(:disabled) { background:color-mix(in srgb,var(--green) 24%,var(--panel)); }
-.mcpWorkspace p { margin:0; line-height:1.5; color:var(--muted); }
-.mcpWorkspace label { display:grid; gap:5px; min-width:0; color:var(--muted); font-size:11px; }
-.mcpWorkspace .mcpToggle,.mcpWorkspace .mcpAccountRights label { display:flex; align-items:center; gap:6px; font-size:12px; }
-.mcpWorkspace input:not([type=checkbox]),.mcpWorkspace select,.mcpWorkspace textarea { width:100%; min-width:0; border:1px solid rgba(91,116,141,.22); border-radius:8px; min-height:38px; padding:8px 10px; background:rgba(5,13,22,.68); color:var(--text); font:12px/1.4 var(--ui-font); }
-.mcpWorkspace input[type=checkbox] { width:14px; height:14px; accent-color:var(--cyan); }
-.mcpWorkspace :is(button,input,select,textarea):focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
-.mcpWorkspace :is(button,input,select,textarea):disabled { opacity:.5; cursor:not-allowed; }
-.mcpSettings { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:12px; padding:14px; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(145deg,rgba(10,21,30,.96),rgba(5,13,20,.94)); }
-.botWorkspace .mcpSettings { grid-template-columns:minmax(0,1fr); }
-.mcpSettings > :is(header,p,.mcpAccounts) { grid-column:1 / -1; }
-.mcpProviderSection { display:grid; gap:10px; min-width:0; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(5,13,22,.4); }
-.mcpProviderSection .mcpConnection { border:0; padding:0; }
-.mcpProviderSection .mcpFields { grid-template-columns:minmax(0,1fr); }
-.mcpSkills { padding-top:0; border-top:0; }
-.mcpSettingsHead { justify-content:space-between; padding-bottom:9px; border-bottom:1px solid rgba(91,116,141,.22); }
-.mcpConnection,.mcpSkills,.mcpAccounts { min-width:0; padding:12px 0 0; margin:0; border:0; border-top:1px solid rgba(91,116,141,.22); }
-.mcpWorkspace legend { padding:0 9px 0 0; color:var(--text); font-weight:600; font-size:12px; }
-.mcpFields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; align-items:start; }
-.mcpFields.providerFields { grid-template-columns:minmax(0,1fr); }
-.mcpFields.botFields { max-width:650px; }
-.mcpSecret { display:flex; align-items:center; gap:5px; min-width:0; }
-.mcpSecretField { display:grid; gap:5px; min-width:0; }
-.mcpSecret button { font-size:10px; padding:6px 7px; }
-.mcpConnectionFoot { justify-content:space-between; margin-top:9px; }
-.mcpWorkspace small { color:var(--muted); font-size:11px; line-height:1.4; }
-.mcpModuleGrid { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; }
-.mcpModule { display:flex; flex-direction:column; gap:8px; min-width:0; padding:12px; border:1px solid rgba(91,116,141,.22); border-radius:11px; background:rgba(5,13,22,.68); }
-.mcpModule > header,.mcpModule > footer { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
-.mcpModule > footer { margin-top:auto; }
-.mcpModule > p { font-size:11px; }
-.mcpWorkspace .mcpToolList { padding-top:5px; color:var(--muted); font:10px/1.5 var(--technical-font); overflow-wrap:anywhere; }
-.mcpScope { margin-top:9px; }
-.mcpActor { width:min(100%,330px); }
-.mcpAccount { margin:8px 0; padding:9px; border:1px solid rgba(91,116,141,.22); border-radius:11px; background:rgba(5,13,22,.68); }
-.mcpAccountRow { display:grid; grid-template-columns:minmax(110px,.7fr) minmax(120px,1fr) auto auto; align-items:end; gap:9px; }
-.mcpAccountRights { display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-height:32px; }
-.mcpAccountAdvanced { margin-top:8px; }
-.mcpAccountAdvanced .mcpFields { margin:8px 0 5px; }
-.mcpWorkspace .mcpRemove { color:var(--red); }
-.mcpWorkspace .mcpNotice { margin:0; padding:8px 10px; border:1px solid rgba(91,116,141,.22); border-radius:11px; color:var(--muted); background:rgba(27,48,67,.24); font-size:11px; }
-.mcpWorkspace .error { color:var(--red); }
-.mcpWorkspace .mcpCheck { padding-top:6px; font-size:11px; }
-.mcpChat { display:flex; flex-direction:column; min-height:300px; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(145deg,rgba(10,21,30,.96),rgba(5,13,20,.94)); overflow:hidden; }
-.mcpChatHead { padding:10px 12px; border-bottom:1px solid rgba(91,116,141,.22); }
-.mcpChatHead > span { margin-left:auto; color:var(--muted); font:11px var(--technical-font); }
-.mcpChatHead .mcpActor { display:flex; align-items:center; gap:7px; }
-.mcpTranscript { display:grid; align-content:start; gap:14px; min-height:220px; max-height:520px; overflow:auto; padding:14px; }
-.mcpChatEmpty { display:grid; justify-items:center; align-content:center; min-height:190px; gap:8px; text-align:center; }
-.mcpChatEmpty .protocolIcon { width:54px; height:54px; opacity:.65; }
-.mcpWorkspace .mcpChatEmpty h2 { margin:0; font-size:18px; font-weight:600; }
-.mcpChatEmpty p { font-size:12px; }
-.mcpChatEmpty > div { display:flex; flex-wrap:wrap; justify-content:center; gap:7px; margin-top:8px; }
-.mcpChatEmpty button { padding:6px 9px; border:1px solid rgba(91,116,141,.22); border-radius:8px; color:var(--muted); background:rgba(5,13,22,.68); font:11px var(--ui-font); cursor:pointer; }
-.mcpTurn { display:grid; gap:10px; min-width:0; }
-.mcpUserMessage { justify-self:end; max-width:85%; padding:9px 12px; border:1px solid color-mix(in srgb,var(--cyan) 22%,transparent); border-radius:8px 8px 2px 8px; background:color-mix(in srgb,var(--cyan) 7%,transparent); white-space:pre-wrap; overflow-wrap:anywhere; }
-.mcpAnswer { padding:2px 0 5px; min-width:0; }
-.mcpAnswer > small { color:#90a8bd; }
-.mcpWorkspace .mcpAnswer > p { margin-top:5px; color:inherit; white-space:pre-wrap; overflow-wrap:anywhere; }
-.mcpComposer { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:9px; padding:10px 12px 5px; border-top:1px solid rgba(91,116,141,.22); }
-.mcpComposer .mcpPrompt { font-size:0; gap:0; }
-.mcpComposer textarea { resize:vertical; min-height:52px; max-height:160px; }
-.mcpWorkspace .mcpChatHint { padding:2px 12px 10px; font-size:10px; color:var(--dim); }
-@media(max-width:800px) {
-  .mcpFields.providerFields,.mcpModuleGrid { grid-template-columns:minmax(0,1fr); }
-  .mcpAccountRow { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .mcpAccountRow .mcpRemove { justify-self:end; }
-}
-@media(max-width:480px) {
-  .mcpWorkspace { padding-top:0; }
-  .mcpToolbar { gap:8px; }
-  .mcpTabs { margin-left:auto; }
-  .mcpIdentity .mcpBadge { flex-basis:auto; font-size:10px; }
-  .mcpSettings { padding:10px; }
-  .mcpFields { grid-template-columns:minmax(0,1fr); }
-  .mcpWorkspace .ghostButton,.mcpWorkspace .primaryButton { min-height:34px; }
-  .mcpTranscript { min-height:220px; padding:12px; }
-  .mcpChatHead { align-items:start; }
-  .mcpChatHead > span { margin-left:0; }
-  .mcpChatHead .mcpActor { width:100%; }
-  .mcpComposer { grid-template-columns:minmax(0,1fr); }
-  .mcpComposer > button { justify-self:end; }
-}
-
-/* The same illustrated command surface used by the other workspaces. */
+.mcpWorkspace { container-type:inline-size; display:grid; gap:10px; min-width:0; padding-bottom:20px; color:var(--text); font:12px/1.45 var(--ui-font); }
 .mcpWorkspace,.mcpWorkspace *,.mcpWorkspace *::before,.mcpWorkspace *::after { box-sizing:border-box; }
-.mcpModelMode { display:grid; gap:6px; max-width:460px; margin-bottom:12px; }
-.mcpCatalog { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin-top:12px; }
-.mcpCatalog > label { display:grid; gap:6px; flex:1 1 260px; min-width:0; }
-.mcpCatalog > small { flex-basis:100%; }
-.mcpCatalog select,.mcpModelMode select { width:100%; min-width:0; }
-.mcpChatHead .mcpActor { min-width:0; max-width:100%; }
-.mcpChatHead .mcpActor select { max-width:360px; min-width:0; width:100%; }
+.mcpWorkspace [hidden] { display:none !important; }
+.mcpWorkspace p { margin:0; line-height:1.5; color:var(--muted); }
+.mcpWorkspace label { display:grid; gap:5px; min-width:0; font-size:11px; color:var(--muted); }
+.mcpWorkspace small { color:var(--muted); font-size:10px; line-height:1.4; }
+.mcpWorkspace input:not([type=checkbox]),.mcpWorkspace select,.mcpWorkspace textarea { width:100%; min-width:0; min-height:36px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:var(--panel-inset); color:var(--text); font:12px/1.4 var(--ui-font); }
+.mcpWorkspace input[type=checkbox] { width:14px; height:14px; margin:0; accent-color:var(--cyan); }
+.mcpWorkspace :is(button,input,select,textarea):disabled { opacity:.45; cursor:not-allowed; }
+.mcpWorkspace :is(button,input,select,textarea):focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+.mcpWorkspace svg { flex-shrink:0; }
+.mcpWorkspace .ghostButton,.mcpWorkspace .primaryButton { display:inline-flex; align-items:center; justify-content:center; gap:5px; flex-shrink:0; min-height:32px; padding:5px 9px; border:1px solid var(--line-strong); border-radius:8px; font:500 11px/1.4 var(--ui-font); }
+.mcpWorkspace .primaryButton { color:var(--green); background:rgba(105,200,170,.12); }
+.mcpWorkspace .mcpIconButton { display:inline-grid; place-items:center; flex-shrink:0; width:28px; height:28px; padding:0; border:1px solid transparent; border-radius:7px; color:var(--muted); background:transparent; cursor:pointer; }
+.mcpWorkspace .mcpIconButton:hover:not(:disabled) { color:var(--text); border-color:var(--line); background:rgba(116,145,176,.1); }
+.mcpIdentity,.mcpActions,.mcpSettingsHead { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.mcpIdentity .protocolIcon { width:30px; height:30px; }
+.mcpWorkspace .mcpIdentity h1 { margin:0; font:700 30px/1.1 var(--display-font); letter-spacing:-.35px; }
+.mcpBadge { padding:4px 8px; border:1px solid var(--line); border-radius:999px; color:var(--muted); background:rgba(7,15,24,.66); font-size:10px; }
 .gateShell .content:has(.mcpWorkspace) > .gateSectionIntro { display:none; }
-.mcpHero { position:relative; isolation:isolate; overflow:hidden; min-width:0; border:1px solid rgba(91,116,141,.22); border-radius:20px; background:#07101a; }
+.mcpHero { position:relative; isolation:isolate; overflow:hidden; min-width:0; border:1px solid var(--line); border-radius:20px; background:#07101a; }
 .mcpHero::before { content:""; position:absolute; inset:0; z-index:-2; background:url('/gate-art/ai-agent.webp') right 12% / auto 185% no-repeat; opacity:.85; pointer-events:none; }
 .botWorkspace .mcpHero::before { background-image:url('/gate-art/nodera-bot.webp'); }
 .mcpHero::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(7,16,26,.99),rgba(7,16,26,.93) 45%,rgba(7,16,26,.3) 75%,rgba(7,16,26,.08)); pointer-events:none; }
-.mcpHeroContent { width:70%; min-height:210px; display:grid; align-content:center; gap:10px; padding:22px 24px; }
+.mcpHeroContent { display:grid; align-content:center; gap:10px; width:70%; min-height:210px; padding:22px 24px; }
 .mcpWorkspace .mcpHeroContent .eyebrow { color:#758e9f; font:700 9px/1.2 var(--font-mono),monospace; letter-spacing:.14em; }
 .mcpWorkspace .mcpHeroLead { max-width:480px; color:#91a6b5; font-size:12px; }
-.mcpHeroFacts { display:grid; grid-template-columns:1.4fr 1fr 1fr; max-width:590px; margin:4px 0 0; border:1px solid rgba(91,116,141,.18); border-radius:12px; background:rgba(5,13,22,.65); overflow:hidden; }
-.mcpHeroFacts > div { min-width:0; display:grid; gap:6px; padding:10px 12px; border-right:1px solid rgba(91,116,141,.15); }
+.mcpHeroFacts { display:grid; grid-template-columns:1.4fr 1fr 1fr; max-width:590px; margin:4px 0 0; border:1px solid var(--line); border-radius:12px; background:rgba(5,13,22,.65); overflow:hidden; }
+.mcpHeroFacts > div { display:grid; min-width:0; gap:6px; padding:10px 12px; border-right:1px solid var(--line); }
 .mcpHeroFacts > div:last-child { border-right:0; }
 .mcpHeroFacts dt { color:#748a99; font:700 8px/1.2 var(--font-mono),monospace; letter-spacing:.09em; }
 .mcpHeroFacts dd { margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#dce7ef; font:600 12px/1.3 var(--font-mono),monospace; }
-.mcpSectionLabel { color:#8196a5; font-size:12px; padding-left:3px; }
-.mcpChat { position:relative; isolation:isolate; }
-.mcpChat::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(5,13,22,.98),rgba(5,13,22,.88)),url('/gate-art/ai-agent.webp') right center / cover no-repeat; pointer-events:none; }
-.mcpChatHead,.mcpComposer { background:rgba(5,13,22,.45); }
-.mcpChatEmpty .protocolIcon { padding:10px; border:1px solid rgba(116,145,176,.22); border-radius:16px; background:rgba(22,38,53,.5); }
-.mcpWorkspace .mcpAccountRights label { font-size:11px; }
-.mcpUserLookup { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:8px; max-width:680px; margin:8px 0 14px; }
+.mcpToolbar { min-width:0; }
+.mcpTabs { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:4px; width:100%; padding:5px; border:1px solid var(--line); border-radius:12px; background:rgba(9,20,28,.85); }
+.mcpTabs button { display:flex; align-items:center; justify-content:center; gap:7px; min-width:0; min-height:38px; padding:7px 10px; border:1px solid transparent; border-radius:8px; color:var(--muted); background:transparent; font:500 12px var(--ui-font); cursor:pointer; }
+.mcpTabs button > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcpTabs button[aria-selected=true] { border-color:rgba(97,207,216,.3); background:rgba(97,207,216,.1); color:var(--cyan); }
+.mcpTabs button small { min-width:17px; padding:1px 4px; border-radius:5px; background:rgba(116,145,176,.1); font-size:10px; }
+.mcpTabs i { width:4px; height:4px; flex-shrink:0; border-radius:50%; background:var(--amber); }
+.mcpSectionLabel { font-size:12px; color:var(--muted); }
+.mcpWorkspace .mcpNotice,.mcpRuntimeUpdate { margin:0; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:rgba(27,48,67,.35); font-size:11px; }
+.mcpRuntimeUpdate { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; color:var(--muted); }
+.mcpRuntimeUpdate > span { flex:1 1 240px; }
+.mcpWorkspace .error { color:var(--red); }
+.mcpChat { position:relative; isolation:isolate; display:flex; flex-direction:column; min-width:0; height:clamp(440px,calc(100dvh - 400px),700px); border:1px solid var(--line); border-radius:18px; background:var(--panel-inset); overflow:hidden; }
+.mcpChat::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(5,13,22,.96),rgba(5,13,22,.86)),url('/gate-art/ai-agent.webp') right center / cover no-repeat; pointer-events:none; }
+.mcpChat.isDragging { outline:2px dashed var(--cyan); outline-offset:-4px; }
+.mcpChatHead { display:flex; align-items:end; flex-wrap:wrap; flex-shrink:0; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line); background:rgba(8,20,29,.66); }
+.mcpChatHead .mcpActor { flex:1 1 180px; max-width:230px; width:auto; }
+.mcpConversationPicker { flex:2 1 220px; }
+.mcpChatActions { display:flex; gap:4px; margin-left:auto; padding-bottom:3px; }
+.mcpChat > .mcpNotice { margin:8px 12px 0; }
+.mcpTranscript { flex:1 1 0; display:grid; align-content:start; gap:16px; min-width:0; min-height:120px; overflow:auto; padding:18px 16px; }
+.mcpChatEmpty { display:grid; justify-items:center; align-content:center; gap:9px; min-height:190px; text-align:center; }
+.mcpChatEmpty .protocolIcon { width:44px; height:44px; padding:8px; border:1px solid var(--line); border-radius:12px; background:rgba(22,38,53,.5); }
+.mcpWorkspace .mcpChatEmpty h2 { margin:0; font-size:20px; font-weight:600; }
+.mcpChatEmpty > div { display:flex; flex-wrap:wrap; justify-content:center; gap:7px; }
+.mcpChatEmpty button { padding:6px 9px; border:1px solid var(--line); border-radius:8px; color:var(--muted); background:rgba(5,13,22,.65); font:11px var(--ui-font); cursor:pointer; }
+.mcpTurn { display:flex; flex-direction:column; gap:10px; width:min(100%,900px); min-width:0; margin-inline:auto; }
+.mcpUserMessage { align-self:flex-end; max-width:85%; padding:10px 12px; border:1px solid rgba(97,207,216,.25); border-radius:15px 15px 4px 15px; background:rgba(36,73,85,.62); backdrop-filter:blur(6px); white-space:pre-wrap; overflow-wrap:anywhere; }
+.mcpAnswer { align-self:flex-start; width:100%; min-width:0; padding:12px; border:1px solid rgba(116,145,176,.22); border-radius:4px 15px 15px 15px; background:rgba(8,23,34,.76); backdrop-filter:blur(6px); }
+.mcpAnswer > small { color:var(--cyan); overflow-wrap:anywhere; }
+.mcpAnswerContent { min-width:0; padding-top:6px; overflow-wrap:anywhere; }
+.mcpWorkspace .mcpAnswerContent p { margin:5px 0; color:var(--text); line-height:1.65; }
+.mcpAnswerContent h3 { margin:10px 0 6px; font-size:14px; font-weight:650; }
+.mcpAnswerContent :is(ul,ol) { margin:6px 0; padding-left:20px; }
+.mcpAnswerContent ul { list-style:disc; }
+.mcpAnswerContent ol { list-style:decimal; }
+.mcpAnswerContent li { margin:3px 0; line-height:1.6; }
+.mcpAnswerContent :not(pre) > code { padding:2px 4px; border:1px solid var(--line); border-radius:4px; background:rgba(5,13,22,.65); color:var(--cyan); font:11px var(--technical-font); }
+.mcpAnswerContent > :first-child { margin-top:0; }
+.mcpCodeBlock { min-width:0; max-width:100%; margin:8px 0; border:1px solid var(--line); border-radius:9px; overflow:hidden; background:rgba(4,11,18,.78); }
+.mcpCodeBlock > header { display:flex; align-items:center; justify-content:space-between; padding:3px 8px; border-bottom:1px solid var(--line); color:var(--muted); font-size:10px; }
+.mcpCodeBlock pre { margin:0; max-width:100%; padding:10px; overflow:auto; white-space:pre; font:11px/1.65 var(--technical-font); tab-size:2; }
+.mcpAnswerTable { max-width:100%; margin:8px 0; overflow:auto; }
+.mcpAnswerTable table { min-width:100%; border-collapse:collapse; font-size:11px; }
+.mcpAnswerTable :is(td,th) { min-width:90px; padding:7px 9px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+.mcpAnswerTable th { background:rgba(97,207,216,.06); color:var(--text); }
+.mcpToolList { padding-top:5px; color:var(--muted); font:10px/1.5 var(--technical-font); overflow-wrap:anywhere; }
+.mcpAnswer > .mcpIconButton { margin-top:5px; }
+.mcpComposer { position:relative; display:flex; flex-direction:column; flex-shrink:0; gap:8px; align-self:center; width:calc(100% - 28px); max-width:900px; margin:0 0 8px; padding:10px; border:1px solid var(--line-strong); border-radius:16px; background:rgba(12,27,38,.88); backdrop-filter:blur(8px); }
+.mcpComposer:focus-within { border-color:rgba(97,207,216,.55); }
+.mcpComposer .mcpPrompt { font-size:0; gap:0; }
+.mcpWorkspace .mcpComposer textarea,.mcpWorkspace .mcpComposer textarea:focus { min-height:52px; max-height:160px; padding:4px 5px; border:0; border-radius:0; background:transparent; resize:none; box-shadow:none; }
+.mcpComposer textarea:focus-visible { outline:none; }
+.mcpComposerTools { display:flex; align-items:center; gap:6px; min-width:0; }
+.mcpModelControl { position:relative; min-width:0; }
+.mcpModelButton { display:flex; align-items:center; gap:6px; min-width:0; max-width:320px; min-height:32px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; background:rgba(8,20,29,.65); color:var(--text); font:500 11px var(--ui-font); cursor:pointer; }
+.mcpModelButton > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcpSendButton { display:grid; place-items:center; flex-shrink:0; width:34px; height:34px; margin-left:auto; padding:0; border:1px solid rgba(97,207,216,.4); border-radius:10px; color:var(--cyan); background:rgba(97,207,216,.16); cursor:pointer; }
+.mcpMenuBackdrop { position:fixed; inset:0; z-index:10; border:0; background:transparent; cursor:default; }
+.mcpModelMenu { position:absolute; bottom:calc(100% + 8px); left:0; z-index:11; width:340px; max-width:calc(100cqw - 60px); padding:6px; border:1px solid var(--line-strong); border-radius:12px; background:var(--panel); box-shadow:0 12px 40px rgba(0,0,0,.4); }
+.mcpModelMenu > header { display:flex; align-items:center; justify-content:space-between; padding:3px 7px; color:var(--muted); font-size:11px; }
+.mcpModelMenu [role=listbox] { max-height:250px; overflow:auto; }
+.mcpModelMenu [role=option] { display:flex; align-items:center; justify-content:space-between; gap:7px; width:100%; min-height:34px; padding:7px 8px; border:0; border-radius:7px; background:transparent; color:var(--text); text-align:left; font:12px/1.4 var(--ui-font); cursor:pointer; }
+.mcpModelMenu [role=option] > span { min-width:0; overflow-wrap:anywhere; }
+.mcpModelMenu [role=option]:hover,.mcpModelMenu [aria-selected=true] { background:rgba(97,207,216,.1); }
+.mcpModelMenu p { padding:8px; font-size:11px; }
+.mcpFileList { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+.mcpFileChip { display:inline-flex; align-items:center; gap:6px; max-width:100%; min-width:0; padding:5px 7px; border:1px solid var(--line); border-radius:8px; background:rgba(7,15,24,.7); color:var(--muted); font-size:11px; }
+.mcpFileChip > span { min-width:0; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcpFileChip > img { width:34px; height:34px; object-fit:cover; border-radius:5px; }
+.mcpFileChip .mcpIconButton { width:22px; height:22px; }
+.mcpUserMessage .mcpFileList { margin-bottom:6px; }
+.mcpExpiredFiles { display:block; margin-top:6px; }
+.mcpWorkspace .mcpChatHint { width:min(100% - 28px,900px); margin:0 auto 10px; font-size:10px; color:var(--dim); }
+.mcpSettings { display:grid; gap:12px; padding:14px; border:1px solid var(--line); border-radius:16px; background:rgba(10,23,32,.88); }
+.mcpSettingsHead { padding-bottom:10px; border-bottom:1px solid var(--line); }
+.mcpSettingsHead h2 { margin:0 auto 0 0; font-size:15px; font-weight:650; }
+.mcpSettingsHead > .mcpActions { margin-left:auto; }
+.mcpWorkspace .mcpToggle,.mcpWorkspace .mcpAccountRights label { display:flex; align-items:center; gap:6px; font-size:11px; }
+.mcpProviderSection { min-width:0; padding:12px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,22,.4); }
+.mcpConnection,.mcpSkills,.mcpAccounts,.mcpBehavior { min-width:0; margin:0; padding:0; border:0; }
+.mcpWorkspace legend { padding:0 0 10px; color:var(--text); font-weight:600; font-size:12px; }
+.mcpConnection { display:flex; flex-wrap:wrap; align-items:end; gap:9px; }
+.mcpModelMode { flex:0 1 170px; }
+.mcpFields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; align-items:start; }
+.mcpConnection .mcpFields { flex:1 1 420px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.mcpSecretField { display:grid; gap:5px; min-width:0; }
+.mcpSecret { display:flex; align-items:center; gap:5px; min-width:0; }
+.mcpSecret button { font-size:10px; }
+.mcpCatalog { display:flex; align-items:center; flex-wrap:wrap; flex-basis:100%; gap:8px; }
+.mcpCatalog > span { color:var(--muted); font-size:11px; }
+.mcpConnectionFoot { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.mcpConnectionFoot > small { flex:1 1 200px; }
+.mcpModuleGroup + .mcpModuleGroup { margin-top:14px; }
+.mcpModuleGroup h3 { display:flex; gap:8px; align-items:center; margin:0 0 8px; font-size:12px; font-weight:500; color:var(--muted); }
+.mcpModuleGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,155px),1fr)); gap:8px; align-items:start; }
+.mcpModule { display:grid; gap:7px; width:100%; max-width:240px; min-width:0; padding:9px; border:1px solid var(--line); border-radius:10px; background:rgba(5,13,22,.6); }
+.mcpModule.isInstalled { border-color:rgba(97,207,216,.25); }
+.mcpModule > header,.mcpModule > footer { display:flex; align-items:center; flex-wrap:wrap; justify-content:space-between; gap:5px; }
+.mcpModuleIdentity { display:flex; align-items:center; gap:6px; min-width:0; flex:1; }
+.mcpModuleIdentity strong { min-width:0; font-size:11px; overflow-wrap:anywhere; }
+.mcpModuleIcon { display:grid; place-items:center; flex-shrink:0; width:24px; height:24px; color:var(--cyan); border:1px solid var(--line); border-radius:6px; background:rgba(97,207,216,.05); }
+.mcpModuleIcon svg { width:14px; height:14px; }
+.mcpModule > p { font-size:10px; }
+.mcpModule > footer > span { font-size:10px; color:var(--muted); }
+.mcpModule > footer .mcpToggle { margin-left:auto; font-size:10px; }
+.mcpModule .mcpIconButton { width:24px; height:24px; }
+.mcpModule .ghostButton { min-height:27px; padding:3px 6px; font-size:10px; }
+.mcpModuleCredentials { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); align-items:end; gap:9px; padding-top:12px; margin-top:12px; border-top:1px solid var(--line); }
+.mcpActor { width:min(100%,280px); }
+.mcpModuleCredentials .mcpActor { width:100%; }
+.mcpAccount { margin:8px 0; padding:10px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,22,.45); }
+.mcpAccountRow { display:grid; grid-template-columns:minmax(110px,.8fr) minmax(120px,1fr) auto auto; align-items:end; gap:9px; }
+.mcpAccountRights { display:flex; align-items:center; flex-wrap:wrap; gap:9px; min-height:36px; }
+.mcpAccountAdvanced { margin-top:9px; padding-top:9px; border-top:1px solid var(--line); }
+.mcpRemove { color:var(--red); }
+.mcpUserLookup { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; max-width:680px; margin-bottom:12px; }
 .mcpUserLookup > small,.mcpFoundUser { grid-column:1 / -1; }
-.mcpFoundUser { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:12px; border:1px solid rgba(91,116,141,.22); border-radius:12px; background:rgba(5,13,22,.65); }
+.mcpFoundUser { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:10px; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,22,.65); }
 .mcpFoundUser > span { min-width:0; overflow-wrap:anywhere; }
 .mcpFoundUser small { display:block; margin-top:4px; }
-.agentWorkspace .mcpSettings { grid-template-columns:minmax(0,1fr); gap:10px; }
-.agentWorkspace .mcpProviderSection { padding:10px; gap:8px; }
-.agentWorkspace .mcpConnection { display:flex; flex-wrap:wrap; align-items:end; gap:8px 10px; }
-.agentWorkspace .mcpModelMode { flex:0 1 180px; margin:0; }
-.agentWorkspace .mcpProviderSection .mcpFields { flex:1 1 420px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
-.agentWorkspace .mcpCatalog { flex-basis:100%; margin-top:0; }
-.agentWorkspace .mcpConnectionFoot { margin:0; justify-content:flex-end; }
-.agentWorkspace .mcpSkills { padding:0; border:0; }
-.mcpSkills legend { display:flex; align-items:center; gap:10px; }
-.mcpSkills legend small { font-weight:400; }
-.mcpModuleGrid { grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr)); align-items:start; }
-.mcpModule { gap:8px; padding:12px; }
-.mcpModuleIdentity { display:flex; align-items:center; gap:8px; min-width:0; }
-.mcpModuleIdentity strong { overflow-wrap:anywhere; }
-.mcpModuleIcon { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--line); border-radius:8px; color:var(--cyan); background:rgba(97,207,216,.06); }
-.mcpModule.isInstalled { border-color:rgba(97,207,216,.2); }
-.mcpModule > footer { padding-top:4px; }
-.mcpModule > footer .mcpToggle { margin-left:auto; font-size:11px; }
-.mcpScope { margin-top:8px; }
-.mcpModuleCredentials { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); gap:9px; align-items:end; }
-.mcpModuleCredentials .mcpActor { width:100%; }
-.agentWorkspace .mcpAccounts { padding-top:10px; }
-.agentWorkspace .mcpAccount { padding:9px; }
-.agentWorkspace .mcpAccountAdvanced { margin-top:8px; padding-top:8px; }
-.mcpWorkspace .mcpIconButton { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:32px; height:32px; min-height:32px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; }
-.mcpWorkspace .mcpIconButton:hover:not(:disabled) { background:rgba(116,145,176,.12); color:var(--text); }
-.mcpWorkspace svg { flex-shrink:0; }
-.mcpChatHead { padding:8px 12px; }
-.mcpChatHead > span { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:0; }
-.mcpChatHead .mcpActor { display:flex; align-items:center; gap:6px; flex:0 1 250px; font-size:0; }
-.mcpChatHead .mcpActor select { padding:5px 8px; min-height:32px; border-color:transparent; background:transparent; }
-.mcpChat.isDragging { outline:2px dashed var(--cyan); outline-offset:-4px; }
-.mcpChatEmpty { min-height:170px; }
-.mcpChatEmpty .protocolIcon { width:44px; height:44px; padding:8px; border-radius:12px; }
-.mcpWorkspace .mcpChatEmpty h2 { font-size:20px; }
-.mcpChat .mcpComposer { position:relative; display:flex; flex-direction:column; align-items:stretch; gap:8px; margin:0 12px 8px; padding:10px; border:1px solid var(--line-strong); border-radius:20px; background:rgba(12,24,33,.94); }
-.mcpChat .mcpComposer textarea { min-height:54px; max-height:160px; padding:4px 5px; border:0; border-radius:0; background:transparent; resize:none; }
-.mcpChat .mcpComposer textarea:focus-visible { outline:none; }
-.mcpChat .mcpComposer:focus-within { border-color:var(--cyan); box-shadow:0 0 0 1px rgba(97,207,216,.1); }
-.mcpComposerTools { display:flex; align-items:center; gap:5px; min-width:0; }
-.mcpModelControl { position:relative; min-width:0; }
-.mcpModelButton { display:flex; align-items:center; gap:5px; max-width:320px; min-width:0; min-height:32px; padding:5px 9px; border:0; border-radius:10px; color:var(--text); background:transparent; font:500 12px var(--ui-font); cursor:pointer; }
-.mcpModelButton:hover:not(:disabled) { background:rgba(116,145,176,.12); }
-.mcpModelButton > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mcpSendButton { display:grid; place-items:center; flex-shrink:0; width:34px; height:34px; margin-left:auto; padding:0; border:0; border-radius:50%; background:var(--text); color:var(--bg); cursor:pointer; }
-.mcpWorkspace .mcpSendButton:disabled { opacity:.25; }
-.mcpMenuBackdrop { position:fixed; inset:0; z-index:10; border:0; background:transparent; cursor:default; }
-.mcpModelMenu { position:absolute; bottom:calc(100% + 9px); left:0; z-index:11; display:grid; gap:5px; width:340px; max-width:calc(100cqw - 60px); padding:8px; border:1px solid var(--line-strong); border-radius:14px; background:var(--panel); box-shadow:0 12px 40px rgba(0,0,0,.4); }
-.mcpModelSearch { display:flex; align-items:center; gap:6px; padding:0 3px; }
-.mcpModelSearch > input { flex:1; }
-.mcpModelMenu [role=listbox] { max-height:230px; overflow:auto; }
-.mcpModelMenu [role=option] { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:34px; text-align:left; padding:7px 8px; border:0; border-radius:7px; background:transparent; color:var(--text); font:12px/1.4 var(--ui-font); cursor:pointer; }
-.mcpModelMenu [role=option] > span { overflow-wrap:anywhere; min-width:0; }
-.mcpModelMenu [role=option]:hover,.mcpModelMenu [role=option][aria-selected=true] { background:rgba(97,207,216,.1); }
-.mcpModelMenu > small,.mcpModelMenu p { padding:4px 8px; font-size:10px; }
-.mcpFileList { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
-.mcpFileChip { display:inline-flex; align-items:center; gap:6px; max-width:100%; min-width:0; padding:5px 7px; border:1px solid var(--line); border-radius:9px; background:rgba(7,15,24,.8); color:var(--muted); font-size:11px; }
-.mcpFileChip > span { min-width:0; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mcpFileChip > img { width:36px; height:36px; border-radius:5px; object-fit:cover; }
-.mcpFileChip .mcpIconButton { width:22px; height:22px; min-height:22px; }
-.mcpUserMessage .mcpFileList { margin-bottom:7px; }
-.mcpAnswer > .mcpIconButton { margin-top:5px; }
+.mcpBehavior { display:grid; gap:12px; }
+.mcpBehaviorFields { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(90px,.4fr); align-items:end; gap:12px; }
+.mcpBehaviorFields .mcpToggle { min-height:36px; }
 .mcpSpinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:mcpSpin .8s linear infinite; }
 @keyframes mcpSpin { to { transform:rotate(360deg); } }
 @media(prefers-reduced-motion:reduce) { .mcpSpinner { animation:none; } }
-.mcpTabs { width:auto; padding:4px; }
-.mcpTabs button { min-height:34px; height:auto; min-width:96px; }
-.mcpWorkspace legend { padding-bottom:9px; }
-.mcpModule { padding:10px; gap:7px; }
-.mcpModule > footer > span { font-size:11px; color:var(--muted); }
-.mcpConnectionFoot > small { flex:1 1 160px; }
-.mcpAccountAdvanced { padding-top:8px; border-top:1px solid var(--line); }
-.mcpCatalog { gap:8px; margin-top:10px; }
-.mcpCatalog > span { color:var(--muted); font-size:11px; }
-.mcpChatHead { align-items:end; gap:8px; }
-.mcpChatHead .mcpActor { display:grid; gap:4px; flex:1 1 180px; width:auto; max-width:260px; }
-.mcpChatHead .mcpModelPicker { flex:2 1 220px; max-width:none; }
-.mcpChatHead .mcpModelPicker select { max-width:none; }
-.mcpChatHead > span,.mcpAnswer > small { overflow-wrap:anywhere; }
-.mcpChat > .mcpNotice { margin:8px 10px 0; }
 @container (max-width:760px) {
- .mcpSettings { grid-template-columns:minmax(0,1fr); }
- .mcpProviderSection .mcpFields,.mcpModuleGrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
- .mcpFields.providerFields > label:first-child { grid-column:1 / -1; }
  .mcpHeroContent { width:85%; }
  .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.98),rgba(7,16,26,.8) 55%,rgba(7,16,26,.25)); }
  .mcpAccountRow { grid-template-columns:repeat(2,minmax(0,1fr)); }
  .mcpAccountRow .mcpRemove { justify-self:end; }
+ .mcpBehaviorFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .mcpTabs button { gap:5px; padding:7px; }
+}
+@container (max-width:680px) {
+ .mcpTabs { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .mcpTabs button:last-child { grid-column:1 / -1; }
+ .mcpTabs button { justify-content:flex-start; padding:7px 12px; }
+ .mcpTabs button small { margin-left:auto; }
 }
 @container (max-width:480px) {
- .agentWorkspace .mcpModelMode { flex-basis:100%; }
- .agentWorkspace .mcpProviderSection .mcpFields { flex-basis:100%; grid-template-columns:minmax(0,1fr); }
- .mcpModelButton { max-width:190px; font-size:11px; }
- .mcpModelMenu { left:-30px; }
- .mcpChat .mcpComposer { margin:0 8px 7px; padding:8px; }
- .mcpChatHead .mcpActor { flex:1 1 100%; max-width:none; }
- .mcpSettings { padding:10px; gap:10px; }
- .mcpProviderSection { padding:10px; }
- .mcpProviderSection .mcpFields,.mcpModuleGrid,.mcpFields { grid-template-columns:minmax(0,1fr); }
- .mcpChatHead .mcpActor { max-width:none; }
- .mcpChatHead > button { margin-left:auto; }
- .mcpSettingsHead > .mcpActions { margin-left:auto; }
- .mcpHeroContent { width:100%; min-height:200px; padding:18px 14px; gap:10px; }
+ .mcpHeroContent { width:100%; min-height:200px; padding:18px 14px; }
  .mcpHero::before { background-position:72% center; background-size:cover; opacity:.55; }
  .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.96),rgba(7,16,26,.63)); }
  .mcpWorkspace .mcpIdentity h1 { font-size:26px; }
- .mcpHeroFacts > div { padding:9px 8px; }
- .mcpHeroFacts dd { font-size:10px; }
- .mcpHeroFacts dt { font-size:7px; letter-spacing:.03em; }
- .mcpComposer { grid-template-columns:minmax(0,1fr); }
- .mcpComposer > button { justify-self:end; }
- .mcpUserLookup { grid-template-columns:minmax(0,1fr); }
- .mcpUserLookup > button { justify-self:start; }
-}
-@media(max-width:480px) { .mcpUserLookup { grid-template-columns:minmax(0,1fr); } .mcpUserLookup > button { justify-self:start; } }
-@media(max-width:800px) {
- .mcpHeroContent { width:85%; }
- .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.98),rgba(7,16,26,.8) 55%,rgba(7,16,26,.25)); }
-}
-@media(max-width:480px) {
- .mcpHeroContent { width:100%; min-height:200px; padding:18px 14px; gap:10px; }
- .mcpHero::before { background-position:72% center; background-size:cover; opacity:.55; }
- .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.96),rgba(7,16,26,.63)); }
- .mcpWorkspace .mcpIdentity h1 { font-size:26px; }
- .mcpIdentity { gap:7px; }
- .mcpIdentity .mcpBadge { font-size:9px; padding:4px 6px; }
  .mcpIdentity .protocolIcon { width:26px; height:26px; }
  .mcpHeroFacts > div { padding:9px 8px; }
  .mcpHeroFacts dd { font-size:10px; }
  .mcpHeroFacts dt { font-size:7px; letter-spacing:.03em; }
- .mcpSettings { padding:12px; }
- .mcpTabs button { flex:1; }
+ .mcpChatHead .mcpActor,.mcpConversationPicker { flex:1 1 130px; max-width:none; }
+ .mcpChatActions { flex-basis:100%; justify-content:flex-end; }
+ .mcpTranscript { padding:12px 9px; }
+ .mcpUserMessage { max-width:92%; }
+ .mcpAnswer { padding:10px; }
+ .mcpComposer { width:calc(100% - 18px); padding:8px; }
+ .mcpModelButton { max-width:190px; }
+ .mcpModelMenu { left:-28px; }
+ .mcpSettings { padding:10px; }
+ .mcpSettingsHead h2 { flex:1 1 100%; }
+ .mcpProviderSection { padding:10px; }
+ .mcpModelMode,.mcpConnection .mcpFields { flex-basis:100%; }
+ .mcpConnection .mcpFields,.mcpFields,.mcpBehaviorFields { grid-template-columns:minmax(0,1fr); }
+ .mcpUserLookup { grid-template-columns:minmax(0,1fr); }
+ .mcpUserLookup > button { justify-self:start; }
 }

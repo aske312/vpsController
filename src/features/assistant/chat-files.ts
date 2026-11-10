@@ -22,10 +22,10 @@ export function chatHistory(turns: { question: string; answer?: string; files?: 
   const result: { role: 'user' | 'assistant'; content: string; attachments?: { name: string; mime: string; data: string }[] }[] = [];
   let length = 0;
   let bytes = currentFiles.reduce((sum, file) => sum + file.size, 0);
-  for (const turn of turns.filter(turn => turn.answer).slice(-6).reverse()) {
+  for (const turn of turns.filter(turn => turn.answer).slice(-20).reverse()) {
     const question = turn.question.slice(0, 8000) || 'Файлы', answer = turn.answer!.slice(0, 8000);
     const fileBytes = turn.files?.reduce((sum, file) => sum + file.size, 0) ?? 0;
-    if (length + question.length + answer.length > 24000 || bytes + fileBytes > 6 * 1024 * 1024) break;
+    if (length + question.length + answer.length > 48000 || bytes + fileBytes > 6 * 1024 * 1024) break;
     length += question.length + answer.length;
     bytes += fileBytes;
     result.unshift({ role: 'user', content: question, attachments: turn.files?.map(({ name, mime, data }) => ({ name, mime, data })) }, { role: 'assistant', content: answer });

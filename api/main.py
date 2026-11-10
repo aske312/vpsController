@@ -448,10 +448,22 @@ def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'noder
 
 @app.post('/api/assistant/chat')
 def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
-    return assistant_control.runtime_request(sys.modules[__name__], '--chat',
-        {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel', 'model': payload.model,
-         'attachments': [item.model_dump() for item in payload.attachments],
-         'history': [item.model_dump() for item in payload.history]})
+    return assistant_control.chat_request(sys.modules[__name__], payload, str(payload.telegram_id) if payload.telegram_id else 'panel')
+
+
+@app.get('/api/assistant/conversations')
+def assistant_conversations(telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    return assistant_control.assistant_memory.listing(sys.modules[__name__], assistant_control.read(sys.modules[__name__]), str(telegram_id) if telegram_id else 'panel')
+
+
+@app.get('/api/assistant/conversations/{identity}')
+def assistant_conversation(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    return assistant_control.assistant_memory.get(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+
+
+@app.delete('/api/assistant/conversations/{identity}')
+def assistant_conversation_delete(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    return assistant_control.assistant_memory.remove(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
 
 
 @app.post('/api/assistant/models')
@@ -466,10 +478,7 @@ def require_nodera_bot(authorization: str | None = Header(default=None),
 
 @app.post('/api/assistant/bot-chat', dependencies=[Depends(require_nodera_bot)])
 def nodera_chat(payload: assistant_control.Chat, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
-    return assistant_control.runtime_request(sys.modules[__name__], '--chat',
-        {'prompt': payload.prompt, 'actor': actor, 'model': payload.model,
-         'attachments': [item.model_dump() for item in payload.attachments],
-         'history': [item.model_dump() for item in payload.history]})
+    return assistant_control.chat_request(sys.modules[__name__], payload, actor, 'bot')
 
 
 @app.post('/api/assistant/bot-command', dependencies=[Depends(require_nodera_bot)])

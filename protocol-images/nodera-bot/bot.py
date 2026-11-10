@@ -3,9 +3,11 @@
 This runtime does not import MCP/Telethon or execute an AI tool loop.
 """
 import asyncio
+import html
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -16,8 +18,44 @@ import httpx
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
 
+
+def telegram_html(text):
+    output = []
+    for part in re.split(r'(```[^\n]*\n[\s\S]*?```|`[^`\n]+`)', text):
+        if part.startswith('```') and part.endswith('```'):
+            code = part[3:-3].split('\n', 1)[-1]
+            output.append('<pre><code>' + html.escape(code) + '</code></pre>')
+        elif part.startswith('`') and part.endswith('`'):
+            output.append('<code>' + html.escape(part[1:-1]) + '</code>')
+        else:
+            escaped = html.escape(part)
+            escaped = re.sub(r'\*\*([^*\n]+)\*\*', r'<b>\1</b>', escaped)
+            escaped = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'<i>\1</i>', escaped)
+            escaped = re.sub(r'(?m)^#{1,6}\s+(.+)$', r'<b>\1</b>', escaped)
+            output.append(re.sub(r'(?m)^[-*+]\s+', '• ', escaped))
+    return ''.join(output)
+
+
+def telegram_chunks(text):
+    chunks, current, stack = [], '', []
+    units = 0
+    for token in re.findall(r'<[^>]+>|&(?:#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);|.', telegram_html(text[:12000]), re.DOTALL):
+        tag = token.startswith('<')
+        size = 0 if tag else len(html.unescape(token).encode('utf-16-le')) // 2
+        if units + size > 3500:
+            chunks.append(current + ''.join('</' + name + '>' for name in reversed(stack)))
+            current = ''.join('<' + name + '>' for name in stack); units = 0
+        current += token; units += size
+        if tag:
+            if token.startswith('</'):
+                if stack: stack.pop()
+            else: stack.append(token[1:-1])
+    if units:
+        chunks.append(current + ''.join('</' + name + '>' for name in reversed(stack)))
+    return chunks
+
 PUBLIC_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка'), ('id', 'Мой Telegram ID')]
-ADMIN_COMMANDS = PUBLIC_COMMANDS + [
+ADMIN_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Выбрать модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
     ('services', 'Службы и доступные действия'), ('components', 'Установленные компоненты'),
     ('service', 'Управление: ID start|stop|restart'), ('confirm', 'Подтвердить действие: код'),
@@ -151,8 +189,8 @@ async def bot(settings):
                     try: still_admin = await identify(settings, sender)
                     except Exception: still_admin = False
                     if not still_admin: answer = public_reply(sender, '')
-                for start in range(0, min(len(answer), 12000), 3500):
-                    await bot_api(settings, 'sendMessage', chat_id=actor, text=answer[start:start+3500])
+                for chunk in telegram_chunks(answer):
+                    await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML')
         except Exception:
             logging.error('NoderaBot polling or delivery failed')
             await asyncio.sleep(5)

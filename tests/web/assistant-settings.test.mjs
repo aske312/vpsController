@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
+import * as answerFormat from '../../src/features/assistant/answer-format.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
 function mount(mode, status, catalog = []) {
@@ -32,7 +33,7 @@ function mount(mode, status, catalog = []) {
   const requireActual = createRequire(import.meta.url), exported = {};
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
-  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './chat-files' ? chatFiles : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   new Function('require', 'exports', outputText)(require, exported);
   const request = async (path, options) => {
@@ -110,11 +111,10 @@ test('catalog mode loads any number of models and sends the chat selection witho
   assert.equal(view.writes.length, 0);
   selector.node.props.onClick();
   tree = view.render();
-  nodes(tree, n => n.type === 'input' && n.props['aria-label'] === 'Найти модель')[0].node.props.onChange({ target: { value: 'model-249' } });
-  tree = view.render();
+  assert.equal(nodes(tree, n => n.type === 'input' && n.props['aria-label'] === 'Найти модель').length, 0);
   const options = nodes(tree, n => n.props.role === 'option');
-  assert.equal(options.length, 1);
-  options[0].node.props.onClick();
+  assert.equal(options.length, 250);
+  options.at(-1).node.props.onClick();
   nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello', style: {}, scrollHeight: 48 } });
   tree = view.render();
   nodes(tree, n => n.type === 'textarea')[0].node.props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} });

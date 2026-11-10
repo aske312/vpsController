@@ -65,8 +65,12 @@ def execute(api, actor, prompt):
     parts = prompt.strip().split()
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
+    if command == '/models' and (not args or len(args) == 1 and args[0].isdigit()):
+        return control.bot_models(api, actor, page=int(args[0]) if args else 1)
+    if command == '/model' and len(args) <= 1:
+        return control.bot_models(api, actor, model=args[0] if args else None, page=None)
     if command == '/help' and not args:
-        return HELP
+        return HELP + '\n/models [страница] — модели AI\n/model <ID> — выбрать модель'
     if command in ('/status', '/resources') and not args:
         data = api.overview(None)
         server, metrics = data['server'], data['resources']

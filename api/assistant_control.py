@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field, StrictBool, field_validator, model_valida
 
 import application_operation as operations
 import assistant_provider
+import assistant_memory
+import socket
 from component_registry import ComponentRegistry, RegistryError
 
 MODULES = ('nodera-bot', 'ai-agent')
@@ -66,6 +68,10 @@ class Settings(BaseModel):
     model: str = Field(default='', max_length=128)
     model_mode: Literal['single', 'catalog'] = 'single'
     api_key: str | None = Field(default=None, max_length=2048)
+    assistant_style: Literal['balanced', 'concise', 'friendly', 'technical'] = 'balanced'
+    assistant_instructions: str = Field(default='', max_length=4000)
+    memory_enabled: StrictBool = True
+    memory_days: int = Field(default=30, strict=True, ge=1, le=90)
     telegram_api_id: int | None = Field(default=None, strict=True, gt=0)
     telegram_api_hash: str | None = Field(default=None, max_length=32)
     accounts: list[Account] = Field(default_factory=list, max_length=30)
@@ -156,9 +162,10 @@ class Chat(BaseModel):
     model_config = {'extra': 'forbid'}
     prompt: str = Field(default='', max_length=12000)
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
-    history: list[ChatMessage] = Field(default_factory=list, max_length=12)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=40)
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
     model: str | None = Field(default=None, min_length=1, max_length=128)
+    conversation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
 
     @model_validator(mode='after')
     def bounded_content(self):
@@ -166,7 +173,7 @@ class Chat(BaseModel):
             raise ValueError('Введите сообщение или добавьте файл')
         if sum(len(item.data) for item in self.attachments + [file for row in self.history for file in row.attachments]) > 8400000:
             raise ValueError('Общий размер вложений превышен')
-        if sum(len(item.content) for item in self.history) > 24000:
+        if sum(len(item.content) for item in self.history) > 48000:
             raise ValueError('История диалога превышает лимит')
         return self
 
@@ -263,7 +270,10 @@ def _read(api):
         Settings.model_validate({key: item for key, item in value.items() if key not in ('revision', 'control_token')} | {'expected_revision': value['revision'], 'component': 'ai-agent'})
     except (ValueError, KeyError):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
-    value.setdefault('mcp_installed', list(MCP_MODULES))
+    if value.get('mcp_installed') is None:
+        value['mcp_installed'] = list(MCP_MODULES)
+    for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30)):
+        value.setdefault(key, default)
     return value
 
 
@@ -285,6 +295,7 @@ def store(api, value):
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
     ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
+    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30))})
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
               accounts=[{key: item for key, item in a.items() if key != 'bot_access'} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -360,8 +371,14 @@ def status(api):
         agent_version = tuple(map(int, (runtime_directory() / 'version').read_text().strip().split('.')))
     except (OSError, ValueError):
         agent_version = ()
+    try:
+        available_version = json.loads((Path(__file__).resolve().parents[1] / 'protocol-images/ai-agent/manifest.json').read_text())['version']
+    except (OSError, ValueError, KeyError):
+        available_version = ''
     return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
             'chat_attachments': agent_version >= (1, 1, 0),
+            'agent_version': '.'.join(map(str, agent_version)), 'agent_available_version': available_version,
+            'chat_persona': agent_version >= (1, 2, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'installed': key in value['mcp_installed'],
                              'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'vpsController MCP'))],
@@ -386,10 +403,13 @@ def configure(api, payload):
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
+        for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30)):
+            if key not in payload.model_fields_set:
+                submitted[key] = old.get(key, default)
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         if submitted['mcp_installed'] is None:
             submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
-        keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed') if payload.component == 'ai-agent' else ('bot_token',)
+        keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'memory_enabled', 'memory_days') if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         if payload.component == 'ai-agent' and value.get('model_mode') == 'catalog':
             value['model'] = ''
@@ -445,6 +465,63 @@ def model_catalog(api, payload):
         _runtime_slots.release()
 
 
+def chat_request(api, payload, actor='panel', channel='panel'):
+    settings = read(api)
+    files = [item.model_dump() for item in payload.attachments]
+    body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files,
+            'history': [item.model_dump() for item in payload.history]}
+    if channel == 'bot' and settings.get('model_mode') == 'catalog' and not body['model']:
+        preference = operations.read(bot_model_path(api, actor))
+        if preference.get('provider_url') == settings.get('provider_url'):
+            body['model'] = preference.get('model')
+        if not body['model']:
+            return {'ok': True, 'result': {'answer': 'Выберите модель: /models — список, /model <ID> — выбор. После этого можно написать Нодере.', 'tools_used': []}}
+    identity = payload.conversation_id
+    if settings.get('memory_enabled', True):
+        if channel == 'bot' and not identity:
+            recent = assistant_memory.listing(api, settings, actor, channel)['items']
+            identity = recent[0]['id'] if recent else None
+        if identity:
+            body['history'] = assistant_memory.context(assistant_memory.get(api, identity, actor, channel), files)
+        else:
+            identity = uuid.uuid4().hex
+    output = runtime_request(api, '--chat', body)
+    if settings.get('memory_enabled', True):
+        try:
+            assistant_memory.append(api, identity, actor, channel, payload.prompt, files, output['result'], body['model'] or settings.get('model', ''), settings)
+            output['conversation_id'] = identity
+        except (OSError, HTTPException, operations.OperationConflict):
+            output['cache_error'] = 'Ответ получен, но кеш диалога сохранить не удалось'
+    return output
+
+
+def bot_model_path(api, actor):
+    if not re.fullmatch(r'[1-9][0-9]{0,15}', str(actor)):
+        raise HTTPException(403, 'Нужен Telegram ID пользователя')
+    return directory(api) / 'nodera-bot' / 'model-choice' / (str(actor) + '.json')
+
+
+def bot_models(api, actor, model=None, page=1):
+    settings = read(api)
+    if settings.get('model_mode', 'single') != 'catalog':
+        return 'Одна модель: ' + (settings.get('model') or 'не настроена')
+    if model is None and page is None:
+        preference = operations.read(bot_model_path(api, actor))
+        return 'Модель: ' + (preference.get('model', '') if preference.get('provider_url') == settings.get('provider_url') else '') + '\n/models — каталог; /model <ID> — выбрать'
+    catalog = model_catalog(api, Catalog(provider_url=settings['provider_url']))['models']
+    if model is not None:
+        if model not in catalog:
+            raise HTTPException(409, 'Модель недоступна вашему API-ключу. Используйте /models')
+        with operations.locked(api.DATA_DIR):
+            file = bot_model_path(api, actor); file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            operations.atomic_json(file, {'model': model, 'provider_url': settings['provider_url']})
+        return 'Выбрана модель: ' + model
+    pages = max(1, (len(catalog) + 39) // 40)
+    if not 1 <= page <= pages:
+        raise HTTPException(409, f'Нужна страница от 1 до {pages}: /models <страница>')
+    return f'Модели · страница {page}/{pages}\n' + '\n'.join(catalog[(page-1)*40:page*40]) + '\n\n/model <ID> — выбрать'
+
+
 def runtime_request(api, mode, body):
     component = 'nodera-bot' if mode == '--check' and body.get('module') == 'nodera-bot' else 'ai-agent'
     require_installed(api, component)
@@ -452,6 +529,7 @@ def runtime_request(api, mode, body):
         raise HTTPException(409, 'Среда AI-agent остановлена. Запустите компонент в разделе Службы')
     python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
+    value['server_name'] = socket.gethostname()
     body = dict(body)
     if body.get('attachments') or body.get('history'):
         try:
@@ -460,6 +538,10 @@ def runtime_request(api, mode, body):
             version = ()
         if version < (1, 1, 0):
             raise HTTPException(409, 'Обновите компонент AI-agent в Обзоре для файлов и истории диалога')
+        if version < (1, 2, 0) and body.get('history'):
+            body['history'] = list(body['history'])
+            while len(body['history']) > 12 or sum(len(row['content']) for row in body['history']) > 24000:
+                del body['history'][:2]
     selected_model = body.pop('model', None)
     if component == 'ai-agent' and mode == '--check' and body.get('module') == 'ai-agent' and value.get('model_mode') == 'catalog':
         result = model_catalog(api, Catalog(provider_url=value['provider_url']))

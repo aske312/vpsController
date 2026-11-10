@@ -1,12 +1,12 @@
 {
-  "id": "ai-agent", "name": "AI-agent", "version": "1.1.0", "installable": true,
+  "id": "ai-agent", "name": "AI-agent", "version": "1.2.0", "installable": true,
   "description": "AI-агент с подключаемыми Telegram MCP и vpsController MCP. Выполняет запросы из панели и от NoderaBot.",
   "category": "assistant", "category_name": "AI и автоматизация", "installer": "install.sh", "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"], "preflight_packages": ["python3-venv", "ca-certificates"],
   "minimum_free_mb": 256, "requires_kernel_headers": false, "service": "vps-control-ai-agent.service", "removable": true,
   "installation": {
     "required_paths": [{"path": "/etc/systemd/system/vps-control-ai-agent.service"}, {"path": "/var/lib/vps-control-ai-agent/venv/bin/python"}, {"path": "/var/lib/vps-control-ai-agent/runner.py"}, {"path": "/var/lib/vps-control-ai-agent/version"}],
-    "backup_paths": [{"path": "{data_dir}/assistant/ai-agent"}, {"path": "/etc/systemd/system/vps-control-ai-agent.service"}, {"path": "/var/lib/vps-control-ai-agent/version"}],
-    "data_paths": [{"path": "{data_dir}/assistant/ai-agent"}]
+    "backup_paths": [{"path": "{data_dir}/assistant/ai-agent"}, {"path": "{data_dir}/assistant/conversations"}, {"path": "/etc/systemd/system/vps-control-ai-agent.service"}, {"path": "/var/lib/vps-control-ai-agent/version"}],
+    "data_paths": [{"path": "{data_dir}/assistant/ai-agent"}, {"path": "{data_dir}/assistant/conversations"}]
   }
 }
