@@ -97,6 +97,10 @@ def install(api, component):
         raise ValueError('NoderaBot service registration is not confirmed')
     version = __import__('json').loads((image / 'manifest.json').read_text())['version']
     (root / 'version').write_text(version + '\n'); (root / 'version').chmod(0o644)
+    if component == 'nodera-bot':
+        saved = control.read(api)
+        if saved['modules']['nodera-bot'] and control.ready(saved, 'nodera-bot'):
+            perform(api, 'start', restoring=True)
 
 
 def remove(api, component):
@@ -112,11 +116,18 @@ def remove(api, component):
     # Private settings, sessions and bot offsets are explicitly retained.
 
 
-def perform(api, action):
+def perform(api, action, *, restoring=False):
     from fastapi import HTTPException
     if action not in ('start', 'stop', 'restart'):
         raise ValueError('Use the image catalog to install a component')
-    control.require_installed(api, 'nodera-bot')
+    if restoring:
+        # The image installer owns admission. A retained receipt becomes
+        # installed only after this post-install startup has completed.
+        control.ComponentRegistry(api.DATA_DIR).require_managed('nodera-bot', allow_retained=True)
+        if not control.runtime_ready('nodera-bot'):
+            raise HTTPException(409, 'Исполняемая часть NoderaBot не подтверждена')
+    else:
+        control.require_installed(api, 'nodera-bot')
     unit_path = assert_unit_owner('nodera-bot')
     if not unit_path.is_file(): raise HTTPException(409, 'Служба NoderaBot не установлена')
     if action != 'stop':

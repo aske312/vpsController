@@ -1022,7 +1022,7 @@ export function ControlPanel() {
   async function installProtocol(image: ProtocolImage) {
     if (!await askConfirmation({
       title: `Установить ${image.name}?`,
-      message: `На сервер будет установлена последняя доступная версия модуля ${image.name}.`,
+      message: `На сервер будет установлена доступная версия компонента ${image.name}.`,
       confirmLabel: "Установить",
     })) return;
     setBusy(true); setInstallingProtocol(image.id);
@@ -1041,7 +1041,7 @@ export function ControlPanel() {
       finishSystemCommand(completed);
     } catch (cause) {
       setInstallingProtocol("");
-      const message = cause instanceof Error ? cause.message : "Не удалось запустить установку протокола";
+      const message = cause instanceof Error ? cause.message : "Не удалось запустить установку компонента";
       if (started) finishSystemCommand(started, message); else notifyError(message);
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
@@ -1410,7 +1410,7 @@ export function ControlPanel() {
     onLogout={() => { void (async () => { if (await canLeaveSection()) { invalidateApiSession(token, false); clearSession(); } })(); }}
     operationHistory={<OperationHistory token={token} />}
   >
-      {tab !== "overview" && tab !== "network" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && tab !== "network" && tab !== "ai-agent" && tab !== "telegram-bot" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
       {tab === "overview" && (
         <OverviewDashboard

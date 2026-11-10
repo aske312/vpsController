@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from tests.api.support import api, load_module
 import assistant_control as control
+import assistant_worker as worker
 runner = load_module('assistant_image_runner', 'protocol-images/ai-agent/runner.py')
 
 
@@ -169,6 +170,21 @@ class AssistantTests(unittest.TestCase):
                 with self.assertRaises(api.HTTPException) as caught:
                     authorize(api, None, '')
                 self.assertEqual(caught.exception.status_code, 401)
+
+    def test_bot_image_starts_only_with_enabled_saved_configuration(self):
+        project = Path(__file__).resolve().parents[2]
+        for configured in (False, True):
+            saved = self.payload()
+            saved['modules']['nodera-bot'] = configured
+            with self.subTest(configured=configured), patch.object(api, 'INSTALL_DIR', project), \
+                 patch.object(worker, 'assert_unit_owner', return_value=self.root / 'nodera.service'), \
+                 patch.object(worker, 'require_idle'), patch.object(worker, 'checked'), \
+                 patch.object(control, 'migrate_settings'), patch.object(control, 'read', return_value=saved), \
+                 patch.object(worker, 'perform') as start:
+                worker.install(api, 'nodera-bot')
+                if configured: start.assert_called_once_with(api, 'start', restoring=True)
+                else: start.assert_not_called()
+                self.assertTrue((control.runtime_directory('nodera-bot') / 'version').is_file())
 
 
 class AgentRuntimeTests(unittest.TestCase):

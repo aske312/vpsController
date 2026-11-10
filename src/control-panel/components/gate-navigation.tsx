@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { BrandGlyph } from "../../shared/components/brand-glyph";
+import { ProtocolIcon } from "../../shared/components/protocol-icon";
 
 type ProtocolImage = {
   id: string;
@@ -49,13 +50,8 @@ export function GateNavigation({
           <NavButton active={activeTab === "overview"} icon="overview" label="Обзор" onClick={() => onNavigate("overview")} />
         </NavGroup>
 
-        {mihomoInstalled && (
-          <NavGroup label="ROUTING">
-            <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />
-          </NavGroup>
-        )}
-
-        {(agentInstalled || botInstalled) && <NavGroup label="ASSISTANT">
+        {(mihomoInstalled || agentInstalled || botInstalled) && <NavGroup label="COMPONENTS">
+          {mihomoInstalled && <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />}
           {agentInstalled && <NavButton active={activeTab === "ai-agent"} icon="mcp" label="AI-агент" onClick={() => onNavigate("ai-agent")} />}
           {botInstalled && <NavButton active={activeTab === "telegram-bot"} icon="telegram" label="NoderaBot" onClick={() => onNavigate("telegram-bot")} />}
         </NavGroup>}
@@ -112,11 +108,9 @@ function NavButton({
 }
 
 function NavGlyph({ name }: { name: string }) {
-  if (name === "telegram") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 18-7-5 18-5-7-8-4Z"/><path d="m11 14 6-7"/></svg>;
-  if (name === "mcp") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="21" r="2"/><path d="m6.5 6.5 3.3 3.3m7.7-3.3-3.3 3.3M12 15v4"/></svg>;
+  if (name === "telegram" || name === "mcp" || name === "mihomo") return <ProtocolIcon protocol={name === "telegram" ? "nodera-bot" : name === "mcp" ? "ai-agent" : "mihomo"} />;
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;
-  if (name === "mihomo") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 4.5v11L12 22l-8-4.5v-11L12 2Z"/><path d="m8 16V8l4 4 4-4v8"/></svg>;
   if (name === "transport") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"/></svg>;
   if (name === "network") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18"/></svg>;
   if (name === "security") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5.2-3.2 8.5-8 10-4.8-1.5-8-4.8-8-10V6l8-3Z"/><path d="m9 12 2 2 4-5"/></svg>;
