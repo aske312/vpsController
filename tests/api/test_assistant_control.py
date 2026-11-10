@@ -1,0 +1,169 @@
+import asyncio
+from contextlib import asynccontextmanager
+import json
+from pathlib import Path
+import tempfile
+import types
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
+from tests.api.support import api
+import assistant_control as control
+from assistant_runtime import runner
+
+
+class AssistantTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.object(api, 'DATA_DIR', self.root))
+        self.enterContext(patch.object(api, 'ACTION_FILE', self.root / 'action.json'))
+        self.observe = self.enterContext(patch.object(api, 'observe_service', return_value={
+            'active': False, 'state': 'inactive', 'runtime': {'state': 'stopped'}}))
+        self.enterContext(patch.dict('os.environ', {'ASSISTANT_RUNTIME_DIR': str(self.root / 'runtime')}))
+
+    def payload(self):
+        return {'expected_revision': '0' * 32,
+                'modules': {'ai-agent': True, 'nodera-bot': False},
+                'mcp': {'telegram-mcp': True, 'vps-controller-mcp': True},
+                'provider_url': 'https://provider.example/v1', 'model': 'configured-model', 'api_key': 'secret-ai',
+                'telegram_api_id': 123, 'telegram_api_hash': 'a' * 32,
+                'bot_token': '123456:abcdefghijklmnopqrstuvwxyz0123456789',
+                'accounts': [{'telegram_id': 11, 'bot_access': True, 'telegram_access': True, 'vps_access': False,
+                              'session': '1' + 'a' * 352, 'excluded_dialogs': [-1001]}]}
+
+    def save(self, payload=None):
+        return control.configure(api, control.Settings.model_validate(payload or self.payload()))
+
+    def test_two_modules_and_mcp_options_have_no_false_health_claims(self):
+        status = control.status(api)
+        self.assertEqual({m['id'] for m in status['modules']}, {'ai-agent', 'nodera-bot'})
+        self.assertEqual({m['id'] for m in status['mcp_modules']}, set(control.MCP_MODULES))
+        self.assertFalse(status['runtime_installed'])
+        self.assertFalse(any(m['enabled'] for m in status['modules']))
+        self.assertNotIn('healthy', json.dumps(status))
+
+    def test_secret_preservation_clear_and_revision_conflict(self):
+        result = self.save()
+        serialized = json.dumps(result)
+        for secret in ('secret-ai', 'a' * 32, '1' + 'a' * 352, self.payload()['bot_token']):
+            self.assertNotIn(secret, serialized)
+        self.assertTrue(result['settings']['accounts'][0]['session_configured'])
+        payload = self.payload()
+        payload.update(expected_revision=result['settings']['revision'], api_key=None, telegram_api_hash=None, bot_token=None)
+        payload['accounts'][0]['session'] = None
+        saved = self.save(payload)
+        self.assertEqual(control.read(api)['api_key'], 'secret-ai')
+        self.assertEqual(control.read(api)['accounts'][0]['session'], '1' + 'a' * 352)
+        with self.assertRaises(control.operations.OperationConflict):
+            self.save(payload)
+        payload.update(expected_revision=saved['settings']['revision'], api_key='')
+        payload['accounts'][0]['session'] = ''
+        self.save(payload)
+        self.assertFalse(control.read(api)['api_key'])
+        self.assertFalse(control.read(api)['accounts'][0]['session'])
+
+    def test_reassigning_id_does_not_carry_another_users_session(self):
+        status = self.save()
+        payload = self.payload(); payload['expected_revision'] = status['settings']['revision']
+        payload['accounts'][0].update(telegram_id=22, session=None)
+        self.save(payload)
+        self.assertEqual(control.read(api)['accounts'][0]['session'], '')
+
+    def test_invalid_scope_and_private_or_credential_provider_urls_are_rejected(self):
+        for url in ('http://provider.example', 'https://127.0.0.1/v1', 'https://[::1]/v1',
+                    'https://localhost/v1', 'https://user:secret@provider.example', 'https://provider.example:8000'):
+            payload = self.payload(); payload['provider_url'] = url
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                control.Settings.model_validate(payload)
+        payload = self.payload(); payload['mcp']['shell'] = True
+        with self.assertRaises(ValueError): control.Settings.model_validate(payload)
+        payload = self.payload(); payload['accounts'] *= 2
+        with self.assertRaises(ValueError): control.Settings.model_validate(payload)
+
+    def test_running_bot_requires_stop_before_credential_snapshot_changes(self):
+        self.observe.return_value['active'] = True
+        with self.assertRaises(api.HTTPException) as caught: self.save()
+        self.assertEqual(caught.exception.status_code, 409)
+
+    def test_control_token_has_per_user_scope_and_revocation(self):
+        self.save()
+        value = control.read(api)
+        token = 'Bearer ' + value['control_token']
+        with self.assertRaises(api.HTTPException) as caught: control.authorize_control(api, token, '11')
+        self.assertEqual(caught.exception.status_code, 403)
+        with self.assertRaises(api.HTTPException): control.authorize_control(api, token, '22')
+        with self.assertRaises(api.HTTPException): control.authorize_control(api, 'Bearer wrong', 'panel')
+        control.authorize_control(api, token, 'panel')
+        value['mcp']['vps-controller-mcp'] = False
+        control.operations.atomic_json(control.directory(api) / 'settings.json', value)
+        with self.assertRaises(api.HTTPException): control.authorize_control(api, token, 'panel')
+
+    def test_routes_require_admin_or_dedicated_service_token(self):
+        self.save()
+        client = TestClient(api.app)
+        self.assertEqual(client.get('/api/assistant').status_code, 401)
+        self.assertEqual(client.post('/api/assistant/chat', json={'prompt': 'test'}).status_code, 401)
+        self.assertEqual(client.post('/api/assistant/control-tool', json={'name': 'vps_overview'}).status_code, 401)
+        token = control.read(api)['control_token']
+        headers = {'Authorization': 'Bearer ' + token, 'X-MCP-Actor': 'panel'}
+        with patch.object(api, 'overview', return_value={'server': {'name': 'test'}, 'resources': {'cpu_percent': 1}}):
+            self.assertEqual(client.post('/api/assistant/control-tool', headers=headers, json={'name': 'vps_overview'}).json()['server']['name'], 'test')
+        self.assertEqual(client.post('/api/assistant/control-tool', headers=headers, json={'name': 'shell'}).status_code, 422)
+
+    def test_components_projection_excludes_connection_credentials(self):
+        with patch.object(api, 'protocol_images', return_value={'items': [{'id': 'mihomo', 'name': 'Mihomo',
+            'installed': True, 'private_key': 'never-send', 'password': 'never-send'}]}):
+            result = control.control_tool(api, 'vps_components')
+        self.assertNotIn('never-send', json.dumps(result))
+
+    def test_corrupted_config_is_not_treated_as_new_installation(self):
+        control.directory(api).mkdir()
+        (control.directory(api) / 'settings.json').write_text('{broken')
+        with self.assertRaises(control.operations.OperationConflict): control.status(api)
+
+
+class AgentRuntimeTests(unittest.TestCase):
+    def test_mcp_scope_is_bound_to_selected_user_and_panel_has_no_telegram_session(self):
+        settings = {'mcp': {'telegram-mcp': True, 'vps-controller-mcp': True}, 'accounts': [
+            {'telegram_id': 11, 'telegram_access': True, 'session': 'session', 'vps_access': False}]}
+        self.assertTrue(runner.allowed(settings, '11', 'telegram-mcp'))
+        self.assertFalse(runner.allowed(settings, 'panel', 'telegram-mcp'))
+        self.assertFalse(runner.allowed(settings, '22', 'telegram-mcp'))
+        self.assertFalse(runner.allowed(settings, '11', 'vps-controller-mcp'))
+        self.assertTrue(runner.allowed(settings, 'panel', 'vps-controller-mcp'))
+
+    def test_tool_loop_uses_mcp_result_and_cannot_execute_unregistered_tools(self):
+        session = types.SimpleNamespace(call_tool=AsyncMock(return_value=types.SimpleNamespace(
+            content=[types.SimpleNamespace(type='text', text='{"cpu_percent":12}')])) )
+        tool = types.SimpleNamespace(name='vps_overview', description='Read metrics', inputSchema={'type': 'object'})
+        @asynccontextmanager
+        async def connections(*_): yield {'vps_overview': (session, tool)}
+        messages_seen = []
+        async def provider(settings, messages, tools):
+            messages_seen.append(json.loads(json.dumps(messages)))
+            if len(messages_seen) == 1:
+                return {'tool_calls': [
+                    {'id': 'one', 'type': 'function', 'function': {'name': 'vps_overview', 'arguments': '{}'}},
+                    {'id': 'two', 'type': 'function', 'function': {'name': 'shell', 'arguments': '{"cmd":"whoami"}'}}]}
+            return {'content': 'CPU: 12%'}
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example', 'model': 'test', 'api_key': 'secret'}
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Read CPU'))
+        self.assertEqual(result['tools_used'], ['vps_overview'])
+        session.call_tool.assert_awaited_once_with('vps_overview', {})
+        self.assertIn('cpu_percent', messages_seen[1][3]['content'])
+        self.assertIn('error', messages_seen[1][4]['content'])
+
+    def test_errors_do_not_disclose_bot_tokens_or_telegram_session_contents(self):
+        for exc in (RuntimeError('https://api.telegram.org/botSECRET/getUpdates'),
+                    ValueError('session=SECRET'), PermissionError('SECRET')):
+            self.assertNotIn('SECRET', runner.safe_error(exc))
+
+    def test_private_dns_answers_cannot_receive_provider_key(self):
+        async def check():
+            loop = asyncio.get_running_loop()
+            with patch.object(loop, 'getaddrinfo', new=AsyncMock(return_value=[(2, 1, 6, '', ('127.0.0.1', 443))])):
+                with self.assertRaises(ValueError):
+                    await runner.provider_request({'provider_url': 'https://provider.example/v1', 'api_key': 'secret'}, [], [])
+        asyncio.run(check())

@@ -53,6 +53,11 @@ export function GateNavigation({
           </NavGroup>
         )}
 
+        <NavGroup label="ASSISTANT">
+          <NavButton active={activeTab === "ai-agent"} icon="mcp" label="AI-агент" onClick={() => onNavigate("ai-agent")} />
+          <NavButton active={activeTab === "telegram-bot"} icon="telegram" label="NoderaBot" onClick={() => onNavigate("telegram-bot")} />
+        </NavGroup>
+
         <NavGroup label="SYSTEM">
           <NavButton active={activeTab === "network"} icon="network" label="Сеть" onClick={() => onNavigate("network")} />
           <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
@@ -88,7 +93,7 @@ function NavButton({
   onClick,
 }: {
   active: boolean;
-  icon: "overview" | "connections" | "mihomo" | "transport" | "network" | "security" | "application" | "services";
+  icon: "overview" | "connections" | "mihomo" | "transport" | "network" | "security" | "application" | "services" | "mcp" | "telegram";
   label: string;
   tone?: "blue" | "violet" | "cyan";
   compact?: boolean;
@@ -105,6 +110,8 @@ function NavButton({
 }
 
 function NavGlyph({ name }: { name: string }) {
+  if (name === "telegram") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 18-7-5 18-5-7-8-4Z"/><path d="m11 14 6-7"/></svg>;
+  if (name === "mcp") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="21" r="2"/><path d="m6.5 6.5 3.3 3.3m7.7-3.3-3.3 3.3M12 15v4"/></svg>;
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;
   if (name === "mihomo") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 4.5v11L12 22l-8-4.5v-11L12 2Z"/><path d="m8 16V8l4 4 4-4v8"/></svg>;

@@ -2,7 +2,7 @@ import type { ProtocolHealth } from "../components/protocol-health-badge";
 import type { CdnSecurityStatus } from "../lib/cdn-security-operation";
 
 export type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
-export type Tab = "overview" | "dns" | "network" | "security" | "application" | "services" | "mihomo";
+export type Tab = "overview" | "dns" | "network" | "security" | "application" | "services" | "mihomo" | "ai-agent" | "telegram-bot";
 export type TunnelProtocol = "wg" | "awg";
 export type ResourceHistory = { load: (number | null)[]; memory: (number | null)[]; disk: (number | null)[]; rx: (number | null)[]; tx: (number | null)[] };
 export type ResourceMetrics = { load1: number | null; load5?: number | null; load15?: number | null; cpu_percent: number | null; cpu_count: number | null; memory_total: number | null; memory_available: number | null; disk_total: number | null; disk_available: number | null; network_rx: number | null; network_tx: number | null; uptime_s?: number | null; stale?: boolean; observations?: Record<string, { available: boolean; checked_at: string; reason: string }> };

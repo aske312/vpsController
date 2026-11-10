@@ -23,6 +23,7 @@ import { NetworkView, type NetworkListState } from "../features/network/network-
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { LoginView } from "../features/auth/login-view";
+import { AssistantView } from "../features/assistant/assistant-view";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, ConfirmationRequest, LoggingSettings, Overview, ProtocolImage, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
 import { actionLabels, bytes, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionSucceeded, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "./system-operation";
@@ -64,6 +65,7 @@ export function ControlPanel() {
   const registerMihomoLeaveGuard = useCallback((guard: SectionLeaveGuard | null) => { mihomoLeaveGuard.current = guard; }, []);
   const [networkListState, setNetworkListState] = useState<NetworkListState>({ query: "", expanded: [] });
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
+  const [mcpRefreshKey, setMcpRefreshKey] = useState(0);
   const [mihomoRefreshKey, setMihomoRefreshKey] = useState(0);
   const [token, setToken] = useState("");
   const loginInFlight = useRef(false);
@@ -170,7 +172,7 @@ export function ControlPanel() {
     // Restore browser-only credentials after hydration.
     setToken(sessionStorage.getItem("312-token") || "");
     const savedTab = sessionStorage.getItem("312-reload-tab");
-    if (savedTab && ["overview", "mihomo", "dns", "network", "security", "application", "services"].includes(savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
+    if (savedTab && ["overview", "mihomo", "dns", "network", "security", "application", "services", "ai-agent", "telegram-bot"].includes(savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
     sessionStorage.removeItem("312-reload-tab");
     sessionStorage.removeItem("312-reload-channel");
     const savedNotice = sessionStorage.getItem("312-notice");
@@ -431,6 +433,7 @@ export function ControlPanel() {
       else if (tab === "services") await loadServices(showBusy);
       else if (tab === "dns") { setTab("network"); setNetworkRefreshKey((value) => value + 1); }
       else if (tab === "network") setNetworkRefreshKey((value) => value + 1);
+      else if (tab === "ai-agent" || tab === "telegram-bot") setMcpRefreshKey((value) => value + 1);
       else if (tab === "mihomo") {
         if (showBusy) setMihomoRefreshKey((value) => value + 1);
         await loadOverview(showBusy);
@@ -1453,6 +1456,8 @@ export function ControlPanel() {
       )}
 
       {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} cloudflare={{ change: cdnCommand.change, pending: cdnCommand.pending, blocked: busy || application?.recovery?.application_required === true }} />}
+
+      {(tab === "ai-agent" || tab === "telegram-bot") && <AssistantView key={tab} mode={tab === "ai-agent" ? "agent" : "bot"} request={request} refreshKey={mcpRefreshKey} busy={busy} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}

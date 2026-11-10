@@ -25,6 +25,11 @@ jobs:
           cache-dependency-path: tests/requirements.txt
       - run: pip install -r tests/requirements.txt
       - run: python -m unittest discover -s tests/api -t . -p 'test_*.py'
+      - name: Verify optional AI-agent MCP transports
+        run: |
+          python -m venv /tmp/nodera-runtime
+          /tmp/nodera-runtime/bin/pip install -r api/assistant_runtime/requirements.txt
+          /tmp/nodera-runtime/bin/python tests/assistant_mcp_smoke.py
       - name: Verify gateway reload with stalled VPN streams
         run: python tests/gateway_reload_smoke.py
       - name: Prepare isolated network tests

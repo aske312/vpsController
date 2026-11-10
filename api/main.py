@@ -45,6 +45,7 @@ import cdn_operation
 import application_operation
 import application_recovery
 import operation_policy
+import assistant_control
 import network_routes
 import network_probe
 import network_check_targets
@@ -404,6 +405,57 @@ async def require_mutation_admission(request: Request, _: None = Depends(require
             pass
     except application_operation.OperationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@app.get('/api/assistant')
+def assistant_status(_: None = Depends(require_token)) -> dict:
+    try:
+        return assistant_control.status(sys.modules[__name__])
+    except (OSError, ValueError) as exc:
+        raise HTTPException(503, 'Не удалось прочитать состояние MCP') from exc
+
+
+@app.put('/api/assistant', dependencies=[Depends(require_short_mutation)])
+def assistant_settings(payload: assistant_control.Settings, _: None = Depends(require_token)) -> dict:
+    try:
+        with application_operation.short_mutation(DATA_DIR):
+            return assistant_control.configure(sys.modules[__name__], payload)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post('/api/assistant/action', status_code=202)
+def assistant_action(payload: assistant_control.Action, _: None = Depends(require_token),
+                     operation_id: str | None = Header(default=None, alias='X-Operation-ID')) -> dict:
+    action = 'assistant:' + payload.action
+    replay = replay_application_operation(operation_id, action)
+    if replay:
+        return replay
+    return start_application_operation(action, [sys.executable, str(Path(__file__).with_name('assistant_worker.py')), payload.action],
+        operation_id=operation_id, properties=(f'--property=EnvironmentFile={ENV_FILE}', '--property=RuntimeMaxSec=15min'))
+
+
+@app.post('/api/assistant/check/{module}')
+def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'nodera-bot', 'ai-agent'],
+                    payload: assistant_control.Check, _: None = Depends(require_token)) -> dict:
+    return assistant_control.runtime_request(sys.modules[__name__], '--check',
+        {'module': module, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel'})
+
+
+@app.post('/api/assistant/chat')
+def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
+    return assistant_control.runtime_request(sys.modules[__name__], '--chat',
+        {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel'})
+
+
+def require_assistant_control(authorization: str | None = Header(default=None),
+                              actor: str = Header(default='', alias='X-MCP-Actor')) -> None:
+    assistant_control.authorize_control(sys.modules[__name__], authorization, actor)
+
+
+@app.post('/api/assistant/control-tool', dependencies=[Depends(require_assistant_control)])
+def assistant_control_tool(payload: assistant_control.ToolCall) -> dict:
+    return assistant_control.control_tool(sys.modules[__name__], payload.name)
 
 
 def system_boot_time() -> datetime | None:

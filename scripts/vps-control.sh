@@ -2564,6 +2564,11 @@ sync_protocol_monitor() {
 # everything else, but restarting only api/web/caddy leaves it running the
 # old code in memory indefinitely - restart it too whenever it's installed.
 restart_mihomo_manager_if_present() {
+  # The optional bot holds Python modules in memory across a release swap.
+  # Restart only an already active NoderaBot; never start a disabled module.
+  if systemctl is-active --quiet vps-control-nodera-bot.service; then
+    systemctl restart vps-control-nodera-bot.service || return 1
+  fi
   systemctl list-unit-files --no-legend 'vps-control-mihomo-manager.service' 2>/dev/null | grep -q . \
     && systemctl restart vps-control-mihomo-manager.service 2>/dev/null || true
 }
@@ -2738,6 +2743,13 @@ PY
 uninstall_app() {
   [[ "${2:-}" == "--yes" ]] || die "полное удаление необратимо; повторите команду с параметром --yes."
   info "Удаление служб, данных и конфигурации панели"
+  if [[ -f /etc/systemd/system/vps-control-nodera-bot.service ]]; then
+    [[ "$(head -n 1 /etc/systemd/system/vps-control-nodera-bot.service)" == '# Managed by vps-control: NoderaBot' ]] \
+      || die "Служба NoderaBot не принадлежит приложению; автоматическое удаление остановлено."
+    systemctl disable --now vps-control-nodera-bot.service || die "Не удалось остановить NoderaBot; удаление остановлено."
+    rm -f -- /etc/systemd/system/vps-control-nodera-bot.service
+    rm -rf -- /var/lib/vps-control-assistant-runtime /var/lib/vps-control-nodera /var/lib/private/vps-control-nodera
+  fi
   stop_legacy_containers
   systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
   local relay_private_unit
