@@ -80,7 +80,7 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
   view.render(); await Promise.resolve();
   let tree = view.render();
   assert.equal(nodes(tree, n => n.type === 'h1').length, 0);
-  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Подключения')[0].node.props.onClick();
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки')[0].node.props.onClick();
   tree = view.render();
   const toggle = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox')[0];
   assert.equal(toggle.disabled, false);
@@ -96,14 +96,15 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
   assert.equal(view.writes[0].bot_token, null);
 });
 
-test('running NoderaBot still locks its own token and enable switch', async () => {
+test('running Telegram bot locks its token and shows the stop action', async () => {
   const view = mount(fixture());
   view.render(); await Promise.resolve();
-  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Telegram')[0].node.props.onClick();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Пользователи')[0].node.props.onClick();
   const tree = view.render();
   const toggles = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox');
   assert.equal(toggles[0].disabled, false);
-  assert.equal(toggles[1].disabled, true);
+  assert.equal(nodes(tree, n => n.type === 'fieldset' && n.props.className === 'noderaBotToken')[0].disabled, true);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Остановить')[0].disabled, false);
 });
 
 test('catalog mode loads any number of models and sends the chat selection without changing settings', async () => {

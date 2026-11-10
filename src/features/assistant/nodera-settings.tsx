@@ -5,15 +5,12 @@ import { moduleState, type Draft, type McpId, type McpStatus, type ModuleId, typ
 
 export const panels = [
   { id: "chat", label: "Чат", icon: "chat" },
-  { id: "provider", label: "Подключения", icon: "settings" },
-  { id: "telegram", label: "Telegram", icon: "telegram" },
-  { id: "modules", label: "MCP", icon: "module" },
-  { id: "access", label: "Доступ", icon: "users" },
-  { id: "behavior", label: "Поведение", icon: "person" },
+  { id: "settings", label: "Настройки", icon: "gear" },
+  { id: "users", label: "Пользователи", icon: "users" },
 ] as const;
 export type Panel = typeof panels[number]["id"];
 type AccountDraft = Draft["accounts"][number];
-type Check = { ok: boolean; text: string; revision: string; actor: string };
+type Check = { ok: boolean; text: string; revision: string; actor: string; username?: string };
 type Quota = { unlimited: boolean; remaining: number; account_remaining?: number };
 type Props = {
   panel: Exclude<Panel, "chat">;
@@ -28,7 +25,7 @@ type Props = {
   actorSelect: ReactNode;
   checks: Partial<Record<ModuleId, Check>>;
   check: (id: ModuleId) => Promise<void>;
-  runAction: (action: "start" | "stop" | "restart") => Promise<void>;
+  runAction: (action: "start" | "stop") => Promise<void>;
 };
 
 const moduleDescriptions: Record<McpId, string> = {
@@ -45,7 +42,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   const [providerEdit, setProviderEdit] = useState<ProviderDraft>();
   const [providerChecks, setProviderChecks] = useState<Record<string, { text: string; failed?: boolean; quota?: Quota | null }>>({});
   const [checkingProvider, setCheckingProvider] = useState<string>();
-  const [moduleEdit, setModuleEdit] = useState<McpId>();
+  const [telegramMcpOpen, setTelegramMcpOpen] = useState(false);
   const [userEdit, setUserEdit] = useState<{ index: number; value: AccountDraft }>();
   const [lookup, setLookup] = useState("");
   const [lookingUp, setLookingUp] = useState(false);
@@ -110,37 +107,50 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>;
   };
 
-  if (panel === "provider") return <section className="noderaSettings">
-    <div className="noderaBar"><button type="button" className="ghostButton" disabled={blocked || providers.length >= 12}
-      onClick={() => setProviderEdit({ id: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join(""), name: "", provider_url: "", api_key: null, api_key_configured: false, model: "", model_mode: "catalog" })}>
-      <ChatIcon name="plus"/>Добавить API
-    </button></div>
-    {!providers.length && <p className="mcpFieldHint">Нет подключений</p>}
-    <div className="noderaProviders">
-      {providers.map(provider => {
+  const connections = <section className="noderaSettings" aria-label="Подключения">
+    <header className="noderaBlockHead"><h2>Подключения</h2>
+      <button type="button" className="ghostButton" disabled={blocked || providers.length >= 12}
+        onClick={() => setProviderEdit({ id: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join(""), name: "", provider_url: "", api_key: null, api_key_configured: false, model: "", model_mode: "catalog" })}>
+        <ChatIcon name="plus"/>Добавить API
+      </button>
+    </header>
+    {!providers.length ? <p className="mcpFieldHint">Нет подключений</p> : <div className="noderaTableScroll"><table className="noderaProviderTable">
+      <thead><tr><th>Провайдер</th><th className="noderaProviderStat">Модели</th><th className="noderaProviderStat">Запросы</th><th className="noderaProviderStat">Токены вход / выход</th><th className="noderaProviderStat">Квота ключа</th><th aria-label="Действия"/></tr></thead>
+      <tbody>{providers.map(provider => {
         const usage = status.provider_usage?.[provider.id];
         const active = draft.active_provider === provider.id;
         const probeResult = providerChecks[provider.id];
-        return <article key={provider.id} className="noderaProvider">
-          <header><div><strong>{provider.name}</strong><small>{provider.provider_url}</small></div>
-            <span className="mcpBadge">{active ? "Активно" : "Сохранено"}</span>
-            <button type="button" className="mcpIconButton" aria-label={`Настроить ${provider.name}`} title="Настроить" disabled={blocked} onClick={() => setProviderEdit(provider)}><ChatIcon name="gear"/></button>
-          </header>
-          <dl><div><dt>Режим</dt><dd>{provider.model_mode === "catalog" ? "Каталог" : provider.model || "—"}</dd></div>
-            <div><dt>Запросы Nodera</dt><dd>{usage?.requests ?? 0}</dd></div>
-            <div><dt>Токены · вход / выход</dt><dd title={usage ? `Отчёт провайдера для ${usage.reported_requests} из ${usage.requests} запросов` : undefined}>{usage?.reported_requests ? `${usage.prompt_tokens.toLocaleString("ru")} / ${usage.completion_tokens.toLocaleString("ru")}` : "—"}</dd></div>
-            {probeResult?.quota && <div><dt>Остаток квоты ключа</dt><dd>{probeResult.quota.unlimited ? "Без лимита" : probeResult.quota.remaining.toLocaleString("ru")}</dd></div>}
-            {probeResult?.quota?.account_remaining !== undefined && <div><dt>Квота аккаунта</dt><dd>{probeResult.quota.account_remaining.toLocaleString("ru")}</dd></div>}
-          </dl>
-          <footer>
-            {!active && <button type="button" className="ghostButton" disabled={blocked} onClick={() => patch({ active_provider: provider.id })}>Сделать активным</button>}
-            <button type="button" className="ghostButton" disabled={blocked || !!checkingProvider || !(provider.api_key ?? provider.api_key_configured)}
-              onClick={() => void probe(provider)}>{checkingProvider === provider.id ? "Проверяем…" : "Проверить API"}</button>
+        const models = provider.model_mode === "catalog" ? "Каталог" : provider.model || "—";
+        const tokens = usage?.reported_requests ? `${usage.prompt_tokens.toLocaleString("ru")} / ${usage.completion_tokens.toLocaleString("ru")}` : "—";
+        const quota = probeResult?.quota ? probeResult.quota.unlimited ? "Без лимита" : probeResult.quota.remaining.toLocaleString("ru") : "—";
+        return <tr key={provider.id}>
+          <th scope="row"><strong>{provider.name}</strong>{active && <span className="mcpBadge">Активно</span>}
+            <small>{provider.provider_url}</small>
+            <span className="noderaProviderCompact">
+              <small>{models} · Запросы {usage?.requests ?? 0}</small>
+              <small>Токены {tokens} · Квота {quota}</small>
+              {probeResult?.quota?.account_remaining !== undefined && <small>Аккаунт · {probeResult.quota.account_remaining.toLocaleString("ru")}</small>}
+            </span>
             {probeResult?.text && <small className={probeResult.failed ? "mcpCheck error" : "mcpCheck"} role="status">{probeResult.text}</small>}
-          </footer>
-        </article>;
-      })}
-    </div>
+          </th>
+          <td className="noderaProviderStat">{models}</td>
+          <td className="noderaProviderStat">{usage?.requests ?? 0}</td>
+          <td className="noderaProviderStat" title={usage ? `Данные провайдера для ${usage.reported_requests} из ${usage.requests} запросов` : undefined}>
+            {tokens}
+          </td>
+          <td className="noderaProviderStat">{quota}
+            {probeResult?.quota?.account_remaining !== undefined && <small>Аккаунт · {probeResult.quota.account_remaining.toLocaleString("ru")}</small>}
+          </td>
+          <td><div className="noderaTableActions">
+            {!active && <button type="button" className="ghostButton" disabled={blocked} onClick={() => patch({ active_provider: provider.id })}>Активировать</button>}
+            <button type="button" className="mcpIconButton" aria-label={`Проверить API ${provider.name}`} title="Проверить API" disabled={blocked || !!checkingProvider || !(provider.api_key ?? provider.api_key_configured)} onClick={() => void probe(provider)}>
+              <ChatIcon name="refresh"/>
+            </button>
+            <button type="button" className="mcpIconButton" aria-label={`Настроить ${provider.name}`} title="Настроить" disabled={blocked} onClick={() => setProviderEdit(provider)}><ChatIcon name="gear"/></button>
+          </div></td>
+        </tr>;
+      })}</tbody>
+    </table></div>}
     {providerEdit && <SettingsDialog title="Подключение API" close={() => setProviderEdit(undefined)}
       submit={() => storeProvider({ ...providerEdit, name: providerEdit.name.trim() || new URL(providerEdit.provider_url).hostname })} blocked={blocked}>
       <label>Название<input value={providerEdit.name} maxLength={80} onChange={event => setProviderEdit({ ...providerEdit, name: event.target.value })}/></label>
@@ -158,68 +168,66 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     </SettingsDialog>}
   </section>;
 
-  if (panel === "telegram") return <section className="noderaSettings">
+  const botCheck = checks["nodera-bot"];
+  const botUsername = draft.bot_token === null ? status.bot_username || botCheck?.username : botCheck?.username;
+  const tokenPresent = Boolean(draft.bot_token ?? draft.bot_token_configured);
+  const botAction = status.bot.active ? "stop" : botUsername ? "start" : "check";
+  const telegram = <section className="noderaSettings" aria-label="Telegram">
+    <header className="noderaBlockHead"><h2>Telegram</h2><span className="mcpBadge">{moduleState(status, "nodera-bot")}</span></header>
     <fieldset className="noderaTelegram" disabled={botLocked}>
-      <div className="noderaBar"><span className="mcpBadge">{moduleState(status, "nodera-bot")}</span>
-        {status.bot.active ? <>
-          <button type="button" className="ghostButton" onClick={() => void runAction("restart")}>Перезапустить</button>
-          <button type="button" className="ghostButton" onClick={() => void runAction("stop")}>Остановить</button>
-        </> : <button type="button" className="ghostButton" disabled={dirty || !bot?.configured || !bot.enabled || status.legacy_bot.active === true}
-          onClick={() => void runAction("start")}>Запустить</button>}
+      <div className="noderaCredentials">
+        <fieldset disabled={botCredentialsLocked} className="noderaBotToken">
+          <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })} compact/>
+        </fieldset>
+        <button type="button" className="primaryButton" disabled={!tokenPresent && botAction !== "stop" || botAction === "start" && status.legacy_bot.active === true}
+          onClick={() => { if (botAction === "check") void check("nodera-bot"); else void runAction(botAction); }}>
+          {botAction === "stop" ? "Остановить" : botAction === "start" ? "Запустить" : working === "nodera-bot" ? "Проверяем…" : "Проверить токен"}
+        </button>
       </div>
-      <fieldset disabled={botCredentialsLocked} className="noderaCredentials">
-        <label className="mcpToggle"><input type="checkbox" checked={draft.modules["nodera-bot"]} onChange={event => patch({ modules: { ...draft.modules, "nodera-bot": event.target.checked } })}/>Бот включён</label>
-        <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>
-      </fieldset>
-      {status.bot.active && <small>Для смены токена остановите бота.</small>}
-      {status.legacy_bot.active && <p className="mcpNotice">Для запуска остановите прежнего Telegram-бота.</p>}
-      <div className="noderaBar"><button type="button" className="ghostButton" disabled={!(draft.bot_token ?? draft.bot_token_configured)}
-        onClick={() => void check("nodera-bot")}>{working === "nodera-bot" ? "Проверяем…" : "Проверить токен"}</button>{checkResult("nodera-bot")}</div>
+      <div className="noderaBar">
+        {botUsername && tokenPresent ? <strong>@{botUsername}</strong> : draft.bot_token === null && draft.bot_token_configured && <span>Токен сохранён</span>}
+        {botCheck && !botCheck.ok && <p className="mcpCheck error" role="status">{botCheck.text}</p>}
+        {status.legacy_bot.active && <p className="mcpNotice">Для запуска остановите прежнего Telegram-бота.</p>}
+      </div>
     </fieldset>
   </section>;
 
-  if (panel === "modules") return <section className="noderaSettings">
+  const modules = <section className="noderaSettings" aria-label="MCP">
+    <header className="noderaBlockHead"><h2>MCP</h2></header>
     <fieldset disabled={blocked} className="mcpSkills">
-      {[true, false].map(installed => {
-        const entries = status.mcp_modules.filter(item => (draft.mcp_installed?.includes(item.id) ?? false) === installed);
-        return entries.length > 0 && <section className="mcpModuleGroup" key={String(installed)}>
-          <h3>{installed ? "Подключённые" : "Каталог"}</h3>
-          <div className="mcpModuleGrid">{entries.map(item => <article key={item.id} className={`mcpModule ${installed ? "isInstalled" : ""}`}>
-            <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name="module"/></span><strong>{item.name}</strong></div>
-              {installed && <button type="button" className="mcpIconButton" aria-label={`Настроить ${item.name}`} title="Настроить" onClick={() => setModuleEdit(item.id)}><ChatIcon name="gear"/></button>}
-            </header>
-            <p>{item.description ?? moduleDescriptions[item.id]}</p>
-            <footer><span>{status.tools[item.id]?.length ?? 0} инстр.</span>{installed
-              ? <label className="mcpToggle"><input type="checkbox" aria-label={`Включить ${item.name}`} checked={draft.mcp[item.id]}
-                onChange={event => patch({ mcp: { ...draft.mcp, [item.id]: event.target.checked } })}/>Вкл.</label>
-              : <button type="button" className="ghostButton" onClick={() => patch({ mcp_installed: [...(draft.mcp_installed ?? []), item.id] })}>Добавить</button>}
-            </footer>
-          </article>)}</div>
-        </section>;
-      })}
+      <div className="mcpModuleGrid">{status.mcp_modules.map(item => {
+        const enabled = draft.mcp[item.id];
+        return <article key={item.id} className={`mcpModule ${enabled ? "isInstalled" : ""}`}>
+          <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name="module"/></span><strong>{item.name}</strong></div></header>
+          <p>{item.description ?? moduleDescriptions[item.id]}</p>
+          <footer>
+            <button type="button" className="ghostButton" aria-pressed={enabled} aria-label={`${item.name} · ${enabled ? "Включён" : "Выключен"}`}
+              onClick={() => patch({ mcp: { ...draft.mcp, [item.id]: !enabled },
+                mcp_installed: !enabled ? [...new Set([...(draft.mcp_installed ?? []), item.id])] : draft.mcp_installed })}>
+              {enabled ? "Включён" : "Выключен"}
+            </button>
+            {item.id === "telegram-mcp" && <button type="button" className="mcpIconButton" aria-label="Настроить Telegram MCP" title="Настроить" onClick={() => setTelegramMcpOpen(true)}><ChatIcon name="gear"/></button>}
+          </footer>
+        </article>;
+      })}</div>
     </fieldset>
-    {moduleEdit && <SettingsDialog title={status.mcp_modules.find(item => item.id === moduleEdit)?.name ?? "MCP"} close={() => setModuleEdit(undefined)}>
-      {moduleEdit === "telegram-mcp" && <>
-        <label>Telegram API ID<input type="number" min={1} value={draft.telegram_api_id ?? ""}
-          onChange={event => patch({ telegram_api_id: event.target.value ? Number(event.target.value) : null })}/></label>
-        <Secret label="Telegram API hash" configured={draft.telegram_api_hash_configured} value={draft.telegram_api_hash} onChange={telegram_api_hash => patch({ telegram_api_hash })}/>
-        {actorSelect}
-      </>}
-      <small>{status.tools[moduleEdit]?.join(" · ")}</small>
-      <button type="button" className="ghostButton" disabled={blocked || dirty || !status.mcp_modules.some(item => item.id === moduleEdit && item.enabled && item.configured) || moduleEdit === "telegram-mcp" && !actor}
-        onClick={() => void check(moduleEdit)}>Проверить модуль</button>
-      {checkResult(moduleEdit)}
-      <button type="button" className="ghostButton" disabled={blocked} onClick={() => {
-        patch({ mcp_installed: draft.mcp_installed?.filter(id => id !== moduleEdit), mcp: { ...draft.mcp, [moduleEdit]: false } });
-        setModuleEdit(undefined);
-      }}>Удалить модуль</button>
+    {telegramMcpOpen && <SettingsDialog title="Telegram MCP" close={() => setTelegramMcpOpen(false)}>
+      <label>Telegram API ID<input type="number" min={1} value={draft.telegram_api_id ?? ""}
+        onChange={event => patch({ telegram_api_id: event.target.value ? Number(event.target.value) : null })}/></label>
+      <Secret label="Telegram API hash" configured={draft.telegram_api_hash_configured} value={draft.telegram_api_hash} onChange={telegram_api_hash => patch({ telegram_api_hash })}/>
+      {actorSelect}
+      <button type="button" className="ghostButton" disabled={blocked || dirty || !actor || !status.mcp_modules.some(item => item.id === "telegram-mcp" && item.enabled && item.configured)}
+        onClick={() => void check("telegram-mcp")}>Проверить модуль</button>
+      {checkResult("telegram-mcp")}
     </SettingsDialog>}
   </section>;
 
-  if (panel === "access") return <section className="noderaSettings">
-    <div className="noderaBar"><button type="button" className="ghostButton" disabled={blocked || draft.accounts.length >= 30} onClick={() => {
-      setLookup(""); setLookupError(""); setUserEdit({ index: -1, value: blankAccount() });
-    }}><ChatIcon name="plus"/>Добавить пользователя</button></div>
+  const users = <section className="noderaSettings" aria-label="Пользователи">
+    <header className="noderaBlockHead"><h2>Пользователи</h2>
+      <button type="button" className="ghostButton" disabled={blocked || draft.accounts.length >= 30} onClick={() => {
+        setLookup(""); setLookupError(""); setUserEdit({ index: -1, value: blankAccount() });
+      }}><ChatIcon name="plus"/>Добавить пользователя</button>
+    </header>
     <div className="noderaTableScroll"><table className="noderaAccessTable">
       <thead><tr><th>Пользователь</th><th className="noderaIdColumn">Telegram ID</th><th>Роль бота</th><th>MCP</th><th aria-label="Действия"/></tr></thead>
       <tbody>
@@ -266,7 +274,8 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     </SettingsDialog>}
   </section>;
 
-  return <section className="noderaSettings">
+  const behavior = <section className="noderaSettings" aria-label="Поведение">
+    <header className="noderaBlockHead"><h2>Поведение</h2></header>
     <fieldset className="mcpBehavior" disabled={blocked}>
       <div className="mcpBehaviorFields">
         <label>Манера общения<select value={draft.assistant_style} onChange={event => patch({ assistant_style: event.target.value as Draft["assistant_style"] })}>
@@ -281,6 +290,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         onChange={event => patch({ assistant_instructions: event.target.value })}/></label>
     </fieldset>
   </section>;
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{modules}{behavior}</> : <>{telegram}{users}</>}</div>;
 }
 
 function SettingsDialog({ title, close, submit, blocked, children }: {
@@ -299,13 +309,15 @@ function SettingsDialog({ title, close, submit, blocked, children }: {
   </dialog>;
 }
 
-function Secret({ label, configured, value, onChange }: { label: string; configured: boolean; value: string | null; onChange: (value: string | null) => void }) {
+function Secret({ label, configured, value, onChange, compact }: { label: string; configured: boolean; value: string | null; onChange: (value: string | null) => void; compact?: boolean }) {
   const id = useId();
   return <div className="mcpSecretField"><label htmlFor={id}>{label}</label>
     <div className="mcpSecret"><input id={id} type="password" autoComplete="new-password" value={value ?? ""}
       placeholder={value === "" ? "Будет удалён" : configured && value === null ? "Сохранён" : "Не задан"} onChange={event => onChange(event.target.value || null)}/>
-      <button type="button" className="ghostButton" aria-label={`${value === "" ? "Вернуть сохранённый" : "Очистить"} ${label}`}
-        onClick={() => onChange(value === "" ? null : "")}>{value === "" ? "Вернуть" : "Очистить"}</button>
+      <button type="button" className={compact ? "mcpIconButton" : "ghostButton"} aria-label={`${value === "" ? "Вернуть сохранённый" : "Очистить"} ${label}`}
+        disabled={compact && value === null && !configured}
+        title={value === "" ? "Вернуть сохранённый токен" : "Очистить"}
+        onClick={() => onChange(value === "" || compact && !configured ? null : "")}>{compact ? <ChatIcon name={value === "" ? "refresh" : "close"}/> : value === "" ? "Вернуть" : "Очистить"}</button>
     </div>
   </div>;
 }

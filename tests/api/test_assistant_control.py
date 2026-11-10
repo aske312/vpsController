@@ -81,6 +81,17 @@ class AssistantTests(unittest.TestCase):
             'requests': 2, 'prompt_tokens': 41, 'completion_tokens': 9, 'reported_requests': 1,
         })
 
+    def test_telegram_identity_matches_only_the_verified_token(self):
+        payload = self.payload()
+        payload.update(component='nodera', bot_token='123456:abcdefghijklmnopqrstuvwxyz0123456789')
+        control.bot_identity(api, payload['bot_token'], 'first_bot')
+        control.bot_identity(api, '987654:abcdefghijklmnopqrstuvwxyz0123456789', 'another_bot')
+        result = self.save(payload)
+        self.assertEqual(result['bot_username'], 'first_bot')
+        self.assertNotIn(payload['bot_token'], json.dumps(result))
+        payload.update(expected_revision=result['settings']['revision'], bot_token='')
+        self.assertIsNone(self.save(payload)['bot_username'])
+
     def test_bundle_installs_both_runtimes_and_restarts_only_a_running_bot(self):
         bundle = types.SimpleNamespace(DATA_DIR=self.root, INSTALL_DIR=ROOT, observe_service=self.observe)
         for active in (False, True):

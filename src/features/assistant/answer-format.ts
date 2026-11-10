@@ -15,8 +15,8 @@ export function answerBlocks(text: string): AnswerBlock[] {
 export function tableRows(lines: string[]) {
   return lines.map(line => line.replace(/^\s*\||\|\s*$/g, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|')));
 }
-export function conversationMarkdown(turns: { question: string; model: string; answer?: string; error?: string; files?: { name: string }[] }[]) {
+export function conversationMarkdown(turns: { question: string; answer?: string; error?: string; files?: { name: string }[] }[]) {
   return '# Диалог с Нодерой\n\n' + turns.map(turn => '## Вы\n\n' + turn.question +
     (turn.files?.length ? '\n\nВложения: ' + turn.files.map(file => file.name).join(', ') : '') +
-    '\n\n## Нодера · ' + turn.model + '\n\n' + (turn.answer || turn.error || 'Ответ ожидается')).join('\n\n---\n\n') + '\n';
+    '\n\n## Nodera\n\n' + (turn.answer || turn.error || 'Ответ ожидается')).join('\n\n---\n\n') + '\n';
 }

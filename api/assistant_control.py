@@ -1,6 +1,7 @@
 """Optional assistant modules. Stored configuration is never a health claim."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -429,6 +430,25 @@ def ready(value, module):
     return True
 
 
+def bot_identity(api, token, username=None):
+    if not token:
+        return None
+    fingerprint = hashlib.sha256(token.encode()).hexdigest()
+    path = directory(api) / 'nodera-bot' / 'identity.json'
+    if username is not None:
+        if isinstance(username, str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}', username):
+            with operations.locked(api.DATA_DIR):
+                identities = operations.read(path)
+                identities.pop(fingerprint, None)
+                identities[fingerprint] = username
+                operations.atomic_json(path, dict(list(identities.items())[-4:]))
+        return None
+    identity = operations.read(path).get(fingerprint)
+    if isinstance(identity, str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}', identity):
+        return identity
+    return None
+
+
 def status(api):
     value = read(api)
     observations = {key: api.observe_service(AGENT_UNIT if key == 'ai-agent' else BOT_UNIT) for key in MODULES}
@@ -462,7 +482,12 @@ def status(api):
         usage = provider_usage(api, value)
     except (OSError, ValueError, operations.OperationConflict):
         usage = {}
+    try:
+        bot_username = bot_identity(api, value.get('bot_token'))
+    except (OSError, operations.OperationConflict):
+        bot_username = None
     return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
+            'bot_username': bot_username,
             'provider_usage': {entry['id']: usage[entry['id']] for entry in providers(value) if entry['id'] in usage},
             'nodera_version': nodera_version, 'nodera_available_version': available_version,
             'nodera_management': combined,
@@ -760,6 +785,11 @@ def runtime_request(api, mode, body):
         _runtime_slots.release()
     if code or not output.get('ok'):
         raise HTTPException(502, output.get('error', 'Модуль завершился с ошибкой'))
+    if component == 'nodera-bot' and mode == '--check':
+        try:
+            bot_identity(api, value['bot_token'], output.get('result', {}).get('username'))
+        except (OSError, operations.OperationConflict):
+            pass
     return output
 
 

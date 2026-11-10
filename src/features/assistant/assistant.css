@@ -27,16 +27,17 @@
 .mcpRuntimeUpdate { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; color:var(--muted); }
 .mcpRuntimeUpdate > span { flex:1 1 240px; }
 .mcpWorkspace .error { color:var(--red); }
-.mcpChat { position:relative; isolation:isolate; display:flex; flex-direction:column; min-width:0; height:max(430px,calc(100dvh - 170px)); border:1px solid var(--line); border-radius:18px; background:var(--panel-inset); overflow:hidden; }
+.mcpChat { position:relative; isolation:isolate; display:flex; flex-direction:column; min-width:0; min-height:0; flex:1; border:1px solid var(--line); border-radius:18px; background:var(--panel-inset); overflow:hidden; }
 .mcpChat::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(5,13,22,.96),rgba(5,13,22,.86)),url('/gate-art/ai-agent.webp') right center / cover no-repeat; pointer-events:none; }
 .mcpChat.isDragging { outline:2px dashed var(--cyan); outline-offset:-4px; }
 .mcpChatHead { display:flex; align-items:end; flex-wrap:wrap; flex-shrink:0; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line); background:rgba(8,20,29,.66); }
-.mcpChatHead .mcpActor { flex:1 1 180px; max-width:230px; width:auto; }
-.mcpConversationPicker { flex:2 1 220px; max-width:420px; }
+.mcpChatHead .mcpActor { flex:0 1 auto; width:auto; max-width:210px; }
+.mcpConversationPicker { flex:0 1 auto; max-width:100%; }
+.mcpWorkspace .mcpChatHead select { width:auto; max-width:100%; field-sizing:content; }
 .mcpChatActions { display:flex; gap:4px; margin-left:auto; padding-bottom:3px; }
 .mcpChat > .mcpNotice { margin:8px 12px 0; }
-.mcpTranscript { flex:1 1 0; display:grid; align-content:start; gap:16px; min-width:0; min-height:120px; overflow:auto; padding:18px 16px; }
-.mcpChatEmpty { display:grid; justify-items:center; align-content:center; gap:9px; min-height:190px; text-align:center; }
+.mcpTranscript { flex:1 1 0; display:grid; align-content:start; gap:16px; min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; padding:18px 16px; }
+.mcpChatEmpty { display:grid; justify-items:center; align-content:center; gap:9px; min-height:min(160px,35dvh); text-align:center; }
 .mcpChatEmpty .protocolIcon { width:44px; height:44px; padding:8px; border:1px solid var(--line); border-radius:12px; background:rgba(22,38,53,.5); }
 .mcpWorkspace .mcpChatEmpty h2 { margin:0; font-size:20px; font-weight:600; }
 .mcpChatEmpty > div { display:flex; flex-wrap:wrap; justify-content:center; gap:7px; }
@@ -106,8 +107,8 @@
 .mcpModule > footer > span { font-size:10px; color:var(--muted); }
 .mcpModule > footer .mcpToggle { margin-left:auto; font-size:10px; }
 .mcpModule .mcpIconButton { width:24px; height:24px; }
-.mcpModule .ghostButton { min-height:27px; padding:3px 6px; font-size:10px; }
-.mcpBehavior,.mcpSkills,.noderaTelegram,.noderaCredentials { min-width:0; margin:0; padding:0; border:0; }
+.mcpWorkspace .mcpModule .ghostButton { min-height:27px; padding:3px 6px; font-size:10px; }
+.mcpBehavior,.mcpSkills,.noderaTelegram,.noderaBotToken { min-width:0; margin:0; padding:0; border:0; }
 .mcpBehavior { display:grid; gap:10px; }
 .mcpBehaviorFields { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(90px,.4fr); align-items:end; gap:12px; }
 .mcpBehaviorFields .mcpToggle { min-height:36px; }
@@ -118,7 +119,14 @@
 .gateNavButton.cyan.active .gateNavGlyph .protocolIcon { filter:drop-shadow(0 0 5px var(--cyan)); }
 .mcpWorkspace .mcpToggle { display:flex; align-items:center; gap:6px; }
 .mcpActor { width:min(100%,280px); }
-.noderaHero { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:96px; padding:14px; }
+.noderaHero { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:132px; padding:16px; }
+.noderaHeroContent { display:grid; gap:10px; flex:1 1 330px; min-width:0; max-width:520px; }
+.noderaHero .eyebrow { color:var(--muted); }
+.noderaHeroFacts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:0; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,22,.76); }
+.noderaHeroFacts > div { min-width:0; padding:6px 9px; }
+.noderaHeroFacts > div + div { border-left:1px solid var(--line); }
+.noderaHeroFacts dt { color:var(--muted); font-size:10px; }
+.noderaHeroFacts dd { margin:2px 0 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-weight:600; }
 .noderaHero .mcpActions { margin-left:auto; }
 .noderaHero .mcpIdentity h1 { font-size:24px; }
 .noderaSectionMenu { position:relative; z-index:20; }
@@ -129,23 +137,24 @@
 .noderaSectionMenu nav button { display:flex; align-items:center; gap:8px; width:100%; padding:7px 8px; border-radius:6px; color:var(--text); text-align:left; cursor:pointer; }
 .noderaSectionMenu nav button:hover { background:rgba(97,207,216,.1); }
 .mcpChatHead { align-items:center; }
-.mcpChatHead > .noderaSectionMenu { order:-1; }
-.mcpChatHead > .noderaSectionMenu nav { right:auto; left:0; }
+.mcpChatHead > .noderaSectionMenu { margin-left:auto; }
+.mcpChatHead .mcpChatActions { margin-left:0; }
 .noderaSettings { display:grid; gap:10px; min-width:0; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(10,23,32,.88); }
 .noderaBar { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
-.noderaProviders { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,265px),1fr)); gap:8px; }
-.noderaProvider { display:grid; gap:8px; min-width:0; padding:9px; border:1px solid var(--line); border-radius:9px; background:var(--panel-inset); }
-.noderaProvider header,.noderaProvider footer { display:flex; align-items:center; gap:6px; }
-.noderaProvider header > div { flex:1; min-width:0; }
-.noderaProvider header :is(strong,small) { display:block; overflow-wrap:anywhere; }
-.noderaProvider dl { display:flex; flex-wrap:wrap; gap:12px; margin:0; }
-.noderaProvider dt { color:var(--muted); font-size:10px; }
-.noderaProvider dd { margin:0; overflow-wrap:anywhere; }
-.noderaProvider footer { flex-wrap:wrap; }
+.noderaBlocks { display:grid; gap:10px; min-width:0; }
+.noderaBlockHead { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.noderaBlockHead h2 { margin:0; font-size:15px; font-weight:650; }
+.noderaProviderTable { width:100%; min-width:560px; border-collapse:collapse; text-align:left; }
+.noderaProviderTable :is(th,td) { padding:7px 9px; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+.noderaProviderTable thead th { color:var(--muted); font-weight:500; background:var(--panel-inset); }
+.noderaProviderTable tbody th { font-weight:600; min-width:160px; }
+.noderaProviderTable tbody .mcpBadge { display:inline-block; margin-left:5px; padding:2px 6px; }
+.noderaProviderTable small { display:block; font-weight:400; }
+.noderaProviderCompact { display:none; }
+.noderaTableActions { display:flex; align-items:center; justify-content:flex-end; gap:5px; }
 .noderaTelegram { display:grid; gap:10px; }
 .noderaCredentials { display:flex; align-items:end; flex-wrap:wrap; gap:10px; }
-.noderaCredentials .mcpToggle { min-height:36px; }
-.noderaCredentials .mcpSecretField { flex:1 1 260px; max-width:440px; }
+.noderaBotToken { flex:1 1 230px; max-width:420px; }
 .noderaTableScroll { overflow:auto; }
 .noderaAccessTable { width:100%; border-collapse:collapse; text-align:left; }
 .noderaAccessTable :is(th,td) { padding:7px 9px; border-bottom:1px solid var(--line); }
@@ -165,15 +174,22 @@
 
 @container (max-width:640px) {
  .mcpBehaviorFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .noderaProviderTable { min-width:0; }
+ .noderaProviderTable tbody th { min-width:0; }
+ .noderaProviderTable .noderaProviderStat { display:none; }
+ .noderaProviderCompact { display:block; }
+ .noderaTableActions { flex-wrap:wrap; }
 }
 @container (max-width:480px) {
  .mcpHero::before { background-position:right top 24%; background-size:auto 270%; opacity:.75; }
  .mcpHero::after { background:linear-gradient(90deg,rgba(7,16,26,.98) 22%,rgba(7,16,26,.65) 62%,rgba(7,16,26,.4)); }
- .noderaHero { min-height:80px; padding:10px; }
+ .noderaHero { min-height:0; padding:10px; }
  .noderaHero .mcpIdentity h1 { font-size:20px; }
  .mcpIdentity .protocolIcon { width:24px; height:24px; }
- .mcpChatHead .mcpActor,.mcpConversationPicker { flex:1 1 120px; max-width:none; }
+ .mcpChatHead .mcpActor { max-width:min(175px,calc(100% - 36px)); }
+ .mcpConversationPicker { max-width:calc(100% - 36px); }
  .mcpChatActions { padding-bottom:0; }
+ .mcpChatHead { gap:4px 6px; padding:6px 8px; }
  .mcpTranscript { padding:12px 9px; }
  .mcpUserMessage { max-width:92%; }
  .mcpAnswer { padding:10px; }
@@ -186,4 +202,36 @@
  .noderaAccessTable tbody .noderaInlineId { display:block; }
  .noderaAccessTable :is(th,td) { padding:6px 4px; }
  .noderaAccessTable td:last-child { width:32px; }
+}
+
+/* The chat takes the space left by the masthead, footer and mobile navigation. */
+.shell.gateShell:has(.noderaWorkspace.isChat) {
+  height:100dvh;
+  min-height:0;
+  grid-template-rows:minmax(0,1fr);
+  overflow:hidden;
+}
+.gateShell > .content:has(.noderaWorkspace.isChat) {
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  min-height:0;
+  padding-bottom:6px !important;
+}
+.gateShell > .content:has(.noderaWorkspace.isChat) > :not(.noderaWorkspace) { flex-shrink:0; }
+.noderaWorkspace.isChat { display:flex; flex:1; flex-direction:column; min-height:0; padding-bottom:0; gap:6px; }
+.gateShell:has(.noderaWorkspace.isChat) .gateMasthead { margin-bottom:8px; }
+.gateShell:has(.noderaWorkspace.isChat) .versionFooter.legalFooter { min-height:0; margin:6px 0 0; padding:3px 4px; gap:6px; }
+.gateShell:has(.noderaWorkspace.isChat) .legalLink { min-height:26px; }
+.mcpComposer > .mcpFileList { max-height:64px; overflow:auto; }
+.mcpModule footer button[aria-pressed=true] { color:var(--cyan); border-color:rgba(97,207,216,.32); }
+
+@media (max-width:760px) {
+ .gateShell:has(.noderaWorkspace.isChat) .versionFooter.legalFooter { gap:2px; }
+ .gateShell:has(.noderaWorkspace.isChat) .legalFooterLinks { flex-wrap:wrap; justify-content:center; }
+}
+@media (max-height:620px) {
+ .noderaWorkspace.isChat .mcpComposer textarea { max-height:72px; }
+ .noderaWorkspace.isChat .mcpComposer > .mcpFileList { max-height:40px; }
+ .noderaWorkspace.isChat .mcpChatHint { display:none; }
 }
