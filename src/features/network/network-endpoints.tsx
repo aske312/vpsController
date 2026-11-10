@@ -171,6 +171,7 @@ export function NetworkEndpoints({
           >
             <header className="networkSectionHeading networkModalHeader">
               <div>
+                <p className="eyebrow networkSectionEyebrow">НОВЫЙ РЕСУРС</p>
                 <h2 id="network-endpoints-title">Добавить точку входа</h2>
               </div>
               <button

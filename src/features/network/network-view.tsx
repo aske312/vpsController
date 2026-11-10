@@ -11,6 +11,8 @@ import { type NetworkCloudflareControl } from "./network-cloudflare";
 import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, useNetworkRelays } from "./network-relays";
 import { NetworkRouteLibrary } from "./network-route-library";
+import { needsAttention, routeEntries } from "./route-library-state";
+import { serverAddressSummary } from "./route-summary";
 
 export type NetworkListState = { query: string; expanded: string[] };
 
@@ -169,13 +171,24 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
     }
   }, [admitOperation, busy, loadFailed, loading, notifyError, onOperation, status]);
 
+  const entries = routeEntries(status, relay.status?.hosts || [], loadFailed, relay.failed, Boolean(relay.status?.pending), relay.reading);
+  const addressProblem = addresses.failed || addresses.status?.discovery.state === "error";
+  const attention = entries.filter(entry => needsAttention(entry.summary)).length + (addresses.status?.items.filter(row => needsAttention(serverAddressSummary(row, addressProblem, Boolean(addresses.pending)))).length || 0);
+
   return (
     <div data-network-page="true">
       <main className="networkBoard">
         <header className="networkPageHeader">
           <div className="networkPageIdentity">
-            <p className="eyebrow networkSectionEyebrow">Network</p>
+            <p className="eyebrow networkSectionEyebrow">NETWORK WORKSPACE</p>
             <h1>Сеть</h1>
+            <p className="networkHeroLead">Домены, адреса сервера и Relay — ресурсы и подключения в одном месте.</p>
+            <dl className="networkHeroFacts">
+              <div><dt>АДРЕСА ВХОДА</dt><dd>{status ? new Set(status.domains.map(item => item.value.toLowerCase())).size : "—"}</dd></div>
+              <div><dt>RELAY</dt><dd>{relay.status?.hosts.length ?? "—"}</dd></div>
+              <div><dt>IP СЕРВЕРА</dt><dd>{addresses.status?.items.length ?? "—"}</dd></div>
+              <div data-attention={attention > 0 || undefined}><dt>ТРЕБУЮТ ВНИМАНИЯ</dt><dd>{status && relay.status && addresses.status ? attention : "—"}</dd></div>
+            </dl>
           </div>
           <div className="networkRefresh">
             <span>
@@ -189,7 +202,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
             </span>
             <button
               type="button"
-              onClick={() => { void load(); void relay.load(); }}
+              onClick={() => { void load(); void relay.load(); void addresses.load(); }}
               disabled={loading || busy}
             >
               Обновить
