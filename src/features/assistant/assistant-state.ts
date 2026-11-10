@@ -7,6 +7,7 @@ export type Account = {
 };
 export type Settings = {
   revision: string; modules: Record<AppModuleId, boolean>; mcp: Record<McpId, boolean>; provider_url: string; model: string;
+  model_mode?: "single" | "catalog";
   telegram_api_id: number | null; accounts: Account[];
   api_key_configured: boolean; bot_token_configured: boolean; telegram_api_hash_configured: boolean;
 };
@@ -24,19 +25,22 @@ export type McpStatus = {
 };
 export function makeDraft(settings: Settings): Draft {
   const { revision, accounts, ...rest } = settings;
-  return { ...rest, expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
+  return { ...rest, model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
     accounts: accounts.map(account => ({ ...account, session: null, excluded_dialogs_text: account.excluded_dialogs.join(", ") })) };
 }
 export function settingsPayload(draft: Draft) {
   return {
     expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp,
-    provider_url: draft.provider_url, model: draft.model, api_key: draft.api_key,
+    provider_url: draft.provider_url, model: draft.model, model_mode: draft.model_mode ?? "single", api_key: draft.api_key,
     bot_token: draft.bot_token, telegram_api_id: draft.telegram_api_id, telegram_api_hash: draft.telegram_api_hash,
     accounts: draft.accounts.map(account => ({ telegram_id: account.telegram_id, name: account.name, bot_access: account.bot_access,
       telegram_access: account.telegram_access, vps_access: account.vps_access, session: account.session,
       excluded_dialogs: account.excluded_dialogs_text.split(",").map(value => value.trim()).filter(Boolean).map(Number),
     })),
   };
+}
+export function chatModels(settings: Settings, catalog: string[]): string[] {
+  return [...new Set([settings.model, ...(settings.model_mode === "catalog" ? catalog : [])].filter(Boolean))];
 }
 export function changed(draft: Draft | null, settings: Settings | undefined) {
   return Boolean(draft && settings && JSON.stringify(settingsPayload(draft)) !== JSON.stringify(settingsPayload(makeDraft(settings))));

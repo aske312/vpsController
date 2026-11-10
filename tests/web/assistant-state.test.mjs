@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changed, makeDraft, moduleState, settingsPayload } from "../../src/features/assistant/assistant-state.ts";
+import { changed, chatModels, makeDraft, moduleState, settingsPayload } from "../../src/features/assistant/assistant-state.ts";
 
 const settings = {
   revision: "a".repeat(32), modules: { "ai-agent": true, "nodera-bot": false },
@@ -22,6 +22,13 @@ test("drafts preserve saved secrets without reading them back and detect actual 
   assert.deepEqual(settingsPayload(draft).accounts[0].excluded_dialogs, [-1001, -1002]);
   draft.api_key = "";
   assert.equal(settingsPayload(draft).api_key, "");
+});
+
+test('legacy single model settings remain single; catalog mode preserves the default and deduplicates discovery', () => {
+  assert.equal(makeDraft(settings).model_mode, 'single');
+  assert.equal(changed(makeDraft(settings), settings), false);
+  assert.deepEqual(chatModels(settings, ['other-model']), ['model']);
+  assert.deepEqual(chatModels({ ...settings, model_mode: 'catalog' }, ['other-model', 'model']), ['model', 'other-model']);
 });
 
 test("configured credentials do not claim that the provider or an on-demand MCP worker is running", () => {

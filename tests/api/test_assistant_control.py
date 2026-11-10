@@ -170,6 +170,51 @@ class AssistantTests(unittest.TestCase):
         self.save()
         self.assertTrue(control.read(api)['modules']['ai-agent'])
 
+    def test_catalog_uses_draft_or_saved_key_without_saving_or_leaking_it_to_another_provider(self):
+        self.save()
+        before = control.read(api)
+        with patch.object(control.assistant_provider, 'catalog', return_value=['model-a', 'model-b']) as discover:
+            result = control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1'))
+            self.assertEqual(result, {'models': ['model-a', 'model-b']})
+            discover.assert_called_once_with('https://provider.example/v1', 'secret-ai')
+            with self.assertRaises(api.HTTPException) as caught:
+                control.model_catalog(api, control.Catalog(provider_url='https://another.example'))
+            self.assertEqual(caught.exception.status_code, 409)
+            self.assertEqual(discover.call_count, 1)
+            control.model_catalog(api, control.Catalog(provider_url='https://api.nyxos.shop/', api_key='draft-secret'))
+            discover.assert_called_with('https://api.nyxos.shop/v1', 'draft-secret')
+        self.assertEqual(control.read(api), before)
+
+    def test_catalog_key_errors_are_sanitized_and_route_requires_admin(self):
+        self.save()
+        with patch.object(control.assistant_provider, 'catalog', side_effect=RuntimeError('secret-ai')):
+            with self.assertRaises(api.HTTPException) as caught:
+                control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1'))
+        self.assertNotIn('secret-ai', caught.exception.detail)
+        self.assertEqual(caught.exception.status_code, 502)
+        with TestClient(api.app) as client:
+            self.assertEqual(client.post('/api/assistant/models', json={'provider_url': 'https://api.nyxos.shop'}).status_code, 401)
+
+    def test_catalog_chat_selection_is_request_scoped_and_single_mode_rejects_override(self):
+        payload = self.payload()
+        saved = self.save(payload)
+        with self.assertRaises(api.HTTPException) as caught:
+            control.runtime_request(api, '--chat', {'prompt': 'hello', 'actor': 'panel', 'model': 'other-model'})
+        self.assertEqual(caught.exception.status_code, 409)
+        payload.update(model_mode='catalog', expected_revision=saved['settings']['revision'])
+        self.save(payload)
+        self.observe.return_value['active'] = True
+        before = control.read(api)
+        with patch.object(control.subprocess, 'Popen') as process_factory:
+            process = process_factory.return_value.__enter__.return_value
+            process.returncode = 0
+            process.communicate.return_value = (json.dumps({'ok': True, 'result': {'answer': 'OK'}}), '')
+            control.runtime_request(api, '--chat', {'prompt': 'hello', 'actor': 'panel', 'model': 'other-model'})
+            sent = json.loads(process.communicate.call_args.args[0])
+            self.assertEqual(sent['settings']['model'], 'other-model')
+            self.assertEqual(sent['settings']['provider_url'], 'https://provider.example/v1')
+        self.assertEqual(control.read(api), before)
+
     def test_control_token_has_per_user_scope_and_revocation(self):
         self.save()
         value = control.read(api)

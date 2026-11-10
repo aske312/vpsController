@@ -449,7 +449,12 @@ def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'noder
 @app.post('/api/assistant/chat')
 def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
     return assistant_control.runtime_request(sys.modules[__name__], '--chat',
-        {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel'})
+        {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel', 'model': payload.model})
+
+
+@app.post('/api/assistant/models')
+def assistant_models(payload: assistant_control.Catalog, _: None = Depends(require_token)) -> dict:
+    return assistant_control.model_catalog(sys.modules[__name__], payload)
 
 
 def require_nodera_bot(authorization: str | None = Header(default=None),

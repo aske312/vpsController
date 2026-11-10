@@ -6,7 +6,7 @@ import ts from 'typescript';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
-function mount(mode, status) {
+function mount(mode, status, catalog = []) {
   const slots = [], effects = [], writes = [];
   let cursor = 0;
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
@@ -34,8 +34,10 @@ function mount(mode, status) {
   const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers
     : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   new Function('require', 'exports', outputText)(require, exported);
-  const request = async (_path, options) => {
-    if (options?.method === 'PUT') writes.push(JSON.parse(options.body));
+  const request = async (path, options) => {
+    if (path === '/assistant/models') return { models: catalog };
+    if (options?.method === 'PUT' || path === '/assistant/chat') writes.push(JSON.parse(options.body));
+    if (path === '/assistant/chat') return { result: { answer: 'OK', tools_used: [] } };
     return status;
   };
   const props = { mode, request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {} };
@@ -87,4 +89,26 @@ test('running NoderaBot still locks its own token and enable switch', async () =
   const tree = view.render();
   assert.equal(nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox')[0].disabled, true);
   assert.equal(nodes(tree, n => n.type === 'fieldset')[0].disabled, true);
+});
+
+test('catalog mode loads any number of models and sends the chat selection without changing settings', async () => {
+  const status = fixture();
+  Object.assign(status.settings, { model_mode: 'catalog', model: 'model-0', api_key_configured: true,
+    provider_url: 'https://api.nyxos.shop/v1', modules: { 'ai-agent': true, 'nodera-bot': true } });
+  Object.assign(status.modules[0], { enabled: true, configured: true });
+  const models = Array.from({ length: 250 }, (_, i) => `model-${i}`);
+  const view = mount('agent', status, models);
+  view.render(); await Promise.resolve(); view.render(); await Promise.resolve();
+  let tree = view.render();
+  const selector = nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Модель для запроса')[0];
+  assert.equal(nodes(selector.node, n => n.type === 'option').length, models.length);
+  assert.equal(selector.disabled, false);
+  selector.node.props.onChange({ target: { value: 'model-249' } });
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello' } });
+  tree = view.render();
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
+  await Promise.resolve();
+  assert.equal(view.writes.length, 1);
+  assert.equal(view.writes[0].model, 'model-249');
+  assert.equal(status.settings.model, 'model-0');
 });

@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 import application_operation as operations
+import assistant_provider
 from component_registry import ComponentRegistry, RegistryError
 
 MODULES = ('nodera-bot', 'ai-agent')
@@ -62,6 +63,7 @@ class Settings(BaseModel):
     bot_token: str | None = Field(default=None, max_length=256)
     provider_url: str = Field(default='', max_length=512)
     model: str = Field(default='', max_length=128)
+    model_mode: Literal['single', 'catalog'] = 'single'
     api_key: str | None = Field(default=None, max_length=2048)
     telegram_api_id: int | None = Field(default=None, strict=True, gt=0)
     telegram_api_hash: str | None = Field(default=None, max_length=32)
@@ -114,7 +116,7 @@ class Settings(BaseModel):
                 raise ValueError('Внутренний адрес провайдера недоступен') from None
         if parsed.port not in (None, 443):
             raise ValueError('Для провайдера поддерживается HTTPS на порту 443')
-        return value
+        return assistant_provider.base_url(value)
 
     @model_validator(mode='after')
     def unique_accounts(self):
@@ -128,6 +130,27 @@ class Chat(BaseModel):
     model_config = {'extra': 'forbid'}
     prompt: str = Field(min_length=1, max_length=12000)
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
+    model: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator('model')
+    @classmethod
+    def valid_model(cls, value):
+        if value is not None and not assistant_provider.model_id(value):
+            raise ValueError('Некорректный ID модели')
+        return value
+
+
+class Catalog(BaseModel):
+    model_config = {'extra': 'forbid'}
+    provider_url: str = Field(max_length=512)
+    api_key: str | None = Field(default=None, max_length=2048)
+
+    @field_validator('provider_url')
+    @classmethod
+    def provider(cls, value):
+        if not value.strip():
+            raise ValueError('Укажите адрес AI-провайдера')
+        return Settings.provider(value)
 
 
 class Check(BaseModel):
@@ -221,6 +244,7 @@ def store(api, value):
     """
     revision = value['revision']
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
+    ai['model_mode'] = value.get('model_mode', 'single')
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
               accounts=[{key: item for key, item in a.items() if key != 'bot_access'} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -316,7 +340,7 @@ def configure(api, payload):
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
-        keys = ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp') if payload.component == 'ai-agent' else ('bot_token',)
+        keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp') if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         value['modules'][payload.component] = submitted['modules'][payload.component]
         for key in ('api_key', 'bot_token', 'telegram_api_hash'):
@@ -343,6 +367,33 @@ def configure(api, payload):
     return status(api)
 
 
+def model_catalog(api, payload):
+    require_installed(api, 'ai-agent')
+    value = read(api)
+    key = payload.api_key
+    if key is None:
+        old_url = value.get('provider_url', '')
+        if not old_url or assistant_provider.base_url(old_url) != payload.provider_url:
+            raise HTTPException(409, 'Для нового адреса провайдера введите API-ключ заново')
+        key = value.get('api_key', '')
+    if not key:
+        raise HTTPException(422, 'Укажите API-ключ для загрузки каталога')
+    if not _runtime_slots.acquire(blocking=False):
+        raise HTTPException(429, 'Два запроса к модулям уже выполняются; дождитесь завершения')
+    try:
+        return {'models': assistant_provider.catalog(payload.provider_url, key)}
+    except ValueError as exc:
+        # Forward only our own validation messages, never provider bodies/URLs.
+        message = str(exc)
+        if not message.startswith(('Каталог ', 'Адрес AI-', 'Провайдер вернул неверный')):
+            message = 'Не удалось прочитать каталог моделей провайдера'
+        raise HTTPException(502, message) from None
+    except Exception:
+        raise HTTPException(502, 'Не удалось загрузить каталог моделей. Проверьте адрес, ключ и доступность провайдера') from None
+    finally:
+        _runtime_slots.release()
+
+
 def runtime_request(api, mode, body):
     component = 'nodera-bot' if mode == '--check' and body.get('module') == 'nodera-bot' else 'ai-agent'
     require_installed(api, component)
@@ -351,6 +402,15 @@ def runtime_request(api, mode, body):
     python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
     body = dict(body)
+    selected_model = body.pop('model', None)
+    if mode == '--chat' and selected_model is not None:
+        if not assistant_provider.model_id(selected_model):
+            raise HTTPException(422, 'Некорректный ID модели')
+        if value.get('model_mode', 'single') != 'catalog' and selected_model != value.get('model'):
+            raise HTTPException(409, 'Выбор другой модели доступен в режиме каталога')
+        value = {**value, 'model': selected_model}
+    if value.get('provider_url'):
+        value = {**value, 'provider_url': assistant_provider.base_url(value['provider_url'])}
     if component == 'ai-agent' and value['modules']['nodera-bot']:
         actor = str(body.get('actor', ''))
         value = {**value, 'accounts': [{**account, 'vps_access': True} if str(account['telegram_id']) == actor and account.get('bot_access') else account for account in value['accounts']]}

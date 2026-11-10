@@ -5,7 +5,7 @@ import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import type { SystemAction } from "../../control-panel/system-operation";
-import { changed, makeDraft, moduleState, settingsPayload, type Draft, type McpStatus, type ModuleId, type McpId } from "./assistant-state";
+import { changed, chatModels, makeDraft, moduleState, settingsPayload, type Draft, type McpStatus, type ModuleId, type McpId } from "./assistant-state";
 
 type Client = ReturnType<typeof createApiClient>;
 type Props = {
@@ -36,7 +36,12 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const [username, setUsername] = useState("");
   const [foundUser, setFoundUser] = useState<{ telegram_id: number; username: string; name: string } | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [turns, setTurns] = useState<{ id: number; question: string; answer?: string; tools?: string[]; error?: string }[]>([]);
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const [model, setModel] = useState("");
+  const catalogVersion = useRef(0);
+  const [turns, setTurns] = useState<{ id: number; question: string; model: string; answer?: string; tools?: string[]; error?: string }[]>([]);
   const nextTurn = useRef(0);
   const [checks, setChecks] = useState<Partial<Record<ModuleId, { ok: boolean; text: string; revision: string; actor: string }>>>({});
   const version = useRef(0);
@@ -44,6 +49,8 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const writing = useRef(false);
   const dirtyRef = useRef(false);
   const dirty = changed(draft, status?.settings);
+  const catalogRevision = agentView && status?.settings.model_mode === "catalog" && status.settings.api_key_configured ? status.settings.revision : "";
+  const savedProviderUrl = status?.settings.provider_url ?? "";
   useEffect(() => { client.current = request; }, [request]);
   useEffect(() => { dirtyRef.current = dirty; onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => () => { version.current += 1; onDirtyChange(false); }, [onDirtyChange]);
@@ -61,10 +68,42 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     }
   }, [request]);
   useEffect(() => { void load(); }, [load, refreshKey]);
+  const loadModels = useCallback(async (provider_url: string, api_key: string | null, chooseDefault = false) => {
+    const generation = ++catalogVersion.current;
+    setCatalogLoading(true); setCatalogError("");
+    try {
+      const result = await request<{ models: string[] }>("/assistant/models", { method: "POST", body: JSON.stringify({ provider_url, api_key }) });
+      if (generation !== catalogVersion.current || client.current !== request) return;
+      setCatalog(result.models);
+      if (chooseDefault) setDraft(current => {
+        if (!current || current.model || !result.models.length) return current;
+        dirtyRef.current = true;
+        return { ...current, model: result.models[0] };
+      });
+    } catch (cause) {
+      if (generation === catalogVersion.current && client.current === request) {
+        setCatalog([]);
+        setCatalogError(cause instanceof Error ? cause.message : "Каталог моделей недоступен");
+      }
+    } finally { if (generation === catalogVersion.current) setCatalogLoading(false); }
+  }, [request]);
+  useEffect(() => {
+    if (catalogRevision && savedProviderUrl && !dirtyRef.current) void loadModels(savedProviderUrl, null);
+  }, [catalogRevision, savedProviderUrl, loadModels]);
+  useEffect(() => () => { catalogVersion.current += 1; }, []);
   function patch(update: Partial<Draft>) {
     dirtyRef.current = true;
+    if ("provider_url" in update || "api_key" in update) {
+      catalogVersion.current += 1; setCatalog([]); setCatalogLoading(false); setCatalogError(""); setModel("");
+    }
     if ("bot_token" in update) setChecks(current => ({ ...current, "nodera-bot": undefined }));
     setDraft(current => current ? { ...current, ...update } : current);
+  }
+  function discardSettings() {
+    if (!status) return;
+    catalogVersion.current += 1; setCatalog([]); setCatalogLoading(false); setCatalogError("");
+    setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false;
+    if (status.settings.model_mode === "catalog") void loadModels(status.settings.provider_url, null);
   }
   async function save(startBot = false) {
     if (!draft || writing.current) return;
@@ -122,10 +161,10 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     const id = ++nextTurn.current;
     const question = prompt.trim();
     writing.current = true; setWorking("chat"); setError(""); setPrompt("");
-    setTurns(current => [...current, { id, question }]);
+    setTurns(current => [...current, { id, question, model: selectedModel }]);
     try {
       const result = await request<{ result: { answer: string; tools_used: string[] } }>("/assistant/chat", {
-        method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null }),
+        method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null, model: selectedModel }),
       });
       if (client.current === request) setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.result.answer, tools: result.result.tools_used } : turn));
     } catch (cause) { setTurns(current => current.map(turn => turn.id === id ? { ...turn, error: cause instanceof Error ? cause.message : "AI не ответил" } : turn)); }
@@ -133,6 +172,8 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   }
   if (!status || !draft) return <section className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
   const componentId = agentView ? "ai-agent" : "nodera-bot";
+  const availableModels = chatModels(status.settings, catalog);
+  const selectedModel = availableModels.includes(model) ? model : status.settings.model;
   const selectedComponent = status.modules.find(item => item.id === componentId);
   if (!selectedComponent?.installed) return <section className="mcpWorkspace"><p>Установите {agentView ? "AI-agent" : "NoderaBot"} в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = selectedComponent.management?.state !== "managed" || selectedComponent.management?.retained;
@@ -177,24 +218,27 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     {error && <p className="mcpNotice error" role="alert">{error}</p>}
     {message && <p className="mcpNotice" role="status">{message}</p>}
     {agentView && <section id={`${tabsId}-chat`} role="tabpanel" aria-labelledby={`${tabsId}-chat-tab`} hidden={panel !== "chat"} className="mcpChat">
-      <div className="mcpChatHead">{actorSelect}<span>{status.settings.model || "Модель не настроена"}</span>{!selectedComponent.configured && <button type="button" className="ghostButton" onClick={() => setPanel("settings")}>Подключить AI</button>}</div>
+      <div className="mcpChatHead">{actorSelect}{status.settings.model_mode === "catalog" ? <><label className="mcpActor">Модель<select aria-label="Модель для запроса" value={selectedModel} disabled={blocked || dirty || catalogLoading} onChange={event => setModel(event.target.value)}>{!availableModels.length && <option value="">Загрузите каталог</option>}{availableModels.map(id => <option key={id} value={id}>{id}</option>)}</select></label><button type="button" className="ghostButton" disabled={blocked || dirty || catalogLoading || !status.settings.api_key_configured} onClick={() => void loadModels(savedProviderUrl, null)}>{catalogLoading ? "Загрузка моделей…" : "Обновить модели"}</button></> : <span>{status.settings.model || "Модель не настроена"}</span>}{!selectedComponent.configured && <button type="button" className="ghostButton" onClick={() => setPanel("settings")}>Подключить AI</button>}</div>
+      {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}. Можно повторить загрузку; основная модель остаётся доступна.</p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните изменения во вкладке «Настройки».</p>}
       <div className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
         {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="ai-agent"/><h2>Чем помочь?</h2><p>Задайте вопрос или используйте подключённые MCP.</p><div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div></div>}
-        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.question}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>AI-агент</small><p>{turn.error || turn.answer || "Обрабатывает запрос…"}</p>{turn.tools?.length ? <details><summary>Инструменты · {turn.tools.length}</summary><p className="mcpToolList">{turn.tools.join(" · ")}</p></details> : null}</article></div>)}
+        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.question}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>{turn.model || "AI-агент"}</small><p>{turn.error || turn.answer || "Обрабатывает запрос…"}</p>{turn.tools?.length ? <details><summary>Инструменты · {turn.tools.length}</summary><p className="mcpToolList">{turn.tools.join(" · ")}</p></details> : null}</article></div>)}
       </div>
       <div className="mcpComposer"><label className="mcpPrompt">Сообщение<textarea value={prompt} maxLength={12000} rows={2} disabled={blocked} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); if (!blocked && !dirty && prompt.trim() && selectedComponent.enabled && selectedComponent.configured) void send(); } }} placeholder="Запрос к агенту…" /></label><button type="button" className="primaryButton" disabled={blocked || dirty || !prompt.trim() || !selectedComponent.enabled || !selectedComponent.configured} onClick={() => void send()}>{working === "chat" ? "Ожидание…" : "Отправить"}</button></div>
       <p className="mcpChatHint">Каждый запрос — отдельный контекст. Данные вызванных инструментов передаются AI-провайдеру.</p>
     </section>}
     <section id={`${tabsId}-settings`} role={agentView ? "tabpanel" : undefined} aria-labelledby={agentView ? `${tabsId}-settings-tab` : undefined} hidden={!settingsVisible}>
       <form className="mcpSettings" onSubmit={event => { event.preventDefault(); void save(canStartBot && !status.bot.active); }}>
-        <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={credentialsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={() => { setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false; }}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
+        <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={credentialsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={discardSettings}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
         {!agentView && status.bot.active && <p className="mcpNotice">Администраторов можно менять без остановки. Для смены токена или включения сначала остановите бота.</p>}
         {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки для загрузки актуальной версии.</p>}
         {setupMessage && <p className="mcpNotice">{setupMessage}</p>}
         {!agentView && <p className="mcpFieldHint">Гости получают приветствие, справку и свой /id. AI, MCP и сведения о сервере доступны только администраторам бота; доступ к веб-панели этим не выдаётся.</p>}
         <fieldset disabled={credentialsBlocked} className="mcpConnection"><legend>{agentView ? "Подключение к AI" : "Подключение бота"}</legend>
-          <div className={`mcpFields ${agentView ? "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://…/v1" onChange={event => patch({ provider_url: event.target.value })}/></label><label>Модель<input value={draft.model} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label><Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
+          {agentView && <label className="mcpModelMode">Модели<select value={draft.model_mode ?? "single"} onChange={event => patch({ model_mode: event.target.value as "single" | "catalog" })}><option value="single">Одна модель · вручную по ID</option><option value="catalog">Авто · каталог провайдера, выбор в чате</option></select></label>}
+          <div className={`mcpFields ${agentView ? "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://api.nyxos.shop/v1" onChange={event => patch({ provider_url: event.target.value })}/></label><label>{draft.model_mode === "catalog" ? "Основная модель" : "Модель"}<input value={draft.model} list={draft.model_mode === "catalog" ? `${tabsId}-models` : undefined} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label><Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
+          {agentView && draft.model_mode === "catalog" && <div className="mcpCatalog"><datalist id={`${tabsId}-models`}>{catalog.map(id => <option key={id} value={id}/>)}</datalist><button type="button" className="ghostButton" disabled={catalogLoading || !draft.provider_url || !(draft.api_key || draft.api_key === null && draft.api_key_configured)} onClick={() => void loadModels(draft.provider_url, draft.api_key, true)}>{catalogLoading ? "Загрузка моделей…" : "Загрузить каталог"}</button>{catalog.length > 0 && <label>Доступные модели · {catalog.length}<select aria-label="Основная модель из каталога" value={catalog.includes(draft.model) ? draft.model : ""} onChange={event => patch({ model: event.target.value })}><option value="" disabled>Выберите основную модель</option>{catalog.map(id => <option key={id} value={id}>{id}</option>)}</select></label>}<small>Каталог загружается по вашему API-ключу. В чате можно выбрать любую доступную модель. Основная модель используется по умолчанию и в Telegram-боте.</small>{catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}</div>}
         </fieldset>
         <div className="mcpConnectionStatus"><div className="mcpConnectionFoot"><small>{agentView ? "API chat/completions с поддержкой инструментов." : "Токен можно проверить до сохранения, включения бота и добавления пользователей."}</small><button type="button" className="ghostButton" disabled={blocked || !canCheckConnection} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
           {result && result.revision === status.settings.revision && result.actor === actor && <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>}
