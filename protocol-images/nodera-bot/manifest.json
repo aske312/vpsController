@@ -1,5 +1,5 @@
 {
-  "id": "nodera-bot", "name": "NoderaBot", "version": "1.1.0", "installable": true,
+  "id": "nodera-bot", "name": "NoderaBot", "version": "1.1.1", "installable": true,
   "description": "Самостоятельный Telegram-бот. Команды работают без AI-agent; AI-ответы подключаются отдельно.",
   "category": "assistant", "category_name": "Telegram", "installer": "install.sh", "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"], "preflight_packages": ["python3-venv", "ca-certificates"],

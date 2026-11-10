@@ -24,6 +24,14 @@ def quoted(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
 
 
+def credential_source(value):
+    path = str(value)
+    if not Path(path).is_absolute() or any(ord(char) < 32 for char in path):
+        raise ValueError('Invalid service credential path')
+    # LoadCredential parses ID:PATH directly, unlike ExecStart argument quoting.
+    return 'settings:' + path.replace('%', '%%')
+
+
 def unit_name(component):
     return control.AGENT_UNIT if component == 'ai-agent' else control.BOT_UNIT
 
@@ -82,7 +90,7 @@ def install(api, component):
     else:
         credentials = control.directory(api) / 'nodera-bot' / 'runtime.json'
         lines += ['Type=simple', 'StateDirectory=vps-control-nodera', 'StateDirectoryMode=0700',
-                  f'LoadCredential={quoted("settings:" + str(credentials))}',
+                  f'LoadCredential={credential_source(credentials)}',
                   f'ExecStart={quoted(python)} {quoted(root / script_name)} --bot', 'Restart=on-failure',
                   'RestartSec=10', 'TimeoutStopSec=15']
     lines += ['', '[Install]', 'WantedBy=multi-user.target', '']
