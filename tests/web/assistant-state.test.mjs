@@ -25,12 +25,12 @@ test("drafts preserve saved secrets without reading them back and detect actual 
 });
 
 test("configured credentials do not claim that the provider or an on-demand MCP worker is running", () => {
-  const state = { settings, modules: [{ id: "ai-agent", enabled: true, configured: true }],
+  const state = { settings, modules: [{ id: "ai-agent", enabled: true, configured: true, installed: false }],
     mcp_modules: [{ id: "telegram-mcp", enabled: true, configured: true }], bot: {}, runtime_installed: false };
-  assert.equal(moduleState(state, "ai-agent"), "Нужна среда выполнения");
-  state.runtime_installed = true;
+  assert.equal(moduleState(state, "ai-agent"), "Компонент не установлен");
+  state.modules[0].installed = true;
   assert.equal(moduleState(state, "ai-agent"), "Запуск по запросу");
   assert.equal(moduleState(state, "telegram-mcp"), "Запуск по запросу");
-  state.modules.push({ id: "nodera-bot", enabled: true, configured: true });
+  state.modules.push({ id: "nodera-bot", enabled: true, configured: true, installed: true });
   assert.equal(moduleState(state, "nodera-bot"), "Состояние службы неизвестно");
 });

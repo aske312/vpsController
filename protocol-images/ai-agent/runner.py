@@ -1,4 +1,4 @@
-"""Nodera runtime: stdio MCP servers, a bounded AI tool loop and Bot API polling.
+"""AI-agent image: stdio MCP servers and a bounded AI tool loop.
 
 No shell tool, Telegram account writes, or administrator panel password.
 """
@@ -261,68 +261,7 @@ async def check(settings, module, actor):
         if not result.get('content'):
             raise RuntimeError('AI-провайдер не вернул текст')
         return {'provider_response': True}
-    return await bot_api(settings, 'getMe')
-
-
-async def bot_api(settings, method, **payload):
-    async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
-        response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload)
-        if response.status_code != 200 or not response.json().get('ok'):
-            raise RuntimeError('Telegram Bot API вернул HTTP ' + str(response.status_code))
-        return response.json()['result']
-
-
-async def bot(settings):
-    if not settings['modules']['nodera-bot']:
-        raise ValueError('NoderaBot выключен в настройках')
-    if not settings.get('bot_token') or not any(a.get('bot_access') for a in settings['accounts']):
-        raise ValueError('Нужны токен и разрешённые пользователи NoderaBot')
-    if (await bot_api(settings, 'getWebhookInfo')).get('url'):
-        raise ValueError('У бота установлен webhook; long polling не запущен')
-    state_root = Path(os.environ.get('STATE_DIRECTORY', tempfile.gettempdir()))
-    state_file = state_root / 'offset.json'
-    offset = json.loads(state_file.read_text()).get('offset', 0) if state_file.exists() else 0
-    last = {}
-    while True:
-        try:
-            updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message'])
-            for update in updates:
-                offset = max(offset, update['update_id'] + 1)
-                # Claim before delivery; a failed request is not sent twice on restart.
-                temporary = state_file.with_suffix('.tmp')
-                temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600)
-                temporary.replace(state_file)
-                message = update.get('message', {})
-                actor = message.get('from', {}).get('id')
-                profile = account(settings, actor)
-                if message.get('chat', {}).get('type') != 'private' or not profile or not profile.get('bot_access'):
-                    continue
-                prompt = message.get('text', '').strip()
-                if not prompt:
-                    continue
-                if time.monotonic() - last.get(actor, 0) < 3:
-                    continue
-                last[actor] = time.monotonic()
-                command = prompt.split()[0].split('@')[0]
-                if command in ('/start', '/help'):
-                    answer = 'NoderaBot. Отправьте вопрос AI-агенту. /status — доступные контуры. Каждый запрос обрабатывается отдельно.'
-                elif command == '/status':
-                    answer = '\n'.join(f'{key}: ' + ('включён' if enabled else 'выключен')
-                                       for key, enabled in settings['modules'].items())
-                    answer += '\nВаш Telegram: ' + ('доступен' if allowed(settings, actor, 'telegram-mcp') else 'не подключён')
-                    answer += '\nvpsController: ' + ('доступен' if allowed(settings, actor, 'vps-controller-mcp') else 'доступ не выдан')
-                else:
-                    try:
-                        result = await asyncio.wait_for(chat(settings, str(actor), prompt), timeout=120)
-                        answer = result['answer']
-                    except Exception as exc:
-                        answer = safe_error(exc)
-                # Sending is restricted to the initiating allowlisted private chat.
-                for start in range(0, min(len(answer), 12000), 3500):
-                    await bot_api(settings, 'sendMessage', chat_id=actor, text=answer[start:start+3500])
-        except Exception:
-            logging.error('NoderaBot polling or delivery failed')
-            await asyncio.sleep(5)
+    raise ValueError('Этот инструмент не принадлежит AI-agent')
 
 
 def safe_error(exc):
@@ -347,11 +286,11 @@ async def request_main(payload, mode):
 
 if __name__ == '__main__':
     try:
-        if sys.argv[1] == '--mcp':
+        if sys.argv[1] == '--self-check':
+            import mcp, telethon
+            print('AI-agent runtime ready')
+        elif sys.argv[1] == '--mcp':
             serve_mcp(json.loads(Path(os.environ['NODERA_CONFIG']).read_text()), os.environ['NODERA_ACTOR'], sys.argv[2])
-        elif sys.argv[1] == '--bot':
-            path = Path(os.environ['CREDENTIALS_DIRECTORY']) / 'settings'
-            asyncio.run(bot(json.loads(path.read_text())))
         else:
             payload = json.loads(sys.stdin.read(1024 * 1024))
             result = asyncio.run(asyncio.wait_for(request_main(payload, sys.argv[1]), timeout=130))

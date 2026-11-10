@@ -448,6 +448,16 @@ def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_to
         {'prompt': payload.prompt, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel'})
 
 
+def require_nodera_bot(authorization: str | None = Header(default=None),
+                       actor: str = Header(default='', alias='X-MCP-Actor')) -> None:
+    assistant_control.authorize_bot(sys.modules[__name__], authorization, actor)
+
+
+@app.post('/api/assistant/bot-chat', dependencies=[Depends(require_nodera_bot)])
+def nodera_chat(payload: assistant_control.Chat, actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_control.runtime_request(sys.modules[__name__], '--chat', {'prompt': payload.prompt, 'actor': actor})
+
+
 def require_assistant_control(authorization: str | None = Header(default=None),
                               actor: str = Header(default='', alias='X-MCP-Actor')) -> None:
     assistant_control.authorize_control(sys.modules[__name__], authorization, actor)
@@ -3861,7 +3871,13 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
     repo = {"vless-reality-xhttp": XRAY_GITHUB_REPO, "mihomo": MIHOMO_GITHUB_REPO,
             "hysteria2": HYSTERIA2_GITHUB_REPO, "tuic": SING_BOX_GITHUB_REPO, "trojan": SING_BOX_GITHUB_REPO}.get(image_id)
     update_available_override: bool | None = None
-    if image_id == "awg":
+    if image_id in assistant_control.MODULES:
+        try:
+            installed_version = (assistant_control.runtime_directory(image_id) / 'version').read_text().strip() if installed else ''
+        except FileNotFoundError:
+            installed_version = ''
+        available_version = str(manifest.get('version', ''))
+    elif image_id == "awg":
         # The PPA package is the installation/update channel. GitHub release
         # tags describe a different release stream and cannot be compared to
         # the version printed by the PPA's awg binary.
@@ -4538,7 +4554,7 @@ def protocol_managed_services() -> dict[str, dict]:
     # mihomo itself) shows up here automatically, so new protocol images
     # never need a matching entry added by hand.
     services: dict[str, dict] = {
-        image["id"]: {"name": image["name"], "unit": image["service"], "controls": ["start", "stop", "restart"], "component_id": image["id"]}
+        image["id"]: {"name": image["name"], "unit": image["service"], "controls": [] if image['id'] == 'nodera-bot' else ["start", "stop", "restart"], "component_id": image["id"]}
         for image in protocol_image_manifests(include_versions=False).values()
         if image.get("installed") and image.get("service")
     }

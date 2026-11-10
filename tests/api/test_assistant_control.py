@@ -8,9 +8,9 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from tests.api.support import api
+from tests.api.support import api, load_module
 import assistant_control as control
-from assistant_runtime import runner
+runner = load_module('assistant_image_runner', 'protocol-images/ai-agent/runner.py')
 
 
 class AssistantTests(unittest.TestCase):
@@ -19,11 +19,18 @@ class AssistantTests(unittest.TestCase):
         self.enterContext(patch.object(api, 'DATA_DIR', self.root))
         self.enterContext(patch.object(api, 'ACTION_FILE', self.root / 'action.json'))
         self.observe = self.enterContext(patch.object(api, 'observe_service', return_value={
-            'active': False, 'state': 'inactive', 'runtime': {'state': 'stopped'}}))
-        self.enterContext(patch.dict('os.environ', {'ASSISTANT_RUNTIME_DIR': str(self.root / 'runtime')}))
+            'active': False, 'unit_present': True, 'state': 'inactive', 'runtime': {'state': 'stopped'}}))
+        self.enterContext(patch.dict('os.environ', {'AI_AGENT_RUNTIME_DIR': str(self.root / 'ai-runtime'), 'NODERA_BOT_RUNTIME_DIR': str(self.root / 'bot-runtime')}))
+        for component in control.MODULES:
+            control.ComponentRegistry(self.root).write_receipt(component, 'installed')
+            runtime = control.runtime_directory(component)
+            (runtime / 'venv/bin').mkdir(parents=True)
+            (runtime / 'venv/bin/python').touch()
+            (runtime / ('runner.py' if component == 'ai-agent' else 'bot.py')).touch()
+            (runtime / 'version').write_text('1.0.0')
 
     def payload(self):
-        return {'expected_revision': '0' * 32,
+        return {'expected_revision': '0' * 32, 'component': 'ai-agent',
                 'modules': {'ai-agent': True, 'nodera-bot': False},
                 'mcp': {'telegram-mcp': True, 'vps-controller-mcp': True},
                 'provider_url': 'https://provider.example/v1', 'model': 'configured-model', 'api_key': 'secret-ai',
@@ -36,7 +43,8 @@ class AssistantTests(unittest.TestCase):
         return control.configure(api, control.Settings.model_validate(payload or self.payload()))
 
     def test_two_modules_and_mcp_options_have_no_false_health_claims(self):
-        status = control.status(api)
+        with patch.object(control, 'runtime_ready', return_value=False):
+            status = control.status(api)
         self.assertEqual({m['id'] for m in status['modules']}, {'ai-agent', 'nodera-bot'})
         self.assertEqual({m['id'] for m in status['mcp_modules']}, set(control.MCP_MODULES))
         self.assertFalse(status['runtime_installed'])
@@ -96,7 +104,7 @@ class AssistantTests(unittest.TestCase):
         with self.assertRaises(api.HTTPException): control.authorize_control(api, 'Bearer wrong', 'panel')
         control.authorize_control(api, token, 'panel')
         value['mcp']['vps-controller-mcp'] = False
-        control.operations.atomic_json(control.directory(api) / 'settings.json', value)
+        control.store(api, value)
         with self.assertRaises(api.HTTPException): control.authorize_control(api, token, 'panel')
 
     def test_routes_require_admin_or_dedicated_service_token(self):
@@ -121,6 +129,39 @@ class AssistantTests(unittest.TestCase):
         control.directory(api).mkdir()
         (control.directory(api) / 'settings.json').write_text('{broken')
         with self.assertRaises(control.operations.OperationConflict): control.status(api)
+
+    def test_bot_settings_cannot_overwrite_agent_key_and_purges_are_separate(self):
+        saved = self.save()
+        payload = self.payload()
+        payload.update(component='nodera-bot', expected_revision=saved['settings']['revision'], api_key='must-be-ignored')
+        payload['accounts'][0]['bot_access'] = True
+        self.save(payload)
+        self.assertEqual(control.read(api)['api_key'], 'secret-ai')
+        self.assertTrue(control.read(api)['accounts'][0]['bot_access'])
+        import shutil
+        shutil.rmtree(control.directory(api) / 'nodera-bot')
+        self.assertFalse(control.read(api).get('bot_token'))
+        self.assertEqual(control.read(api)['api_key'], 'secret-ai')
+        self.assertFalse(control.read(api)['accounts'][0]['bot_access'])
+
+    def test_failed_generation_commit_preserves_previous_credentials(self):
+        saved = self.save()
+        payload = self.payload(); payload.update(expected_revision=saved['settings']['revision'], api_key='new-key')
+        original = control.operations.atomic_json
+        def fail_pointer(path, value, **kwargs):
+            if path.name == 'settings.json': raise OSError('disk failure')
+            return original(path, value, **kwargs)
+        with patch.object(control.operations, 'atomic_json', side_effect=fail_pointer):
+            with self.assertRaises(OSError): self.save(payload)
+        self.assertEqual(control.read(api)['api_key'], 'secret-ai')
+        self.assertEqual(control.read(api)['revision'], saved['settings']['revision'])
+
+    def test_removed_component_cannot_run_even_with_retained_keys(self):
+        self.save()
+        control.ComponentRegistry(self.root).write_receipt('ai-agent', 'installed', retained=True)
+        with self.assertRaises(api.HTTPException) as caught:
+            control.runtime_request(api, '--chat', {'prompt': 'test'})
+        self.assertEqual(caught.exception.status_code, 409)
 
 
 class AgentRuntimeTests(unittest.TestCase):

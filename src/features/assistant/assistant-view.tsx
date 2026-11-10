@@ -64,7 +64,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     writing.current = true; version.current += 1;
     setWorking("save"); setError(""); setMessage("");
     try {
-      const next = await request<McpStatus>("/assistant", { method: "PUT", body: JSON.stringify(settingsPayload(draft)) });
+      const next = await request<McpStatus>("/assistant", { method: "PUT", body: JSON.stringify({ ...settingsPayload(draft), component: agentView ? "ai-agent" : "nodera-bot" }) });
       if (client.current !== request) return;
       setStatus(next); setDraft(makeDraft(next.settings)); dirtyRef.current = false;
       setChecks({}); setMessage("Настройки сохранены. Подключения проверяются отдельно.");
@@ -82,11 +82,10 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
       setChecks(current => ({ ...current, [id]: { ok: false, text: cause instanceof Error ? cause.message : "Проверка не выполнена", revision, actor } }));
     } finally { writing.current = false; setWorking(""); }
   }
-  async function runAction(action: "install" | "start" | "stop" | "restart") {
-    if (!await confirmAction({ title: action === "install" ? "Установить среду MCP?" : "Изменить состояние NoderaBot?",
-      message: action === "install" ? "Будут установлены отдельная среда выполнения агента, зависимости его MCP-подключений и служба NoderaBot. Бот автоматически не запускается."
-        : action === "stop" ? "NoderaBot остановится, его автозапуск будет отключён." : "NoderaBot запустится с сохранёнными настройками. Будет включён автозапуск.",
-      confirmLabel: action === "install" ? "Установить" : action === "stop" ? "Остановить" : action === "restart" ? "Перезапустить" : "Запустить", danger: action === "stop" })) return;
+  async function runAction(action: "start" | "stop" | "restart") {
+    if (!await confirmAction({ title: "Изменить состояние NoderaBot?",
+      message: action === "stop" ? "NoderaBot остановится, его автозапуск будет отключён." : "NoderaBot запустится с сохранёнными настройками. Будет включён автозапуск.",
+      confirmLabel: action === "stop" ? "Остановить" : action === "restart" ? "Перезапустить" : "Запустить", danger: action === "stop" })) return;
     setError("");
     try { await admitOperation("/assistant/action", { method: "POST", body: JSON.stringify({ action }) }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Команда не принята"); }
@@ -103,16 +102,20 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     finally { writing.current = false; setWorking(""); }
   }
   if (!status || !draft) return <section className="mcpWorkspace"><p role="status">{loadError || "Загружаем модули MCP…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить загрузку</button></section>;
-  const blocked = busy || Boolean(working) || Boolean(loadError);
+  const selectedComponent = status.modules.find(item => item.id === (agentView ? "ai-agent" : "nodera-bot"));
+  if (!selectedComponent?.installed) return <section className="mcpWorkspace"><p>Компонент {agentView ? "AI-agent" : "NoderaBot"} не установлен. Установите его образ в разделе «Обзор → Компоненты».</p></section>;
+  const readOnly = selectedComponent.management?.state !== "managed" || selectedComponent.management?.retained;
+  const blocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
   const settingsBlocked = blocked || status.bot.active === true;
   const conflict = status.settings.revision !== draft.expected_revision;
   const changeAccount = (index: number, update: Partial<Draft["accounts"][number]>) => patch({ accounts: draft.accounts.map((item, i) => i === index ? { ...item, ...update } : item) });
   return <div className="mcpWorkspace">
     <section className="mcpSummary">
       <div><p className="eyebrow">{agentView ? "AI AGENT" : "TELEGRAM BOT"}</p><h2>{agentView ? "Модель, инструменты и контуры доступа" : "NoderaBot"}</h2><p>{agentView ? "Настройки AI-провайдера и подключаемые MCP-навыки. Агент доступен из панели и через Telegram-бота." : "Отдельный Telegram-интерфейс. Команды бота работают самостоятельно, для AI-ответов используется модуль агента."}</p></div>
-      <div className="mcpRuntime"><span>{status.runtime_installed ? "Среда установлена" : "Среда не установлена"}</span><button type="button" className="ghostButton" disabled={blocked || status.bot.active === true} onClick={() => void runAction("install")}>{status.runtime_installed ? "Проверить установку" : "Установить среду"}</button></div>
+      <div className="mcpRuntime"><span>Компонент установлен из образа</span><span>Обновление и удаление: Обзор → Компоненты</span></div>
     </section>
     {loadError && <p className="mcpNotice error" role="alert">{loadError} Состояние модулей не обновлено.</p>}
+    {readOnly && <p className="mcpNotice">Компонент доступен для просмотра. Примите его под управление в разделе «Обзор → Компоненты».</p>}
     {!agentView && status.legacy_bot.active && <p className="mcpNotice">На сервере работает прежний Telegram-бот. Он не принят под управление NoderaBot. Запуск нового бота заблокирован до отдельного переключения.</p>}
     {error && <p className="mcpNotice error" role="alert">{error}</p>}
     {message && <p className="mcpNotice" role="status">{message}</p>}
@@ -123,8 +126,8 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
         <p>{descriptions[module.id]}</p>
         <label className="mcpToggle"><input type="checkbox" checked={draft.modules[module.id as "ai-agent" | "nodera-bot"]} disabled={settingsBlocked} onChange={event => patch({ modules: { ...draft.modules, [module.id]: event.target.checked } })} />Включить модуль</label>
         {module.id in status.tools && <p className="mcpToolList">{status.tools[module.id as keyof McpStatus["tools"]].join(" · ")}</p>}
-        <footer><button type="button" className="ghostButton" disabled={blocked || dirty || !module.enabled || !module.configured || !status.runtime_installed || module.id === "telegram-mcp" && !actor} onClick={() => void check(module.id)}>{working === module.id ? "Проверяем…" : "Проверить подключение"}</button>
-          {module.id === "nodera-bot" && <button type="button" className="ghostButton" disabled={blocked || dirty || !status.runtime_installed || status.legacy_bot.active === true || !module.enabled || !module.configured} onClick={() => void runAction(status.bot.active ? "restart" : "start")}>{status.bot.active ? "Перезапустить" : "Запустить"}</button>}
+        <footer><button type="button" className="ghostButton" disabled={blocked || dirty || !module.enabled || !module.configured || !module.installed} onClick={() => void check(module.id)}>{working === module.id ? "Проверяем…" : "Проверить подключение"}</button>
+          {module.id === "nodera-bot" && <button type="button" className="ghostButton" disabled={blocked || dirty || !module.installed || status.legacy_bot.active === true || !module.enabled || !module.configured} onClick={() => void runAction(status.bot.active ? "restart" : "start")}>{status.bot.active ? "Перезапустить" : "Запустить"}</button>}
           {module.id === "nodera-bot" && status.bot.active && <button type="button" className="ghostButton" disabled={blocked} onClick={() => void runAction("stop")}>Остановить</button>}
         </footer>
         {result && result.revision === status.settings.revision && result.actor === actor && <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>}

@@ -1,0 +1,12 @@
+{
+  "id": "nodera-bot", "name": "NoderaBot", "version": "1.0.0", "installable": true,
+  "description": "Самостоятельный Telegram-бот. Команды работают без AI-agent; AI-ответы подключаются отдельно.",
+  "category": "assistant", "category_name": "Telegram", "installer": "install.sh", "uninstaller": "uninstall.sh",
+  "supported_os": ["ubuntu", "debian"], "preflight_packages": ["python3-venv", "ca-certificates"],
+  "minimum_free_mb": 128, "requires_kernel_headers": false, "service": "vps-control-nodera-bot.service", "removable": true,
+  "installation": {
+    "required_paths": [{"path": "/etc/systemd/system/vps-control-nodera-bot.service"}, {"path": "/var/lib/vps-control-nodera-bot/venv/bin/python"}, {"path": "/var/lib/vps-control-nodera-bot/bot.py"}, {"path": "/var/lib/vps-control-nodera-bot/version"}],
+    "backup_paths": [{"path": "{data_dir}/assistant/nodera-bot"}, {"path": "/etc/systemd/system/vps-control-nodera-bot.service"}, {"path": "/var/lib/vps-control-nodera-bot/version"}, {"path": "/var/lib/vps-control-nodera"}, {"path": "/var/lib/private/vps-control-nodera"}],
+    "data_paths": [{"path": "{data_dir}/assistant/nodera-bot"}, {"path": "/var/lib/vps-control-nodera"}, {"path": "/var/lib/private/vps-control-nodera"}]
+  }
+}

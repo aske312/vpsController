@@ -16,8 +16,8 @@ export type Draft = Omit<Settings, "revision" | "accounts"> & {
 };
 export type Observation = { active?: boolean; unit_present?: boolean | null; state?: string; runtime?: { state: string; reason?: string } };
 export type McpStatus = {
-  settings: Settings; runtime_installed: boolean; bot: Observation; legacy_bot: Observation;
-  modules: { id: ModuleId; name: string; enabled: boolean; configured: boolean; execution: "service" | "on-demand" }[];
+  settings: Settings; runtime_installed: boolean; bot: Observation; agent?: Observation; legacy_bot: Observation;
+  modules: { id: ModuleId; name: string; enabled: boolean; configured: boolean; installed: boolean; management: {state: string; retained?: boolean}; execution: "service" | "on-demand" }[];
   mcp_modules: { id: McpId; name: string; enabled: boolean; configured: boolean; execution: "on-demand" }[];
   tools: Record<"telegram-mcp" | "vps-controller-mcp", string[]>;
 };
@@ -45,7 +45,9 @@ export function moduleState(status: McpStatus, id: ModuleId) {
   if (id === "nodera-bot" && status.bot.runtime?.state === "running") return "Служба запущена";
   if (id === "nodera-bot" && status.bot.runtime?.state === "error") return "Ошибка службы";
   if (!item?.enabled) return "Выключен";
-  if (!status.runtime_installed) return "Нужна среда выполнения";
+  if (!status.modules.find(item => item.id === (id === "nodera-bot" ? id : "ai-agent"))?.installed) return "Компонент не установлен";
+  if (id !== "nodera-bot" && status.agent?.runtime?.state === "stopped") return "Среда агента остановлена";
+  if (id !== "nodera-bot" && status.agent?.runtime?.state === "error") return "Ошибка среды агента";
   if (!item.configured) return "Нужны настройки";
   if (id === "nodera-bot") {
     if (status.bot.unit_present === false) return "Служба не установлена";

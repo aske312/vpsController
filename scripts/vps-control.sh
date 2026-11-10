@@ -1846,7 +1846,7 @@ release_protocol_ports() {
 
 install_protocol_image() {
   local image_id="${2:-}"
-  [[ "${image_id}" == "mihomo" ]] || die "Отдельные модули Direct удалены; используйте Mihomo."
+  [[ "${image_id}" == "mihomo" || "${image_id}" == "ai-agent" || "${image_id}" == "nodera-bot" ]] || die "Отдельные модули Direct удалены; используйте Mihomo."
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
   local image_dir="${INSTALL_DIR}/protocol-images"
   local manifest=""
@@ -1879,21 +1879,23 @@ PY
   installation_kind="$(DATA_DIR="${DATA_DIR}" WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
     python3 "${INSTALL_DIR}/api/component_registry.py" check-install --manifest "${manifest}" --data-dir "${DATA_DIR}")" \
     || die "компонент не разрешён к установке; проверьте принятие под управление в панели."
-  prepare_protocol_ports "${image_id}"
-  RESERVED_PROTOCOL_IMAGE="${image_id}"
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then
+    prepare_protocol_ports "${image_id}"
+    RESERVED_PROTOCOL_IMAGE="${image_id}"
+  fi
   prepare_package_manager
   preflight_protocol_image "${manifest}" \
     || die "preflight модуля ${image_id} не пройден; установка не запускалась."
   apt-get -o DPkg::Lock::Timeout=300 check \
     || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
-  refresh_protocol_api_access
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then refresh_protocol_api_access; fi
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
   DATA_DIR="${DATA_DIR}" WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
     python3 "${INSTALL_DIR}/api/component_registry.py" begin-install --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "не удалось зафиксировать начало установки компонента."
   install -m 0600 /dev/null "${module_log}"
   set +e
-  VPS_CONTROL_RESTORE_COMPONENT="${image_id}" \
+  DATA_DIR="${DATA_DIR}" INSTALL_DIR="${INSTALL_DIR}" VPS_CONTROL_RESTORE_COMPONENT="${image_id}" \
     ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
@@ -1911,7 +1913,7 @@ PY
       # It is never a rollback of a pre-existing installation or retained data.
       if [[ "${installation_kind}" == "fresh" && "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]]; then
         echo "Откат частично установленного образа ${image_id}" >>"${module_log}"
-        ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+        DATA_DIR="${DATA_DIR}" INSTALL_DIR="${INSTALL_DIR}" ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
           AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
           PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
           bash "${image_root}/${uninstaller}" >>"${module_log}" 2>&1 \
@@ -1924,17 +1926,17 @@ PY
       CURRENT_ACTION=""
       die "не удалось установить ${image_id}; журнал: ${module_log}"
   fi
-  install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg; fi
   if [[ "${image_id}" == "wg" || "${image_id}" == "awg" ]]; then
     configure_vpn_firewall_policy
   fi
   # Protocol status/configuration is read live; installation does not change
   # the API code or environment and does not require an API restart.
-  sync_protocol_monitor
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then sync_protocol_monitor; fi
   python3 "${INSTALL_DIR}/api/component_registry.py" record-install --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "компонент установлен, но запись управления не сохранена; проверьте состояние в панели."
   ok "Образ ${image_id} установлен."
-  release_protocol_ports "${image_id}"
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then release_protocol_ports "${image_id}"; fi
   RESERVED_PROTOCOL_IMAGE=""
 }
 
@@ -1954,14 +1956,14 @@ remove_protocol_image() {
   info "Удаление установленного протокола ${image_id}"
   python3 "${INSTALL_DIR}/api/component_registry.py" check-managed --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "сначала примите компонент под управление в панели."
-  refresh_protocol_api_access
-  ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then refresh_protocol_api_access; fi
+  DATA_DIR="${DATA_DIR}" INSTALL_DIR="${INSTALL_DIR}" ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
-  release_protocol_ports "${image_id}"
-  install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
-  sync_protocol_monitor
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then release_protocol_ports "${image_id}"; fi
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg; fi
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then sync_protocol_monitor; fi
   WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
     python3 "${INSTALL_DIR}/api/component_registry.py" record-removal --manifest "${manifest}" --data-dir "${DATA_DIR}" \
     || die "компонент удалён; не удалось отметить сохранённые данные."
@@ -2050,7 +2052,7 @@ update_protocol_image() {
     # service (and its live connections) is not touched by this update.
     [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] \
       || die "образ ${image_id} не поддерживает обновление."
-    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+    DATA_DIR="${DATA_DIR}" INSTALL_DIR="${INSTALL_DIR}" ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
       AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
       XRAY_UPDATE_ONLY=1 MIHOMO_UPDATE_ONLY=1 \
@@ -2064,7 +2066,7 @@ update_protocol_image() {
   if [[ "${image_id}" == "mihomo" ]]; then
     systemctl restart vps-control-mihomo-manager.service
   fi
-  sync_protocol_monitor
+  if [[ "${image_id}" != "ai-agent" && "${image_id}" != "nodera-bot" ]]; then sync_protocol_monitor; fi
   ok "Образ ${image_id} обновлён."
 }
 
@@ -2564,11 +2566,6 @@ sync_protocol_monitor() {
 # everything else, but restarting only api/web/caddy leaves it running the
 # old code in memory indefinitely - restart it too whenever it's installed.
 restart_mihomo_manager_if_present() {
-  # The optional bot holds Python modules in memory across a release swap.
-  # Restart only an already active NoderaBot; never start a disabled module.
-  if systemctl is-active --quiet vps-control-nodera-bot.service; then
-    systemctl restart vps-control-nodera-bot.service || return 1
-  fi
   systemctl list-unit-files --no-legend 'vps-control-mihomo-manager.service' 2>/dev/null | grep -q . \
     && systemctl restart vps-control-mihomo-manager.service 2>/dev/null || true
 }
@@ -2729,9 +2726,13 @@ PY
     [[ -z "${interface_env}" ]] || interface_value="${!interface_env:-}"
     service="${service_template/\{interface\}/${interface_value}}"
     [[ -n "${service}" ]] || continue
-    systemctl is-enabled --quiet "${service}" 2>/dev/null || continue
+    if [[ "${image_id}" == "ai-agent" || "${image_id}" == "nodera-bot" ]]; then
+      python3 "${INSTALL_DIR}/api/component_registry.py" check-managed --manifest "${manifest}" --data-dir "${DATA_DIR}" >/dev/null 2>&1 || continue
+    else
+      systemctl is-enabled --quiet "${service}" 2>/dev/null || continue
+    fi
     info "Удаление установленного протокола ${image_id}"
-    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+    DATA_DIR="${DATA_DIR}" INSTALL_DIR="${INSTALL_DIR}" ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
       AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
       bash "${image_root}/${uninstaller}" \
@@ -2743,9 +2744,7 @@ PY
 uninstall_app() {
   [[ "${2:-}" == "--yes" ]] || die "полное удаление необратимо; повторите команду с параметром --yes."
   info "Удаление служб, данных и конфигурации панели"
-  if [[ -f /etc/systemd/system/vps-control-nodera-bot.service ]]; then
-    [[ "$(head -n 1 /etc/systemd/system/vps-control-nodera-bot.service)" == '# Managed by vps-control: NoderaBot' ]] \
-      || die "Служба NoderaBot не принадлежит приложению; автоматическое удаление остановлено."
+  if [[ -f /etc/systemd/system/vps-control-nodera-bot.service && "$(head -n 1 /etc/systemd/system/vps-control-nodera-bot.service)" == '# Managed by vps-control: NoderaBot' ]]; then
     systemctl disable --now vps-control-nodera-bot.service || die "Не удалось остановить NoderaBot; удаление остановлено."
     rm -f -- /etc/systemd/system/vps-control-nodera-bot.service
     rm -rf -- /var/lib/vps-control-assistant-runtime /var/lib/vps-control-nodera /var/lib/private/vps-control-nodera
@@ -2760,6 +2759,9 @@ uninstall_app() {
     rm -f -- "${relay_private_unit}"
   done
   cleanup_installed_protocol_images
+  if [[ -f "${DATA_DIR}/components/nodera-bot/receipt.json" ]]; then
+    rm -rf -- /var/lib/vps-control-nodera /var/lib/private/vps-control-nodera
+  fi
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor /etc/systemd/system/apt-daily-upgrade.service.d/vps-control.conf "${COMMAND_PATH}"

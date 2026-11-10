@@ -1431,6 +1431,7 @@ export function ControlPanel() {
           onAdoptProtocol={(image) => void adoptProtocol(image)}
           onPurgeProtocol={(image) => void purgeProtocol(image)}
           onRemoveProtocol={(image) => void removeProtocol(image)}
+          onOpenComponent={(image) => { if (image.id === "ai-agent" || image.id === "nodera-bot") void navigateTo(image.id === "ai-agent" ? "ai-agent" : "telegram-bot"); }}
         />
       )}
 

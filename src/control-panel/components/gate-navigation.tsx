@@ -34,6 +34,8 @@ export function GateNavigation({
   onNavigate,
 }: Props) {
   const mihomoInstalled = protocolImages.some((item) => item.id === "mihomo" && item.installed);
+  const agentInstalled = protocolImages.some((item) => item.id === "ai-agent" && item.installed);
+  const botInstalled = protocolImages.some((item) => item.id === "nodera-bot" && item.installed);
 
   return (
     <aside className="gateSidebar">
@@ -53,10 +55,10 @@ export function GateNavigation({
           </NavGroup>
         )}
 
-        <NavGroup label="ASSISTANT">
-          <NavButton active={activeTab === "ai-agent"} icon="mcp" label="AI-агент" onClick={() => onNavigate("ai-agent")} />
-          <NavButton active={activeTab === "telegram-bot"} icon="telegram" label="NoderaBot" onClick={() => onNavigate("telegram-bot")} />
-        </NavGroup>
+        {(agentInstalled || botInstalled) && <NavGroup label="ASSISTANT">
+          {agentInstalled && <NavButton active={activeTab === "ai-agent"} icon="mcp" label="AI-агент" onClick={() => onNavigate("ai-agent")} />}
+          {botInstalled && <NavButton active={activeTab === "telegram-bot"} icon="telegram" label="NoderaBot" onClick={() => onNavigate("telegram-bot")} />}
+        </NavGroup>}
 
         <NavGroup label="SYSTEM">
           <NavButton active={activeTab === "network"} icon="network" label="Сеть" onClick={() => onNavigate("network")} />

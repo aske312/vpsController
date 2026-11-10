@@ -42,6 +42,7 @@ type Props = {
   onAdoptProtocol: (image: ProtocolImage) => void;
   onPurgeProtocol: (image: ProtocolImage) => void;
   onRemoveProtocol: (image: ProtocolImage) => void;
+  onOpenComponent: (image: ProtocolImage) => void;
 };
 
 const bytes = (value?: number | null) => {
@@ -98,6 +99,7 @@ export function OverviewDashboard({
   onAdoptProtocol,
   onPurgeProtocol,
   onRemoveProtocol,
+  onOpenComponent,
 }: Props) {
   const [metricsPeriod, setMetricsPeriod] = useState<MetricsPeriod>("live");
   const metricsHistory = useMetricsHistory(token, metricsPeriod);
@@ -319,6 +321,7 @@ export function OverviewDashboard({
             coreVersion={image.id === "mihomo" ? mihomoStatus?.core_version : undefined}
             busy={busy} installingProtocol={installingProtocol}
             onInstall={onInstallProtocol} onUpdate={onUpdateProtocol}
+            onOpen={onOpenComponent}
             onAdopt={onAdoptProtocol} onPurge={onPurgeProtocol} onRemove={onRemoveProtocol} />)}
           {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
         </div>

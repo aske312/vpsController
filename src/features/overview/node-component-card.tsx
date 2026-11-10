@@ -34,7 +34,7 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
     </header>
     <dl className="nodeComponentCardFacts">
       <div><dt>Версия</dt><dd className="nodeComponentCardVersion">{versionLabel}{image.version_checking ? <small> · проверяем обновления</small> : (image.update_available || image.update_via_release) && <small title="Доступна новая версия"> → {image.available_version ? formatModuleVersion(image.available_version) : "Обновление"}</small>}</dd></div>
-      {image.id !== "mihomo" && <div><dt>Порт</dt><dd>{port || "—"}</dd></div>}
+      {image.id !== "mihomo" && image.category !== "assistant" && <div><dt>Порт</dt><dd>{port || "—"}</dd></div>}
     </dl>
     {attention && <p className="nodeComponentCardIssue">{state.summary.description}</p>}
       <footer className="nodeComponentCardActions">
@@ -43,7 +43,7 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
             <button type="button" disabled={busy || !state.canAdopt} onClick={() => onAdopt(image)}>Принять</button>
           ) : !image.installed ? (
             <button type="button" disabled={!state.canInstall || busy || Boolean(installingProtocol)} onClick={() => onInstall(image)}>{!image.installable ? "Недоступен" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>
-          ) : image.update_available && image.id !== "mihomo" ? (
+          ) : image.update_available && image.id !== "mihomo" && image.category !== "assistant" ? (
             <button type="button" aria-label={`Обновить ${image.name}`} title="Открыть компонент: доступно обновление" onClick={() => onOpen?.(image)}>Обновить</button>
           ) : image.update_available ? (
             <button type="button" aria-label={`Обновить ${image.name}`} title="Обновить компонент" data-tone={image.update_breaking ? "warning" : undefined} disabled={busy || !state.canUpdate || Boolean(installingProtocol)} onClick={() => onUpdate(image)}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>

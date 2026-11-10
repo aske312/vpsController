@@ -13,15 +13,18 @@ import sys
 import urllib.parse
 import uuid
 import threading
+from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 import application_operation as operations
+from component_registry import ComponentRegistry, RegistryError
 
 MODULES = ('nodera-bot', 'ai-agent')
 MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp')
 BOT_UNIT = 'vps-control-nodera-bot.service'
+AGENT_UNIT = 'vps-control-ai-agent.service'
 _runtime_slots = threading.BoundedSemaphore(2)
 
 
@@ -53,6 +56,7 @@ class Account(BaseModel):
 class Settings(BaseModel):
     model_config = {'extra': 'forbid'}
     expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
+    component: Literal['ai-agent', 'nodera-bot']
     modules: dict[str, StrictBool]
     mcp: dict[str, StrictBool]
     bot_token: str | None = Field(default=None, max_length=256)
@@ -138,34 +142,109 @@ class ToolCall(BaseModel):
 
 class Action(BaseModel):
     model_config = {'extra': 'forbid'}
-    action: str = Field(pattern=r'^(install|start|stop|restart)$')
+    action: str = Field(pattern=r'^(start|stop|restart)$')
 
 
 def directory(api):
     return api.DATA_DIR / 'assistant'
 
 
-def runtime_directory():
-    return Path(os.getenv('ASSISTANT_RUNTIME_DIR', '/var/lib/vps-control-assistant-runtime'))
+def runtime_directory(component='ai-agent'):
+    if component not in MODULES:
+        raise ValueError('Unknown assistant component')
+    variable = 'AI_AGENT_RUNTIME_DIR' if component == 'ai-agent' else 'NODERA_BOT_RUNTIME_DIR'
+    return Path(os.getenv(variable, '/var/lib/vps-control-' + component))
 
 
-def runtime_ready():
-    root = runtime_directory()
-    requirements = Path(__file__).with_name('assistant_runtime') / 'requirements.txt'
-    return (root / 'venv/bin/python').is_file() and (root / 'requirements.txt').is_file() and (root / 'requirements.txt').read_bytes() == requirements.read_bytes()
+def runtime_ready(component='ai-agent'):
+    root = runtime_directory(component)
+    filename = 'runner.py' if component == 'ai-agent' else 'bot.py'
+    try:
+        return (root / 'venv/bin/python').is_file() and (root / filename).is_file() and bool((root / 'version').read_text().strip())
+    except FileNotFoundError:
+        return False
 
 
-def read(api):
+def _read(api):
     value = operations.read(directory(api) / 'settings.json')
+    if value.get('schema') == 2:
+        revision = value['revision']
+        if not re.fullmatch(r'[0-9a-f]{32}', revision):
+            raise operations.OperationConflict('Ревизия настроек ассистента повреждена')
+        assembled = {'revision': revision, 'control_token': value['control_token'],
+                     'modules': {key: False for key in MODULES}, 'mcp': {key: False for key in MCP_MODULES},
+                     'provider_url': '', 'model': '', 'telegram_api_id': None, 'accounts': []}
+        accounts = {}
+        for component in ('ai-agent', 'nodera-bot'):
+            folder = directory(api) / component
+            settings = operations.read(folder / (revision + '.json'))
+            if not settings and folder.exists():
+                raise operations.OperationConflict('Файл настроек компонента не найден; автоматический сброс не выполняется')
+            assembled['modules'].update(settings.pop('modules', {}))
+            for account in settings.pop('accounts', []):
+                item = accounts.setdefault(account['telegram_id'], {'telegram_id': account['telegram_id'], 'name': '',
+                    'bot_access': False, 'telegram_access': False, 'vps_access': False, 'excluded_dialogs': [], 'session': ''})
+                item.update(account)
+            assembled.update(settings)
+        assembled['accounts'] = list(accounts.values())
+        value = assembled
     if not value:
         return {'revision': '0' * 32, 'modules': {key: False for key in MODULES},
                 'mcp': {key: False for key in MCP_MODULES},
                 'provider_url': '', 'model': '', 'accounts': [], 'telegram_api_id': None}
     try:
-        Settings.model_validate({key: item for key, item in value.items() if key not in ('revision', 'control_token')} | {'expected_revision': value['revision']})
+        Settings.model_validate({key: item for key, item in value.items() if key not in ('revision', 'control_token')} | {'expected_revision': value['revision'], 'component': 'ai-agent'})
     except (ValueError, KeyError):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
     return value
+
+
+def read(api):
+    with operations.locked(api.DATA_DIR):
+        return _read(api)
+
+
+def store(api, value):
+    """Publish both private config generations through one atomic pointer.
+
+    Each image owns only its own configuration directory. Purging it cannot
+    remove or resurrect credentials from the other image.
+    """
+    revision = value['revision']
+    ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
+    ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
+              accounts=[{key: item for key, item in a.items() if key != 'bot_access'} for a in value['accounts']])
+    bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
+           'accounts': [{key: a.get(key, False if key == 'bot_access' else '') for key in ('telegram_id', 'name', 'bot_access')}
+                        for a in value['accounts']]}
+    for component, settings in (('ai-agent', ai), ('nodera-bot', bot)):
+        operations.atomic_json(directory(api) / component / (revision + '.json'), settings)
+    operations.atomic_json(directory(api) / 'settings.json', {'schema': 2, 'revision': revision, 'control_token': value['control_token']})
+    for component in MODULES:
+        for path in (directory(api) / component).glob('*.json'):
+            if re.fullmatch(r'[0-9a-f]{32}\.json', path.name) and path.stem != revision:
+                path.unlink(missing_ok=True)
+
+
+def migrate_settings(api):
+    with operations.locked(api.DATA_DIR):
+        old = operations.read(directory(api) / 'settings.json')
+        if old.get('schema') == 2 or not old:
+            return
+        value = _read(api)
+        store(api, value)
+
+
+def require_installed(api, component):
+    try:
+        ComponentRegistry(api.DATA_DIR).require_managed(component)
+    except RegistryError as exc:
+        raise HTTPException(409, str(exc)) from None
+    if not runtime_ready(component):
+        raise HTTPException(409, 'Компонент не установлен или его установка неполная')
+    unit = AGENT_UNIT if component == 'ai-agent' else BOT_UNIT
+    if api.observe_service(unit).get('unit_present') is not True:
+        raise HTTPException(409, 'Регистрация службы компонента не подтверждена')
 
 
 def public(value):
@@ -191,50 +270,71 @@ def ready(value, module):
 
 def status(api):
     value = read(api)
-    runtime = runtime_ready()
+    observations = {key: api.observe_service(AGENT_UNIT if key == 'ai-agent' else BOT_UNIT) for key in MODULES}
+    installed = {key: runtime_ready(key) and observations[key].get('unit_present') is True for key in MODULES}
     modules = []
     for key, name in zip(MODULES, ('NoderaBot', 'AI-agent')):
         modules.append({'id': key, 'name': name, 'enabled': value['modules'][key],
-                        'configured': ready(value, key), 'execution': 'service' if key == 'nodera-bot' else 'on-demand'})
-    return {'settings': public(value), 'modules': modules, 'runtime_installed': runtime,
+                        'configured': ready(value, key), 'installed': installed[key],
+                        'management': ComponentRegistry(api.DATA_DIR).management(key),
+                        'execution': 'service' if key == 'nodera-bot' else 'on-demand'})
+    return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'vpsController MCP'))],
-            'bot': api.observe_service(BOT_UNIT),
+            'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
             'tools': {'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components']}}
 
 
 def configure(api, payload):
+    require_installed(api, payload.component)
     bot = api.observe_service(BOT_UNIT)
     if bot.get('active'):
         raise HTTPException(409, 'Остановите NoderaBot перед изменением настроек; затем запустите его с новой конфигурацией')
     if bot.get('unit_present') is not False and bot.get('state') not in ('inactive', 'failed'):
         raise HTTPException(409, 'Состояние NoderaBot не подтверждено. Обновите раздел перед изменением настроек')
     with operations.locked(api.DATA_DIR):
-        old = read(api)
+        old = _read(api)
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
-        value = payload.model_dump(exclude={'expected_revision'})
+        submitted = payload.model_dump(exclude={'expected_revision', 'component'})
+        value = {**old, 'modules': dict(old['modules']), 'accounts': []}
+        keys = ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp') if payload.component == 'ai-agent' else ('bot_token',)
+        value.update({key: submitted[key] for key in keys})
+        value['modules'][payload.component] = submitted['modules'][payload.component]
         for key in ('api_key', 'bot_token', 'telegram_api_hash'):
-            if value[key] is None:
+            if value.get(key) is None:
                 value[key] = old.get(key, '')
         previous = {a['telegram_id']: a for a in old['accounts']}
-        for account in value['accounts']:
-            if account['session'] is None:
-                account['session'] = previous.get(account['telegram_id'], {}).get('session', '')
+        for account in submitted['accounts']:
+            prior = previous.pop(account['telegram_id'], {})
+            if payload.component == 'ai-agent':
+                account['bot_access'] = prior.get('bot_access', False)
+                if account['session'] is None: account['session'] = prior.get('session', '')
+            else:
+                for key, default in (('telegram_access', False), ('vps_access', False), ('session', ''), ('excluded_dialogs', [])):
+                    account[key] = prior.get(key, default)
+            value['accounts'].append(account)
+        for prior in previous.values():
+            if payload.component == 'ai-agent' and prior.get('bot_access'):
+                value['accounts'].append({**prior, 'telegram_access': False, 'vps_access': False, 'session': '', 'excluded_dialogs': []})
+            elif payload.component == 'nodera-bot' and (prior.get('session') or prior.get('telegram_access') or prior.get('vps_access')):
+                value['accounts'].append({**prior, 'bot_access': False})
         value['revision'] = uuid.uuid4().hex
         value['control_token'] = old.get('control_token') or secrets.token_urlsafe(48)
-        operations.atomic_json(directory(api) / 'settings.json', value)
+        store(api, value)
     return status(api)
 
 
 def runtime_request(api, mode, body):
-    python = runtime_directory() / 'venv' / 'bin' / 'python'
-    if not runtime_ready():
-        raise HTTPException(409, 'Сначала установите среду выполнения модулей MCP')
+    component = 'nodera-bot' if mode == '--check' and body.get('module') == 'nodera-bot' else 'ai-agent'
+    require_installed(api, component)
+    if component == 'ai-agent' and not api.observe_service(AGENT_UNIT).get('active'):
+        raise HTTPException(409, 'Среда AI-agent остановлена. Запустите компонент в разделе Службы')
+    python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
-    command = [str(python), str(Path(__file__).with_name('assistant_runtime') / 'runner.py'), mode]
+    command = [str(python), str(runtime_directory(component) / ('runner.py' if component == 'ai-agent' else 'bot.py')), mode]
     # The worker never inherits panel passwords, cookies or unrelated service credentials.
     env = {key: os.environ[key] for key in ('PATH', 'LANG', 'SYSTEMROOT', 'SSL_CERT_FILE') if key in os.environ}
     if not _runtime_slots.acquire(blocking=False):
@@ -268,12 +368,23 @@ def runtime_request(api, mode, body):
 def authorize_control(api, authorization, actor):
     value = read(api)
     expected = value.get('control_token', '')
-    if not expected or not hmac.compare_digest(authorization or '', 'Bearer ' + expected):
+    if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
         raise HTTPException(401, 'Нужен служебный токен MCP', headers={'WWW-Authenticate': 'Bearer'})
     if not value['mcp']['vps-controller-mcp']:
         raise HTTPException(403, 'Модуль vpsController MCP выключен')
     if actor != 'panel' and not any(str(a['telegram_id']) == actor and a['vps_access'] for a in value['accounts']):
         raise HTTPException(403, 'Пользователю не разрешён контур vpsController')
+    require_installed(api, 'ai-agent')
+
+
+def authorize_bot(api, authorization, actor):
+    value = read(api)
+    expected = value.get('control_token', '')
+    if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
+        raise HTTPException(401, 'Нужен служебный токен бота', headers={'WWW-Authenticate': 'Bearer'})
+    if not value['modules']['nodera-bot'] or not any(str(a['telegram_id']) == actor and a.get('bot_access') for a in value['accounts']):
+        raise HTTPException(403, 'Доступ к NoderaBot не выдан')
+    require_installed(api, 'nodera-bot')
 
 
 def control_tool(api, name):

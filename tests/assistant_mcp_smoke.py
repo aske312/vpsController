@@ -45,7 +45,7 @@ async def main():
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         launcher = folder / 'launch.py'
         launcher.write_text('import sys,json\nfrom pathlib import Path\n'
-                           f'sys.path.insert(0,{str(ROOT / "api/assistant_runtime")!r})\n'
+                           f'sys.path.insert(0,{str(ROOT / "protocol-images/ai-agent")!r})\n'
                            'import runner\n'
                            f'runner.VPS_URL="http://127.0.0.1:{server.server_port}/api/assistant/control-tool"\n'
                            f'runner.serve_mcp(json.loads(Path({str(config)!r}).read_text()),"panel","vps-controller-mcp")\n')
@@ -69,7 +69,7 @@ async def main():
             settings['accounts'] = [{'telegram_id': 11, 'telegram_access': True, 'session': 'not-used'}]
             config.write_text(json.dumps(settings))
             params = StdioServerParameters(command=sys.executable,
-                args=[str(ROOT / 'api/assistant_runtime/runner.py'), '--mcp', 'telegram-mcp'],
+                args=[str(ROOT / 'protocol-images/ai-agent/runner.py'), '--mcp', 'telegram-mcp'],
                 env={'NODERA_CONFIG': str(config), 'NODERA_ACTOR': '11'})
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
