@@ -133,8 +133,42 @@ class AssistantTests(unittest.TestCase):
 
     def test_running_bot_requires_stop_before_credential_snapshot_changes(self):
         self.observe.return_value['active'] = True
-        with self.assertRaises(api.HTTPException) as caught: self.save()
+        payload = self.payload()
+        payload['component'] = 'nodera-bot'
+        with self.assertRaises(api.HTTPException) as caught: self.save(payload)
         self.assertEqual(caught.exception.status_code, 409)
+
+    def test_agent_can_be_configured_without_stopping_or_changing_running_bot(self):
+        payload = self.payload()
+        payload['component'] = 'nodera-bot'
+        payload['modules']['nodera-bot'] = True
+        saved = self.save(payload)
+        before = control.read(api)
+        snapshot = control.directory(api) / 'nodera-bot/runtime.json'
+        snapshot.write_text('running-bot-credential-snapshot')
+        self.observe.return_value['active'] = True
+        payload = self.payload()
+        payload['expected_revision'] = saved['settings']['revision']
+        payload['accounts'] = []
+        payload['bot_token'] = ''
+        with patch.object(worker, 'checked') as service_command:
+            self.save(payload)
+        current = control.read(api)
+        self.assertTrue(current['modules']['ai-agent'])
+        self.assertEqual(current['model'], 'configured-model')
+        self.assertEqual(current['api_key'], 'secret-ai')
+        self.assertTrue(current['modules']['nodera-bot'])
+        self.assertEqual(current['bot_token'], before['bot_token'])
+        self.assertEqual(current['control_token'], before['control_token'])
+        self.assertTrue(current['accounts'][0]['bot_access'])
+        self.assertEqual(snapshot.read_text(), 'running-bot-credential-snapshot')
+        service_command.assert_not_called()
+
+    def test_agent_setup_does_not_require_bot_service_observation(self):
+        self.observe.side_effect = lambda unit: ({'active': False, 'unit_present': None, 'state': 'unknown'}
+            if unit == control.BOT_UNIT else {'active': True, 'unit_present': True, 'state': 'active'})
+        self.save()
+        self.assertTrue(control.read(api)['modules']['ai-agent'])
 
     def test_control_token_has_per_user_scope_and_revocation(self):
         self.save()

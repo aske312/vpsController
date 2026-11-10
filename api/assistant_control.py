@@ -304,12 +304,12 @@ def status(api):
 def configure(api, payload):
     require_installed(api, payload.component)
     bot = api.observe_service(BOT_UNIT)
-    if not bot.get('active') and bot.get('unit_present') is not False and bot.get('state') not in ('inactive', 'failed'):
+    if payload.component == 'nodera-bot' and not bot.get('active') and bot.get('unit_present') is not False and bot.get('state') not in ('inactive', 'failed'):
         raise HTTPException(409, 'Состояние NoderaBot не подтверждено. Обновите раздел перед изменением настроек')
     with operations.locked(api.DATA_DIR):
         old = _read(api)
-        if bot.get('active') and (payload.component != 'nodera-bot'
-                or payload.modules['nodera-bot'] != old['modules']['nodera-bot']
+        if payload.component == 'nodera-bot' and bot.get('active') and (
+                payload.modules['nodera-bot'] != old['modules']['nodera-bot']
                 or payload.bot_token is not None and payload.bot_token != old.get('bot_token', '')):
             raise HTTPException(409, 'Для изменения токена или включения NoderaBot сначала остановите его. Список администраторов можно менять без остановки')
         if old['revision'] != payload.expected_revision:

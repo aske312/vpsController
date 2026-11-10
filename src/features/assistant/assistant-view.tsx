@@ -137,8 +137,8 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   if (!selectedComponent?.installed) return <section className="mcpWorkspace"><p>Установите {agentView ? "AI-agent" : "NoderaBot"} в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = selectedComponent.management?.state !== "managed" || selectedComponent.management?.retained;
   const blocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
-  const credentialsBlocked = blocked || status.bot.active === true;
-  const settingsBlocked = blocked || agentView && status.bot.active === true;
+  const credentialsBlocked = blocked || !agentView && status.bot.active === true;
+  const settingsBlocked = blocked;
   const conflict = status.settings.revision !== draft.expected_revision;
   const settingsVisible = !agentView || panel === "settings";
   const canStartBot = !agentView && draft.modules["nodera-bot"] && Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured);
@@ -189,7 +189,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     <section id={`${tabsId}-settings`} role={agentView ? "tabpanel" : undefined} aria-labelledby={agentView ? `${tabsId}-settings-tab` : undefined} hidden={!settingsVisible}>
       <form className="mcpSettings" onSubmit={event => { event.preventDefault(); void save(canStartBot && !status.bot.active); }}>
         <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={credentialsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={() => { setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false; }}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
-        {status.bot.active && <p className="mcpNotice">{agentView ? "Для изменения настроек остановите NoderaBot." : "Администраторов можно менять без остановки. Для смены токена или включения сначала остановите бота."}</p>}
+        {!agentView && status.bot.active && <p className="mcpNotice">Администраторов можно менять без остановки. Для смены токена или включения сначала остановите бота.</p>}
         {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки для загрузки актуальной версии.</p>}
         {setupMessage && <p className="mcpNotice">{setupMessage}</p>}
         {!agentView && <p className="mcpFieldHint">Гости получают приветствие, справку и свой /id. AI, MCP и сведения о сервере доступны только администраторам бота; доступ к веб-панели этим не выдаётся.</p>}
