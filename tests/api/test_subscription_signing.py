@@ -166,65 +166,39 @@ class SignedSubscriptionEndpointTests(unittest.TestCase):
 
 
 class SigningUpdateHookTests(unittest.TestCase):
-    def test_old_updater_runs_new_payload_migration_and_preserves_key(self):
+    def test_update_provisions_only_managed_mihomo_and_propagates_failure(self):
         bash = str(Path('D:/Git/bin/bash.exe')) if os.name == 'nt' else shutil.which('bash')
         if not bash or not Path(bash).is_file():
             self.skipTest('Requires Bash')
-
-        def posix(path):
-            value = Path(path).resolve().as_posix()
-            return '/' + value[0].lower() + value[2:] if os.name == 'nt' else value
-
-        source = (ROOT / 'protocol-images/mihomo/install-subscription-limits.sh').read_text(encoding='utf-8')
-        # Execute the real migration prelude, stopping before any systemd writes.
-        prelude = source.split('\nprevious_pid=', 1)[0]
-        prelude = re.sub(r'(?m)^ROOT=.*$', 'ROOT=' + shlex.quote(posix(ROOT / 'protocol-images/mihomo')), prelude)
-        prelude = re.sub(r'(?m)^PYTHON=.*$', 'PYTHON=' + shlex.quote(posix(sys.executable)), prelude)
-        # This is the pre-signing updater contract. It knows only the existing
-        # limits installer; it cannot call a function added in the next release.
-        legacy = ('ensure_mihomo_profile_runtimes() {\n'
-                  '  python3 check-managed || return 0\n'
-                  '  bash "$INSTALL_DIR/protocol-images/mihomo/install-subscription-limits.sh" || return $?\n'
-                  '}\n')
-        for mode in ('unmanaged', 'new', 'environment', 'corrupt', 'override'):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory(dir=ROOT / '.runtime') as directory:
+        source = (ROOT / 'scripts/vps-control.sh').read_text(encoding='utf-8')
+        function = re.search(r'(?ms)^ensure_mihomo_profile_runtimes\(\) \{.*?^\}', source).group()
+        for managed, has_signer, signing_exit, expected in ((False, True, 0, 0), (True, True, 19, 19), (True, True, 0, 23), (True, False, 0, 23)):
+            with self.subTest(managed=managed, has_signer=has_signer, signing_exit=signing_exit), tempfile.TemporaryDirectory(dir=ROOT / '.runtime') as directory:
                 root = Path(directory)
-                key = root / 'private key.pem'
-                config = root / 'environment'
-                config.write_text('PRO_SUBSCRIPTION_SIGNING_KEY="' + posix(key) + '"\n', encoding='utf-8')
-                hook = root / 'protocol-images/mihomo/install-subscription-limits.sh'
-                hook.parent.mkdir(parents=True)
-                hook.write_text(prelude + 'echo limits >> "$TEST_EVENTS"\n', encoding='utf-8', newline='\n')
-                if mode == 'corrupt':
-                    key.write_bytes(b'corrupt existing key')
-                environment = {k:v for k,v in os.environ.items() if k not in {'PRO_SUBSCRIPTION_SIGNING_KEY', 'ENV_FILE'}}
-                environment.update(INSTALL_DIR=posix(root), ENV_FILE=posix(config), TEST_EVENTS=posix(root / 'events'))
-                if mode != 'environment':
-                    environment['PRO_SUBSCRIPTION_SIGNING_KEY'] = posix(key)
-                if mode == 'override':
-                    config.write_text('PRO_SUBSCRIPTION_SIGNING_KEY="' + posix(root / 'unused.pem') + '"\n')
-                script = 'set -eu\npython3() { return ' + ('1' if mode == 'unmanaged' else '0') + '; }\n' + legacy + 'ensure_mihomo_profile_runtimes\n'
-
-                def run():
-                    return subprocess.run([bash, '-c', script], capture_output=True, text=True, env=environment)
-
-                result = run()
-                if mode == 'corrupt':
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertEqual(key.read_bytes(), b'corrupt existing key')
-                    self.assertFalse((root / 'events').exists())
-                elif mode == 'unmanaged':
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertFalse(key.exists())
+                python = root / 'venv/bin/python'
+                python.parent.mkdir(parents=True)
+                if has_signer:
+                    helper = root / 'api/subscription_signing.py'
+                    helper.parent.mkdir()
+                    helper.touch()
+                python.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$TEST_EVENTS"\nexit '+str(signing_exit)+'\n', encoding='utf-8', newline='\n')
+                python.chmod(0o755)
+                posix_root = root.resolve().as_posix()
+                if os.name == 'nt':
+                    posix_root = '/' + posix_root[0].lower() + posix_root[2:]
+                script = ('set -eu\nINSTALL_DIR='+shlex.quote(posix_root)+'\nDATA_DIR="$INSTALL_DIR"\n'
+                          'export TEST_EVENTS="$INSTALL_DIR/events"\n'
+                          'python3() { return '+('0' if managed else '1')+'; }\n'
+                          'env_value() { printf "%s" "/private/custom server.pem"; }\n'
+                          'bash() { echo limits >> "$TEST_EVENTS"; return 23; }\n'
+                          +function+'\nensure_mihomo_profile_runtimes\n')
+                result = subprocess.run([bash, '-c', script], capture_output=True, text=True, env={k:v for k,v in os.environ.items() if k != 'PRO_SUBSCRIPTION_SIGNING_KEY'})
+                self.assertEqual(result.returncode, expected, result.stderr)
+                events = (root / 'events').read_text() if (root / 'events').exists() else ''
+                if managed and has_signer:
+                    self.assertIn('--ensure /private/custom server.pem', events)
+                    self.assertEqual('limits' in events, signing_exit == 0)
+                elif managed:
+                    self.assertEqual(events, 'limits\n')
                 else:
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    before = key.read_bytes()
-                    signer = signing.load_signer(key)
-                    response = signing.proof_headers(signer, b'proxies: []', 'https://example.test/s/token', 'n' * 32)
-                    signing.verify(response['X-Subscription-Proof'], b'proxies: []', 'https://example.test/s/token', 'n' * 32, signing.public_record(signer))
-                    self.assertEqual(run().returncode, 0)
-                    self.assertEqual(key.read_bytes(), before)
-                    self.assertEqual((root / 'events').read_text().splitlines(), ['limits', 'limits'])
-                    self.assertFalse((root / 'unused.pem').exists())
-                    if os.name != 'nt':
-                        self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(events, '')

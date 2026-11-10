@@ -175,6 +175,8 @@ for name, installed in state.get('modules', {}).items():
 PY
 )
 fi
+"${APP_ROOT}/venv/bin/python" "${APP_ROOT}/api/subscription_signing.py" --ensure \
+  "${PRO_SUBSCRIPTION_SIGNING_KEY:-/etc/vps-control/subscription-signing.pem}" >/dev/null
 bash "${MODULE_DIR}/install-subscription-limits.sh"
 systemctl daemon-reload
 systemctl enable --now vps-control-mihomo-manager.service
