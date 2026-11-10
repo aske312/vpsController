@@ -133,6 +133,12 @@ class Chat(BaseModel):
 class Check(BaseModel):
     model_config = {'extra': 'forbid'}
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
+    bot_token: str | None = Field(default=None, max_length=256)
+
+    @field_validator('bot_token')
+    @classmethod
+    def token_value(cls, value):
+        return Settings.token_value(value)
 
 
 class ToolCall(BaseModel):
@@ -337,6 +343,15 @@ def runtime_request(api, mode, body):
         raise HTTPException(409, 'Среда AI-agent остановлена. Запустите компонент в разделе Службы')
     python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
+    body = dict(body)
+    if component == 'nodera-bot':
+        token = body.pop('bot_token', None)
+        token = value.get('bot_token') if token is None else token
+        if not token:
+            raise HTTPException(422, 'Укажите токен Telegram-бота для проверки')
+        # getMe validates credentials only. It neither starts polling nor needs
+        # enabled access or users; the saved configuration remains untouched.
+        value = {**value, 'bot_token': token, 'modules': {**value['modules'], 'nodera-bot': True}}
     command = [str(python), str(runtime_directory(component) / ('runner.py' if component == 'ai-agent' else 'bot.py')), mode]
     # The worker never inherits panel passwords, cookies or unrelated service credentials.
     env = {key: os.environ[key] for key in ('PATH', 'LANG', 'SYSTEMROOT', 'SSL_CERT_FILE') if key in os.environ}

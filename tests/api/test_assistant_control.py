@@ -72,6 +72,47 @@ class AssistantTests(unittest.TestCase):
         self.assertFalse(control.read(api)['api_key'])
         self.assertFalse(control.read(api)['accounts'][0]['session'])
 
+    def test_http_save_does_not_conflict_with_its_own_admission_lock(self):
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        self.addCleanup(api.app.dependency_overrides.clear)
+        client = TestClient(api.app)
+        payload = self.payload(); payload['component'] = 'nodera-bot'
+        response = client.put('/api/assistant', json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['settings']['bot_token_configured'])
+        self.assertNotIn(payload['bot_token'], response.text)
+        payload['expected_revision'] = response.json()['settings']['revision']
+        with control.operations.mutation_lock(self.root):
+            blocked = client.put('/api/assistant', json=payload)
+        self.assertEqual(blocked.status_code, 409)
+
+    def test_draft_bot_token_check_needs_no_enable_or_users_and_does_not_save(self):
+        self.save()
+        before = control.read(api)
+        self.assertFalse(before['modules']['nodera-bot'])
+        self.assertFalse(any(a.get('bot_access') for a in before['accounts']))
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        self.addCleanup(api.app.dependency_overrides.clear)
+        client = TestClient(api.app)
+        token = self.payload()['bot_token']
+        with patch.object(control.subprocess, 'Popen') as launch:
+            process = launch.return_value.__enter__.return_value
+            process.communicate.return_value = (json.dumps({'ok': True, 'result': {'username': 'FixtureBot'}}), '')
+            process.returncode = 0
+            checked = client.post('/api/assistant/check/nodera-bot', json={'bot_token': token})
+            self.assertEqual(checked.status_code, 200, checked.text)
+            self.assertEqual(checked.json()['result']['username'], 'FixtureBot')
+            self.assertNotIn(token, checked.text)
+            supplied = json.loads(process.communicate.call_args.args[0])
+            self.assertEqual(supplied['settings']['bot_token'], token)
+            self.assertTrue(supplied['settings']['modules']['nodera-bot'])
+            self.assertNotIn(token, str(launch.call_args))
+        self.assertEqual(control.read(api), before)
+        self.assertEqual(client.post('/api/assistant/check/ai-agent', json={'bot_token': token}).status_code, 422)
+        with patch.object(control.subprocess, 'Popen') as launch:
+            self.assertEqual(client.post('/api/assistant/check/nodera-bot', json={}).status_code, 422)
+            launch.assert_not_called()
+
     def test_reassigning_id_does_not_carry_another_users_session(self):
         status = self.save()
         payload = self.payload(); payload['expected_revision'] = status['settings']['revision']

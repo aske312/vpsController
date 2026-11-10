@@ -418,8 +418,7 @@ def assistant_status(_: None = Depends(require_token)) -> dict:
 @app.put('/api/assistant', dependencies=[Depends(require_short_mutation)])
 def assistant_settings(payload: assistant_control.Settings, _: None = Depends(require_token)) -> dict:
     try:
-        with application_operation.short_mutation(DATA_DIR):
-            return assistant_control.configure(sys.modules[__name__], payload)
+        return assistant_control.configure(sys.modules[__name__], payload)
     except application_operation.OperationConflict as exc:
         raise HTTPException(409, str(exc)) from None
 
@@ -438,8 +437,11 @@ def assistant_action(payload: assistant_control.Action, _: None = Depends(requir
 @app.post('/api/assistant/check/{module}')
 def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'nodera-bot', 'ai-agent'],
                     payload: assistant_control.Check, _: None = Depends(require_token)) -> dict:
+    if module != 'nodera-bot' and payload.bot_token is not None:
+        raise HTTPException(422, 'Токен бота можно передать только для проверки NoderaBot')
     return assistant_control.runtime_request(sys.modules[__name__], '--check',
-        {'module': module, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel'})
+        {'module': module, 'actor': str(payload.telegram_id) if payload.telegram_id else 'panel',
+         **({'bot_token': payload.bot_token} if module == 'nodera-bot' else {})})
 
 
 @app.post('/api/assistant/chat')

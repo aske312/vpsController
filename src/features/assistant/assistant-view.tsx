@@ -61,6 +61,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   useEffect(() => { void load(); }, [load, refreshKey]);
   function patch(update: Partial<Draft>) {
     dirtyRef.current = true;
+    if ("bot_token" in update) setChecks(current => ({ ...current, "nodera-bot": undefined }));
     setDraft(current => current ? { ...current, ...update } : current);
   }
   async function save(startBot = false) {
@@ -84,8 +85,8 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     const revision = status.settings.revision;
     writing.current = true; setWorking(id); setError("");
     try {
-      await request(`/assistant/check/${id}`, { method: "POST", body: JSON.stringify({ telegram_id: actor ? Number(actor) : null }) });
-      setChecks(current => ({ ...current, [id]: { ok: true, text: "Подключение проверено", revision, actor } }));
+      const checked = await request<{ result?: { username?: string } }>(`/assistant/check/${id}`, { method: "POST", body: JSON.stringify({ telegram_id: actor ? Number(actor) : null, ...(id === "nodera-bot" ? { bot_token: draft?.bot_token } : {}) }) });
+      setChecks(current => ({ ...current, [id]: { ok: true, text: id === "nodera-bot" && checked.result?.username ? `Токен подтверждён · @${checked.result.username}` : "Подключение проверено", revision, actor } }));
     } catch (cause) {
       setChecks(current => ({ ...current, [id]: { ok: false, text: cause instanceof Error ? cause.message : "Проверка не выполнена", revision, actor } }));
     } finally { writing.current = false; setWorking(""); }
@@ -122,6 +123,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const conflict = status.settings.revision !== draft.expected_revision;
   const settingsVisible = !agentView || panel === "settings";
   const canStartBot = !agentView && draft.modules["nodera-bot"] && Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured) && draft.accounts.some(account => account.bot_access && account.telegram_id > 0);
+  const canCheckConnection = agentView ? !dirty && selectedComponent.enabled && selectedComponent.configured : Boolean(draft.bot_token || draft.bot_token === null && draft.bot_token_configured);
   const changeAccount = (index: number, update: Partial<Draft["accounts"][number]>) => patch({ accounts: draft.accounts.map((item, i) => i === index ? { ...item, ...update } : item) });
   const chooseActor = (value: string) => { setActor(value); setTurns([]); };
   const actorSelect = <label className="mcpActor">Контур<select value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор · VPS</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id} · {item.telegram_id}</option>)}</select></label>;
@@ -166,15 +168,16 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     </section>}
     <section id={`${tabsId}-settings`} role={agentView ? "tabpanel" : undefined} aria-labelledby={agentView ? `${tabsId}-settings-tab` : undefined} hidden={!settingsVisible}>
       <form className="mcpSettings" onSubmit={event => { event.preventDefault(); void save(canStartBot && !status.bot.active); }}>
-        <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={settingsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={() => { setDraft(makeDraft(status.settings)); dirtyRef.current = false; }}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
+        <header className="mcpSettingsHead"><label className="mcpToggle"><input type="checkbox" checked={draft.modules[componentId]} disabled={settingsBlocked} onChange={event => patch({ modules: { ...draft.modules, [componentId]: event.target.checked } })}/>{agentView ? "Агент включён" : "Бот включён"}</label><div className="mcpActions"><button type="button" className="ghostButton" disabled={blocked || !dirty} onClick={() => { setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false; }}>Отменить</button><button type="submit" className="primaryButton" disabled={settingsBlocked || !dirty || conflict}>{canStartBot && !status.bot.active ? "Сохранить и запустить" : "Сохранить"}</button></div></header>
         {status.bot.active && <p className="mcpNotice">Для изменения настроек остановите NoderaBot.</p>}
         {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки для загрузки актуальной версии.</p>}
         {setupMessage && <p className="mcpNotice">{setupMessage}</p>}
         <fieldset disabled={settingsBlocked} className="mcpConnection"><legend>{agentView ? "Подключение к AI" : "Подключение бота"}</legend>
           <div className={`mcpFields ${agentView ? "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://…/v1" onChange={event => patch({ provider_url: event.target.value })}/></label><label>Модель<input value={draft.model} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label><Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
-          <div className="mcpConnectionFoot"><small>{agentView ? "API chat/completions с поддержкой инструментов." : "Long polling · команды /start, /help, /status работают без AI-agent."}</small><button type="button" className="ghostButton" disabled={blocked || dirty || !selectedComponent.enabled || !selectedComponent.configured} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
-          {result && result.revision === status.settings.revision && result.actor === actor && <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>}
         </fieldset>
+        <div className="mcpConnectionStatus"><div className="mcpConnectionFoot"><small>{agentView ? "API chat/completions с поддержкой инструментов." : "Токен можно проверить до сохранения, включения бота и добавления пользователей."}</small><button type="button" className="ghostButton" disabled={blocked || !canCheckConnection} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
+          {result && result.revision === status.settings.revision && result.actor === actor && <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>}
+        </div>
         {agentView && <fieldset disabled={settingsBlocked} className="mcpSkills"><legend>MCP-подключения</legend><div className="mcpModuleGrid">{status.mcp_modules.map(skill => {
           const checked = checks[skill.id];
           return <article className="mcpModule" key={skill.id}><header><label className="mcpToggle"><input type="checkbox" checked={draft.mcp[skill.id as McpId]} onChange={event => patch({ mcp: { ...draft.mcp, [skill.id]: event.target.checked } })}/><strong>{skill.name}</strong></label><span className="mcpBadge">{moduleState(status, skill.id)}</span></header><p>{descriptions[skill.id]}</p>
