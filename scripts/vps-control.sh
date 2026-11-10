@@ -2599,12 +2599,6 @@ ensure_ikev2_auth_runtime() {
 ensure_mihomo_profile_runtimes() {
   python3 "${INSTALL_DIR}/api/component_registry.py" check-managed \
     --manifest "${INSTALL_DIR}/protocol-images/mihomo/manifest.json" --data-dir "${DATA_DIR}" >/dev/null 2>&1 || return 0
-  # A deliberate restore may select a payload predating subscription signatures.
-  if [[ -f "${INSTALL_DIR}/api/subscription_signing.py" ]]; then
-    local signing_key="${PRO_SUBSCRIPTION_SIGNING_KEY:-$(env_value PRO_SUBSCRIPTION_SIGNING_KEY)}"
-    "${INSTALL_DIR}/venv/bin/python" "${INSTALL_DIR}/api/subscription_signing.py" --ensure \
-      "${signing_key:-/etc/vps-control/subscription-signing.pem}" >/dev/null || return $?
-  fi
   bash "${INSTALL_DIR}/protocol-images/mihomo/install-subscription-limits.sh" || return $?
   local config_dir="/etc/vps-control/mihomo/shadowsocks"
   if [[ ! -f /etc/systemd/system/vps-control-mihomo-ss@.service ]] \
