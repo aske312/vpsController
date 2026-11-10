@@ -23,7 +23,7 @@ class AuthenticationBoundaryTests(unittest.TestCase):
                     with self.subTest(method=method, path=route.path):
                         response = client.request(method, path, json={})
                         self.assertEqual(response.status_code, 401, response.text)
-                        expected_scheme = 'Bearer' if route.path in {'/api/assistant/control-tool', '/api/assistant/bot-chat'} else 'Basic'
+                        expected_scheme = 'Bearer' if route.path in {'/api/assistant/control-tool', '/api/assistant/bot-chat', '/api/assistant/bot-contact'} else 'Basic'
                         self.assertEqual(response.headers.get('www-authenticate'), expected_scheme)
                         checked += 1
         self.assertGreater(checked, 0)
