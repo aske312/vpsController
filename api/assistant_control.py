@@ -292,7 +292,8 @@ def public(value):
 
 def ready(value, module):
     if module == 'ai-agent':
-        return bool(value.get('provider_url') and value.get('model') and value.get('api_key'))
+        return bool(value.get('provider_url') and value.get('api_key') and
+                    (value.get('model_mode') == 'catalog' or value.get('model')))
     if module == 'nodera-bot':
         return bool(value.get('bot_token'))
     if module == 'telegram-mcp':
@@ -342,6 +343,8 @@ def configure(api, payload):
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp') if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
+        if payload.component == 'ai-agent' and value.get('model_mode') == 'catalog':
+            value['model'] = ''
         value['modules'][payload.component] = submitted['modules'][payload.component]
         for key in ('api_key', 'bot_token', 'telegram_api_hash'):
             if value.get(key) is None:
@@ -403,6 +406,11 @@ def runtime_request(api, mode, body):
     value = read(api)
     body = dict(body)
     selected_model = body.pop('model', None)
+    if component == 'ai-agent' and mode == '--check' and body.get('module') == 'ai-agent' and value.get('model_mode') == 'catalog':
+        result = model_catalog(api, Catalog(provider_url=value['provider_url']))
+        return {'ok': True, 'result': {'models_available': len(result['models'])}}
+    if mode == '--chat' and value.get('model_mode') == 'catalog' and not selected_model:
+        raise HTTPException(409, 'Выберите модель для запроса в чате')
     if mode == '--chat' and selected_model is not None:
         if not assistant_provider.model_id(selected_model):
             raise HTTPException(422, 'Некорректный ID модели')

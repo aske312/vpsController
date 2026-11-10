@@ -202,9 +202,18 @@ class AssistantTests(unittest.TestCase):
             control.runtime_request(api, '--chat', {'prompt': 'hello', 'actor': 'panel', 'model': 'other-model'})
         self.assertEqual(caught.exception.status_code, 409)
         payload.update(model_mode='catalog', expected_revision=saved['settings']['revision'])
-        self.save(payload)
+        payload['model'] = ''
+        configured = self.save(payload)
+        self.assertTrue(next(m for m in configured['modules'] if m['id'] == 'ai-agent')['configured'])
+        self.assertEqual(configured['settings']['model'], '')
         self.observe.return_value['active'] = True
         before = control.read(api)
+        with self.assertRaises(api.HTTPException) as caught:
+            control.runtime_request(api, '--chat', {'prompt': 'hello', 'actor': 'panel'})
+        self.assertEqual(caught.exception.status_code, 409)
+        with patch.object(control.assistant_provider, 'catalog', return_value=['a', 'b']):
+            checked = control.runtime_request(api, '--check', {'module': 'ai-agent', 'actor': 'panel'})
+        self.assertEqual(checked['result']['models_available'], 2)
         with patch.object(control.subprocess, 'Popen') as process_factory:
             process = process_factory.return_value.__enter__.return_value
             process.returncode = 0

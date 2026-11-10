@@ -40,7 +40,7 @@ export function settingsPayload(draft: Draft) {
   };
 }
 export function chatModels(settings: Settings, catalog: string[]): string[] {
-  return [...new Set([settings.model, ...(settings.model_mode === "catalog" ? catalog : [])].filter(Boolean))];
+  return [...new Set((settings.model_mode === "catalog" ? catalog : [settings.model]).filter(Boolean))];
 }
 export function changed(draft: Draft | null, settings: Settings | undefined) {
   return Boolean(draft && settings && JSON.stringify(settingsPayload(draft)) !== JSON.stringify(settingsPayload(makeDraft(settings))));

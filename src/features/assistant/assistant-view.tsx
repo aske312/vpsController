@@ -68,18 +68,13 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     }
   }, [request]);
   useEffect(() => { void load(); }, [load, refreshKey]);
-  const loadModels = useCallback(async (provider_url: string, api_key: string | null, chooseDefault = false) => {
+  const loadModels = useCallback(async (provider_url: string, api_key: string | null) => {
     const generation = ++catalogVersion.current;
     setCatalogLoading(true); setCatalogError("");
     try {
       const result = await request<{ models: string[] }>("/assistant/models", { method: "POST", body: JSON.stringify({ provider_url, api_key }) });
       if (generation !== catalogVersion.current || client.current !== request) return;
       setCatalog(result.models);
-      if (chooseDefault) setDraft(current => {
-        if (!current || current.model || !result.models.length) return current;
-        dirtyRef.current = true;
-        return { ...current, model: result.models[0] };
-      });
     } catch (cause) {
       if (generation === catalogVersion.current && client.current === request) {
         setCatalog([]);
@@ -157,7 +152,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     setFoundUser(null); setUsername("");
   }
   async function send() {
-    if (!prompt.trim() || writing.current) return;
+    if (!prompt.trim() || !selectedModel || writing.current) return;
     const id = ++nextTurn.current;
     const question = prompt.trim();
     writing.current = true; setWorking("chat"); setError(""); setPrompt("");
@@ -173,7 +168,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   if (!status || !draft) return <section className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
   const componentId = agentView ? "ai-agent" : "nodera-bot";
   const availableModels = chatModels(status.settings, catalog);
-  const selectedModel = availableModels.includes(model) ? model : status.settings.model;
+  const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : "") : status.settings.model;
   const selectedComponent = status.modules.find(item => item.id === componentId);
   if (!selectedComponent?.installed) return <section className="mcpWorkspace"><p>Установите {agentView ? "AI-agent" : "NoderaBot"} в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = selectedComponent.management?.state !== "managed" || selectedComponent.management?.retained;
@@ -190,18 +185,18 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
   const result = checks[componentId];
   const setupMessage = !agentView && !selectedComponent.configured ? "Для запуска сохраните токен и включите бота. Затем отправьте ему /id и добавьте себя в администраторы." : "";
   return <div className={`mcpWorkspace ${agentView ? "agentWorkspace" : "botWorkspace"}`}>
-    <section className="mcpHero" aria-label={agentView ? "Обзор AI-агента" : "Обзор NoderaBot"}>
+    {agentView ? <header className="mcpAppHeader"><div className="mcpIdentity"><ProtocolIcon protocol="ai-agent"/><h1>AI-агент</h1><span className="mcpBadge">{moduleState(status, componentId)}</span></div><p>{status.settings.provider_url ? new URL(status.settings.provider_url).hostname : "Подключите API в настройках"}</p></header> : <section className="mcpHero" aria-label="Обзор NoderaBot">
       <div className="mcpHeroContent">
         <p className="eyebrow">{agentView ? "AI WORKSPACE" : "TELEGRAM BOT"}</p>
         <div className="mcpIdentity"><ProtocolIcon protocol={componentId}/><h1>{agentView ? "AI-агент" : "NoderaBot"}</h1><span className="mcpBadge">{!agentView && !selectedComponent.configured ? "Нужна настройка" : moduleState(status, componentId)}</span></div>
         <p className="mcpHeroLead">{agentView ? "Диалог с AI и подключённые инструменты управления." : "Личный доступ к серверу и AI-агенту через Telegram."}</p>
         <dl className="mcpHeroFacts">
-          <div><dt>{agentView ? "МОДЕЛЬ" : "ПОДКЛЮЧЕНИЕ"}</dt><dd>{agentView ? status.settings.model || "Не задана" : status.settings.bot_token_configured ? "Токен сохранён" : "Не настроено"}</dd></div>
+          <div><dt>{agentView ? "МОДЕЛЬ" : "ПОДКЛЮЧЕНИЕ"}</dt><dd>{agentView ? status.settings.model_mode === "catalog" ? "Выбор в чате" : status.settings.model || "Не задана" : status.settings.bot_token_configured ? "Токен сохранён" : "Не настроено"}</dd></div>
           <div><dt>{agentView ? "MCP-МОДУЛИ" : "РЕЖИМ"}</dt><dd>{agentView ? `${status.mcp_modules.filter(item => item.enabled).length} / ${status.mcp_modules.length}` : "Long polling"}</dd></div>
           <div><dt>{agentView ? "ПОЛЬЗОВАТЕЛИ" : "АДМИНИСТРАТОРЫ"}</dt><dd>{status.settings.accounts.filter(item => agentView ? item.telegram_access || item.vps_access : item.bot_access).length}</dd></div>
         </dl>
       </div>
-    </section>
+    </section>}
     <header className="mcpToolbar">
       {!agentView && <span className="mcpSectionLabel">Настройки бота</span>}
       {agentView ? <div className="mcpTabs" role="tablist" aria-label="Разделы AI-агента">{(["chat", "settings"] as const).map((value, index) => <button key={value} id={`${tabsId}-${value}-tab`} type="button" role="tab" aria-selected={panel === value} aria-controls={`${tabsId}-${value}`} tabIndex={panel === value ? 0 : -1} onClick={() => setPanel(value)} onKeyDown={event => {
@@ -218,14 +213,14 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
     {error && <p className="mcpNotice error" role="alert">{error}</p>}
     {message && <p className="mcpNotice" role="status">{message}</p>}
     {agentView && <section id={`${tabsId}-chat`} role="tabpanel" aria-labelledby={`${tabsId}-chat-tab`} hidden={panel !== "chat"} className="mcpChat">
-      <div className="mcpChatHead">{actorSelect}{status.settings.model_mode === "catalog" ? <><label className="mcpActor">Модель<select aria-label="Модель для запроса" value={selectedModel} disabled={blocked || dirty || catalogLoading} onChange={event => setModel(event.target.value)}>{!availableModels.length && <option value="">Загрузите каталог</option>}{availableModels.map(id => <option key={id} value={id}>{id}</option>)}</select></label><button type="button" className="ghostButton" disabled={blocked || dirty || catalogLoading || !status.settings.api_key_configured} onClick={() => void loadModels(savedProviderUrl, null)}>{catalogLoading ? "Загрузка моделей…" : "Обновить модели"}</button></> : <span>{status.settings.model || "Модель не настроена"}</span>}{!selectedComponent.configured && <button type="button" className="ghostButton" onClick={() => setPanel("settings")}>Подключить AI</button>}</div>
-      {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}. Можно повторить загрузку; основная модель остаётся доступна.</p>}
+      <div className="mcpChatHead">{status.settings.accounts.length > 0 && actorSelect}{status.settings.model_mode === "catalog" ? <><label className="mcpActor mcpModelPicker">Модель<select aria-label="Модель для запроса" value={selectedModel} disabled={blocked || dirty || catalogLoading} onChange={event => setModel(event.target.value)}><option value="">{catalogLoading ? "Загрузка моделей…" : availableModels.length ? `Выберите модель · ${availableModels.length}` : "Загрузите каталог"}</option>{availableModels.map(id => <option key={id} value={id}>{id}</option>)}</select></label><button type="button" className="ghostButton" disabled={blocked || dirty || catalogLoading || !status.settings.api_key_configured} onClick={() => void loadModels(savedProviderUrl, null)}>{catalogLoading ? "Загрузка…" : "Обновить"}</button></> : <span>{status.settings.model || "Модель не настроена"}</span>}{!selectedComponent.configured && <button type="button" className="ghostButton" onClick={() => setPanel("settings")}>Подключить AI</button>}</div>
+      {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}. Повторите загрузку каталога.</p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните изменения во вкладке «Настройки».</p>}
       <div className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
-        {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="ai-agent"/><h2>Чем помочь?</h2><p>Задайте вопрос или используйте подключённые MCP.</p><div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div></div>}
+        {!turns.length && <div className="mcpChatEmpty"><h2>{status.settings.model_mode === "catalog" && !selectedModel ? "Выберите модель выше" : "Задайте вопрос"}</h2><p>Ответы появятся здесь.</p>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
         {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.question}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>{turn.model || "AI-агент"}</small><p>{turn.error || turn.answer || "Обрабатывает запрос…"}</p>{turn.tools?.length ? <details><summary>Инструменты · {turn.tools.length}</summary><p className="mcpToolList">{turn.tools.join(" · ")}</p></details> : null}</article></div>)}
       </div>
-      <div className="mcpComposer"><label className="mcpPrompt">Сообщение<textarea value={prompt} maxLength={12000} rows={2} disabled={blocked} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); if (!blocked && !dirty && prompt.trim() && selectedComponent.enabled && selectedComponent.configured) void send(); } }} placeholder="Запрос к агенту…" /></label><button type="button" className="primaryButton" disabled={blocked || dirty || !prompt.trim() || !selectedComponent.enabled || !selectedComponent.configured} onClick={() => void send()}>{working === "chat" ? "Ожидание…" : "Отправить"}</button></div>
+      <div className="mcpComposer"><label className="mcpPrompt">Сообщение<textarea value={prompt} maxLength={12000} rows={2} disabled={blocked} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); if (!blocked && !dirty && prompt.trim() && selectedModel && selectedComponent.enabled && selectedComponent.configured) void send(); } }} placeholder="Запрос к агенту…" /></label><button type="button" className="primaryButton" disabled={blocked || dirty || !prompt.trim() || !selectedModel || !selectedComponent.enabled || !selectedComponent.configured} onClick={() => void send()}>{working === "chat" ? "Ожидание…" : "Отправить"}</button></div>
       <p className="mcpChatHint">Каждый запрос — отдельный контекст. Данные вызванных инструментов передаются AI-провайдеру.</p>
     </section>}
     <section id={`${tabsId}-settings`} role={agentView ? "tabpanel" : undefined} aria-labelledby={agentView ? `${tabsId}-settings-tab` : undefined} hidden={!settingsVisible}>
@@ -237,21 +232,21 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
         {!agentView && <p className="mcpFieldHint">Гости получают приветствие, справку и свой /id. AI, MCP и сведения о сервере доступны только администраторам бота; доступ к веб-панели этим не выдаётся.</p>}
         <fieldset disabled={credentialsBlocked} className="mcpConnection"><legend>{agentView ? "Подключение к AI" : "Подключение бота"}</legend>
           {agentView && <label className="mcpModelMode">Модели<select value={draft.model_mode ?? "single"} onChange={event => patch({ model_mode: event.target.value as "single" | "catalog" })}><option value="single">Одна модель · вручную по ID</option><option value="catalog">Авто · каталог провайдера, выбор в чате</option></select></label>}
-          <div className={`mcpFields ${agentView ? "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://api.nyxos.shop/v1" onChange={event => patch({ provider_url: event.target.value })}/></label><label>{draft.model_mode === "catalog" ? "Основная модель" : "Модель"}<input value={draft.model} list={draft.model_mode === "catalog" ? `${tabsId}-models` : undefined} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label><Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
-          {agentView && draft.model_mode === "catalog" && <div className="mcpCatalog"><datalist id={`${tabsId}-models`}>{catalog.map(id => <option key={id} value={id}/>)}</datalist><button type="button" className="ghostButton" disabled={catalogLoading || !draft.provider_url || !(draft.api_key || draft.api_key === null && draft.api_key_configured)} onClick={() => void loadModels(draft.provider_url, draft.api_key, true)}>{catalogLoading ? "Загрузка моделей…" : "Загрузить каталог"}</button>{catalog.length > 0 && <label>Доступные модели · {catalog.length}<select aria-label="Основная модель из каталога" value={catalog.includes(draft.model) ? draft.model : ""} onChange={event => patch({ model: event.target.value })}><option value="" disabled>Выберите основную модель</option>{catalog.map(id => <option key={id} value={id}>{id}</option>)}</select></label>}<small>Каталог загружается по вашему API-ключу. В чате можно выбрать любую доступную модель. Основная модель используется по умолчанию и в Telegram-боте.</small>{catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}</div>}
+          <div className={`mcpFields ${agentView ? draft.model_mode === "catalog" ? "catalogProviderFields" : "providerFields" : "botFields"}`}>{agentView ? <><label>Base URL<input type="url" value={draft.provider_url} placeholder="https://api.nyxos.shop/v1" onChange={event => patch({ provider_url: event.target.value })}/></label>{draft.model_mode !== "catalog" && <label>Модель<input value={draft.model} maxLength={128} onChange={event => patch({ model: event.target.value })}/></label>}<Secret label="API-ключ" configured={draft.api_key_configured} value={draft.api_key} onChange={api_key => patch({ api_key })}/></> : <Secret label="Токен бота" configured={draft.bot_token_configured} value={draft.bot_token} onChange={bot_token => patch({ bot_token })}/>}</div>
+          {agentView && draft.model_mode === "catalog" && <div className="mcpCatalog"><button type="button" className="ghostButton" disabled={catalogLoading || !draft.provider_url || !(draft.api_key || draft.api_key === null && draft.api_key_configured)} onClick={() => void loadModels(draft.provider_url, draft.api_key)}>{catalogLoading ? "Загрузка моделей…" : "Проверить каталог"}</button>{catalog.length > 0 && <span>Доступно моделей: {catalog.length}</span>}<small>Укажите только Base URL и API-ключ. Все доступные модели загружаются автоматически. Выбор модели — в чате перед запросом.</small>{catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}</div>}
         </fieldset>
         <div className="mcpConnectionStatus"><div className="mcpConnectionFoot"><small>{agentView ? "API chat/completions с поддержкой инструментов." : "Токен можно проверить до сохранения, включения бота и добавления пользователей."}</small><button type="button" className="ghostButton" disabled={blocked || !canCheckConnection} onClick={() => void check(componentId)}>{working === componentId ? "Проверяем…" : "Проверить подключение"}</button></div>
           {result && result.revision === status.settings.revision && result.actor === actor && <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>}
         </div>
-        {agentView && <fieldset disabled={settingsBlocked} className="mcpSkills"><legend>MCP-подключения</legend><div className="mcpModuleGrid">{status.mcp_modules.map(skill => {
+        {agentView && <details className="mcpAdvancedSettings"><summary>Инструменты MCP · {status.mcp_modules.filter(skill => skill.enabled).length} включено</summary><fieldset disabled={settingsBlocked} className="mcpSkills"><legend>MCP-подключения</legend><div className="mcpModuleGrid">{status.mcp_modules.map(skill => {
           const checked = checks[skill.id];
           return <article className="mcpModule" key={skill.id}><header><label className="mcpToggle"><input type="checkbox" checked={draft.mcp[skill.id as McpId]} onChange={event => patch({ mcp: { ...draft.mcp, [skill.id]: event.target.checked } })}/><strong>{skill.name}</strong></label><span className="mcpBadge">{moduleState(status, skill.id)}</span></header><p>{descriptions[skill.id]}</p>
             {skill.id === "telegram-mcp" && draft.mcp[skill.id] && <div className="mcpFields"><label>Telegram API ID<input type="number" min={1} value={draft.telegram_api_id ?? ""} onChange={event => patch({ telegram_api_id: event.target.value ? Number(event.target.value) : null })}/></label><Secret label="Telegram API hash" configured={draft.telegram_api_hash_configured} value={draft.telegram_api_hash} onChange={telegram_api_hash => patch({ telegram_api_hash })}/></div>}
             <footer><details><summary>Инструменты · {status.tools[skill.id].length}</summary><p className="mcpToolList">{status.tools[skill.id].join(" · ")}</p></details><button type="button" className="ghostButton" disabled={blocked || dirty || !skill.enabled || !skill.configured || skill.id === "telegram-mcp" && !actor} onClick={() => void check(skill.id)}>{working === skill.id ? "Проверяем…" : "Проверить"}</button></footer>
             {checked && checked.revision === status.settings.revision && checked.actor === actor && <p className={checked.ok ? "mcpCheck" : "mcpCheck error"} role="status">{checked.text}</p>}
           </article>;
-        })}</div><div className="mcpScope">{actorSelect}<small>Контур определяет права для проверок MCP и чата.</small></div></fieldset>}
-        <fieldset disabled={settingsBlocked} className="mcpAccounts"><legend>{agentView ? "Пользователи и права MCP" : "Администраторы бота"}</legend>
+        })}</div><div className="mcpScope">{actorSelect}<small>Контур определяет права для проверок MCP и чата.</small></div></fieldset></details>}
+        <details className="mcpAdvancedSettings" open={!agentView}><summary>{agentView ? `Пользователи и доступ · ${draft.accounts.length}` : "Администраторы бота"}</summary><fieldset disabled={settingsBlocked} className="mcpAccounts"><legend>{agentView ? "Пользователи и права MCP" : "Администраторы бота"}</legend>
           {agentView && draft.modules["nodera-bot"] && draft.accounts.some(item => item.bot_access) && <p className="mcpFieldHint">Администраторы включённого NoderaBot наследуют доступ к VPS. Чтобы снять его, уберите роль администратора в настройках бота.</p>}
           {!agentView && <div className="mcpUserLookup"><label>Добавить по @username<input value={username} maxLength={65} placeholder="@aske312" onChange={event => { setUsername(event.target.value); setFoundUser(null); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void lookupUser(); } }} /></label><button type="button" className="ghostButton" disabled={!username.trim()} onClick={() => void lookupUser()}>{working === "lookup" ? "Ищем…" : "Найти пользователя"}</button><small>Пользователь должен сначала написать этому боту /start или /id. Тег проверяется в Telegram, доступ сохраняется за числовым ID.</small>
             {foundUser && <div className="mcpFoundUser"><span><strong>@{foundUser.username}</strong> · {foundUser.name}<small>Telegram ID: {foundUser.telegram_id}</small></span><button type="button" className="ghostButton" disabled={draft.accounts.some(item => item.telegram_id === foundUser.telegram_id && item.bot_access) || draft.accounts.length >= 30 && !draft.accounts.some(item => item.telegram_id === foundUser.telegram_id)} onClick={addFoundUser}>Добавить администратора</button></div>}
@@ -261,7 +256,7 @@ export function AssistantView({ mode, request, refreshKey, busy, onDirtyChange, 
             {agentView && <details className="mcpAccountAdvanced"><summary>Сессия и исключения</summary><div className="mcpFields"><Secret label="Telethon StringSession" configured={item.session_configured} value={item.session} onChange={session => changeAccount(index, { session })}/><label>Исключённые ID диалогов<input value={item.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => changeAccount(index, { excluded_dialogs_text: event.target.value })}/></label></div><small>Сессия принадлежит этому Telegram ID. Подключение по QR пока недоступно.</small></details>}
           </article>)}
           <button type="button" className="ghostButton" disabled={draft.accounts.length >= 30} onClick={() => patch({ accounts: [...draft.accounts, { telegram_id: 0, name: "", bot_access: !agentView, telegram_access: false, vps_access: false, excluded_dialogs: [], excluded_dialogs_text: "", session: null, session_configured: false }] })}>Добавить пользователя</button>
-        </fieldset>
+        </fieldset></details>
       </form>
     </section>
   </div>;

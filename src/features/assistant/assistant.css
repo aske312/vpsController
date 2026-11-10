@@ -47,6 +47,39 @@
 .mcpAccountRights { display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-height:32px; }
 .mcpAccountAdvanced { margin-top:8px; }
 .mcpAccountAdvanced .mcpFields { margin:8px 0 5px; }
+.mcpAppHeader { display:flex; align-items:center; justify-content:space-between; gap:8px 16px; flex-wrap:wrap; padding:4px 0; }
+.mcpWorkspace .mcpAppHeader h1 { font-size:20px; letter-spacing:-.2px; }
+.mcpAppHeader .protocolIcon { width:26px; height:26px; }
+.mcpAppHeader > p { font-size:11px; overflow-wrap:anywhere; }
+.agentWorkspace { gap:9px; }
+.agentWorkspace .mcpTabs { width:auto; padding:3px; border-radius:9px; }
+.agentWorkspace .mcpTabs button { height:30px; min-width:86px; padding:0 12px; border-radius:6px; }
+.agentWorkspace .mcpSettings { gap:10px; padding:12px; border-radius:10px; background:var(--panel); }
+.agentWorkspace .mcpChat { min-height:300px; border-radius:10px; background:var(--panel); }
+.agentWorkspace .mcpChat::before { display:none; }
+.agentWorkspace .mcpChatHead { gap:8px; padding:8px 10px; background:var(--panel-inset); }
+.agentWorkspace .mcpChatHead .mcpActor { display:grid; gap:4px; flex:1 1 180px; width:auto; max-width:260px; }
+.agentWorkspace .mcpChatHead .mcpModelPicker { max-width:none; flex:2 1 220px; }
+.agentWorkspace .mcpChatHead .mcpModelPicker select { max-width:none; }
+.agentWorkspace .mcpTranscript { min-height:200px; padding:12px; }
+.agentWorkspace .mcpChatEmpty { min-height:180px; gap:6px; }
+.agentWorkspace .mcpChatEmpty h2 { font-size:15px; }
+.agentWorkspace .mcpComposer { padding:8px 10px; background:var(--panel-inset); }
+.agentWorkspace .mcpComposer textarea { min-height:44px; }
+.agentWorkspace .mcpChatHint { padding:0 10px 8px; }
+.agentWorkspace .mcpConnectionFoot { margin-top:0; }
+.agentWorkspace .mcpModelMode { max-width:100%; margin-bottom:10px; }
+.agentWorkspace .mcpCatalog { gap:8px; margin-top:10px; }
+.mcpAdvancedSettings { border-top:1px solid var(--line); padding-top:10px; min-width:0; }
+.mcpWorkspace .mcpAdvancedSettings > summary { color:var(--text); font-size:12px; padding:2px 0; }
+.mcpAdvancedSettings > fieldset { margin-top:10px; border-top:0; padding-top:0; }
+.mcpFields.catalogProviderFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+@media(max-width:600px) {
+  .mcpFields.catalogProviderFields { grid-template-columns:minmax(0,1fr); }
+  .agentWorkspace .mcpChatHead .mcpActor { max-width:none; }
+  .agentWorkspace .mcpChatHead > button { align-self:end; }
+  .agentWorkspace .mcpTabs { margin-left:0; }
+}
 .mcpWorkspace .mcpRemove { color:var(--red); }
 .mcpWorkspace .mcpNotice { margin:0; padding:8px 10px; border:1px solid rgba(91,116,141,.22); border-radius:11px; color:var(--muted); background:rgba(27,48,67,.24); font-size:11px; }
 .mcpWorkspace .error { color:var(--red); }

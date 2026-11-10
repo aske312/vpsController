@@ -24,11 +24,11 @@ test("drafts preserve saved secrets without reading them back and detect actual 
   assert.equal(settingsPayload(draft).api_key, "");
 });
 
-test('legacy single model settings remain single; catalog mode preserves the default and deduplicates discovery', () => {
+test('legacy settings remain single; catalog mode exposes the provider catalog without a configured model', () => {
   assert.equal(makeDraft(settings).model_mode, 'single');
   assert.equal(changed(makeDraft(settings), settings), false);
   assert.deepEqual(chatModels(settings, ['other-model']), ['model']);
-  assert.deepEqual(chatModels({ ...settings, model_mode: 'catalog' }, ['other-model', 'model']), ['model', 'other-model']);
+  assert.deepEqual(chatModels({ ...settings, model: '', model_mode: 'catalog' }, ['other-model', 'model', 'model']), ['other-model', 'model']);
 });
 
 test("configured credentials do not claim that the provider or an on-demand MCP worker is running", () => {
