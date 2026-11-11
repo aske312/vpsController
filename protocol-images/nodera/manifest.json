@@ -1,11 +1,11 @@
 {
   "id": "nodera",
   "name": "Nodera",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "installable": true,
-  "description": "AI, Telegram, MCP.",
+  "description": "AI Ассистент, Telegram и управление VPS через MCP.",
   "category": "assistant",
-  "category_name": "AI",
+  "category_name": "AI Ассистент",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": [

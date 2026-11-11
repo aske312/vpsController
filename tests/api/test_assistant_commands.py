@@ -1,6 +1,10 @@
 """Bot service changes must use live admin ACLs and explicit, durable confirmation."""
 import asyncio
+import json
+import os
+from pathlib import Path
 import re
+import tempfile
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -35,6 +39,85 @@ class ServerCommandTests(unittest.TestCase):
     def call(self, command, actor=None):
         headers = self.headers if actor is None else {**self.headers, 'X-MCP-Actor': str(actor)}
         return self.client.post('/api/assistant/bot-command', headers=headers, json={'command': command})
+
+    def test_mcp_prepares_but_cannot_confirm_and_checks_live_scope(self):
+        value = control.read(api)
+        value['mcp']['vps-controller-mcp'] = True
+        control.store(api, value)
+        token = {'Authorization': 'Bearer ' + value['control_token'], 'X-MCP-Actor': 'panel'}
+        with patch.object(api, 'manage_service') as action:
+            result = self.client.post('/api/assistant/control-tool', headers=token,
+                                      json={'name': 'vps_service_action', 'service': 'fixture', 'action': 'restart'})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertTrue(result.json()['confirmation_required'])
+            self.assertNotIn('code', result.json())
+            action.assert_not_called()
+            self.assertEqual(self.client.post('/api/assistant/control-tool', headers=token,
+                                              json={'name': 'vps_confirm'}).status_code, 422)
+            self.assertEqual(self.client.post('/api/assistant/control-tool', headers=token,
+                                              json={'name': 'vps_api', 'endpoint': '/settings'}).status_code, 422)
+            denied = self.client.post('/api/assistant/control-tool', headers={**token, 'X-MCP-Actor': '999'},
+                                      json={'name': 'vps_service_action', 'service': 'fixture', 'action': 'restart'})
+            self.assertEqual(denied.status_code, 403)
+            pending = control.operations.read(commands.pending_path(api, 'panel'))
+            self.assertEqual(self.client.post('/api/assistant/service-confirm', json={'code': pending['code']}).status_code, 401)
+            action.return_value = {'id': pending['operation_id'], 'state': 'queued'}
+            with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
+                confirmed = self.client.post('/api/assistant/service-confirm', json={'code': pending['code']})
+                self.assertEqual(confirmed.status_code, 200, confirmed.text)
+                action.assert_called_once()
+                value['mcp']['vps-controller-mcp'] = False
+                control.store(api, value)
+                self.assertEqual(self.client.post('/api/assistant/service-confirm', json={'code': pending['code']}).status_code, 403)
+
+    def test_telegram_buttons_keep_callbacks_scoped_and_long_model_ids_out_of_payload(self):
+        model = 'provider/' + 'long-model-' * 10
+        actions = {}
+        markup = bot.inline_keyboard('Модели · страница 1/2\n' + model + '\n\n/model <ID> — выбрать', '/models', 'chat', actions)
+        self.assertTrue(all(len(button['callback_data'].encode()) <= 64 for row in markup['inline_keyboard'] for button in row))
+        self.assertIn('/model ' + model, actions.values())
+        self.assertIn('/models 2', actions.values())
+        self.assertNotIn('Службы', str(bot.reply_keyboard('chat')))
+        self.assertIn('Службы', str(bot.reply_keyboard(True)))
+        self.assertEqual(bot.reply_keyboard(False), {'remove_keyboard': True})
+
+    def test_telegram_menu_routes_model_callback_and_plain_text_with_live_permissions(self):
+        async def run():
+            settings = {'modules': {'nodera-bot': True}, 'bot_token': 'fixture'}
+            sent, polls = [], 0
+
+            async def transport(settings, method, **payload):
+                nonlocal polls
+                if method == 'getWebhookInfo': return {'url': ''}
+                if method in ('setMyCommands', 'answerCallbackQuery'): return True
+                if method == 'sendMessage': sent.append(payload); return {}
+                if method == 'getUpdates':
+                    polls += 1
+                    if polls == 1:
+                        return [{'update_id': 1, 'message': {'from': {'id': 11}, 'chat': {'type': 'private'}, 'text': 'Модели AI'}}]
+                    if polls in (2, 3):
+                        markup = next(row['reply_markup'] for row in sent if 'inline_keyboard' in row.get('reply_markup', {}))
+                        data = markup['inline_keyboard'][0][0]['callback_data']
+                        return [{'update_id': polls, 'callback_query': {'id': str(polls), 'from': {'id': 11 if polls == 2 else 22},
+                                'data': data, 'message': {'chat': {'type': 'private'}}}}]
+                    if polls == 4:
+                        return [{'update_id': 4, 'message': {'from': {'id': 11}, 'chat': {'type': 'private'}, 'text': 'Обычный вопрос'}}]
+                    raise asyncio.CancelledError()
+                raise AssertionError(method)
+
+            ticks = iter(range(100, 10000, 4))
+            with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), \
+                    patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', new=AsyncMock(side_effect=lambda _, sender: sender['id'] == 11)), \
+                    patch.object(bot.time, 'monotonic', side_effect=lambda: next(ticks)), \
+                    patch.object(bot, 'server_command', new=AsyncMock(side_effect=['Модели · страница 1/1\nselected-model\n\n/model <ID> — выбрать', 'Выбрана модель: selected-model'])) as server, \
+                    patch.object(bot, 'agent_request', new=AsyncMock(return_value='Ответ AI')) as agent:
+                try: await bot.bot(settings)
+                except asyncio.CancelledError: pass
+                self.assertEqual([call.args[2] for call in server.await_args_list], ['/models', '/model selected-model'])
+                agent.assert_awaited_once_with(settings, 11, 'Обычный вопрос')
+                self.assertEqual(json.loads((Path(folder) / 'offset.json').read_text())['offset'], 5)
+                self.assertTrue(any(row.get('chat_id') == 22 and 'устарело' in row.get('text', '') for row in sent))
+        asyncio.run(run())
 
     def prepare(self):
         response = self.call('/service fixture restart')

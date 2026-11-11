@@ -21,7 +21,8 @@ type Props = {
   admitOperation: (path: string, options: RequestInit) => Promise<SystemAction | null | undefined>;
   onOperation: (operation: SystemAction) => void;
 };
-type Turn = { id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string };
+type PendingAction = { service: string; action: string; code: string; expires: number };
+type Turn = { pending_action?: PendingAction; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string };
 type Conversation = { id: string; title: string; updated_at: string; turns: number };
 function shortTitle(title: string) {
   const characters = Array.from(title);
@@ -235,12 +236,12 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     writing.current = true; setWorking("chat"); setError(""); setPrompt(""); setFiles([]); setModelMenu(false);
     setTurns(current => [...current, { id, question, model: selectedModel, files: attached }]);
     try {
-      const result = await request<{ result: { answer: string; tools_used: string[] }; conversation_id?: string; cache_error?: string; provider_usage?: Record<string, ProviderUsage> }>("/assistant/chat", {
+      const result = await request<{ result: { answer: string; tools_used: string[] }; conversation_id?: string; cache_error?: string; provider_usage?: Record<string, ProviderUsage>; pending_action?: PendingAction }>("/assistant/chat", {
         method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null, model: selectedModel,
           attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history, conversation_id: conversationId }),
       });
       if (client.current === request) {
-        setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.result.answer, tools: result.result.tools_used } : turn));
+        setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action } : turn));
         setConversationId(result.conversation_id ?? null); rememberConversation(actor, result.conversation_id ?? null); setMemoryError(result.cache_error ?? '');
         if (result.provider_usage) setStatus(current => current ? { ...current, provider_usage: result.provider_usage } : current);
         if (cacheEnabled) void loadConversations();
@@ -248,21 +249,33 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     } catch (cause) { setTurns(current => current.map(turn => turn.id === id ? { ...turn, error: cause instanceof Error ? cause.message : "AI не ответил" } : turn)); }
     finally { writing.current = false; setWorking(""); }
   }
+  async function confirmService(turn: Turn) {
+    const action = turn.pending_action;
+    if (!action || writing.current || !await confirmAction({ title: `${action.action}: ${action.service}?`,
+      message: "Действие может прервать соединения этой службы.", confirmLabel: "Подтвердить", danger: action.action !== "start" })) return;
+    writing.current = true; setWorking("service"); setError("");
+    try {
+      const result = await request<{ text: string }>("/assistant/service-confirm", { method: "POST",
+        body: JSON.stringify({ code: action.code, telegram_id: actor ? Number(actor) : null }) });
+      setTurns(current => current.map(item => item.id === turn.id ? { ...item, pending_action: undefined, action_result: result.text } : item));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Действие не выполнено"); }
+    finally { writing.current = false; setWorking(""); }
+  }
   if (!status || !draft) return <section className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
   const selectedComponent = status.modules.find(item => item.id === "ai-agent");
   const botComponent = status.modules.find(item => item.id === "nodera-bot");
   const availableModels = chatModels(status.settings, catalog);
-  const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : "") : status.settings.model;
+  const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : availableModels.includes(status.settings.model) ? status.settings.model : "") : status.settings.model;
   const managedComponent = selectedComponent?.installed ? selectedComponent : botComponent;
   if (!managedComponent?.installed) return <section className="mcpWorkspace"><p>Установите Nodera в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = managedComponent.management?.state !== "managed" || managedComponent.management?.retained;
   const blocked = busy || Boolean(working) || readingFiles || memoryBusy || Boolean(loadError) || Boolean(readOnly);
   const conflict = status.settings.revision !== draft.expected_revision;
   const agentReady = selectedComponent?.installed && selectedComponent.enabled && selectedComponent.configured;
-  const chooseActor = (value: string) => { memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
+  const chooseActor = (value: string) => { memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(""); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
   const actorName = status.settings.accounts.find(item => String(item.telegram_id) === actor)?.name || actor || "Администратор";
   const actorSelect = <label className="mcpActor">Контур<select aria-label="Контур" title={actorName} value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id}</option>)}</select></label>;
-  const newChat = () => { memoryGeneration.current++; interacted.current = true; rememberConversation(actor, null); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setCopied(undefined); setMemoryError(''); };
+  const newChat = () => { memoryGeneration.current++; interacted.current = true; rememberConversation(actor, null); setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setCopied(undefined); setMemoryError(''); };
   async function removeConversation() {
     if (!conversationId || !await confirmAction({ title: 'Удалить диалог?', message: 'Диалог и его вложения будут удалены из кеша на сервере.', confirmLabel: 'Удалить', danger: true })) return;
     try { await request(`/assistant/conversations/${conversationId}${actor ? `?telegram_id=${actor}` : ''}`, { method: 'DELETE' }); newChat(); await loadConversations(); }
@@ -289,7 +302,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   const sectionPicker = <details ref={sectionMenu} className="noderaSectionMenu" onKeyDown={event => {
     if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
   }}>
-    <summary className="mcpIconButton" aria-label="Разделы Nodera" title="Разделы Nodera"><ChatIcon name="gear"/>{dirty && <i/>}</summary>
+    <summary className="ghostButton" aria-label="Настройки" title="Настройки"><ChatIcon name="gear"/>Настройки{dirty && <i/>}</summary>
     <nav aria-label="Разделы Nodera">{panels.filter(item => item.id !== panel).map(item =>
       <button key={item.id} type="button" onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}</nav>
   </details>;
@@ -325,7 +338,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
         {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
-        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article></div>)}
+        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.pending_action && <div className="mcpServiceConfirmation"><span>{turn.pending_action.action} · {turn.pending_action.service}</span><button type="button" className="ghostButton" disabled={blocked} onClick={() => void confirmService(turn)}>Подтвердить действие</button></div>}{turn.action_result && <p className="mcpNotice" role="status">{turn.action_result}</p>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
       </div>
       <div className="mcpComposer">
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={blocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}
@@ -353,10 +366,13 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
             <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1></div>
             <span className="mcpBadge">{panel === "users" ? botStatus : status.settings.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span>
           </div>
+          <p className="noderaHeroDescription"><span className="noderaHeroDetail">{panel === "settings"
+            ? "Выберите AI по умолчанию, подключите инструменты VPS и Telegram, настройте характер и память Нодеры."
+            : "Управляйте Telegram-ботом и доступом пользователей к AI, серверу и личным диалогам."}</span><span className="noderaHeroSummary">{panel === "settings" ? "Модели AI, инструменты и память." : "Telegram-бот, пользователи и права."}</span></p>
           <dl className="noderaHeroFacts">
             {panel === "settings" ? <>
               <div><dt>Активный API</dt><dd title={activeProvider?.name}>{activeProvider?.name ?? "—"}</dd></div>
-              <div><dt>Модели</dt><dd title={status.settings.model}>{status.settings.model_mode === "catalog" ? "Каталог" : status.settings.model || "—"}</dd></div>
+              <div><dt>AI по умолчанию</dt><dd title={status.settings.model}>{status.settings.model || "Не выбран"}</dd></div>
               <div><dt>MCP</dt><dd>{status.mcp_modules.filter(item => item.enabled).length} / {status.mcp_modules.length}</dd></div>
             </> : <>
               <div><dt>Telegram</dt><dd>{status.bot_username ? `@${status.bot_username}` : botStatus}</dd></div>

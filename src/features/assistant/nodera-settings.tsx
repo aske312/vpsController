@@ -32,7 +32,7 @@ type Props = {
 
 const moduleDescriptions: Record<McpId, string> = {
   "telegram-mcp": "Диалоги, история и поиск.",
-  "vps-controller-mcp": "Метрики, службы, компоненты и состояние панели.",
+  "vps-controller-mcp": "Мониторинг VPS и модулей, управление службами с подтверждением, API приложения.",
 };
 const blankAccount = (): AccountDraft => ({
   telegram_id: 0, name: "", bot_access: false, bot_chat_access: false, address_as: "",
@@ -43,6 +43,7 @@ const blankAccount = (): AccountDraft => ({
 export function NoderaSettings({ panel, request, status, draft, patch, blocked, dirty, refreshKey, actor, actorSelect, checks, check, runAction, working }: Props) {
   const [providerEdit, setProviderEdit] = useState<ProviderDraft>();
   const [providerChecks, setProviderChecks] = useState<Record<string, { text: string; failed?: boolean; quota?: Quota | null }>>({});
+  const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
   const [checkingProvider, setCheckingProvider] = useState<string>();
   const [telegramMcpOpen, setTelegramMcpOpen] = useState(false);
   const [userEdit, setUserEdit] = useState<{ index: number; value: AccountDraft; observed?: boolean }>();
@@ -92,6 +93,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       const result = await request<{ models: string[]; quota?: Quota | null }>("/assistant/models", {
         method: "POST", body: JSON.stringify({ provider_url: provider.provider_url, api_key: provider.api_key, provider_id: provider.id, include_quota: true }),
       });
+      setProviderModels(current => ({ ...current, [provider.id]: result.models }));
       const available = provider.model_mode === "catalog" || result.models.includes(provider.model);
       setProviderChecks(current => ({ ...current, [provider.id]: available
         ? { text: `Каталог доступен · моделей ${result.models.length}`, quota: result.quota }
@@ -138,6 +140,23 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       </button>
       </div>
     </header>
+    {providers.length > 0 && <div className="noderaDefaultAI noderaBar">
+      <label>API по умолчанию<select aria-label="API по умолчанию" disabled={blocked} value={draft.active_provider ?? ""}
+        onChange={event => patch({ active_provider: event.target.value })}>
+        {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+      </select></label>
+      {(() => {
+        const active = providers.find(provider => provider.id === draft.active_provider);
+        if (!active) return null;
+        const models = [...new Set([active.model, ...(providerModels[active.id] ?? [])].filter(Boolean))];
+        return <><label>Модель по умолчанию<select aria-label="Модель по умолчанию" disabled={blocked || active.model_mode === "single"} value={active.model}
+          onChange={event => patch({ providers: providers.map(provider => provider.id === active.id ? { ...provider, model: event.target.value } : provider) })}>
+          <option value="">Выберите модель</option>{models.map(model => <option key={model} value={model}>{model}</option>)}
+        </select></label>
+        {active.model_mode === "catalog" && <button type="button" className="ghostButton" disabled={blocked || !!checkingProvider} onClick={() => void probe(active)}>{checkingProvider === active.id ? "Загрузка…" : "Загрузить модели"}</button>}</>;
+      })()}
+      <small>Для новых чатов и Telegram. В каждом диалоге модель можно переключить.</small>
+    </div>}
     {!providers.length ? <p className="mcpFieldHint">Нет подключений</p> : <div className="noderaTableScroll"><table className="noderaProviderTable">
       <thead><tr><th>Провайдер</th><th className="noderaProviderStat">Модели</th><th className="noderaProviderStat">Запросы</th><th className="noderaProviderStat">Токены вход / выход</th><th className="noderaProviderStat">Квота ключа</th><th aria-label="Действия"/></tr></thead>
       <tbody>{providers.map(provider => {
@@ -148,7 +167,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         const tokens = usage?.reported_requests ? `${usage.prompt_tokens.toLocaleString("ru")} / ${usage.completion_tokens.toLocaleString("ru")}` : "—";
         const quota = probeResult?.quota ? probeResult.quota.unlimited ? "Без лимита" : probeResult.quota.remaining.toLocaleString("ru") : "—";
         return <tr key={provider.id}>
-          <th scope="row"><strong>{provider.name}</strong>{active && <span className="mcpBadge">Активно</span>}
+          <th scope="row"><strong>{provider.name}</strong>{active && <span className="mcpBadge">По умолчанию</span>}
             <small>{provider.provider_url}</small>
             <span className="noderaProviderCompact">
               <small>{models} · Запросы {usage?.requests ?? 0}</small>
@@ -166,7 +185,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
             {probeResult?.quota?.account_remaining !== undefined && <small>Аккаунт · {probeResult.quota.account_remaining.toLocaleString("ru")}</small>}
           </td>
           <td><div className="noderaTableActions">
-            {!active && <button type="button" className="ghostButton" disabled={blocked} onClick={() => patch({ active_provider: provider.id })}>Активировать</button>}
+            {!active && <button type="button" className="ghostButton" disabled={blocked} onClick={() => patch({ active_provider: provider.id })}>По умолчанию</button>}
             <button type="button" className="mcpIconButton" aria-label={`Проверить API ${provider.name}`} title="Проверить API" disabled={blocked || !!checkingProvider || !(provider.api_key ?? provider.api_key_configured)} onClick={() => void probe(provider)}>
               <ChatIcon name="refresh"/>
             </button>
@@ -183,7 +202,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <Secret label="API-ключ" configured={providerEdit.api_key_configured} value={providerEdit.api_key} onChange={api_key => setProviderEdit({ ...providerEdit, api_key })}/>
       <label>Модели<select value={providerEdit.model_mode} onChange={event => setProviderEdit({ ...providerEdit, model_mode: event.target.value as ProviderDraft["model_mode"] })}>
         <option value="catalog">Каталог API</option><option value="single">Одна модель</option></select></label>
-      {providerEdit.model_mode === "single" && <label>Модель<input value={providerEdit.model} required maxLength={128} onChange={event => setProviderEdit({ ...providerEdit, model: event.target.value })}/></label>}
+      <label>{providerEdit.model_mode === "single" ? "Модель" : "Модель по умолчанию (ID)"}<input value={providerEdit.model} required={providerEdit.model_mode === "single"} maxLength={128} onChange={event => setProviderEdit({ ...providerEdit, model: event.target.value })}/></label>
       {providers.some(item => item.id === providerEdit.id) && <button type="button" className="ghostButton" disabled={blocked} onClick={() => {
         const remaining = providers.filter(item => item.id !== providerEdit.id);
         patch({ providers: remaining, active_provider: draft.active_provider === providerEdit.id ? remaining[0]?.id ?? null : draft.active_provider });
@@ -198,6 +217,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   const botAction = status.bot.active ? "stop" : botUsername ? "start" : "check";
   const telegram = <section className="noderaSettings" aria-label="Telegram">
     <header className="noderaBlockHead"><h2>Telegram</h2><span className="mcpBadge">{moduleState(status, "nodera-bot")}</span></header>
+    <p>В Telegram доступны кнопки управления и выбор модели. Обычные сообщения получает AI по умолчанию; команды сервера доступны администраторам.</p>
     <fieldset className="noderaTelegram" disabled={botLocked}>
       <div className="noderaCredentials">
         <fieldset disabled={botCredentialsLocked} className="noderaBotToken">
@@ -223,7 +243,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         const enabled = draft.mcp[item.id];
         return <article key={item.id} className={`mcpModule ${enabled ? "isInstalled" : ""}`}>
           <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name={item.id === "telegram-mcp" ? "telegram" : "module"}/></span>
-            <strong>{item.id === "vps-controller-mcp" ? "mcp_312_node_net" : item.name}</strong></div></header>
+            <strong>{item.id === "vps-controller-mcp" ? "mcp vps" : item.name}</strong></div></header>
           <p>{item.description ?? moduleDescriptions[item.id]}</p>
           <footer>
             <button type="button" className="ghostButton" aria-pressed={enabled} aria-label={`${item.name} · ${enabled ? "Включён" : "Выключен"}`}
@@ -302,7 +322,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       {!account.bot_access && <label>Как Нодера обращается к пользователю<input value={account.address_as ?? ""} maxLength={80} onChange={event => editAccount({ address_as: event.target.value })}/></label>}
       <div className="noderaBar">
         <label className="mcpToggle"><input type="checkbox" checked={account.telegram_access} onChange={event => editAccount({ telegram_access: event.target.checked })}/>Telegram MCP</label>
-        <label className="mcpToggle"><input type="checkbox" checked={account.vps_access || account.bot_access && draft.modules["nodera-bot"]} disabled={account.bot_access && draft.modules["nodera-bot"]} onChange={event => editAccount({ vps_access: event.target.checked })}/>312node.net MCP</label>
+        <label className="mcpToggle"><input type="checkbox" checked={account.vps_access || account.bot_access && draft.modules["nodera-bot"]} disabled={account.bot_access && draft.modules["nodera-bot"]} onChange={event => editAccount({ vps_access: event.target.checked })}/>VPS MCP</label>
       </div>
       {account.telegram_access && <>
         <Secret label="Telegram-сессия" configured={account.session_configured} value={account.session} onChange={session => editAccount({ session })}/>

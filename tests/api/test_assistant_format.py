@@ -44,5 +44,6 @@ class AssistantFormatTests(unittest.TestCase):
         self.assertIn('женском роде', value)
         self.assertIn('test-host', value)
         self.assertIn('Use exact units', value)
-        self.assertIn('только чтение', value)
+        self.assertIn('vps_service_action', value)
+        self.assertIn('Не подтверждай действия за пользователя', value)
         self.assertNotIn('secret-key', value)

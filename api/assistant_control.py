@@ -14,6 +14,7 @@ import sys
 import urllib.parse
 import uuid
 import threading
+import time
 from typing import Literal
 
 from fastapi import HTTPException
@@ -236,7 +237,17 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel']
+    name: Literal['vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api']
+    service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
+    action: Literal['start', 'stop', 'restart'] | None = None
+    operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    endpoint: Literal['/overview', '/services', '/components', '/metrics', '/application'] | None = None
+
+
+class ServiceConfirmation(BaseModel):
+    model_config = {'extra': 'forbid'}
+    code: str = Field(pattern=r'^[0-9a-f]{8}$')
+    telegram_id: int | None = Field(default=None, strict=True, gt=0, le=2**52)
 
 
 class Action(BaseModel):
@@ -409,8 +420,6 @@ def apply_providers(value, old, submitted):
         prior = previous.get(entry['id'], {})
         if entry['api_key'] is None:
             entry['api_key'] = prior.get('api_key', '') if prior.get('provider_url') == entry['provider_url'] else ''
-        if entry['model_mode'] == 'catalog':
-            entry['model'] = ''
     value['providers'] = entries
     value['active_provider'] = submitted['active_provider']
     active = next((entry for entry in entries if entry['id'] == value['active_provider']), {})
@@ -496,13 +505,14 @@ def status(api):
             'chat_persona': agent_version >= (1, 2, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'installed': key in value['mcp_installed'],
-                             'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'mcp_312_node_net'))],
+                             'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'mcp vps'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
             'tools': {'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
-                          (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else [])}}
+                          (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else []) +
+                          (['vps_service_action', 'vps_operation', 'vps_api'] if agent_version >= (1, 5, 0) else [])}}
 
 
 def configure(api, payload):
@@ -548,8 +558,6 @@ def configure(api, payload):
         elif payload.component == 'ai-agent':
             value.pop('providers', None)
             value.pop('active_provider', None)
-        if value.get('model_mode') == 'catalog':
-            value['model'] = ''
         if unified:
             value['modules'].update(submitted['modules'])
         else:
@@ -650,6 +658,8 @@ def chat_request(api, payload, actor='panel', channel='panel', *, settings=None)
         if model_preference_matches(preference, settings):
             body['model'] = preference.get('model')
         if not body['model']:
+            body['model'] = settings.get('model')
+        if not body['model']:
             return {'ok': True, 'result': {'answer': 'Выберите модель: /models — список, /model <ID> — выбор. После этого можно написать Нодере.', 'tools_used': []}}
     identity = payload.conversation_id
     if settings.get('memory_enabled', True):
@@ -662,6 +672,11 @@ def chat_request(api, payload, actor='panel', channel='panel', *, settings=None)
             identity = uuid.uuid4().hex
     body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
+    import assistant_commands
+    if 'vps_service_action' in output['result'].get('tools_used', []):
+        pending = operations.read(assistant_commands.pending_path(api, actor))
+        if pending and not pending.get('submitted') and pending.get('expires', 0) > time.time():
+            output['pending_action'] = {key: pending[key] for key in ('service', 'action', 'code', 'expires')}
     try:
         usage = provider_usage(api, settings, output['result'])
         output['provider_usage'] = {entry['id']: usage[entry['id']] for entry in providers(settings) if entry['id'] in usage}
@@ -692,9 +707,13 @@ def bot_models(api, actor, model=None, page=1):
     settings = read(api)
     if settings.get('model_mode', 'single') != 'catalog':
         return 'Одна модель: ' + (settings.get('model') or 'не настроена')
+    if model == 'default':
+        with operations.locked(api.DATA_DIR):
+            bot_model_path(api, actor).unlink(missing_ok=True)
+        return 'Модель по умолчанию: ' + (settings.get('model') or 'не выбрана в панели')
     if model is None and page is None:
         preference = operations.read(bot_model_path(api, actor))
-        return 'Модель: ' + (preference.get('model', '') if model_preference_matches(preference, settings) else '') + '\n/models — каталог; /model <ID> — выбрать'
+        return 'Модель: ' + ((preference.get('model') if model_preference_matches(preference, settings) else None) or settings.get('model') or 'не выбрана') + '\n/models — каталог; /model <ID> — выбрать'
     catalog = model_catalog(api, Catalog(provider_url=settings['provider_url'], provider_id=active_provider(settings)))['models']
     if model is not None:
         if model not in catalog:
@@ -736,6 +755,8 @@ def runtime_request(api, mode, body):
     if component == 'ai-agent' and mode == '--check' and body.get('module') == 'ai-agent' and value.get('model_mode') == 'catalog':
         result = model_catalog(api, Catalog(provider_url=value['provider_url']))
         return {'ok': True, 'result': {'models_available': len(result['models'])}}
+    if mode == '--chat' and not selected_model:
+        selected_model = value.get('model') or None
     if mode == '--chat' and value.get('model_mode') == 'catalog' and not selected_model:
         raise HTTPException(409, 'Выберите модель для запроса в чате')
     if mode == '--chat' and selected_model is not None:
@@ -832,17 +853,43 @@ def require_bot_actor(value, actor, *, chat=False):
         raise HTTPException(403, 'Доступ к этому действию в Telegram не выдан')
 
 
-def control_tool(api, name):
+def control_tool(api, name, arguments=None, actor='panel'):
+    import assistant_commands
+    arguments = arguments or {}
+    if name == 'vps_service_action':
+        service, action = arguments.get('service'), arguments.get('action')
+        if not isinstance(service, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', service) or action not in ('start', 'stop', 'restart'):
+            raise HTTPException(422, 'Укажите службу и действие start, stop или restart')
+        # MCP can prepare an action but has no tool that confirms it.
+        assistant_commands.execute(api, actor, f'/service {service} {action}')
+        record = operations.read(assistant_commands.pending_path(api, actor))
+        return {'confirmation_required': True, 'service': service, 'action': action,
+                'operation_id': record['operation_id'],
+                'message': 'Пользователь должен подтвердить действие кнопкой в панели или командой /confirm в Telegram.'}
+    if name == 'vps_operation':
+        identity = arguments.get('operation_id', '')
+        if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
+            raise HTTPException(422, 'Укажите ID операции')
+        value = api.get_application_operation(identity, None)
+        return {key: value.get(key) for key in ('id', 'action', 'state')}
+    if name == 'vps_api':
+        endpoints = {'/overview': 'vps_overview', '/services': 'vps_services', '/components': 'vps_components',
+                     '/metrics': 'vps_metrics', '/application': 'vps_panel'}
+        tool = endpoints.get(arguments.get('endpoint'))
+        if not tool:
+            raise HTTPException(422, 'Этот раздел API недоступен через MCP')
+        return control_tool(api, tool, actor=actor)
+
     if name == 'vps_overview':
         result = api.overview(None)
         return {'server': result['server'], 'resources': result['resources']}
     if name == 'vps_services':
-        return {'services': [{'id': key, 'name': definition['name'], **{
+        return {'services': [{'id': key, 'name': definition['name'], 'controls': assistant_commands.controls(key, definition), **{
             field: observation.get(field) for field in ('state', 'substate', 'active', 'enabled', 'runtime')
         }} for key, definition in api.managed_services().items()
             for observation in [api.observe_service(definition['unit'])]]}
     if name == 'vps_components':
-        return {'components': [{key: item.get(key) for key in ('id', 'name', 'installed', 'version', 'installed_version', 'available_version', 'update_available', 'management')}
+        return {'components': [{key: item.get(key) for key in ('id', 'name', 'installed', 'version', 'installed_version', 'available_version', 'update_available', 'management', 'component_state')}
                                for item in api.protocol_images(None)['items']]}
     if name == 'vps_metrics':
         history = api.get_metrics_history('hour', None)

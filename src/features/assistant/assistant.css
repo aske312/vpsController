@@ -33,7 +33,7 @@
 .mcpChatHead { display:flex; align-items:end; flex-wrap:wrap; flex-shrink:0; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line); background:rgba(8,20,29,.66); }
 .mcpChatHead .mcpActor { flex:0 1 auto; width:auto; max-width:210px; }
 .mcpConversationPicker { flex:0 1 auto; max-width:100%; }
-.mcpWorkspace .mcpChatHead select { width:auto; max-width:100%; field-sizing:content; }
+.mcpWorkspace .mcpChatHead select { min-height:28px; height:28px; padding:3px 8px; width:auto; max-width:100%; field-sizing:content; }
 .mcpChatActions { display:flex; gap:4px; margin-left:auto; padding-bottom:3px; }
 .mcpChat > .mcpNotice { margin:8px 12px 0; }
 .mcpTranscript { flex:1 1 0; display:grid; align-content:start; gap:16px; min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; padding:18px 16px; }
@@ -63,7 +63,8 @@
 .mcpAnswerTable :is(td,th) { min-width:90px; padding:7px 9px; border:1px solid var(--line); text-align:left; vertical-align:top; }
 .mcpAnswerTable th { background:rgba(97,207,216,.06); color:var(--text); }
 .mcpToolList { padding-top:5px; color:var(--muted); font:10px/1.5 var(--technical-font); overflow-wrap:anywhere; }
-.mcpAnswer > .mcpIconButton { margin-top:5px; }
+.mcpAnswerActions { display:flex; justify-content:flex-end; min-width:0; margin-top:-6px; }
+.mcpAnswerActions:empty { display:none; }
 .mcpComposer { position:relative; display:flex; flex-direction:column; flex-shrink:0; gap:8px; align-self:center; width:calc(100% - 28px); max-width:900px; margin:0 0 8px; padding:10px; border:1px solid var(--line-strong); border-radius:16px; background:rgba(12,27,38,.88); backdrop-filter:blur(8px); }
 .mcpComposer:focus-within { border-color:rgba(97,207,216,.55); }
 .mcpComposer .mcpPrompt { font-size:0; gap:0; }
@@ -122,6 +123,13 @@
 .mcpActor { width:min(100%,280px); }
 .noderaHero { --nodera-hero-height:clamp(212px,24vw,285px); display:flex; flex-direction:column; justify-content:space-between; gap:14px; min-height:var(--nodera-hero-height); padding:18px; }
 .noderaHeroContent { display:grid; gap:12px; min-width:0; width:min(100%,480px); }
+.mcpWorkspace .noderaHeroDescription { max-width:430px; color:var(--muted); font-size:12px; line-height:1.65; }
+.noderaHeroSummary { display:none; }
+@container (min-width:481px) and (max-width:800px) {
+ .noderaHero { gap:6px; }
+ .noderaHeroContent { gap:4px; }
+ .mcpWorkspace .noderaHeroDescription { font-size:11px; line-height:1.5; }
+}
 .noderaHero .eyebrow { color:var(--muted); }
 .noderaHeroFacts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:0; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,22,.76); }
 .noderaHeroFacts > div { min-width:0; padding:6px 9px; }
@@ -188,7 +196,11 @@
 @container (max-width:480px) {
  .mcpHero::before { width:100%; background-position:right top; background-size:100% auto; mask-image:none; opacity:.85; }
  .mcpHero::after { background:linear-gradient(180deg,transparent 10%,rgba(7,16,26,.3) 45%,#07101a 91%); }
- .noderaHero { min-height:235px; padding:65px 10px 10px; }
+ .noderaHero { min-height:235px; padding:65px 10px 10px; gap:6px; }
+ .noderaHeroContent { gap:2px; }
+ .mcpWorkspace .noderaHeroDescription { font-size:11px; line-height:1.5; }
+ .noderaHeroDetail { display:none; }
+ .noderaHeroSummary { display:inline; }
  .noderaHero .mcpIdentity h1 { font-size:20px; }
  .noderaHeroNav button { padding-inline:7px; }
  .mcpIdentity .protocolIcon { width:24px; height:24px; }
@@ -223,7 +235,6 @@
 .gateShell > .content:has(.noderaWorkspace.isChat) > :not(.noderaWorkspace) { flex-shrink:0; }
 .noderaWorkspace.isChat { display:flex; flex:1; flex-direction:column; min-height:0; padding-bottom:0; gap:6px; }
 .gateShell:has(.noderaWorkspace.isChat) .gateMasthead { margin-bottom:8px; }
-.gateShell:has(.noderaWorkspace.isChat) .versionFooter.legalFooter { margin-top:6px; }
 .mcpComposer > .mcpFileList { max-height:64px; overflow:auto; }
 .mcpModule footer button[aria-pressed=true] { color:var(--cyan); border-color:rgba(97,207,216,.32); }
 
@@ -232,3 +243,8 @@
  .noderaWorkspace.isChat .mcpComposer > .mcpFileList { max-height:40px; }
  .noderaWorkspace.isChat .mcpChatHint { display:none; }
 }
+
+.noderaDefaultAI { align-items:end; padding-bottom:10px; border-bottom:1px solid var(--line); }
+.noderaDefaultAI > label { flex:1 1 180px; max-width:320px; }
+.noderaDefaultAI > small { flex-basis:100%; }
+.mcpServiceConfirmation { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:8px; color:var(--amber); }

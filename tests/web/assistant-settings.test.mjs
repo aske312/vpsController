@@ -137,3 +137,31 @@ test('catalog mode loads any number of models and sends the chat selection witho
   assert.equal(view.writes[0].model, 'model-249');
   assert.equal(status.settings.model, '');
 });
+
+test('new catalog chats use the saved default and copy actions sit outside the answer', async () => {
+  const status = fixture();
+  Object.assign(status.settings, { model_mode: 'catalog', model: 'default-model', api_key_configured: true,
+    provider_url: 'https://provider.example/v1', modules: { 'ai-agent': true, 'nodera-bot': true } });
+  Object.assign(status.modules[0], { enabled: true, configured: true });
+  const view = mount(status, ['default-model', 'another-model']);
+  view.render(); await Promise.resolve(); view.render(); await Promise.resolve();
+  let tree = view.render();
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello', style: {}, scrollHeight: 48 } });
+  tree = view.render();
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onKeyDown({ key: 'Enter', preventDefault() {} });
+  await Promise.resolve();
+  assert.equal(view.writes[0].model, 'default-model');
+  tree = view.render();
+  const answer = nodes(tree, n => n.type === 'article' && n.props.className.startsWith('mcpAnswer'))[0].node;
+  assert.equal(nodes(answer, n => n.props['aria-label'] === 'Скопировать ответ').length, 0);
+  const actions = nodes(tree, n => n.props.className === 'mcpAnswerActions')[0].node;
+  assert.equal(nodes(actions, n => n.props['aria-label'] === 'Скопировать ответ').length, 1);
+  nodes(tree, n => n.props['aria-label'] === 'Модель для запроса')[0].node.props.onClick();
+  tree = view.render();
+  nodes(tree, n => n.props.role === 'option').at(-1).node.props.onClick();
+  tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Новый чат')[0].node.props.onClick();
+  tree = view.render();
+  const selection = nodes(tree, n => n.props['aria-label'] === 'Модель для запроса')[0].node;
+  assert.equal(selection.props.children[0].props.children, 'default-model');
+});

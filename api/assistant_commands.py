@@ -62,7 +62,7 @@ def operation_text(value):
 
 
 def pending_path(api, actor):
-    if not re.fullmatch(r'[1-9][0-9]{0,15}', actor):
+    if actor != 'panel' and not re.fullmatch(r'[1-9][0-9]{0,15}', actor):
         raise HTTPException(403, 'Нужен числовой ID администратора бота')
     return control.directory(api) / 'nodera-bot' / 'commands' / (actor + '.json')
 

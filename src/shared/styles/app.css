@@ -274,6 +274,11 @@
   box-shadow: 0 0 12px rgba(86, 217, 233, .50);
 }
 
+.gateNavButton.cyan.active {
+  background: linear-gradient(90deg, rgba(86, 217, 233, .18), rgba(86, 217, 233, .07));
+  border-color: rgba(86, 217, 233, .18);
+}
+
 .gateNavButton.compact {
   min-height: 38px;
 }
@@ -1031,6 +1036,8 @@
   font: 10px/1.45 var(--font-mono);
   letter-spacing: .7px;
 }
+
+.gateShell > .content > :has(+ .legalFooter) { margin-bottom:8px; }
 
 .legalVersionLine {
   min-width: 0;

@@ -97,7 +97,7 @@ class AssistantMemoryTests(unittest.TestCase):
         self.assertEqual(bot.read_text(), 'preserve')
 
     def test_bot_model_choice_is_per_user_and_catalog_mode_gives_clear_guidance(self):
-        self.settings.update(model_mode='catalog', provider_url='https://provider.example/v1')
+        self.settings.update(model_mode='catalog', model='', provider_url='https://provider.example/v1')
         with patch.object(control, 'read', return_value=self.settings), patch.object(control, 'model_catalog', return_value={'models': ['one', 'two']}), patch.object(control, 'runtime_request', return_value={'ok': True, 'result': {'answer': 'A', 'tools_used': []}}) as runtime:
             self.assertIn('/model', control.chat_request(self.env, control.Chat(prompt='Hello'), '11', 'bot')['result']['answer'])
             runtime.assert_not_called()

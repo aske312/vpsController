@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import secrets
 from pathlib import Path
 import sys
 import tempfile
@@ -55,6 +56,7 @@ def telegram_chunks(text):
     return chunks
 
 PUBLIC_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка'), ('id', 'Мой Telegram ID')]
+CHAT_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Выбрать модель AI')]
 ADMIN_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Выбрать модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
     ('services', 'Службы и доступные действия'), ('components', 'Установленные компоненты'),
@@ -62,10 +64,10 @@ ADMIN_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI
     ('cancel', 'Отменить ожидающее подтверждение'), ('operation', 'Результат операции: ID')]
 
 
-async def command_menu(settings, actor=None, admin=False):
+async def command_menu(settings, actor=None, admin=False, chat=False):
     scope = {'type': 'chat', 'chat_id': actor} if actor else {'type': 'all_private_chats'}
     await bot_api(settings, 'setMyCommands', scope=scope,
-                  commands=[{'command': name, 'description': description} for name, description in (ADMIN_COMMANDS if admin else PUBLIC_COMMANDS)])
+                  commands=[{'command': name, 'description': description} for name, description in (ADMIN_COMMANDS if admin else CHAT_COMMANDS if chat else PUBLIC_COMMANDS)])
 
 
 async def server_command(settings, actor, prompt):
@@ -102,7 +104,12 @@ async def agent_request(settings, actor, prompt):
             if response.status_code == 409:
                 return 'AI-agent не установлен, остановлен или не принят под управление. Команды бота доступны.'
             return 'AI-agent не выполнил запрос. Проверьте настройки и доступ провайдера в панели.'
-        return response.json()['result']['answer']
+        value = response.json()
+        answer = value['result']['answer']
+        pending = value.get('pending_action')
+        if pending:
+            answer += f"\n\nПодтвердите {pending['action']} для {pending['service']}:\n/confirm {pending['code']}"
+        return answer
 
 
 async def identify(settings, sender):
@@ -151,6 +158,58 @@ async def reply(settings, sender, prompt, access):
         return 'AI-agent сейчас недоступен. Команды бота доступны.'
 
 
+BUTTON_COMMANDS = {'Сервер': '/status', 'Ресурсы': '/resources', 'Службы': '/services',
+                   'Компоненты': '/components', 'Модели AI': '/models',
+                   'Текущая модель': '/model', 'AI по умолчанию': '/model default', 'Помощь': '/help'}
+
+
+def reply_keyboard(access):
+    rows = [['Модели AI', 'Текущая модель'], ['AI по умолчанию', 'Помощь']]
+    if access is True:
+        rows = [['Сервер', 'Ресурсы'], ['Службы', 'Компоненты']] + rows
+    if not access:
+        return {'remove_keyboard': True}
+    return {'keyboard': [[{'text': text} for text in row] for row in rows],
+            'resize_keyboard': True, 'is_persistent': True, 'input_field_placeholder': 'Напишите вопрос Нодере…'}
+
+
+def inline_keyboard(answer, prompt, access, actions):
+    """Opaque callbacks are scoped to one actor; long model IDs stay server-side."""
+    rows = []
+    def button(text, command):
+        key = secrets.token_hex(8)
+        actions[key] = command
+        return {'text': text[:60], 'callback_data': 'nd:' + key}
+    command = prompt.split()[0].split('@')[0].lower()
+    if access and command == '/models' and answer.startswith('Модели · страница '):
+        for model in answer.split('\n\n', 1)[0].splitlines()[1:]:
+            rows.append([button(model, '/model ' + model)])
+        page = re.search(r'страница (\d+)/(\d+)', answer)
+        if page:
+            current, total = map(int, page.groups())
+            navigation = []
+            if current > 1: navigation.append(button('← Назад', f'/models {current - 1}'))
+            if current < total: navigation.append(button('Далее →', f'/models {current + 1}'))
+            if navigation: rows.append(navigation)
+        rows.append([button('AI по умолчанию', '/model default')])
+    if access is True and command == '/services':
+        for line in answer.splitlines()[1:]:
+            parts = line.split(' · ')
+            if len(parts) != 3: continue
+            identity, _, available = parts
+            if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', identity): continue
+            row = [button(identity + ' · ' + action, f'/service {identity} {action}')
+                   for action in available.split(', ') if action in ('start', 'stop', 'restart')]
+            if row: rows.append(row)
+    confirmation = re.search(r'/confirm ([0-9a-f]{8})', answer)
+    if access is True and confirmation:
+        rows.append([button('Подтвердить действие', '/confirm ' + confirmation[1]), button('Отмена', '/cancel')])
+    operation = re.search(r'/operation ([0-9a-f]{32})', answer)
+    if access is True and operation:
+        rows.append([button('Проверить результат', '/operation ' + operation[1])])
+    return {'inline_keyboard': rows} if rows else None
+
+
 async def bot(settings):
     if not settings['modules']['nodera-bot'] or not settings.get('bot_token'):
         raise ValueError('Нужен токен включённого NoderaBot')
@@ -163,41 +222,62 @@ async def bot(settings):
     offset = json.loads(state_file.read_text()).get('offset', 0) if state_file.exists() else 0
     last = {}
     menus = {}
+    callbacks = {}
     while True:
         try:
-            updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message'])
+            updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'callback_query'])
             for update in updates:
                 offset = max(offset, update['update_id'] + 1)
                 temporary = state_file.with_suffix('.tmp')
                 temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
-                message = update.get('message', {})
-                sender = message.get('from', {})
+                callback = update.get('callback_query')
+                message = callback.get('message', {}) if callback else update.get('message', {})
+                sender = callback.get('from', {}) if callback else message.get('from', {})
                 actor = sender.get('id')
                 if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
-                prompt = message.get('text', '').strip()
-                if time.monotonic() - last.get(actor, 0) < 3: continue
+                if callback:
+                    await bot_api(settings, 'answerCallbackQuery', callback_query_id=callback['id'])
+                    key = callback.get('data', '')
+                    prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
+                    if not prompt:
+                        await bot_api(settings, 'sendMessage', chat_id=actor, text='Это меню устарело. Откройте раздел кнопкой ниже.')
+                        continue
+                else:
+                    prompt = message.get('text', '').strip()
+                    prompt = BUTTON_COMMANDS.get(prompt, prompt)
+                if not prompt.startswith('/') and time.monotonic() - last.get(actor, 0) < 3: continue
                 if len(last) >= 1000:
                     last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
                     if len(last) >= 1000: continue
-                last[actor] = time.monotonic()
+                if not prompt.startswith('/'):
+                    last[actor] = time.monotonic()
                 try: access = await identify(settings, sender)
                 except Exception: access = False
                 if not prompt: continue
                 admin = access is True
-                if menus.get(actor) is not admin:
+                role = 'admin' if admin else 'chat' if access == 'chat' else 'guest'
+                if menus.get(actor) != role:
                     try:
-                        await command_menu(settings, actor, admin)
+                        await command_menu(settings, actor, admin, access == 'chat')
                         if len(menus) >= 1000: menus.clear()
-                        menus[actor] = admin
+                        menus[actor] = role
                     except Exception: logging.error('NoderaBot private command menu could not be updated')
                 answer = await reply(settings, sender, prompt, access)
                 if access:
                     # A request can outlive a permission change.
                     try: current_access = await identify(settings, sender)
                     except Exception: current_access = False
-                    if current_access != access: answer = public_reply(sender, '')
+                    if current_access != access:
+                        access = False
+                        answer = public_reply(sender, '')
+                if len(callbacks) >= 1000: callbacks.clear()
+                actions = {}
+                markup = inline_keyboard(answer, prompt, access, actions)
+                if actions: callbacks[actor] = actions
                 for chunk in telegram_chunks(answer):
-                    await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML')
+                    await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=reply_keyboard(access))
+                if markup:
+                    await bot_api(settings, 'sendMessage', chat_id=actor, text='Выберите действие:', reply_markup=markup)
         except Exception:
             logging.error('NoderaBot polling or delivery failed')
             await asyncio.sleep(5)

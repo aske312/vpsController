@@ -55,7 +55,7 @@ async def main():
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     names = {tool.name for tool in (await session.list_tools()).tools}
-                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel'}, names
+                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api'}, names
                     result = await session.call_tool('vps_overview', {})
                     assert not result.isError, result
                     assert 'isolated-fixture' in '\n'.join(part.text for part in result.content)

@@ -516,8 +516,19 @@ def require_assistant_control(authorization: str | None = Header(default=None),
 
 
 @app.post('/api/assistant/control-tool', dependencies=[Depends(require_assistant_control)])
-def assistant_control_tool(payload: assistant_control.ToolCall) -> dict:
-    return assistant_control.control_tool(sys.modules[__name__], payload.name)
+def assistant_control_tool(payload: assistant_control.ToolCall,
+                           actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_control.control_tool(sys.modules[__name__], payload.name, payload.model_dump(exclude={'name'}, exclude_none=True), actor)
+
+
+@app.post('/api/assistant/service-confirm')
+def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _: None = Depends(require_token)) -> dict:
+    api = sys.modules[__name__]
+    actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
+    value = assistant_control.read(api)
+    assistant_control.authorize_control(api, 'Bearer ' + value['control_token'], actor)
+    return {'text': assistant_commands.execute(api, actor, '/confirm ' + payload.code)}
+
 
 
 def system_boot_time() -> datetime | None:

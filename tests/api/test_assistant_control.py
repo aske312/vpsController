@@ -81,6 +81,28 @@ class AssistantTests(unittest.TestCase):
             'requests': 2, 'prompt_tokens': 41, 'completion_tokens': 9, 'reported_requests': 1,
         })
 
+    def test_catalog_default_is_saved_and_bot_override_can_be_reset(self):
+        saved = self.save()['settings']
+        provider = {key: value for key, value in saved['providers'][0].items() if key != 'api_key_configured'}
+        provider.update(model_mode='catalog', model='default-model', api_key=None)
+        payload = self.payload()
+        payload.update(component='nodera', expected_revision=saved['revision'], providers=[provider],
+                       active_provider=provider['id'], bot_token=None)
+        configured = self.save(payload)
+        self.assertEqual(configured['settings']['model'], 'default-model')
+        value = control.read(api)
+        value['memory_enabled'] = False
+        with patch.object(control, 'runtime_request', return_value={'result': {'answer': 'OK'}}) as runtime:
+            control.chat_request(api, control.Chat(prompt='hello'), '11', 'bot', settings=value)
+            self.assertEqual(runtime.call_args.args[2]['model'], 'default-model')
+            with patch.object(control, 'model_catalog', return_value={'models': ['override']}):
+                control.bot_models(api, '11', model='override')
+            control.chat_request(api, control.Chat(prompt='hello'), '11', 'bot', settings=value)
+            self.assertEqual(runtime.call_args.args[2]['model'], 'override')
+            control.bot_models(api, '11', model='default')
+            control.chat_request(api, control.Chat(prompt='hello'), '11', 'bot', settings=value)
+            self.assertEqual(runtime.call_args.args[2]['model'], 'default-model')
+
     def test_telegram_identity_matches_only_the_verified_token(self):
         payload = self.payload()
         payload.update(component='nodera', bot_token='123456:abcdefghijklmnopqrstuvwxyz0123456789')
