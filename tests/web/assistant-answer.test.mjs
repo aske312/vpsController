@@ -32,3 +32,11 @@ test('export contains dialogue text and file names without embedding attachment 
   assert.ok(markdown.includes('Summary'));
   assert.ok(!markdown.includes('private-base64'));
 });
+
+test('internet sources use safe links while executable URLs and raw HTML stay text', () => {
+  const html = renderToStaticMarkup(createElement(AssistantAnswer, { text: '[Source](https://example.com/docs) [Unsafe](javascript:alert(1)) [Secret](https://user:password@example.com)' }));
+  assert.ok(html.includes('href="https://example.com/docs"'));
+  assert.ok(html.includes('noopener noreferrer nofollow'));
+  assert.ok(!html.includes('href="javascript:'));
+  assert.ok(!html.includes('href="https://user:password'));
+});

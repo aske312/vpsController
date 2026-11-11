@@ -3,7 +3,16 @@ import { answerBlocks, tableRows } from './answer-format';
 import { ChatIcon } from './chat-icon';
 
 function inline(text: string): ReactNode[] {
-    return text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|~~[^~\n]+~~)/g).map((part, index) => part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part.startsWith('*') && part.endsWith('*') ? <em key={index}>{part.slice(1, -1)}</em> : part.startsWith('~~') && part.endsWith('~~') ? <del key={index}>{part.slice(2, -2)}</del> : part);
+    return text.split(/(`[^`\n]+`|\[[^\]\n]{1,200}\]\(https?:\/\/[^\s<>]+\)|\*\*[^*\n]+\*\*|\*[^*\n]+\*|~~[^~\n]+~~)/g).map((part, index) => {
+      const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s<>]+)\)$/);
+      if (link) {
+        try {
+          const url = new URL(link[2]);
+          if (!url.username && !url.password) return <a key={index} href={url.href} target="_blank" rel="noopener noreferrer nofollow">{link[1]}</a>;
+        } catch { /* Malformed source links remain literal text. */ }
+      }
+      return part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part.startsWith('*') && part.endsWith('*') ? <em key={index}>{part.slice(1, -1)}</em> : part.startsWith('~~') && part.endsWith('~~') ? <del key={index}>{part.slice(2, -2)}</del> : part;
+    });
 }
 function prose(text: string) {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');

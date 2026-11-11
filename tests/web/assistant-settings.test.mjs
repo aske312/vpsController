@@ -106,7 +106,10 @@ test('running Telegram bot locks its token and shows the stop action', async () 
   const toggles = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox');
   assert.equal(toggles.length, 0);
   assert.equal(nodes(tree, n => n.type === 'fieldset' && n.props.className === 'noderaBotToken')[0].disabled, true);
-  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Остановить')[0].disabled, false);
+  const botSwitch = nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'Telegram bot')[0];
+  assert.equal(botSwitch.disabled, false);
+  assert.equal(botSwitch.node.props['aria-checked'], true);
+  assert.equal(nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'AI').length, 1);
 });
 
 test('chat scope lives in settings and subscription binding is saved with address preferences', async () => {

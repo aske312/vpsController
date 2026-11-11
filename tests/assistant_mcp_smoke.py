@@ -77,6 +77,18 @@ async def main():
                     names = {tool.name for tool in (await session.list_tools()).tools}
                     assert names == {'tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'}, names
             print('Telegram stdio tool discovery (no account login or write): passed')
+            settings['accounts'][0]['bot_chat_access'] = True
+            config.write_text(json.dumps(settings))
+            params = StdioServerParameters(command=sys.executable,
+                args=[str(ROOT / 'protocol-images/ai-agent/runner.py'), '--mcp', 'web'],
+                env={'NODERA_CONFIG': str(config), 'NODERA_ACTOR': '11'})
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    names = {tool.name for tool in (await session.list_tools()).tools}
+                    assert names == {'web_search', 'web_read'}, names
+                    assert (await session.call_tool('web_read', {'url': 'https://localhost/'})).isError
+            print('Web stdio discovery and private target rejection: passed')
         finally:
             server.shutdown(); server.server_close(); thread.join()
 

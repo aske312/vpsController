@@ -262,42 +262,41 @@
 .noderaAISwitch[aria-checked=true] { color:var(--cyan); }
 .noderaAISwitch[aria-checked=true] .noderaSwitchTrack { background:rgba(97,207,216,.3); }
 .noderaAISwitch[aria-checked=true] .noderaSwitchTrack > span { background:var(--cyan); transform:translateX(13px); }
-.mcpWorkspace .noderaProviderChoice { display:flex; align-items:center; gap:7px; color:var(--text); cursor:pointer; }
-.mcpWorkspace .noderaProviderChoice input { width:14px; height:14px; min-height:0; padding:0; accent-color:var(--cyan); }
 .noderaProviderModel { display:flex; align-items:center; gap:3px; }
 .noderaProviderModel select { flex:1; }
-.noderaProviderTable { min-width:500px; table-layout:fixed; }
-.noderaProviderTable th:first-child { width:32%; }
-.noderaProviderTable th:last-child { width:40px; }
+.noderaProviderTable { min-width:660px; table-layout:fixed; }
+.noderaProviderTable :is(th,td) { padding:6px; vertical-align:middle; }
+.noderaProviderTable .noderaDefaultColumn { width:28px; text-align:center; }
+.noderaProviderTable th:nth-child(2) { width:25%; }
+.noderaProviderTable th:nth-child(3) { width:30%; }
+.noderaProviderTable th:last-child { width:32px; }
+.mcpWorkspace .noderaDefaultColumn input { width:14px; height:14px; min-height:0; padding:0; accent-color:var(--cyan); }
 .noderaProviderTable .isDefaultProvider { background:rgba(97,207,216,.035); }
-.noderaAccessTable { min-width:1050px; font-size:11px; }
-.noderaAccessTable :is(th,td) { vertical-align:top; }
-.noderaAccessTable tbody th { min-width:115px; }
-.noderaAccessTable td:nth-child(2) { width:220px; min-width:190px; }
-.noderaAccessTable td:nth-child(3) { min-width:140px; }
-.noderaAccessTable td:nth-child(4) { min-width:140px; }
-.noderaAccessTable td:nth-child(5) { min-width:120px; }
-.noderaAccessTable td:nth-child(6) { min-width:180px; }
-.mcpWorkspace .noderaAccessTable :is(select,input) { min-height:30px; padding:4px 6px; font-size:11px; }
-.noderaAccessTable small { display:block; margin-top:4px; }
-.noderaUserDetails,.noderaUserEditors { display:grid; gap:5px; }
+.noderaAccessTable { min-width:0; font-size:11px; }
+.noderaAccessTable :is(th,td) { vertical-align:middle; }
+.noderaAccessTable th:first-child { width:35%; }
+.noderaAccessTable small { display:block; margin-top:3px; }
+.noderaHeroFacts dd .noderaAISwitch { max-width:100%; padding:3px 5px; font-size:10px; }
+.noderaHeroFacts dt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .noderaTags { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:5px; }
 .noderaTag { display:inline-flex; align-items:center; padding:3px 7px; border:1px solid var(--line); border-radius:999px; background:rgba(30,49,65,.45); color:var(--muted); font:10px/1.4 var(--ui-font); overflow-wrap:anywhere; }
 button.noderaTag { cursor:pointer; }
 .noderaTag.isSelected { color:var(--cyan); background:rgba(97,207,216,.09); border-color:rgba(97,207,216,.3); }
 .mcpWorkspace .noderaUserBio { color:var(--text); font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }
-@container (max-width:640px) { .noderaProviderTable { min-width:340px; } .noderaProviderTable th:first-child { width:40%; } }
+@container (max-width:640px) { .noderaProviderTable { min-width:440px; } }
 @media (prefers-reduced-motion:reduce) { .noderaSwitchTrack > span { transition:none; } }
-
 @container (max-width:480px) {
  .noderaSwitchLabel { display:none; }
- .noderaAISwitch { padding:4px 6px; }
+ .noderaAISwitch { padding:3px 5px; }
  .noderaProviderTable,.noderaProviderTable tbody { display:block; min-width:0; }
  .noderaProviderTable thead { display:none; }
- .noderaProviderTable tbody tr { display:grid; grid-template-columns:minmax(0,1fr) 32px; gap:4px; padding:7px 0; border-bottom:1px solid var(--line); }
- .noderaProviderTable tbody :is(th,td) { width:auto; min-width:0; border:0; padding:4px; }
- .noderaProviderTable tbody th:first-child { width:auto; grid-column:1; grid-row:1; }
- .noderaProviderTable tbody td:nth-child(2) { grid-column:1/-1; grid-row:2; }
- .noderaProviderTable tbody td:nth-child(2)::before { content:"Модель по умолчанию"; display:block; margin-bottom:4px; font-size:10px; color:var(--muted); }
- .noderaProviderTable tbody td:last-child { grid-column:2; grid-row:1; }
+ .noderaProviderTable tbody tr { display:grid; grid-template-columns:24px minmax(0,1fr) 28px; gap:3px; padding:5px 0; border-bottom:1px solid var(--line); }
+ .noderaProviderTable tbody :is(th,td) { width:auto; min-width:0; border:0; padding:3px; }
+ .noderaProviderTable tbody .noderaDefaultColumn { grid-column:1; grid-row:1; }
+ .noderaProviderTable tbody th:nth-child(2) { width:auto; grid-column:2; grid-row:1; }
+ .noderaProviderTable tbody td:nth-child(3) { grid-column:2/-1; grid-row:2; }
+ .noderaProviderTable tbody td:nth-child(3)::before { content:"Модель по умолчанию"; display:block; margin-bottom:3px; font-size:10px; color:var(--muted); }
+ .noderaProviderTable tbody td:last-child { grid-column:3; grid-row:1; }
+ .noderaAccessTable th:first-child { width:40%; }
+ .noderaAccessTable :is(th,td) { padding:6px 3px; }
 }

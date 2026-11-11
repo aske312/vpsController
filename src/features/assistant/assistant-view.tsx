@@ -314,7 +314,6 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   const canUpdate = !status.nodera_management || status.nodera_management.state === "managed" && !status.nodera_management.retained;
   const isChat = panel === "chat";
   const activeProvider = status.settings.providers?.find(item => item.id === status.settings.active_provider);
-  const botStatus = status.bot.active ? "Работает" : status.settings.bot_token_configured ? "Настроен" : "Не подключён";
   return <div className={`mcpWorkspace noderaWorkspace ${isChat ? "isChat" : ""}`}>
     {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
     {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
@@ -371,7 +370,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
           <div className="mcpIdentity">
             <ProtocolIcon protocol={panel === "users" ? "nodera-bot" : "nodera"}/>
             <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1></div>
-            {panel === "settings" ? <button type="button" role="switch" aria-label="AI" aria-checked={draft.modules["ai-agent"]} className="noderaAISwitch" title={draft.modules["ai-agent"] ? "Выключить AI" : "Включить AI"} disabled={blocked || !selectedComponent?.installed} onClick={() => patch({ modules: { ...draft.modules, "ai-agent": !draft.modules["ai-agent"] } })}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{draft.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span></button> : <span className="mcpBadge">{botStatus}</span>}
+
           </div>
           <p className="noderaHeroDescription"><span className="noderaHeroDetail">{panel === "settings"
             ? "Выберите AI по умолчанию, подключите инструменты VPS и Telegram, настройте характер и память Нодеры."
@@ -379,12 +378,12 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
           <dl className="noderaHeroFacts">
             {panel === "settings" ? <>
               <div><dt>Активный API</dt><dd title={activeProvider?.name}>{activeProvider?.name ?? "—"}</dd></div>
-              <div><dt>AI по умолчанию</dt><dd title={status.settings.model}>{status.settings.model || "Не выбран"}</dd></div>
-              <div><dt>MCP</dt><dd>{status.mcp_modules.filter(item => item.enabled).length} / {status.mcp_modules.length}</dd></div>
+              <div><dt>AI</dt><dd><button type="button" role="switch" aria-label="AI" aria-checked={draft.modules["ai-agent"]} className="noderaAISwitch" title={draft.modules["ai-agent"] ? "Выключить AI" : "Включить AI"} disabled={blocked || !selectedComponent?.installed} onClick={() => patch({ modules: { ...draft.modules, "ai-agent": !draft.modules["ai-agent"] } })}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{draft.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span></button></dd></div>
+              <div><dt>MCP</dt><dd>{status.mcp_modules.filter(item => item.enabled).length + (status.web_tools && status.settings.web_enabled !== false ? 1 : 0)} / {status.mcp_modules.length + (status.web_tools ? 1 : 0)}</dd></div>
             </> : <>
-              <div><dt>Telegram</dt><dd>{status.bot_username ? `@${status.bot_username}` : botStatus}</dd></div>
-              <div><dt>Пользователи</dt><dd>{status.settings.accounts.length}</dd></div>
-              <div><dt>Администраторы бота</dt><dd>{status.settings.accounts.filter(item => item.bot_access).length}</dd></div>
+              <div><dt title={status.bot_username ? `@${status.bot_username}` : undefined}>Telegram</dt><dd><button type="button" role="switch" aria-label="Telegram bot" aria-checked={status.bot.active === true} className="noderaAISwitch" disabled={blocked || !botComponent?.installed || botComponent.management?.state !== "managed" || typeof status.bot.active !== "boolean" || !status.bot.active && (!(draft.bot_token ?? draft.bot_token_configured) || status.legacy_bot.active === true)} title={status.bot.active ? "Остановить Telegram-бота" : "Запустить Telegram-бота"} onClick={() => void runAction(status.bot.active ? "stop" : "start")}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{status.bot.active ? "Включён" : "Выключен"}</span></button></dd></div>
+              <div><dt>AI</dt><dd><button type="button" role="switch" aria-label="AI" aria-checked={draft.modules["ai-agent"]} className="noderaAISwitch" title={draft.modules["ai-agent"] ? "Выключить AI" : "Включить AI"} disabled={blocked || !selectedComponent?.installed} onClick={() => patch({ modules: { ...draft.modules, "ai-agent": !draft.modules["ai-agent"] } })}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{draft.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span></button></dd></div>
+              <div><dt>Пользователи</dt><dd>{status.settings.accounts.length} / {status.settings.accounts.filter(item => item.bot_access).length} админ</dd></div>
             </>}
           </dl>
         </div>
@@ -402,7 +401,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
       {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
       <NoderaSettings panel={panel} request={request} status={status} draft={draft} patch={patch}
         blocked={blocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
-        runAction={runAction} working={working}/>
+        working={working}/>
     </>}
   </div>;
 }

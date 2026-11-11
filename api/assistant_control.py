@@ -89,6 +89,7 @@ class Settings(BaseModel):
     active_provider: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     assistant_style: Literal['balanced', 'concise', 'friendly', 'technical'] = 'balanced'
     assistant_instructions: str = Field(default='', max_length=4000)
+    web_enabled: StrictBool = True
     memory_enabled: StrictBool = True
     memory_days: int = Field(default=30, strict=True, ge=1, le=90)
     telegram_api_id: int | None = Field(default=None, strict=True, gt=0)
@@ -325,7 +326,7 @@ def _read(api):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
     if value.get('mcp_installed') is None:
         value['mcp_installed'] = list(MCP_MODULES)
-    for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30)):
+    for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
         value.setdefault(key, default)
     return value
 
@@ -348,7 +349,7 @@ def store(api, value):
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
     ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
-    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30))})
+    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
               accounts=[{key: item for key, item in a.items() if key not in ('bot_access', *ACCOUNT_OPTIONS)} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -509,13 +510,14 @@ def status(api):
             'chat_attachments': agent_version >= (1, 1, 0),
             'agent_version': '.'.join(map(str, agent_version)),
             'chat_persona': agent_version >= (1, 2, 0),
+            'web_tools': agent_version >= (1, 7, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'installed': key in value['mcp_installed'],
                              'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'mcp vps'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
-            'tools': {'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
+            'tools': {'web': ['web_search', 'web_read'] if agent_version >= (1, 7, 0) else [], 'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
                           (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else []) +
                           (['vps_service_action', 'vps_operation', 'vps_api'] if agent_version >= (1, 5, 0) else []) +
@@ -552,13 +554,13 @@ def configure(api, payload):
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
-        for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('memory_enabled', True), ('memory_days', 30)):
+        for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
             if key not in payload.model_fields_set:
                 submitted[key] = old.get(key, default)
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         if submitted['mcp_installed'] is None:
             submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
-        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'memory_enabled', 'memory_days')
+        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'web_enabled', 'memory_enabled', 'memory_days')
         keys = ai_keys + ('bot_token',) if unified else ai_keys if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         if unified and submitted['providers'] is not None:

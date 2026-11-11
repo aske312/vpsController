@@ -81,6 +81,16 @@ class AssistantTests(unittest.TestCase):
             'requests': 2, 'prompt_tokens': 41, 'completion_tokens': 9, 'reported_requests': 1,
         })
 
+    def test_web_access_can_be_disabled_and_legacy_settings_edits_preserve_it(self):
+        payload = self.payload()
+        payload['web_enabled'] = False
+        saved = self.save(payload)
+        self.assertFalse(saved['settings']['web_enabled'])
+        payload.pop('web_enabled')
+        payload['expected_revision'] = saved['settings']['revision']
+        self.save(payload)
+        self.assertFalse(control.read(api)['web_enabled'])
+
     def test_catalog_default_is_saved_and_bot_override_can_be_reset(self):
         saved = self.save()['settings']
         provider = {key: value for key, value in saved['providers'][0].items() if key != 'api_key_configured'}
