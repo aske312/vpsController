@@ -209,7 +209,11 @@ class ServerCommandTests(unittest.TestCase):
             with patch.object(bot, 'bot_api', new=AsyncMock()) as transport:
                 await bot.command_menu({}, 11, True)
                 self.assertEqual(transport.call_args.kwargs['scope'], {'type': 'chat', 'chat_id': 11})
-                self.assertIn('service', [row['command'] for row in transport.call_args.kwargs['commands']])
+                published = [row['command'] for row in transport.call_args.kwargs['commands']]
+                self.assertIn('status', published)
+                self.assertNotIn('service', published)
+                self.assertNotIn('confirm', published)
+                self.assertNotIn('cancel', published)
                 await bot.command_menu({}, 22, False)
                 self.assertEqual([row['command'] for row in transport.call_args.kwargs['commands']], ['start', 'help', 'id'])
         asyncio.run(check())

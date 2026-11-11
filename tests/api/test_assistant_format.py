@@ -54,6 +54,7 @@ class AssistantFormatTests(unittest.TestCase):
     def test_nodera_persona_tone_and_permissions_are_in_every_request(self):
         value = runner.persona({'server_name': 'test-host', 'assistant_style': 'technical', 'assistant_instructions': 'Use exact units', 'api_key': 'secret-key'})
         self.assertIn('девушка', value)
+        self.assertIn('AI-ассистент', value)
         self.assertIn('женском роде', value)
         self.assertIn('test-host', value)
         self.assertIn('Use exact units', value)

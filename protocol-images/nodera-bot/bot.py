@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import secrets
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 import sys
 import tempfile
@@ -57,12 +58,31 @@ def telegram_chunks(text):
     return chunks
 
 PUBLIC_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка'), ('id', 'Мой Telegram ID')]
-CHAT_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Выбрать модель AI')]
-ADMIN_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Выбрать модель AI')] + [
+CHAT_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI')]
+ADMIN_COMMANDS = PUBLIC_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
-    ('services', 'Службы и доступные действия'), ('components', 'Установленные компоненты'),
-    ('service', 'Управление: ID start|stop|restart'), ('confirm', 'Подтвердить действие: код'),
-    ('cancel', 'Отменить ожидающее подтверждение'), ('operation', 'Результат операции: ID')]
+    ('services', 'Состояние служб'), ('components', 'Установленные компоненты')]
+TYPING_INTERVAL = 4
+
+
+@asynccontextmanager
+async def typing(settings, actor):
+    async def keep_alive():
+        while True:
+            started = time.monotonic()
+            try:
+                await asyncio.wait_for(bot_api(settings, 'sendChatAction', chat_id=actor, action='typing'), timeout=3)
+            except Exception:
+                pass  # A cosmetic status must never discard or delay an AI answer.
+            await asyncio.sleep(max(0.01, TYPING_INTERVAL - (time.monotonic() - started)))
+    task = asyncio.create_task(keep_alive(), name=f'nodera-typing-{actor}')
+    try:
+        await asyncio.sleep(0)
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def command_menu(settings, actor=None, admin=False, chat=False):
@@ -80,7 +100,7 @@ async def server_command(settings, actor, prompt):
             json={'command': prompt})
         if response.status_code != 200:
             if response.status_code in (401, 403):
-                return 'Доступ администратора бота не подтверждён.'
+                return 'Недостаточно прав для этого действия.'
             if response.status_code in (404, 409):
                 detail = response.json().get('detail')
                 if isinstance(detail, str): return detail[:1000]
@@ -103,8 +123,8 @@ async def agent_request(settings, actor, prompt):
             json={'prompt': prompt})
         if response.status_code != 200:
             if response.status_code == 409:
-                return 'AI-agent не установлен, остановлен или не принят под управление. Команды бота доступны.'
-            return 'AI-agent не выполнил запрос. Проверьте настройки и доступ провайдера в панели.'
+                return 'Сейчас я не могу подготовить ответ. Информационные команды доступны; владелец может проверить настройки AI.'
+            return 'Не получилось подготовить ответ. Попробуйте немного позже.'
         value = response.json()
         answer = value['result']['answer']
         pending = value.get('pending_action')
@@ -154,34 +174,50 @@ async def identify(settings, sender):
 def public_reply(sender, command):
     if command in ('/id', '/userid'):
         tag = '\nТег: @' + sender['username'] if sender.get('username') else ''
-        return f"Ваш Telegram ID: {sender['id']}{tag}\nПередайте ID владельцу бота, если вам нужен доступ администратора."
+        return f"Ваш Telegram ID: {sender['id']}{tag}\nДля доступа к ассистенту передайте этот ID владельцу."
     if command in ('/start', '/help'):
-        return 'Привет! Я Нодера 👋\nМогу подсказать ваш Telegram ID: /id. Доступ к серверу выдаёт владелец бота.'
-    return 'Я Нодера 👋 Для получения доступа обратитесь к владельцу бота. Ваш Telegram ID можно узнать командой /id.'
+        return 'Привет! Я Нодера, ваш AI-ассистент 👋\nПомогаю с вопросами и доступными вам настройками. Чтобы начать общение, попросите владельца открыть доступ.\n/id — ваш Telegram ID, /help — справка.'
+    return 'Я Нодера, ваш AI-ассистент 👋 Чтобы начать общение, обратитесь к владельцу. Ваш Telegram ID: /id.'
+
+
+def assistant_help(admin=False):
+    text = ('Привет! Я Нодера, ваш AI-ассистент 👋\n'
+            'Отвечаю на вопросы, помогаю разобраться с подпиской и доступными настройками. '
+            'Просто напишите, чем помочь — команды помнить не нужно.\n\n'
+            'Информация:\n/id — ваш Telegram ID\n/models — доступные модели\n/model — текущая модель')
+    if admin:
+        text += '\n/status — состояние сервера\n/resources — ресурсы\n/services — состояние служб\n/components — компоненты'
+    return text
+
+
+def informational_reply(command, answer):
+    if answer.startswith('Неизвестная команда'):
+        return 'Не узнала команду. Напишите, что хотите сделать, или откройте /help.'
+    if command == '/services':
+        rows = [line.split(' · ') for line in answer.splitlines()]
+        states = [' · '.join(parts[:2]) for parts in rows if len(parts) == 3 and re.fullmatch(r'[a-zA-Z0-9_.:@-]{1,80}', parts[0])]
+        return 'Состояние служб:\n' + '\n'.join(states) if states else 'Не удалось получить состояние служб. Попробуйте немного позже.'
+    return answer
 
 
 async def reply(settings, sender, prompt, access):
     command = prompt.split()[0].split('@')[0].lower()
     if command in ('/id', '/userid') or not access:
         return public_reply(sender, command)
-    if access == 'chat' and command in ('/help', '/start'):
-        return 'Привет! Я Нодера 👋 Напишите вопрос. /models — модели, /model <ID> — выбрать модель.'
     if command in ('/start', '/help'):
-        try:
-            return 'Привет! Я Нодера 👋 У вас доступ администратора бота.\n' + await server_command(settings, sender['id'], '/help')
-        except Exception:
-            return 'Команды сервера сейчас недоступны. Проверьте панель и повторите /help.'
+        return assistant_help(access is True)
     if command.startswith('/'):
         if access == 'chat' and command not in ('/models', '/model', '/confirm', '/cancel', '/operation'):
             return 'Вам доступен чат. /help — доступные команды.'
         try:
-            return await server_command(settings, sender['id'], prompt)
+            return informational_reply(command, await server_command(settings, sender['id'], prompt))
         except Exception:
             return 'Не удалось получить результат команды. Проверьте панель или /operation с ID операции. Не повторяйте изменение, пока не проверите его результат.'
     try:
-        return await agent_request(settings, sender['id'], prompt)
+        async with typing(settings, sender['id']):
+            return await agent_request(settings, sender['id'], prompt)
     except Exception:
-        return 'AI-agent сейчас недоступен. Команды бота доступны.'
+        return 'Сейчас не получилось подготовить ответ. Попробуйте немного позже.'
 
 
 BUTTON_COMMANDS = {'Сервер': '/status', 'Ресурсы': '/resources', 'Службы': '/services',
@@ -190,7 +226,7 @@ BUTTON_COMMANDS = {'Сервер': '/status', 'Ресурсы': '/resources', '�
 
 
 def reply_keyboard(access):
-    rows = [['Модели AI', 'Текущая модель'], ['AI по умолчанию', 'Помощь']]
+    rows = [['Модели AI', 'Текущая модель'], ['Помощь']]
     if access is True:
         rows = [['Сервер', 'Ресурсы'], ['Службы', 'Компоненты']] + rows
     if not access:
@@ -218,15 +254,6 @@ def inline_keyboard(answer, prompt, access, actions):
             if current < total: navigation.append(button('Далее →', f'/models {current + 1}'))
             if navigation: rows.append(navigation)
         rows.append([button('AI по умолчанию', '/model default')])
-    if access is True and command == '/services':
-        for line in answer.splitlines()[1:]:
-            parts = line.split(' · ')
-            if len(parts) != 3: continue
-            identity, _, available = parts
-            if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', identity): continue
-            row = [button(identity + ' · ' + action, f'/service {identity} {action}')
-                   for action in available.split(', ') if action in ('start', 'stop', 'restart')]
-            if row: rows.append(row)
     confirmation = re.search(r'/confirm ([0-9a-f]{8})', answer)
     if access and confirmation:
         rows.append([button('Подтвердить действие', '/confirm ' + confirmation[1]), button('Отмена', '/cancel')])
