@@ -6,6 +6,9 @@ runs:
     - name: Install WireGuard and nftables
       shell: bash
       run: |
+        echo 'Checking runner DNS before installing network test dependencies'
+        timeout 20s getent ahostsv4 archive.ubuntu.com
+        timeout 20s sudo -u _apt getent ahostsv4 archive.ubuntu.com
         # Hosted Ubuntu runners use Azure mirror lists, whose DNS can fail
         # independently of the standard Ubuntu archive and security mirrors.
         for list in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt; do
@@ -15,5 +18,5 @@ runs:
             sudo sed -i "s/azure\.archive\.ubuntu\.com/$mirror/g" "$list"
           fi
         done
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o APT::Update::Error-Mode=any update -qq
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq --no-install-recommends wireguard-tools nftables
+        sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o APT::Update::Error-Mode=any update -qq
+        sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq --no-install-recommends wireguard-tools nftables
