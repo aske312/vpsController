@@ -91,6 +91,22 @@ class AssistantTests(unittest.TestCase):
         self.save(payload)
         self.assertFalse(control.read(api)['web_enabled'])
 
+    def test_native_tools_settings_are_preserved_on_legacy_edits_and_domains_validated(self):
+        payload = self.payload()
+        payload.update(personalization_enabled=False, web_domains=['Docs.Example.org'])
+        saved = self.save(payload)['settings']
+        self.assertFalse(saved['personalization_enabled'])
+        self.assertEqual(saved['web_domains'], ['docs.example.org'])
+        payload.pop('personalization_enabled'); payload.pop('web_domains')
+        payload['expected_revision'] = saved['revision']
+        self.save(payload)
+        value = control.read(api)
+        self.assertFalse(value['personalization_enabled'])
+        self.assertEqual(value['web_domains'], ['docs.example.org'])
+        for domain in ['https://example.com', 'localhost', 'example.localhost', 'example.com/path', '127.0.0.1']:
+            payload['web_domains'] = [domain]
+            with self.assertRaises(ValueError): control.Settings.model_validate(payload)
+
     def test_catalog_default_is_saved_and_bot_override_can_be_reset(self):
         saved = self.save()['settings']
         provider = {key: value for key, value in saved['providers'][0].items() if key != 'api_key_configured'}

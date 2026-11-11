@@ -82,3 +82,38 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         settings['web_enabled'] = False
         self.assertFalse(runner.allowed(settings, '11', 'web'))
         self.assertFalse(runner.allowed(settings, 'panel', 'web'))
+
+    async def test_site_scope_filters_results_and_research_distinguishes_read_pages(self):
+        xml = b'<rss><channel><item><link>https://fake-example.com/no</link></item><item><link>https://docs.example.com/yes</link></item></channel></rss>'
+        with patch.object(runner, 'web_get', new=AsyncMock(return_value=('', 'text/xml', xml, 'utf-8'))) as get:
+            result = await runner.internet_search('product docs', ['example.com'])
+        self.assertEqual([item['url'] for item in result['results']], ['https://docs.example.com/yes'])
+        self.assertTrue(result['snippets_only'])
+        self.assertIn('site%3Aexample.com', get.call_args.args[0])
+        for sites in (['example.com/path'], ['https://example.com'], ['localhost'], ['example.com OR site:evil.com']):
+            with self.assertRaises(ValueError): runner.search_domains(sites)
+        with patch.object(runner, 'internet_search', new=AsyncMock(return_value={'results': [{'url': 'https://example.com/one'}, {'url': 'https://example.com/two'}]})), patch.object(runner, 'internet_read', new=AsyncMock(side_effect=[{'url': 'https://example.com/one', 'text': 'Verified source text', 'truncated': False}, RuntimeError('HTTP 403')])):
+            result = await runner.internet_research('question')
+        self.assertEqual(len(result['sources']), 1)
+        self.assertEqual(result['sources'][0]['text'], 'Verified source text')
+        self.assertEqual(result['unavailable'][0]['error'], 'HTTP 403')
+
+    async def test_native_tools_follow_toggles_and_explicit_memory_write_permits(self):
+        settings = {'web_enabled': True, 'accounts': [], 'mcp': {}, 'personalization_enabled': True}
+        tools = runner.native_connections(settings, 'panel')
+        self.assertIn('web_research', tools)
+        self.assertIn('context_read', tools)
+        self.assertNotIn('context_remember', tools)
+        settings['context_permits'] = {'remember': 'signed-proof'}
+        self.assertIn('context_remember', runner.native_connections(settings, 'panel'))
+        settings.update(web_enabled=False, personalization_enabled=False)
+        self.assertEqual(runner.native_connections(settings, 'panel'), {})
+
+    async def test_html_search_decodes_results_and_keeps_site_scope(self):
+        html = b'<html><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.example.com%2Fpage">Official <b>documentation</b></a><div class="result__snippet">Useful <b>summary</b></div></html>'
+        with patch.object(runner, 'web_get', new=AsyncMock(return_value=('', 'text/html', html, 'utf-8'))):
+            result = await runner.internet_search('documentation', ['example.com'])
+        self.assertEqual(result['provider'], 'DuckDuckGo')
+        self.assertEqual(result['results'][0]['url'], 'https://docs.example.com/page')
+        self.assertEqual(result['results'][0]['title'], 'Official documentation')
+        self.assertEqual(result['results'][0]['description'], 'Useful summary')

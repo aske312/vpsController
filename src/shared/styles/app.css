@@ -279,6 +279,10 @@
   border-color: rgba(86, 217, 233, .18);
 }
 
+.gateNavButton.green.active { background:linear-gradient(90deg,rgba(105,200,170,.18),rgba(105,200,170,.07)); border-color:rgba(105,200,170,.2); }
+.gateNavButton.green.active::before { background:var(--green); box-shadow:0 0 12px rgba(105,200,170,.5); }
+.gateNavButton.green.active .gateNavGlyph { color:var(--green); }
+
 .gateNavButton.compact {
   min-height: 38px;
 }

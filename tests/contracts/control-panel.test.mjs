@@ -137,13 +137,13 @@ test("log management runs bundled control safely and permits disabled retention"
   assert.match(manager, /chmod 0755 "\$\{INSTALL_DIR\}\/scripts\/vps-control\.sh"/);
 });
 
-test("the interface uses one fixed visual design without personalization", async () => {
+test("the interface uses one fixed visual design without theme preferences", async () => {
   const [page, api, css, manager] = await Promise.all([
     readUiSources(), readApiSources(), readStyles(), read("scripts/vps-control.sh"),
   ]);
-  assert.doesNotMatch(page, /personalization|data-(?:style|palette|density|theme)/i);
+  assert.doesNotMatch(page, /(?:visual|ui)[_-]?personalization|data-(?:style|palette|density|theme)/i);
   assert.doesNotMatch(page, /gate-art\/alternatives\/security-alt\.webp/);
-  assert.doesNotMatch(api, /personalization/i);
+  assert.doesNotMatch(api, /['"]\/api\/personalization['"]/i);
   assert.doesNotMatch(css, /personalization|data-(?:style|palette|density|theme)|task-manager/i);
   assert.match(page, /<AppWorkspace/);
   assert.match(css, /\.shell\.gateShell/);

@@ -92,7 +92,7 @@ def append(api, identity, actor, channel, question, files, result, model, settin
         record = _read(file) or {'schema': 1, 'id': identity, 'title': (question.strip().splitlines() or [files[0]['name'] if files else 'Новый диалог'])[0][:80], 'turns': []}
         attachments = [{**item, 'id': uuid.uuid4().hex, 'size': len(item['data']) * 3 // 4 - (len(item['data']) - len(item['data'].rstrip('=')))} for item in files]
         identity_turn = max((turn['id'] for turn in record['turns']), default=0) + 1
-        record['turns'].append({'id': identity_turn, 'question': question, 'files': attachments, 'answer': result['answer'], 'tools': result.get('tools_used', []), 'model': model})
+        record['turns'].append({'id': identity_turn, 'question': question, 'at': operations.timestamp(), 'files': attachments, 'answer': result['answer'], 'tools': result.get('tools_used', []), 'model': model})
         record['turns'] = record['turns'][-40:]
         file_bytes = 0
         for turn in reversed(record['turns']):

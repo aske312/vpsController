@@ -4,12 +4,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
+import { useNotifier } from "../../shared/notifications/notification-center";
+import { mutationFailureState } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
 import { AssistantAnswer } from "./assistant-answer";
 import { conversationMarkdown } from "./answer-format";
 import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
-import type { SystemAction } from "../../control-panel/system-operation";
+import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
 import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId, type ProviderUsage } from "./assistant-state";
 import { NoderaSettings, SettingsDialog, panels, type Panel } from "./nodera-settings";
 
@@ -21,7 +23,7 @@ type Props = {
   admitOperation: (path: string, options: RequestInit) => Promise<SystemAction | null | undefined>;
   onOperation: (operation: SystemAction) => void;
 };
-type PendingAction = { service: string; action: string; code: string; expires: number; changes?: Record<string, unknown> };
+type PendingAction = { service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown> };
 type Turn = { pending_action?: PendingAction; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string };
 type Conversation = { id: string; title: string; updated_at: string; turns: number };
 function shortTitle(title: string) {
@@ -39,8 +41,9 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   const [status, setStatus] = useState<McpStatus>();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const notify = useNotifier("nodera", "Nodera");
+  const setError = (text: string) => { if (text) notify.error(text); };
+  const setMessage = (text: string) => { if (text) notify.success(text); };
   const [working, setWorking] = useState("");
   const [actor, setActor] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -203,8 +206,10 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     writing.current = true; setWorking(id); setError("");
     try {
       const checked = await request<{ result?: { username?: string } }>(`/assistant/check/${id}`, { method: "POST", body: JSON.stringify({ telegram_id: actor ? Number(actor) : null, ...(id === "nodera-bot" ? { bot_token: draft?.bot_token } : {}) }) });
+      notify.success("Подключение проверено");
       setChecks(current => ({ ...current, [id]: { ok: true, text: "Подключение проверено", username: checked.result?.username, revision, actor } }));
     } catch (cause) {
+      notify.error(cause instanceof Error ? cause.message : "Проверка не выполнена");
       setChecks(current => ({ ...current, [id]: { ok: false, text: cause instanceof Error ? cause.message : "Проверка не выполнена", revision, actor } }));
     } finally { writing.current = false; setWorking(""); }
   }
@@ -256,10 +261,17 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
       message: "Подтвердите изменение. Оно может повлиять на подключения и устройства.", confirmLabel: "Подтвердить", danger: action.action !== "start" })) return;
     writing.current = true; setWorking("service"); setError("");
     try {
-      const result = await request<{ text: string }>("/assistant/service-confirm", { method: "POST",
+      const result = await request<{ text: string; operation?: SystemAction | null }>("/assistant/service-confirm", { method: "POST",
         body: JSON.stringify({ code: action.code, telegram_id: actor ? Number(actor) : null }) });
-      setTurns(current => current.map(item => item.id === turn.id ? { ...item, pending_action: undefined, action_result: result.text } : item));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Действие не выполнено"); }
+      if (result.operation) onOperation(systemActionSnapshot(result.operation));
+      else notify.info(result.text);
+      setTurns(current => current.map(item => item.id === turn.id ? { ...item, pending_action: undefined } : item));
+    } catch (cause) {
+      if (mutationFailureState(cause) === "unknown" && action.operation_id) {
+        onOperation({ id: action.operation_id, state: "unknown", message: "Проверяем результат отправленной команды." });
+        setTurns(current => current.map(item => item.id === turn.id ? { ...item, pending_action: undefined } : item));
+      } else setError(cause instanceof Error ? cause.message : "Действие не выполнено");
+    }
     finally { writing.current = false; setWorking(""); }
   }
   if (!status || !draft) return <section className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
@@ -317,8 +329,6 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   return <div className={`mcpWorkspace noderaWorkspace ${isChat ? "isChat" : ""}`}>
     {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
     {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
-    {error && <p className="mcpNotice error" role="alert">{error}</p>}
-    {message && <span className="sr-only" role="status">{message}</span>}
     {needsUpdate && <div className="mcpRuntimeUpdate" role="status"><span>{status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"}</span><button type="button" className="ghostButton" disabled={blocked || dirty || !canUpdate} onClick={() => void updateAgent()}>Обновить Nodera</button></div>}
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!blocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
       <div className="mcpChatHead">
@@ -336,7 +346,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
         {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
-        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.pending_action && <div className="mcpServiceConfirmation"><span>{turn.pending_action.action} · {turn.pending_action.service}</span>{turn.pending_action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(turn.pending_action.changes, null, 2)}</pre></details>}<button type="button" className="ghostButton" disabled={blocked} onClick={() => void confirmService(turn)}>Подтвердить действие</button></div>}{turn.action_result && <p className="mcpNotice" role="status">{turn.action_result}</p>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
+        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.pending_action && <div className="mcpServiceConfirmation"><span>{turn.pending_action.action} · {turn.pending_action.service}</span>{turn.pending_action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(turn.pending_action.changes, null, 2)}</pre></details>}<button type="button" className="ghostButton" disabled={blocked} onClick={() => void confirmService(turn)}>Подтвердить действие</button></div>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
       </div>
       <div className="mcpComposer">
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={blocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}
@@ -372,17 +382,14 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
             <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1></div>
 
           </div>
-          <p className="noderaHeroDescription"><span className="noderaHeroDetail">{panel === "settings"
-            ? "Выберите AI по умолчанию, подключите инструменты VPS и Telegram, настройте характер и память Нодеры."
-            : "Управляйте Telegram-ботом и доступом пользователей к AI, серверу и личным диалогам."}</span><span className="noderaHeroSummary">{panel === "settings" ? "Модели AI, инструменты и память." : "Telegram-бот, пользователи и права."}</span></p>
           <dl className="noderaHeroFacts">
             {panel === "settings" ? <>
-              <div><dt>Активный API</dt><dd title={activeProvider?.name}>{activeProvider?.name ?? "—"}</dd></div>
+              <div><dt>API / модель по умолчанию</dt><dd title={`${activeProvider?.name ?? ""} · ${status.settings.model}`}>{activeProvider?.name ?? "—"}<small className="noderaDefaultModel">{status.settings.model || "Модель не выбрана"}</small></dd></div>
               <div><dt>AI</dt><dd><button type="button" role="switch" aria-label="AI" aria-checked={draft.modules["ai-agent"]} className="noderaAISwitch" title={draft.modules["ai-agent"] ? "Выключить AI" : "Включить AI"} disabled={blocked || !selectedComponent?.installed} onClick={() => patch({ modules: { ...draft.modules, "ai-agent": !draft.modules["ai-agent"] } })}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{draft.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span></button></dd></div>
-              <div><dt>MCP</dt><dd>{status.mcp_modules.filter(item => item.enabled).length + (status.web_tools && status.settings.web_enabled !== false ? 1 : 0)} / {status.mcp_modules.length + (status.web_tools ? 1 : 0)}</dd></div>
+              <div><dt>MCP</dt><dd>{status.mcp_modules.filter(item => item.enabled).length} / {status.mcp_modules.length}</dd></div>
             </> : <>
               <div><dt title={status.bot_username ? `@${status.bot_username}` : undefined}>Telegram</dt><dd><button type="button" role="switch" aria-label="Telegram bot" aria-checked={status.bot.active === true} className="noderaAISwitch" disabled={blocked || !botComponent?.installed || botComponent.management?.state !== "managed" || typeof status.bot.active !== "boolean" || !status.bot.active && (!(draft.bot_token ?? draft.bot_token_configured) || status.legacy_bot.active === true)} title={status.bot.active ? "Остановить Telegram-бота" : "Запустить Telegram-бота"} onClick={() => void runAction(status.bot.active ? "stop" : "start")}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{status.bot.active ? "Включён" : "Выключен"}</span></button></dd></div>
-              <div><dt>AI</dt><dd><button type="button" role="switch" aria-label="AI" aria-checked={draft.modules["ai-agent"]} className="noderaAISwitch" title={draft.modules["ai-agent"] ? "Выключить AI" : "Включить AI"} disabled={blocked || !selectedComponent?.installed} onClick={() => patch({ modules: { ...draft.modules, "ai-agent": !draft.modules["ai-agent"] } })}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{draft.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span></button></dd></div>
+              <div><dt>Имя бота</dt><dd title={status.bot_username ? `@${status.bot_username}` : undefined}>{status.bot_username ? `@${status.bot_username}` : "Не подключён"}</dd></div>
               <div><dt>Пользователи</dt><dd>{status.settings.accounts.length} / {status.settings.accounts.filter(item => item.bot_access).length} админ</dd></div>
             </>}
           </dl>

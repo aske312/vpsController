@@ -46,6 +46,7 @@ import application_operation
 import application_recovery
 import operation_policy
 import assistant_control
+import assistant_personalization
 import assistant_contacts
 import assistant_commands
 import network_routes
@@ -453,6 +454,37 @@ def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_to
     return assistant_control.chat_request(sys.modules[__name__], payload, str(payload.telegram_id) if payload.telegram_id else 'panel')
 
 
+@app.get('/api/assistant/context')
+def assistant_context(telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    import assistant_personalization as context
+    api = sys.modules[__name__]
+    return context.snapshot(api, assistant_control.read(api), str(telegram_id) if telegram_id else 'panel')
+
+
+@app.post('/api/assistant/context')
+def assistant_context_update(payload: assistant_personalization.MemoryAction, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    import assistant_personalization as context
+    api = sys.modules[__name__]
+    return context.update(api, assistant_control.read(api), str(telegram_id) if telegram_id else 'panel', payload)
+
+
+def require_context_token(authorization: str | None = Header(default=None)):
+    if not authorization:
+        raise HTTPException(401, 'Нужен служебный токен ассистента', headers={'WWW-Authenticate': 'Bearer'})
+    value = assistant_control.read(sys.modules[__name__])
+    if not hmac.compare_digest(authorization, 'Bearer ' + value.get('control_token', '')):
+        raise HTTPException(401, 'Неверный служебный токен ассистента', headers={'WWW-Authenticate': 'Bearer'})
+
+
+@app.post('/api/assistant/context-tool', dependencies=[Depends(require_context_token)])
+def assistant_context_tool(payload: assistant_personalization.MemoryAction, authorization: str | None = Header(default=None), actor: str = Header(default='', alias='X-MCP-Actor'), proof: str | None = Header(default=None, alias='X-Context-Permit')) -> dict:
+    import assistant_personalization as context
+    api = sys.modules[__name__]
+    action = payload
+    settings = context.authorize(api, authorization, actor, action, proof)
+    return context.update(api, settings, actor, action)
+
+
 @app.get('/api/assistant/conversations')
 def assistant_conversations(telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     return assistant_control.assistant_memory.listing(sys.modules[__name__], assistant_control.read(sys.modules[__name__]), str(telegram_id) if telegram_id else 'panel')
@@ -541,7 +573,13 @@ def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _:
     actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
     value = assistant_control.read(api)
     assistant_control.authorize_control(api, 'Bearer ' + value['control_token'], actor)
-    return {'text': assistant_commands.execute(api, actor, '/confirm ' + payload.code)}
+    record = assistant_control.operations.read(assistant_commands.pending_path(api, actor))
+    text = assistant_commands.execute(api, actor, '/confirm ' + payload.code)
+    operation = None
+    if record.get('operation_id'):
+        try: operation = get_application_operation(record['operation_id'], None)
+        except HTTPException: pass
+    return {'text': text, 'operation': operation}
 
 
 

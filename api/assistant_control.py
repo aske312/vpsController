@@ -89,12 +89,25 @@ class Settings(BaseModel):
     active_provider: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     assistant_style: Literal['balanced', 'concise', 'friendly', 'technical'] = 'balanced'
     assistant_instructions: str = Field(default='', max_length=4000)
+    personalization_enabled: StrictBool = True
     web_enabled: StrictBool = True
+    web_domains: list[str] = Field(default_factory=list, max_length=8)
     memory_enabled: StrictBool = True
     memory_days: int = Field(default=30, strict=True, ge=1, le=90)
     telegram_api_id: int | None = Field(default=None, strict=True, gt=0)
     telegram_api_hash: str | None = Field(default=None, max_length=32)
     accounts: list[Account] = Field(default_factory=list, max_length=30)
+
+    @field_validator('web_domains')
+    @classmethod
+    def web_sites(cls, values):
+        result = []
+        for value in values:
+            domain = value.strip().lower().encode('idna').decode('ascii')
+            if len(domain) > 253 or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', domain) or domain.endswith(('.local', '.internal', '.localhost')) or domain.replace('.', '').isdigit():
+                raise ValueError('Укажите публичные домены без https:// и пути')
+            if domain not in result: result.append(domain)
+        return result
 
     @field_validator('modules')
     @classmethod
@@ -326,7 +339,7 @@ def _read(api):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
     if value.get('mcp_installed') is None:
         value['mcp_installed'] = list(MCP_MODULES)
-    for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
+    for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
         value.setdefault(key, default)
     return value
 
@@ -349,7 +362,7 @@ def store(api, value):
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
     ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
-    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
+    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
               accounts=[{key: item for key, item in a.items() if key not in ('bot_access', *ACCOUNT_OPTIONS)} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -511,13 +524,15 @@ def status(api):
             'agent_version': '.'.join(map(str, agent_version)),
             'chat_persona': agent_version >= (1, 2, 0),
             'web_tools': agent_version >= (1, 7, 0),
+            'context_tools': agent_version >= (1, 9, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'installed': key in value['mcp_installed'],
                              'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'mcp vps'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
-            'tools': {'web': ['web_search', 'web_read'] if agent_version >= (1, 7, 0) else [], 'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
+            'tools': {'web': (['web_search', 'web_read'] + (['web_research'] if agent_version >= (1, 9, 0) else [])) if agent_version >= (1, 7, 0) else [],
+                      'personalization': ['context_read', 'context_remember', 'context_forget'] if agent_version >= (1, 9, 0) else [], 'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
                           (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else []) +
                           (['vps_service_action', 'vps_operation', 'vps_api'] if agent_version >= (1, 5, 0) else []) +
@@ -554,13 +569,13 @@ def configure(api, payload):
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
-        for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
+        for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
             if key not in payload.model_fields_set:
                 submitted[key] = old.get(key, default)
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         if submitted['mcp_installed'] is None:
             submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
-        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'web_enabled', 'memory_enabled', 'memory_days')
+        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'personalization_enabled', 'web_domains', 'web_enabled', 'memory_enabled', 'memory_days')
         keys = ai_keys + ('bot_token',) if unified else ai_keys if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         if unified and submitted['providers'] is not None:
@@ -689,13 +704,14 @@ def chat_request(api, payload, actor='panel', channel='panel', *, settings=None)
             body['history'] = assistant_memory.context(assistant_memory.get(api, identity, actor, channel, settings=settings), files)
         else:
             identity = uuid.uuid4().hex
+    body['context_conversation'] = identity
     body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
     import assistant_commands
     if any(tool in output['result'].get('tools_used', []) for tool in ('vps_service_action', 'mihomo_api')):
         pending = operations.read(assistant_commands.pending_path(api, actor))
         if pending and not pending.get('submitted') and pending.get('expires', 0) > time.time():
-            output['pending_action'] = {key: pending[key] for key in ('service', 'action', 'code', 'expires')}
+            output['pending_action'] = {key: pending[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
             if pending.get('kind') == 'mihomo':
                 import assistant_mihomo
                 output['pending_action']['changes'] = assistant_mihomo.sanitize(pending['body'])
@@ -761,6 +777,19 @@ def runtime_request(api, mode, body):
     import assistant_contacts
     value['interlocutor'] = assistant_contacts.interlocutor(api, value, str(body.get('actor', 'panel')))
     body = dict(body)
+    import assistant_personalization
+    if value.get('personalization_enabled', True):
+        try:
+            value['personal_context'] = assistant_personalization.snapshot(api, value, str(body.get('actor', 'panel')), body.pop('context_conversation', None))
+        except (OSError, HTTPException, operations.OperationConflict):
+            value['personal_context'] = {'unavailable': True}
+        prompt = body.get('prompt', '')
+        value['context_permits'] = {}
+        if re.search(r'(?iu)\b(запомни|запомните|remember)\b', prompt):
+            value['context_permits']['remember'] = assistant_personalization.permit(value, str(body.get('actor', 'panel')), 'remember')
+        if re.search(r'(?iu)\b(забудь|forget)\b|(?:удали|delete).{0,30}(?:памят|контекст|факт|memory)', prompt):
+            value['context_permits']['forget'] = assistant_personalization.permit(value, str(body.get('actor', 'panel')), 'forget')
+    body.pop('context_conversation', None)
     expected_revision = body.pop('settings_revision', None)
     if expected_revision and value['revision'] != expected_revision:
         raise HTTPException(409, 'Настройки Nodera изменились. Обновите раздел и повторите запрос.')

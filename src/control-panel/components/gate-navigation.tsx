@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import { BrandGlyph } from "../../shared/components/brand-glyph";
-import { ProtocolIcon } from "../../shared/components/protocol-icon";
 
 type ProtocolImage = {
   id: string;
@@ -51,7 +50,7 @@ export function GateNavigation({
 
         {(mihomoInstalled || noderaInstalled) && <NavGroup label="COMPONENTS">
           {mihomoInstalled && <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />}
-          {noderaInstalled && <NavButton active={activeTab === "nodera"} icon="nodera" label="Nodera" tone="cyan" onClick={() => onNavigate("nodera")} />}
+          {noderaInstalled && <NavButton active={activeTab === "nodera"} icon="nodera" label="Nodera" tone="green" onClick={() => onNavigate("nodera")} />}
         </NavGroup>}
 
         <NavGroup label="SYSTEM">
@@ -91,7 +90,7 @@ function NavButton({
   active: boolean;
   icon: "overview" | "connections" | "mihomo" | "transport" | "network" | "security" | "application" | "services" | "nodera";
   label: string;
-  tone?: "blue" | "violet" | "cyan";
+  tone?: "blue" | "violet" | "cyan" | "green";
   compact?: boolean;
   badge?: string;
   onClick: () => void;
@@ -106,7 +105,7 @@ function NavButton({
 }
 
 function NavGlyph({ name }: { name: string }) {
-  if (name === "nodera") return <ProtocolIcon protocol="nodera" />;
+  if (name === "nodera") return <svg viewBox="0 0 28 28" aria-hidden="true"><path d="m14 3 9.5 5.5v11L14 25l-9.5-5.5v-11Z"/><path d="m14 8 5 6-5 6-5-6ZM14 3v5m9.5.5L19 14l4.5 5.5M14 20v5M4.5 8.5 9 14l-4.5 5.5"/><path d="m14 11 2.5 3-2.5 3-2.5-3Z" fill="currentColor" stroke="none"/></svg>;
   if (name === "mihomo") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 4.5v11L12 22l-8-4.5v-11L12 2Z"/><path d="m8 16V8l4 4 4-4v8"/></svg>;
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;

@@ -1,3 +1,4 @@
+import { useNotifier } from "../../shared/notifications/notification-center";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
@@ -40,6 +41,40 @@ const blankAccount = (): AccountDraft => ({
 });
 
 export function NoderaSettings({ panel, request, status, draft, patch, blocked, dirty, refreshKey, actor, actorSelect, checks, check, working }: Props) {
+  const notify = useNotifier("nodera", "Nodera");
+  const [sitesText, setSitesText] = useState((draft.web_domains ?? []).join(", "));
+  useEffect(() => {
+    setSitesText(previous => JSON.stringify(previous.split(",").map(value => value.trim()).filter(Boolean)) === JSON.stringify(draft.web_domains ?? []) ? previous : (draft.web_domains ?? []).join(", "));
+  }, [draft.web_domains]);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextActor, setContextActor] = useState("");
+  const [contextData, setContextData] = useState<{ facts: {id: string; text: string}[]; recent_topics: string[] }>();
+  const [contextText, setContextText] = useState("");
+  const [contextBusy, setContextBusy] = useState(false);
+  const [contextError, setContextError] = useState("");
+  const contextGeneration = useRef(0);
+  useEffect(() => {
+    if (!contextOpen) return;
+    const generation = ++contextGeneration.current;
+    setContextData(undefined); setContextText(""); setContextError("");
+    void request<{facts: {id: string; text: string}[]; recent_topics: string[]}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`).then(
+      result => { if (generation === contextGeneration.current) setContextData(result); },
+      error => { if (generation === contextGeneration.current) setContextError(error instanceof Error ? error.message : "Контекст недоступен"); },
+    );
+    return () => { contextGeneration.current = generation + 1; };
+  }, [contextOpen, contextActor, request]);
+  async function changeContext(operation: "remember" | "forget", identity = "all") {
+    if (contextBusy) return;
+    const generation = contextGeneration.current;
+    setContextBusy(true);
+    try {
+      const result = await request<{facts: {id: string; text: string}[]; recent_topics: string[]}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`,
+        { method: "POST", body: JSON.stringify({ operation, identity, text: contextText }) });
+      if (generation === contextGeneration.current) { setContextData(result); setContextText(""); }
+      notify.success(operation === "remember" ? "Предпочтение сохранено" : "Контекст удалён");
+    } catch (error) { notify.error(error instanceof Error ? error.message : "Контекст не изменён"); }
+    finally { setContextBusy(false); }
+  }
   const [providerEdit, setProviderEdit] = useState<ProviderDraft>();
   const [providerChecks, setProviderChecks] = useState<Record<string, { text: string; failed?: boolean; quota?: Quota | null }>>({});
   const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
@@ -102,11 +137,13 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         method: "POST", body: JSON.stringify({ provider_url: provider.provider_url, api_key: provider.api_key, provider_id: provider.id, include_quota: true }),
       });
       setProviderModels(current => ({ ...current, [provider.id]: result.models }));
+      notify.success(`Подключение проверено · моделей ${result.models.length}`);
       const available = provider.model_mode === "catalog" || result.models.includes(provider.model);
       setProviderChecks(current => ({ ...current, [provider.id]: available
         ? { text: `Каталог доступен · моделей ${result.models.length}`, quota: result.quota }
         : { text: "Модель отсутствует в каталоге", failed: true, quota: result.quota } }));
     } catch (cause) {
+      notify.error(cause instanceof Error ? cause.message : "Проверка не выполнена");
       setProviderChecks(current => ({ ...current, [provider.id]: { text: cause instanceof Error ? cause.message : "Проверка не выполнена", failed: true } }));
     } finally {
       setCheckingProvider(undefined);
@@ -228,7 +265,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
             {item.id === "telegram-mcp" && <button type="button" className="mcpIconButton" aria-label="Настроить Telegram MCP" title="Настроить" onClick={() => setTelegramMcpOpen(true)}><ChatIcon name="gear"/></button>}
           </footer>
         </article>;
-      })}<article className={`mcpModule ${draft.web_enabled ? "isInstalled" : ""}`}><header><strong>Интернет</strong></header><p>Веб-поиск и чтение публичных страниц. Без авторизации на сайтах.</p><footer><button type="button" className="ghostButton" aria-label="Интернет" aria-pressed={draft.web_enabled ?? true} disabled={blocked || !status.web_tools} onClick={() => patch({ web_enabled: !draft.web_enabled })}>{draft.web_enabled ? "Включён" : "Выключен"}</button>{!status.web_tools && <small>Обновите Nodera</small>}</footer></article></div>
+      })}</div>
     </fieldset>
     {telegramMcpOpen && <SettingsDialog title="Telegram MCP" close={() => setTelegramMcpOpen(false)}>
       <label>Telegram API ID<input type="number" min={1} value={draft.telegram_api_id ?? ""}
@@ -238,6 +275,32 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <button type="button" className="ghostButton" disabled={blocked || dirty || !actor || !status.mcp_modules.some(item => item.id === "telegram-mcp" && item.enabled && item.configured)}
         onClick={() => void check("telegram-mcp")}>Проверить модуль</button>
       {checkResult("telegram-mcp")}
+    </SettingsDialog>}
+  </section>;
+
+  const tools = <section className="noderaSettings" aria-label="Инструменты">
+    <header className="noderaBlockHead"><h2>Инструменты</h2></header>
+    <div className="noderaToolsGrid">
+      <article className="mcpModule"><header><strong>Интернет</strong></header><p>Поиск, чтение и сопоставление источников.</p>
+        <label>Предпочитаемые сайты<input placeholder="example.com, docs.example.org" value={sitesText} disabled={blocked}
+          onChange={event => { setSitesText(event.target.value); patch({ web_domains: event.target.value.split(",").map(value => value.trim()).filter(Boolean) }); }}/></label>
+        <small>До 8 доменов. Пусто — весь интернет. Ассистент может уточнять область поиска.</small>
+        <footer><button type="button" className="ghostButton" aria-label="Интернет" aria-pressed={draft.web_enabled ?? true} disabled={blocked || !status.web_tools} onClick={() => patch({ web_enabled: !draft.web_enabled })}>{draft.web_enabled ? "Включён" : "Выключен"}</button>{!status.web_tools && <small>Обновите Nodera</small>}</footer>
+      </article>
+      <article className="mcpModule"><header><strong>Персонализация</strong></header><p>Предпочтения по просьбе собеседника и контекст его недавних диалогов. Хранение: {draft.memory_days ?? 30} дней.</p>
+        <footer><button type="button" className="ghostButton" aria-label="Персонализация" aria-pressed={draft.personalization_enabled ?? true} disabled={blocked || !status.context_tools} onClick={() => patch({ personalization_enabled: !draft.personalization_enabled })}>{draft.personalization_enabled ? "Включена" : "Выключена"}</button>
+        <button type="button" className="ghostButton" disabled={blocked || !status.context_tools} onClick={() => { setContextActor(actor); setContextOpen(true); }}>Контекст собеседника</button></footer>
+      </article>
+    </div>
+    {contextOpen && <SettingsDialog title="Контекст собеседника" close={() => { if (!contextBusy) setContextOpen(false); }}>
+      <label>Собеседник<select value={contextActor} disabled={contextBusy} onChange={event => setContextActor(event.target.value)}><option value="">Администратор панели</option>{draft.accounts.map(account => <option key={account.telegram_id} value={String(account.telegram_id)}>{account.name || account.telegram_id}</option>)}</select></label>
+      {contextError && <p role="alert">{contextError}</p>}
+      {!contextData && !contextError && <p role="status">Загрузка контекста…</p>}
+      {contextData && <><h3>Сохранённые предпочтения</h3>{contextData.facts.length ? contextData.facts.map(fact => <div className="noderaContextFact" key={fact.id}><span>{fact.text}</span><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget", fact.id)}>Удалить</button></div>) : <p>Нет сохранённых предпочтений.</p>}
+        <label>Добавить предпочтение<input maxLength={300} value={contextText} disabled={contextBusy} onChange={event => setContextText(event.target.value)}/></label>
+        <button type="button" className="ghostButton" disabled={contextBusy || !contextText.trim()} onClick={() => void changeContext("remember")}>Запомнить</button>
+        <h3>Недавние темы</h3>{contextData.recent_topics.length ? <ul>{contextData.recent_topics.map((topic, index) => <li key={index}>{topic}</li>)}</ul> : <p>Нет контекста из других диалогов.</p>}
+        <button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget")}>Очистить персональный контекст</button></>}
     </SettingsDialog>}
   </section>;
 
@@ -336,7 +399,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         onChange={event => patch({ assistant_instructions: event.target.value })}/></label>
     </fieldset>
   </section>;
-  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{modules}{behavior}</> : <>{telegram}{users}</>}</div>;
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}{behavior}</> : <>{telegram}{users}</>}</div>;
 }
 
 export function SettingsDialog({ title, close, submit, blocked, children }: {

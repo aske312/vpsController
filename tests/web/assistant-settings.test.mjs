@@ -9,7 +9,7 @@ import * as answerFormat from '../../src/features/assistant/answer-format.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
 function mount(status, catalog = []) {
-  const slots = [], effects = [], writes = [];
+  const slots = [], effects = [], writes = [], notifications = [];
   let cursor = 0;
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const hooks = {
@@ -35,7 +35,7 @@ function mount(status, catalog = []) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {};
   const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
-    : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+    : name.endsWith('/notification-center') ? { useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
   const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
@@ -49,7 +49,7 @@ function mount(status, catalog = []) {
     return status;
   };
   const props = { request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
-  return { writes, render() {
+  return { writes, notifications, render() {
     cursor = 0;
     const tree = exported.AssistantView(props);
     const expand = node => {
@@ -96,6 +96,7 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
   assert.equal(view.writes[0].component, 'nodera');
   assert.equal(view.writes[0].modules['ai-agent'], true);
   assert.equal(view.writes[0].bot_token, null);
+  assert.ok(view.notifications.some(item => item.state === 'success' && item.message === 'Настройки сохранены'));
 });
 
 test('running Telegram bot locks its token and shows the stop action', async () => {
@@ -109,7 +110,7 @@ test('running Telegram bot locks its token and shows the stop action', async () 
   const botSwitch = nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'Telegram bot')[0];
   assert.equal(botSwitch.disabled, false);
   assert.equal(botSwitch.node.props['aria-checked'], true);
-  assert.equal(nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'AI').length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'AI').length, 0);
 });
 
 test('chat scope lives in settings and subscription binding is saved with address preferences', async () => {
