@@ -18,11 +18,6 @@
 
 .addClient label, .loginCard label { font-size: 9px; }
 
-.loginPage .versionFooter { position: absolute; inset: auto 0 18px; }
-
-.gateShell .content > .legalFooter,
-.gateShell .content > footer { max-width:none; }
-
 .loginRedesign {
   min-height: 100vh !important;
   padding: 0 !important;
@@ -232,18 +227,6 @@
   margin-top: 14px;
 }
 
-.loginRedesign .versionFooter {
-  position: absolute;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  z-index: 1;
-  width: min(1240px, calc(100vw - 48px));
-  justify-content: flex-start;
-  padding-left: clamp(12px, 5vw, 72px);
-  opacity: 0.84;
-}
-
 @media (max-width: 980px) {
 .loginShell {
     justify-items: center;
@@ -251,10 +234,6 @@
   }
 .loginCard {
     width: min(560px, 100%);
-  }
-.loginRedesign .versionFooter {
-    justify-content: center;
-    padding-left: 0;
   }
 }
 
@@ -279,49 +258,14 @@
     min-width: 76px;
     font-size: 11px;
   }
-.loginRedesign .versionFooter {
-    width: calc(100vw - 24px);
-    bottom: 12px;
-    opacity: 0.72;
-  }
-}
-
-.versionFooter.legalFooter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  color: #91a5b4;
 }
 
 .legalFooterMeta,
-.legalFooterLinks,
 .legalBuildRow {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-
-.legalLink {
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(82, 103, 125, 0.26);
-  background: rgba(9, 16, 24, 0.48);
-  color: #9bb0be;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: .18s ease;
-}
-
-.legalLink:hover {
-  border-color: rgba(113, 213, 180, 0.36);
-  color: #ecf5f9;
-  background: rgba(11, 19, 28, 0.78);
 }
 
 .legalBackdrop {
@@ -430,19 +374,8 @@
   padding-inline: 16px !important;
 }
 
-.loginRedesign .versionFooter.legalFooter {
-  justify-content: flex-start;
-}
-
-.gateShell .versionFooter.legalFooter {
-  justify-content: center;
-  padding: 12px 16px 22px;
-}
-
 @media (max-width: 760px) {
-.versionFooter.legalFooter,
   .legalFooterMeta,
-  .legalFooterLinks,
   .legalBuildRow,
   .legalModalFoot {
     justify-content: center;
@@ -455,82 +388,10 @@
 .legalModalHead h2 {
     font-size: 24px;
   }
-.loginRedesign .versionFooter.legalFooter {
-    justify-content: center;
-  }
 }
 
-.gateShell .versionFooter.legalFooter {
-  width: 100%;
-  min-height: 54px;
-  margin: 14px 0 0;
-  padding: 14px 4px 18px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: nowrap;
-  border-top: 1px solid rgba(80, 104, 126, 0.20);
-  color: #7f94a3;
-}
-
-.gateShell .legalFooterLinks {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: nowrap;
-}
-
-.gateShell .legalLink {
-  min-height: 34px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: #748b9a;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.gateShell .legalLink:hover {
-  border: 0;
-  background: rgba(77, 107, 126, 0.10);
-  color: #b9ccd8;
-}
-
-.loginRedesign .versionFooter.legalFooter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  border-top: 0;
-}
-
-.loginRedesign .legalBadge strong,
-.loginRedesign .legalLink {
+.loginRedesign .legalBadge strong {
   font-size: 10px;
-}
-
-.loginRedesign .legalLink {
-  min-height: 28px;
-  padding: 0 8px;
-  border-color: transparent;
-  background: transparent;
-}
-
-@media (max-width: 760px) {
-.gateShell .versionFooter.legalFooter {
-    min-height: 0;
-    padding: 14px 0 18px;
-    flex-direction: column;
-    justify-content: center;
-    gap: 8px;
-  }
-.gateShell .legalFooterMeta,
-  .gateShell .legalFooterLinks {
-    justify-content: center;
-  }
 }
 
 .legalNotice {
@@ -558,12 +419,13 @@
 }
 
 /* Authentication scene */
-.loginRedesign { min-height:100svh !important; padding:0 !important; display:block; background:#04090f !important; }
+.loginRedesign { --login-content-width:min(1340px,calc(100% - 72px)); min-height:100dvh !important; padding:0 0 6px !important; display:flex; flex-direction:column; align-items:stretch; background:#04090f !important; }
+.loginRedesign > .legalFooter { width:var(--login-content-width); margin-inline:auto; }
 .loginRedesign::before { background-position:center; background-size:cover; opacity:.72; filter:saturate(.86) brightness(.66); }
 .loginRedesign::after { z-index:-2; background:linear-gradient(90deg,rgba(3,8,13,.97) 0%,rgba(3,8,13,.86) 35%,rgba(3,8,13,.35) 67%,rgba(3,8,13,.72) 100%),linear-gradient(0deg,rgba(3,8,13,.96),transparent 42%,rgba(3,8,13,.38)); }
 .loginBackdrop { position:absolute; inset:0; z-index:-1; pointer-events:none; background:radial-gradient(circle at 72% 44%,rgba(72,128,205,.12),transparent 28%),radial-gradient(circle at 42% 58%,rgba(81,223,208,.055),transparent 32%); box-shadow:inset 0 0 120px rgba(0,0,0,.56); }
 
-.loginLayout { width:min(1340px,calc(100% - 72px)); min-height:calc(100svh - 62px); margin:0 auto; display:grid; grid-template-columns:minmax(380px,500px) minmax(0,1fr); grid-auto-rows:max-content; column-gap:0; row-gap:20px; align-content:center; padding:44px 0 82px; }
+.loginLayout { width:var(--login-content-width); flex:1; margin:0 auto; display:grid; grid-template-columns:minmax(380px,500px) minmax(0,1fr); grid-auto-rows:max-content; column-gap:0; row-gap:20px; align-content:center; padding:44px 0; }
 .loginHero { grid-column:1; min-width:0; display:grid; gap:20px; padding:0; }
 .loginBrand { display:flex; align-items:center; gap:12px; }
 .loginBrand>span { width:43px; height:43px; display:grid; place-items:center; border:1px solid rgba(92,213,222,.28); border-radius:12px; color:#76e0e5; background:rgba(22,73,81,.2); box-shadow:0 0 28px rgba(68,210,219,.08); }
@@ -617,32 +479,30 @@
 .loginPanelFooter { display:flex; align-items:center; justify-content:center; gap:7px; margin-top:17px; color:#607886; font:500 9px/1.2 var(--font-sans); }
 .loginPanelFooter svg { width:14px; height:14px; fill:none; stroke:#62bda9; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
 
-.loginRedesign>.versionFooter.legalFooter { position:absolute; z-index:2; left:50%; bottom:14px; width:min(1340px,calc(100% - 72px)); transform:translateX(-50%); justify-content:flex-start; gap:18px; margin:0; opacity:.68; }
-
 @media (max-width:980px) {
-  .loginLayout { width:min(520px,calc(100% - 36px)); min-height:calc(100svh - 68px); grid-template-columns:1fr; gap:34px; align-content:center; padding:34px 0 94px; }
+  .loginRedesign { --login-content-width:min(520px,calc(100% - 36px)); }
+  .loginRedesign > .legalFooter { flex-direction:column; gap:2px; text-align:center; }
+  .loginLayout { grid-template-columns:1fr; gap:34px; align-content:center; padding:34px 0; }
   .loginHero { align-self:auto; display:grid; gap:28px; padding:0; }
   .loginHeroCopy { margin:0; }
   .loginHeroCopy h1 { font-size:clamp(38px,8vw,54px); }
   .loginHeroCopy>p:last-child,.loginHeroStatus { display:none; }
   .loginRedesign::after { background:linear-gradient(180deg,rgba(3,8,13,.82),rgba(3,8,13,.94)),radial-gradient(circle at 50% 18%,rgba(73,156,191,.12),transparent 32%); }
-  .loginRedesign>.versionFooter.legalFooter { width:calc(100% - 36px); justify-content:center; }
 }
 
 @media (max-width:560px) {
-  .loginLayout { width:calc(100% - 24px); gap:24px; padding:22px 0 90px; }
+  .loginRedesign { --login-content-width:calc(100% - 24px); }
+  .loginLayout { gap:24px; padding:22px 0; }
   .loginHero { gap:22px; }
   .loginHeroCopy h1 { font-size:34px; line-height:1.02; }
   .loginKicker { margin-bottom:12px; font-size:8px; }
   .loginPanel { padding:22px 18px; border-radius:15px; }
   .loginPanelHeader h2 { font-size:20px; }
   .loginPanelCopy { margin:17px 0 21px; }
-  .loginRedesign>.versionFooter.legalFooter { width:calc(100% - 24px); bottom:10px; }
-  .loginRedesign>.versionFooter .legalBadge { display:none; }
 }
 
 @media (max-height:700px) and (min-width:981px) {
-  .loginLayout { min-height:calc(100svh - 62px); padding:30px 0 72px; }
+  .loginLayout { padding:30px 0; }
   .loginHeroCopy { margin:50px 0 auto; }
   .loginHeroCopy h1 { font-size:52px; }
 }

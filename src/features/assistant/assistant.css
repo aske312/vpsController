@@ -212,24 +212,16 @@
   overflow:hidden;
 }
 .gateShell > .content:has(.noderaWorkspace.isChat) {
-  display:flex;
-  flex-direction:column;
   height:100%;
   min-height:0;
-  padding-bottom:6px !important;
 }
 .gateShell > .content:has(.noderaWorkspace.isChat) > :not(.noderaWorkspace) { flex-shrink:0; }
 .noderaWorkspace.isChat { display:flex; flex:1; flex-direction:column; min-height:0; padding-bottom:0; gap:6px; }
 .gateShell:has(.noderaWorkspace.isChat) .gateMasthead { margin-bottom:8px; }
-.gateShell:has(.noderaWorkspace.isChat) .versionFooter.legalFooter { min-height:0; margin:6px 0 0; padding:3px 4px; gap:6px; }
-.gateShell:has(.noderaWorkspace.isChat) .legalLink { min-height:26px; }
+.gateShell:has(.noderaWorkspace.isChat) .versionFooter.legalFooter { margin-top:6px; }
 .mcpComposer > .mcpFileList { max-height:64px; overflow:auto; }
 .mcpModule footer button[aria-pressed=true] { color:var(--cyan); border-color:rgba(97,207,216,.32); }
 
-@media (max-width:760px) {
- .gateShell:has(.noderaWorkspace.isChat) .versionFooter.legalFooter { gap:2px; }
- .gateShell:has(.noderaWorkspace.isChat) .legalFooterLinks { flex-wrap:wrap; justify-content:center; }
-}
 @media (max-height:620px) {
  .noderaWorkspace.isChat .mcpComposer textarea { max-height:72px; }
  .noderaWorkspace.isChat .mcpComposer > .mcpFileList { max-height:40px; }
