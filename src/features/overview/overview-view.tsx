@@ -204,7 +204,7 @@ export function OverviewDashboard({
                     <div>
                       <p className="eyebrow">MANAGED ROUTING</p>
                       <h2>Mihomo</h2>
-                      <small>{mihomoStatus?.core_version ? `core ${mihomoStatus.core_version}` : `package ${mihomoImage?.version || "—"}`}</small>
+                      <small>{(mihomoImage?.installed_version || mihomoStatus?.core_version) ? `core ${mihomoImage?.installed_version || mihomoStatus?.core_version}` : "Версия ядра недоступна"}</small>
                     </div>
                   </div>
                   <span className={`overviewState ${mihomoStatus?.active ? "online" : "idle"}`}>

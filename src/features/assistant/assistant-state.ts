@@ -18,7 +18,7 @@ export type Settings = {
   providers?: Provider[]; active_provider?: string | null;
   mcp_installed?: McpId[];
   assistant_style?: 'balanced' | 'concise' | 'friendly' | 'technical';
-  assistant_instructions?: string; personalization_enabled?: boolean; web_domains?: string[]; web_enabled?: boolean; memory_enabled?: boolean; memory_days?: number;
+  assistant_character?: string; assistant_instructions?: string; personalization_enabled?: boolean; web_domains?: string[]; web_enabled?: boolean; memory_enabled?: boolean; memory_days?: number;
   telegram_api_id: number | null; accounts: Account[];
   api_key_configured: boolean; bot_token_configured: boolean; telegram_api_hash_configured: boolean;
 };
@@ -43,14 +43,14 @@ export type McpStatus = {
 };
 export function makeDraft(settings: Settings): Draft {
   const { revision, accounts, providers, ...rest } = settings;
-  return { ...rest, assistant_style: settings.assistant_style ?? 'balanced', assistant_instructions: settings.assistant_instructions ?? '', personalization_enabled: settings.personalization_enabled ?? true, web_domains: settings.web_domains ?? [], web_enabled: settings.web_enabled ?? true, memory_enabled: settings.memory_enabled ?? true, memory_days: settings.memory_days ?? 30, mcp_installed: settings.mcp_installed ?? Object.keys(settings.mcp) as McpId[], model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
+  return { ...rest, assistant_style: settings.assistant_style ?? 'balanced', assistant_character: settings.assistant_character ?? '', assistant_instructions: settings.assistant_instructions ?? '', personalization_enabled: settings.personalization_enabled ?? true, web_domains: settings.web_domains ?? [], web_enabled: settings.web_enabled ?? true, memory_enabled: settings.memory_enabled ?? true, memory_days: settings.memory_days ?? 30, mcp_installed: settings.mcp_installed ?? Object.keys(settings.mcp) as McpId[], model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
     providers: providers?.map(provider => ({ ...provider, api_key: null })),
     accounts: accounts.map(account => ({ ...account, session: null, excluded_dialogs_text: account.excluded_dialogs.join(", ") })) };
 }
 export function settingsPayload(draft: Draft) {
   return {
     expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
-    assistant_style: draft.assistant_style, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
+    assistant_style: draft.assistant_style, assistant_character: draft.assistant_character, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
     provider_url: draft.provider_url, model: draft.model, model_mode: draft.model_mode ?? "single", api_key: draft.api_key,
     providers: draft.providers?.map(({ id, name, provider_url, model, model_mode, api_key }) => ({ id, name, provider_url, model, model_mode, api_key })),
     active_provider: draft.active_provider,

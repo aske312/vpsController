@@ -8,7 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 
 _observations: ContextVar[dict | None] = ContextVar("service_observations", default=None)
-_PROPERTIES = "LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description"
+_PROPERTIES = "LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description,Type,RemainAfterExit,MainPID"
 _TIMER_PROPERTIES = ",LastTriggerUSec,NextElapseUSecRealtime"
 
 
@@ -99,6 +99,13 @@ def _service_observation(properties, checked_at, *, timer=False):
         reason = "Служба не найдена"
     elif state == "failed" or load in {"error", "bad-setting"}:
         runtime, reason = "error", "Systemd сообщает об ошибке службы"
+    elif state == "active" and substate == "exited":
+        if properties.get('Type') == 'oneshot' and properties.get('RemainAfterExit') == 'yes':
+            runtime, reason = 'running', 'Одноразовая настройка применена; постоянный процесс не требуется'
+        elif properties.get('Type') in ('simple', 'exec', 'forking', 'notify', 'notify-reload', 'dbus', 'idle'):
+            runtime, reason = 'error', 'Служба требует постоянный процесс, но systemd сообщает exited'
+        else:
+            runtime, reason = 'unknown', 'Процесс завершён; тип службы и применение настройки не подтверждены'
     elif state == "active":
         runtime, reason = "running", "Служба активна; работоспособность проверяется отдельно"
     elif state == "inactive":
@@ -109,7 +116,8 @@ def _service_observation(properties, checked_at, *, timer=False):
     observation = {
         "unit_present": present,
         "installed": present is True,  # Legacy field describes the unit, not a component.
-        "active": state == "active" and present is not False,
+        "active": state == "active" and present is not False and runtime == "running",
+        "service_type": properties.get("Type", "unknown"),
         "state": state,
         "substate": substate,
         "enabled": properties.get("UnitFileState") in {"enabled", "enabled-runtime", "static"},

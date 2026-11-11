@@ -22,6 +22,17 @@ class RecoverySnapshotTests(unittest.TestCase):
         self.database = self.source / 'metrics/history.sqlite3'
         self.database.parent.mkdir()
 
+    def test_large_conversation_cache_is_disposable_but_personal_preferences_are_backed_up(self):
+        cache = self.source / 'assistant' / 'conversations' / 'panel-panel'
+        preferences = self.source / 'assistant' / 'personalization'
+        cache.mkdir(parents=True); preferences.mkdir(parents=True)
+        (cache / 'chat.json').write_text('temporary context')
+        (preferences / 'panel.json').write_text('important facts')
+        destination = self.root / 'snapshot'
+        snapshot.snapshot_data(self.source, destination)
+        self.assertFalse((destination / 'assistant' / 'conversations').exists())
+        self.assertEqual((destination / 'assistant' / 'personalization' / 'panel.json').read_text(), 'important facts')
+
     def test_online_snapshot_includes_committed_wal_without_copying_journals(self):
         with closing(sqlite3.connect(self.database)) as writer:
             writer.execute('PRAGMA journal_mode=WAL')

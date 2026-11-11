@@ -38,6 +38,8 @@ def snapshot_data(source: Path, destination: Path, *, database_timeout=30):
             copied.mkdir(mode=0o700, parents=True)
             for child in original.iterdir():
                 child_relative = relative / child.name
+                if child_relative.parts == ('assistant', 'conversations'):
+                    continue  # Disposable context cache can be 5 GB; durable preferences are backed up.
                 if len(child_relative.parts) == 1 and child.name in EXCLUDED:
                     continue
                 if any(child.name.endswith(suffix) and is_sqlite(child.with_name(child.name[:-len(suffix)]))

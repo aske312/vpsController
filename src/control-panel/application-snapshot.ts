@@ -13,6 +13,7 @@ function runtime(value: unknown) {
 
 export function applicationStatusSnapshot(value: unknown, validateOperation: (value: unknown) => SystemAction, validateCdn?: (value: unknown) => CdnSecurityStatus): ApplicationStatus {
   if (!record(value) || !record(value.api) || !Array.isArray(value.containers)) throw new Error("Некорректное состояние приложения");
+  if (value.component_health !== undefined && (!Array.isArray(value.component_health) || value.component_health.some(item => !record(item) || !["nodera", "mihomo"].includes(String(item.id)) || typeof item.name !== "string" || typeof item.reason !== "string" || !["healthy", "warning", "critical", "pending", "unknown"].includes(String(item.status)) || !(item.checked_at === null || typeof item.checked_at === "string")))) throw new Error("Некорректные проверки компонентов");
   const api = value.api;
   if (["active", "enabled"].some((key) => api[key] !== null && typeof api[key] !== "boolean")
     || !runtime(api.runtime)) throw new Error("Некорректное состояние приложения");
@@ -48,7 +49,7 @@ export function observedApplicationRequest(client: ReturnType<typeof createApiCl
 export function applicationStatusUnavailable(current: ApplicationStatus | null, pending: boolean): ApplicationStatus | null {
   if (!current) return null;
   const unknown = { state: "unknown" as const, reason: "Состояние приложения не подтверждено; обновите данные", checked_at: "" };
-  return { ...current, api: { active: null, enabled: null, runtime: unknown },
+  return { ...current, component_health: current.component_health?.map(item => ({ ...item, status: "unknown", reason: "Актуальный результат проверки недоступен" })), api: { active: null, enabled: null, runtime: unknown },
     containers: current.containers.map((container) => ({ ...container, State: "unknown", Status: undefined, Health: undefined, healthy: null, runtime: unknown, status_text: unknown.reason })),
     action: pending ? { ...current.action, state: "unknown", result: undefined, progress: undefined, message: "Состояние операции не подтверждено; проверяем без повторной отправки" } : current.action };
 }

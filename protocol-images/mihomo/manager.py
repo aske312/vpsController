@@ -25,6 +25,7 @@ import urllib.request
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager, ExitStack, nullcontext
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -51,6 +52,7 @@ import profile_presets as preset_catalog
 from mrs_cache import MrsCache
 import cdn_security
 import application_operation
+import component_state
 import network_routes
 import server_addresses
 import network_probe
@@ -84,6 +86,12 @@ SETTINGS_ROOT = DATA_ROOT / "settings"
 RUNTIME_CORE_BIN = DATA_ROOT / "bin" / "mihomo"
 BUNDLED_CORE_BIN = APP_ROOT / "api" / "bin" / "mihomo"
 CORE_BIN = RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
+def core_binary():
+    # A manager started before the first runtime installation must see the new binary.
+    if CORE_BIN not in (RUNTIME_CORE_BIN, BUNDLED_CORE_BIN): return CORE_BIN
+    return RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
+
+
 # Mihomo defaults to $HOME/.config/mihomo for its home/cache directory.
 # The manager service runs with ProtectHome=true, so /root is masked and
 # that mkdir fails. Point it at a writable directory explicitly instead.
@@ -2409,8 +2417,8 @@ def core_status() -> dict[str, Any]:
     })
     core_version = ""
     core_build = ""
-    if CORE_BIN.is_file():
-        result = run(str(CORE_BIN), "-v")
+    if core_binary().is_file():
+        result = run(str(core_binary()), "-v")
         core_build = (result.stdout or result.stderr).strip().splitlines()[0] if result.returncode == 0 else ""
         match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", core_build)
         core_version = match.group(1) if match else core_build
@@ -2421,13 +2429,14 @@ def core_status() -> dict[str, Any]:
         "active": True if runtime["state"] == "running" else False if runtime["state"] == "stopped" else None,
         "runtime": runtime,
         "recovery_required": (PROFILE_FILE.parent / "profile-recovery" / "manifest.json").exists(),
-        "health": {"state": "unchecked", "reason": "Состояние systemd не заменяет проверку подключений", "checked_at": None},
+        "health": component_state.saved_health(DATA_ROOT.parent, "mihomo"),
         "installed": True,
         "version": core_version,
         "core_version": core_version,
         "core_build": core_build,
         "core_available_version": core_available_version,
         "core_update_via_release": False,
+        "core_update_available": newer_release(core_version, core_available_version),
         "modules_installed": len(installed_modules),
         "modules_total": len(KNOWN_MODULES),
         "profiles": len(profile_items),
@@ -3392,9 +3401,9 @@ def apply_reality_config(config_path: Path, config: dict[str, Any], restart_serv
 def vless_encryption_pair(settings: dict[str, Any]) -> tuple[str, str]:
     if settings.get("privacy_mode", "standard") == "standard":
         return "none", ""
-    if not CORE_BIN.is_file():
+    if not core_binary().is_file():
         raise HTTPException(status_code=409, detail="Для дополнительного шифрования установите актуальное ядро Mihomo.")
-    version_result = run(str(CORE_BIN), "-v")
+    version_result = run(str(core_binary()), "-v")
     version = re.search(r"\bv(\d+)\.(\d+)\.(\d+)\b", version_result.stdout)
     if version_result.returncode or not version or tuple(map(int, version.groups())) < (1, 19, 30):
         raise HTTPException(status_code=409, detail="Для дополнительного шифрования требуется ядро Mihomo 1.19.30 или новее.")
@@ -5278,14 +5287,14 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
 
 
 def validate_rendered_profile(config: str) -> None:
-    if not CORE_BIN.is_file():
+    if not core_binary().is_file():
         return
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8", delete=False) as handle:
         handle.write(config)
         temp_path = handle.name
     try:
         CORE_HOME.mkdir(parents=True, exist_ok=True)
-        result = run(str(CORE_BIN), "-t", "-d", str(CORE_HOME), "-f", temp_path)
+        result = run(str(core_binary()), "-t", "-d", str(CORE_HOME), "-f", temp_path)
         if result.returncode:
             raise HTTPException(status_code=500, detail=(result.stderr or result.stdout).strip() or "Mihomo rejected generated config")
     finally:
@@ -5768,7 +5777,7 @@ def select_client_channels(token: str, request: Request, payload: ChannelSelecti
         "version": 1, "command": "select-channels", "config": config,
         "revision": profile_revision(profile), "require_udp": payload.require_udp,
         "expires_at": int(time.time()) + 600,
-        "server_checks": {"configuration": "validated" if CORE_BIN.is_file() else "rendered",
+        "server_checks": {"configuration": "validated" if core_binary().is_file() else "rendered",
                           "client_reachability": "required"},
         "subscription_userinfo": subscription_limits.userinfo(profile, DATA_ROOT / "subscription-limits"),
     }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})

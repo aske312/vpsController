@@ -310,3 +310,12 @@ button.noderaTag { cursor:pointer; }
 .noderaContextFact { display:flex; align-items:center; gap:12px; justify-content:space-between; padding:8px 0; overflow-wrap:anywhere; }
 .noderaToolsGrid .mcpModule { min-width:0; }
 .noderaToolsGrid input { width:100%; min-width:0; }
+
+.noderaToolsList { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 20px; }
+.noderaToolRow { display:flex; gap:9px; align-items:center; min-width:0; padding:12px 0; border-bottom:1px solid var(--line); }
+.noderaToolRow > span { flex:1; min-width:0; }
+.noderaToolRow small,.noderaContextFact small { display:block; color:var(--muted); margin-top:4px; }
+.noderaHeroFacts { grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); max-width:780px; }
+@container (max-width:640px) { .noderaToolsList { grid-template-columns:1fr; } .noderaHeroFacts { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+
+.noderaHeroContent { width:min(100%,720px); }

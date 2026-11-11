@@ -8,7 +8,8 @@ test("installed component version never falls back to the available release", ()
   assert.equal(componentInstalledVersion(candidate), "Версия неизвестна");
   assert.equal(componentInstalledVersion({...candidate, installed: false}), "Не установлен");
   assert.equal(componentInstalledVersion({...candidate, installed_version: "1.2.3"}), "v1.2.3");
-  assert.equal(componentInstalledVersion({...candidate, id: "mihomo", installed_version: "1.2.3"}, "2.3.4"), "v2.3.4");
+  assert.equal(componentInstalledVersion({...candidate, id: "mihomo"}, "2.3.4"), "v2.3.4");
+  assert.equal(componentInstalledVersion({...candidate, id: "mihomo", installed_version: "1.2.3"}, "2.3.4"), "v1.2.3");
 });
 
 const image = { installed: true, installable: true, update_available: true, management: {state: "managed"},

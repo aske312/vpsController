@@ -88,6 +88,7 @@ class Settings(BaseModel):
     providers: list[Provider] | None = Field(default=None, max_length=12)
     active_provider: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     assistant_style: Literal['balanced', 'concise', 'friendly', 'technical'] = 'balanced'
+    assistant_character: str = Field(default='Нодера — доброжелательная, самостоятельная и внимательная собеседница. Говорит ясно, с лёгким юмором, без лести. Признаёт неопределённость, объясняет решения и уважает предпочтения собеседника.', max_length=2000)
     assistant_instructions: str = Field(default='', max_length=4000)
     personalization_enabled: StrictBool = True
     web_enabled: StrictBool = True
@@ -254,14 +255,15 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_capabilities', 'mihomo_api']
+    name: Literal['vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_capabilities', 'mihomo_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics']
     service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     method: Literal['GET', 'POST', 'PATCH', 'DELETE'] = 'GET'
     path: str | None = Field(default=None, max_length=256)
     body: dict = Field(default_factory=dict)
-    endpoint: Literal['/overview', '/services', '/components', '/metrics', '/application'] | None = None
+    lines: int = Field(default=60, strict=True, ge=20, le=120)
+    endpoint: Literal['/overview', '/services', '/components', '/metrics', '/application', '/logs', '/network', '/security', '/diagnostics'] | None = None
 
 
 class ServiceConfirmation(BaseModel):
@@ -339,7 +341,7 @@ def _read(api):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
     if value.get('mcp_installed') is None:
         value['mcp_installed'] = list(MCP_MODULES)
-    for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
+    for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
         value.setdefault(key, default)
     return value
 
@@ -362,7 +364,7 @@ def store(api, value):
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
     ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
-    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
+    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
               accounts=[{key: item for key, item in a.items() if key not in ('bot_access', *ACCOUNT_OPTIONS)} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -479,6 +481,8 @@ def bot_identity(api, token, username=None):
 
 
 def status(api):
+    import component_checks, component_state
+    from datetime import datetime, timezone
     value = read(api)
     observations = {key: api.observe_service(AGENT_UNIT if key == 'ai-agent' else BOT_UNIT) for key in MODULES}
     installed = {key: runtime_ready(key) and observations[key].get('unit_present') is True for key in MODULES}
@@ -515,7 +519,7 @@ def status(api):
         bot_username = bot_identity(api, value.get('bot_token'))
     except (OSError, operations.OperationConflict):
         bot_username = None
-    return {'settings': public(value), 'modules': modules, 'runtime_installed': installed['ai-agent'],
+    return {'settings': public(value), 'health': component_state.health_state(component_checks.cached(api).get('nodera'), now=datetime.now(timezone.utc)), 'modules': modules, 'runtime_installed': installed['ai-agent'],
             'bot_username': bot_username,
             'provider_usage': {entry['id']: usage[entry['id']] for entry in providers(value) if entry['id'] in usage},
             'nodera_version': nodera_version, 'nodera_available_version': available_version,
@@ -536,7 +540,8 @@ def status(api):
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
                           (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else []) +
                           (['vps_service_action', 'vps_operation', 'vps_api'] if agent_version >= (1, 5, 0) else []) +
-                          (['vps_user', 'mihomo_capabilities', 'mihomo_api'] if agent_version >= (1, 6, 0) else [])}}
+                          (['vps_user', 'mihomo_capabilities', 'mihomo_api'] if agent_version >= (1, 6, 0) else []) +
+                          (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else [])}}
 
 
 def configure(api, payload):
@@ -569,13 +574,13 @@ def configure(api, payload):
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
-        for key, default in (('assistant_style', 'balanced'), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
+        for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
             if key not in payload.model_fields_set:
                 submitted[key] = old.get(key, default)
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         if submitted['mcp_installed'] is None:
             submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
-        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_instructions', 'personalization_enabled', 'web_domains', 'web_enabled', 'memory_enabled', 'memory_days')
+        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'assistant_style', 'assistant_character', 'assistant_instructions', 'personalization_enabled', 'web_domains', 'web_enabled', 'memory_enabled', 'memory_days')
         keys = ai_keys + ('bot_token',) if unified else ai_keys if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         if unified and submitted['providers'] is not None:
@@ -780,7 +785,7 @@ def runtime_request(api, mode, body):
     import assistant_personalization
     if value.get('personalization_enabled', True):
         try:
-            value['personal_context'] = assistant_personalization.snapshot(api, value, str(body.get('actor', 'panel')), body.pop('context_conversation', None))
+            value['personal_context'] = assistant_personalization.for_model(assistant_personalization.snapshot(api, value, str(body.get('actor', 'panel')), body.pop('context_conversation', None)), body.get('prompt', ''))
         except (OSError, HTTPException, operations.OperationConflict):
             value['personal_context'] = {'unavailable': True}
         prompt = body.get('prompt', '')
@@ -909,6 +914,9 @@ def require_bot_actor(value, actor, *, chat=False):
 def control_tool(api, name, arguments=None, actor='panel'):
     import assistant_commands
     arguments = arguments or {}
+    if name in ('vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'):
+        import assistant_diagnostics
+        return assistant_diagnostics.call(api, name, arguments, actor)
     if name in ('vps_user', 'mihomo_capabilities', 'mihomo_api'):
         import assistant_mihomo
         if name == 'vps_user':
@@ -941,7 +949,7 @@ def control_tool(api, name, arguments=None, actor='panel'):
         return {key: value.get(key) for key in ('id', 'action', 'state')}
     if name == 'vps_api':
         endpoints = {'/overview': 'vps_overview', '/services': 'vps_services', '/components': 'vps_components',
-                     '/metrics': 'vps_metrics', '/application': 'vps_panel'}
+                     '/metrics': 'vps_metrics', '/application': 'vps_panel', '/logs': 'vps_logs', '/network': 'vps_network', '/security': 'vps_security', '/diagnostics': 'vps_diagnostics'}
         tool = endpoints.get(arguments.get('endpoint'))
         if not tool:
             raise HTTPException(422, 'Этот раздел API недоступен через MCP')
@@ -952,7 +960,7 @@ def control_tool(api, name, arguments=None, actor='panel'):
         return {'server': result['server'], 'resources': result['resources']}
     if name == 'vps_services':
         return {'services': [{'id': key, 'name': definition['name'], 'controls': assistant_commands.controls(key, definition), **{
-            field: observation.get(field) for field in ('state', 'substate', 'active', 'enabled', 'runtime')
+            field: observation.get(field) for field in ('state', 'substate', 'active', 'enabled', 'runtime', 'service_type')
         }} for key, definition in api.managed_services().items()
             for observation in [api.observe_service(definition['unit'])]]}
     if name == 'vps_components':

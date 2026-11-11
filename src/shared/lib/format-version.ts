@@ -7,5 +7,5 @@ export function formatModuleVersion(value?: string | null, fallback = "—") {
 
 export function componentInstalledVersion(image: { id: string; installed: boolean; installed_version?: string | null }, coreVersion?: string) {
   if (!image.installed) return "Не установлен";
-  return formatModuleVersion(image.id === "mihomo" && coreVersion ? coreVersion : image.installed_version, "Версия неизвестна");
+  return formatModuleVersion(image.installed_version || (image.id === "mihomo" ? coreVersion : undefined), "Версия неизвестна");
 }

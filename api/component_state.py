@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,7 +57,19 @@ def health_state(diagnostics: dict | None, *, now: datetime) -> dict:
     state = {"healthy": "healthy", "warning": "possible_issues", "critical": "error"}.get(diagnostics.get("status"), "unknown")
     reason = {"healthy": "Проверки пройдены", "possible_issues": "Проверка обнаружила возможные проблемы",
               "error": "Проверка обнаружила ошибку", "unknown": "Результат проверки неизвестен"}[state]
-    return observation(state, reason, timestamp)
+    return observation(state, diagnostics.get("reason") or reason, timestamp)
+
+
+def saved_health(data_root, identity):
+    file = Path(data_root) / 'component-health.json'
+    try:
+        if file.exists() and file.stat().st_size > 131072: raise ValueError('oversized health record')
+        records = json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
+        diagnostic = records.get('items', {}).get(identity)
+        if diagnostic is not None and not isinstance(diagnostic, dict): raise ValueError('invalid health record')
+    except (OSError, ValueError, AttributeError):
+        diagnostic = {'status': 'unknown', 'checked_at': datetime.now(timezone.utc).isoformat(), 'reason': 'Файл автоматической проверки недоступен; данные сохранены для восстановления'}
+    return health_state(diagnostic, now=datetime.now(timezone.utc))
 
 
 def component_state(image_id: str, manifest: dict, files: list[bool | None], unit: dict, version: str,

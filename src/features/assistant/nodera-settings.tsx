@@ -46,9 +46,11 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   useEffect(() => {
     setSitesText(previous => JSON.stringify(previous.split(",").map(value => value.trim()).filter(Boolean)) === JSON.stringify(draft.web_domains ?? []) ? previous : (draft.web_domains ?? []).join(", "));
   }, [draft.web_domains]);
+  const [internetOpen, setInternetOpen] = useState(false);
+  const [permanent, setPermanent] = useState(true);
   const [contextOpen, setContextOpen] = useState(false);
   const [contextActor, setContextActor] = useState("");
-  const [contextData, setContextData] = useState<{ facts: {id: string; text: string}[]; recent_topics: string[] }>();
+  const [contextData, setContextData] = useState<{ facts: {id: string; text: string; permanent?: boolean}[]; recent_topics: string[]; cache?: { used_bytes: number; limit_bytes: number } }>();
   const [contextText, setContextText] = useState("");
   const [contextBusy, setContextBusy] = useState(false);
   const [contextError, setContextError] = useState("");
@@ -57,7 +59,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     if (!contextOpen) return;
     const generation = ++contextGeneration.current;
     setContextData(undefined); setContextText(""); setContextError("");
-    void request<{facts: {id: string; text: string}[]; recent_topics: string[]}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`).then(
+    void request<{facts: {id: string; text: string; permanent?: boolean}[]; recent_topics: string[]; cache?: { used_bytes: number; limit_bytes: number }}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`).then(
       result => { if (generation === contextGeneration.current) setContextData(result); },
       error => { if (generation === contextGeneration.current) setContextError(error instanceof Error ? error.message : "Контекст недоступен"); },
     );
@@ -68,8 +70,8 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     const generation = contextGeneration.current;
     setContextBusy(true);
     try {
-      const result = await request<{facts: {id: string; text: string}[]; recent_topics: string[]}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`,
-        { method: "POST", body: JSON.stringify({ operation, identity, text: contextText }) });
+      const result = await request<{facts: {id: string; text: string; permanent?: boolean}[]; recent_topics: string[]; cache?: { used_bytes: number; limit_bytes: number }}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`,
+        { method: "POST", body: JSON.stringify({ operation, identity, text: contextText, permanent }) });
       if (generation === contextGeneration.current) { setContextData(result); setContextText(""); }
       notify.success(operation === "remember" ? "Предпочтение сохранено" : "Контекст удалён");
     } catch (error) { notify.error(error instanceof Error ? error.message : "Контекст не изменён"); }
@@ -278,26 +280,48 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     </SettingsDialog>}
   </section>;
 
+  const behavior = <section className="noderaSettings" aria-label="Поведение">
+    <header className="noderaBlockHead"><h2>Поведение</h2></header>
+    <fieldset className="mcpBehavior" disabled={blocked}>
+      <div className="mcpBehaviorFields">
+        <label>Манера общения<select value={draft.assistant_style} onChange={event => patch({ assistant_style: event.target.value as Draft["assistant_style"] })}>
+          <option value="balanced">Спокойно и по делу</option><option value="concise">Кратко</option><option value="friendly">Дружелюбно</option><option value="technical">Технически подробно</option>
+        </select></label>
+        <div className="noderaMemory">
+          <label className="mcpToggle"><input type="checkbox" checked={draft.memory_enabled} onChange={event => patch({ memory_enabled: event.target.checked })}/>Сохранять диалоги</label>
+          {draft.memory_enabled && <><label>Срок хранения, дни<input type="number" min={1} max={90} value={draft.memory_days}
+            onChange={event => patch({ memory_days: Number(event.target.value) })}/></label>
+            <small>От последнего сообщения в диалоге.</small></>}
+        </div>
+      </div>
+      <label className="noderaInstructions">Дополнительные инструкции<textarea value={draft.assistant_instructions} maxLength={4000} rows={5}
+        onChange={event => patch({ assistant_instructions: event.target.value })}/></label>
+    </fieldset>
+  </section>;
   const tools = <section className="noderaSettings" aria-label="Инструменты">
     <header className="noderaBlockHead"><h2>Инструменты</h2></header>
-    <div className="noderaToolsGrid">
-      <article className="mcpModule"><header><strong>Интернет</strong></header><p>Поиск, чтение и сопоставление источников.</p>
-        <label>Предпочитаемые сайты<input placeholder="example.com, docs.example.org" value={sitesText} disabled={blocked}
-          onChange={event => { setSitesText(event.target.value); patch({ web_domains: event.target.value.split(",").map(value => value.trim()).filter(Boolean) }); }}/></label>
-        <small>До 8 доменов. Пусто — весь интернет. Ассистент может уточнять область поиска.</small>
-        <footer><button type="button" className="ghostButton" aria-label="Интернет" aria-pressed={draft.web_enabled ?? true} disabled={blocked || !status.web_tools} onClick={() => patch({ web_enabled: !draft.web_enabled })}>{draft.web_enabled ? "Включён" : "Выключен"}</button>{!status.web_tools && <small>Обновите Nodera</small>}</footer>
-      </article>
-      <article className="mcpModule"><header><strong>Персонализация</strong></header><p>Предпочтения по просьбе собеседника и контекст его недавних диалогов. Хранение: {draft.memory_days ?? 30} дней.</p>
-        <footer><button type="button" className="ghostButton" aria-label="Персонализация" aria-pressed={draft.personalization_enabled ?? true} disabled={blocked || !status.context_tools} onClick={() => patch({ personalization_enabled: !draft.personalization_enabled })}>{draft.personalization_enabled ? "Включена" : "Выключена"}</button>
-        <button type="button" className="ghostButton" disabled={blocked || !status.context_tools} onClick={() => { setContextActor(actor); setContextOpen(true); }}>Контекст собеседника</button></footer>
-      </article>
+    <div className="noderaToolsList">
+      {([{ id: "web", name: "Интернет", description: "Поиск и чтение источников", enabled: draft.web_enabled ?? true, available: status.web_tools, change: () => patch({ web_enabled: !draft.web_enabled }), settings: () => setInternetOpen(true) },
+        { id: "memory", name: "Персонализация", description: "Характер, память и контекст собеседника", enabled: draft.personalization_enabled ?? true, available: status.context_tools, change: () => patch({ personalization_enabled: !draft.personalization_enabled }), settings: () => { setContextActor(actor); setContextOpen(true); } }]).map(tool => <div className="noderaToolRow" key={tool.id}>
+        <span><strong>{tool.name}</strong><small>{tool.description}{!tool.available && " · обновите Nodera"}</small></span>
+        <button type="button" role="switch" className="noderaAISwitch" aria-label={tool.name} aria-checked={tool.enabled} disabled={blocked || !tool.available} onClick={tool.change}><span className="noderaSwitchTrack"><span/></span></button>
+        <button type="button" className="mcpIconButton" aria-label={`Настроить ${tool.name}`} title="Настроить" disabled={blocked || !tool.available || contextBusy} onClick={tool.settings}><ChatIcon name="gear"/></button>
+      </div>)}
     </div>
-    {contextOpen && <SettingsDialog title="Контекст собеседника" close={() => setContextOpen(false)}>
+    {internetOpen && <SettingsDialog title="Интернет" close={() => setInternetOpen(false)}>
+      <label>Предпочитаемые сайты<input placeholder="example.com, docs.example.org" value={sitesText} disabled={blocked} onChange={event => { setSitesText(event.target.value); patch({ web_domains: event.target.value.split(",").map(value => value.trim()).filter(Boolean) }); }}/></label>
+      <small>До 8 доменов. Пусто — весь интернет. Ассистент может уточнять область поиска.</small>
+    </SettingsDialog>}
+    {contextOpen && <SettingsDialog title="Персонализация" close={() => setContextOpen(false)}>
+      <label>Характер Nodera<textarea maxLength={2000} value={draft.assistant_character ?? ""} disabled={blocked} onChange={event => patch({ assistant_character: event.target.value })}/></label>
+      {behavior}
+      {contextData?.cache && <p className="mcpFieldHint">Кеш персонализации: {(contextData.cache.used_bytes / 1024 / 1024).toFixed(1)} МБ / 5 ГБ. Временный контекст — {draft.memory_days ?? 30} дней; важные сведения хранятся до удаления.</p>}
       <label>Собеседник<select value={contextActor} disabled={contextBusy} onChange={event => setContextActor(event.target.value)}><option value="">Администратор панели</option>{draft.accounts.map(account => <option key={account.telegram_id} value={String(account.telegram_id)}>{account.name || account.telegram_id}</option>)}</select></label>
       {contextError && <p role="alert">{contextError}</p>}
       {!contextData && !contextError && <p role="status">Загрузка контекста…</p>}
-      {contextData && <><h3>Сохранённые предпочтения</h3>{contextData.facts.length ? contextData.facts.map(fact => <div className="noderaContextFact" key={fact.id}><span>{fact.text}</span><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget", fact.id)}>Удалить</button></div>) : <p>Нет сохранённых предпочтений.</p>}
+      {contextData && <><h3>Сохранённые предпочтения</h3>{contextData.facts.length ? contextData.facts.map(fact => <div className="noderaContextFact" key={fact.id}><span>{fact.text}<small>{fact.permanent ? "Долгосрочно" : `${draft.memory_days ?? 30} дней`}</small></span><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget", fact.id)}>Удалить</button></div>) : <p>Нет сохранённых предпочтений.</p>}
         <label>Добавить предпочтение<input maxLength={300} value={contextText} disabled={contextBusy} onChange={event => setContextText(event.target.value)}/></label>
+        <label className="mcpToggle"><input type="checkbox" checked={permanent} disabled={contextBusy} onChange={event => setPermanent(event.target.checked)}/>Хранить надолго</label>
         <button type="button" className="ghostButton" disabled={contextBusy || !contextText.trim()} onClick={() => void changeContext("remember")}>Запомнить</button>
         <h3>Недавние темы</h3>{contextData.recent_topics.length ? <ul>{contextData.recent_topics.map((topic, index) => <li key={index}>{topic}</li>)}</ul> : <p>Нет контекста из других диалогов.</p>}
         <button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget")}>Очистить персональный контекст</button></>}
@@ -381,25 +405,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     </SettingsDialog>}
   </section>;
 
-  const behavior = <section className="noderaSettings" aria-label="Поведение">
-    <header className="noderaBlockHead"><h2>Поведение</h2></header>
-    <fieldset className="mcpBehavior" disabled={blocked}>
-      <div className="mcpBehaviorFields">
-        <label>Манера общения<select value={draft.assistant_style} onChange={event => patch({ assistant_style: event.target.value as Draft["assistant_style"] })}>
-          <option value="balanced">Спокойно и по делу</option><option value="concise">Кратко</option><option value="friendly">Дружелюбно</option><option value="technical">Технически подробно</option>
-        </select></label>
-        <div className="noderaMemory">
-          <label className="mcpToggle"><input type="checkbox" checked={draft.memory_enabled} onChange={event => patch({ memory_enabled: event.target.checked })}/>Сохранять диалоги</label>
-          {draft.memory_enabled && <><label>Срок хранения, дни<input type="number" min={1} max={90} value={draft.memory_days}
-            onChange={event => patch({ memory_days: Number(event.target.value) })}/></label>
-            <small>От последнего сообщения в диалоге.</small></>}
-        </div>
-      </div>
-      <label className="noderaInstructions">Дополнительные инструкции<textarea value={draft.assistant_instructions} maxLength={4000} rows={5}
-        onChange={event => patch({ assistant_instructions: event.target.value })}/></label>
-    </fieldset>
-  </section>;
-  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}{behavior}</> : <>{telegram}{users}</>}</div>;
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{users}</>}</div>;
 }
 
 export function SettingsDialog({ title, close, submit, blocked, children }: {

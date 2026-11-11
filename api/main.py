@@ -46,6 +46,7 @@ import application_operation
 import application_recovery
 import operation_policy
 import assistant_control
+import component_checks
 import assistant_personalization
 import assistant_contacts
 import assistant_commands
@@ -122,15 +123,21 @@ async def lifespan(_: FastAPI):
     global metrics_monitor
     migration_task = None
     relay_recovery_task = None
+    component_health_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
         migration_task = asyncio.create_task(migrate_legacy_components())
         relay_recovery_task = asyncio.create_task(recover_relay_tests())
         metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
         metrics_monitor.start()
+        component_health_task = asyncio.create_task(component_checks.monitor(sys.modules[__name__]))
     try:
         yield
     finally:
+        if component_health_task is not None:
+            component_health_task.cancel()
+            try: await component_health_task
+            except asyncio.CancelledError: pass
         if relay_recovery_task is not None:
             relay_recovery_task.cancel()
             try: await relay_recovery_task
@@ -4097,11 +4104,12 @@ def protocol_image_manifests(*, include_versions: bool = True, include_retired: 
         installed = (any(value is True for value in files) or unit["active"] or
                      ("@" not in service_template and unit["unit_present"] is True) or bot_unit.get("unit_present") is True)
         versions = protocol_version_info(manifest, image_id, installed) if include_versions else {}
-        diagnostics = (network_diagnostic_cache if image_id in ("wg", "awg") else direct_diagnostic_cache).get(image_id)
+        diagnostics = component_checks.cached(sys.modules[__name__]).get(image_id) if image_id in ('nodera', 'mihomo') else (network_diagnostic_cache if image_id in ("wg", "awg") else direct_diagnostic_cache).get(image_id)
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
-            "version": str(manifest.get("version", "")),
+            "version": versions.get("installed_version") if image_id == "mihomo" and installed and versions.get("installed_version") else str(manifest.get("version", "")),
+            "manifest_version": str(manifest.get("version", "")),
             "description": str(manifest.get("description", "")),
             "category": str(manifest.get("category", "network")),
             "category_name": str(manifest.get("category_name", "Сетевые модули")),
@@ -4564,6 +4572,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "runtime": api_observation["runtime"],
         },
         "containers": containers,
+        "component_health": component_checks.visible(sys.modules[__name__]),
         "cdn_security": {**cdn_security.settings(), "operation": cdn_operation.status()},
         "action": action,
         "service_mode": {

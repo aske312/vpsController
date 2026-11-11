@@ -201,3 +201,19 @@ test('new catalog chats use the saved default and copy actions sit outside the a
   const selection = nodes(tree, n => n.props['aria-label'] === 'Модель для запроса')[0].node;
   assert.equal(selection.props.children[0].props.children, 'default-model');
 });
+
+test('tools use switches and gears; model and tool count are separate header facts', async () => {
+  const status = fixture();
+  status.web_tools = true; status.context_tools = true;
+  const view = mount(status);
+  view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
+  let tree = view.render();
+  assert.equal(nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'Интернет').length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'Персонализация').length, 1);
+  assert.equal(nodes(tree, n => n.type === 'dt' && n.props.children === 'Модель по умолчанию').length, 1);
+  assert.equal(nodes(tree, n => n.type === 'dt' && n.props.children === 'Инструменты').length, 1);
+  nodes(tree, n => n.props['aria-label'] === 'Настроить Интернет')[0].node.props.onClick();
+  tree = view.render();
+  assert.equal(nodes(tree, n => n.props.title === 'Интернет' && typeof n.type === 'function').length, 1);
+});

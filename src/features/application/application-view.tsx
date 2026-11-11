@@ -74,6 +74,13 @@ export function ApplicationView({ application, services, applicationVersion, app
                 <b>{container.presentation.label}</b>
               </div>)}
             </div>
+            {!!application?.component_health?.length && <div className="applicationRuntimeList" aria-label="Автоматические проверки компонентов">
+              {application.component_health.map(item => <div key={item.id} className={item.status === "healthy" ? "healthy" : item.status === "critical" ? "failed" : "pending"}>
+                <i/><span><strong>{item.name}</strong><small>{item.reason}{item.checked_at ? ` · ${new Date(item.checked_at).toLocaleString("ru")}` : ""}</small></span>
+                <b>{item.status === "healthy" ? "OK" : item.status === "critical" ? "Ошибка" : item.status === "pending" ? "Проверяется" : "Проверить"}</b>
+              </div>)}
+            </div>}
+
 
             <div className="applicationPrimaryActions">
               <button onClick={() => void runApplicationAction("restart")} disabled={mutationBlocked}><span>RESTART</span><strong>Перезапустить</strong><small>Панель и API без reboot VPS</small></button>

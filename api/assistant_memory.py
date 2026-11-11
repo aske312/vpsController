@@ -6,7 +6,7 @@ import uuid
 from fastapi import HTTPException
 import application_operation as operations
 
-MAX_BYTES = 64 * 1024 * 1024
+MAX_BYTES = 5 * 1024 * 1024 * 1024
 MAX_CONVERSATIONS = 10
 
 
@@ -59,10 +59,12 @@ def get(api, identity, actor='panel', channel='panel', *, settings=None):
 
 
 def _prune(api, settings):
+    import assistant_personalization
+    assistant_personalization.expire(api, settings)
     root = api.DATA_DIR / 'assistant' / 'conversations'
     cutoff = time.time() - settings.get('memory_days', 30) * 86400
     files = sorted(root.glob('*/*.json'), key=lambda item: item.stat().st_mtime, reverse=True)
-    counts, total = {}, 0
+    counts, total = {}, sum(file.stat().st_size for file in (api.DATA_DIR / 'assistant' / 'personalization').glob('*.json'))
     for file in files:
         info = file.stat()
         scope = file.parent.name

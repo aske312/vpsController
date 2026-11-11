@@ -1,7 +1,7 @@
 {
   "id": "nodera",
   "name": "Nodera",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "installable": true,
   "description": "AI Ассистент, Telegram и управление VPS через MCP.",
   "category": "assistant",
@@ -49,7 +49,16 @@
     ],
     "backup_paths": [
       {
-        "path": "{data_dir}/assistant"
+        "path": "{data_dir}/assistant/settings.json"
+      },
+      {
+        "path": "{data_dir}/assistant/ai-agent"
+      },
+      {
+        "path": "{data_dir}/assistant/nodera-bot"
+      },
+      {
+        "path": "{data_dir}/assistant/personalization"
       },
       {
         "path": "/etc/systemd/system/vps-control-ai-agent.service"

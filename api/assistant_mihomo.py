@@ -41,7 +41,7 @@ def administrator(settings, actor):
     return actor == 'panel' or bool(profile_for(settings, actor).get('bot_access'))
 
 
-def request(method, path, body=None, operation_id=None):
+def request(method, path, body=None, operation_id=None, *, timeout=35):
     """Only this fixed loopback origin receives the panel's credential."""
     password = os.getenv('ADMIN_PASSWORD', '')
     if not password:
@@ -53,7 +53,7 @@ def request(method, path, body=None, operation_id=None):
     data = json.dumps(body).encode() if body is not None and method != 'GET' else None
     req = urllib.request.Request('http://127.0.0.1:8791/api/mihomo' + path, data=data, headers=headers, method=method)
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=35) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=timeout) as response:
             raw = response.read(2 * 1024 * 1024 + 1)
             if len(raw) > 2 * 1024 * 1024:
                 raise HTTPException(502, 'Ответ Mihomo слишком большой')

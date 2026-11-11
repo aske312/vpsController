@@ -56,7 +56,7 @@ function serviceBadge(service: ServiceItem) {
   if (state === "unknown") return { className: "stopped", label: "Unknown" };
   if (state === "error") return { className: "failed", label: "Error" };
   if (state === "running") {
-    if (substate === "exited") return { className: "ready", label: "ACTIVE  EXITED" };
+    if (substate === "exited") return { className: "ready", label: "ПРИМЕНЕНО" };
     if (substate === "waiting") return { className: "ready", label: "ACTIVE  WAITING" };
     return { className: "running", label: "RUNNING" };
   }

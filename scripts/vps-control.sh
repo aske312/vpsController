@@ -2611,6 +2611,7 @@ ensure_ikev2_auth_runtime() {
 ensure_mihomo_profile_runtimes() {
   python3 "${INSTALL_DIR}/api/component_registry.py" check-managed \
     --manifest "${INSTALL_DIR}/protocol-images/mihomo/manifest.json" --data-dir "${DATA_DIR}" >/dev/null 2>&1 || return 0
+  python3 "${INSTALL_DIR}/api/mihomo_core.py" "${INSTALL_DIR}/api/bin/mihomo" "${DATA_DIR}/mihomo/bin/mihomo" || return $?
   bash "${INSTALL_DIR}/protocol-images/mihomo/install-subscription-limits.sh" || return $?
   local config_dir="/etc/vps-control/mihomo/shadowsocks"
   if [[ ! -f /etc/systemd/system/vps-control-mihomo-ss@.service ]] \
