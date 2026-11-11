@@ -2,7 +2,7 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
-import { moduleState, type Draft, type McpId, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
+import { accountPermissions, accountRole, permissionNames, roleDefaults, roleNames, type Role, type Permission, moduleState, type Draft, type McpId, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
 
 export const panels = [
   { id: "chat", label: "Чат", icon: "chat" },
@@ -35,7 +35,7 @@ const moduleDescriptions: Record<McpId, string> = {
   "vps-controller-mcp": "Мониторинг VPS и модулей, управление службами с подтверждением, API приложения.",
 };
 const blankAccount = (): AccountDraft => ({
-  telegram_id: 0, name: "", bot_access: false, bot_chat_access: false, address_as: "",
+  role: "guest", permission_overrides: {}, telegram_id: 0, name: "", bot_access: false, bot_chat_access: false, address_as: "",
   telegram_access: false, vps_access: false, excluded_dialogs: [],
   excluded_dialogs_text: "", session: null, session_configured: false,
 });
@@ -48,6 +48,9 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   }, [draft.web_domains]);
   const [internetOpen, setInternetOpen] = useState(false);
   const [permanent, setPermanent] = useState(true);
+  const [personalTab, setPersonalTab] = useState<"character" | "behavior" | "memory">("character");
+  const [roleEdit, setRoleEdit] = useState<Role>();
+  const [factLimit, setFactLimit] = useState(8);
   const [contextOpen, setContextOpen] = useState(false);
   const [contextActor, setContextActor] = useState("");
   const [contextData, setContextData] = useState<{ facts: {id: string; text: string; permanent?: boolean}[]; recent_topics: string[]; cache?: { used_bytes: number; limit_bytes: number } }>();
@@ -58,7 +61,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   useEffect(() => {
     if (!contextOpen) return;
     const generation = ++contextGeneration.current;
-    setContextData(undefined); setContextText(""); setContextError("");
+    setContextData(undefined); setContextText(""); setFactLimit(8); setContextError("");
     void request<{facts: {id: string; text: string; permanent?: boolean}[]; recent_topics: string[]; cache?: { used_bytes: number; limit_bytes: number }}>(`/assistant/context${contextActor ? `?telegram_id=${contextActor}` : ""}`).then(
       result => { if (generation === contextGeneration.current) setContextData(result); },
       error => { if (generation === contextGeneration.current) setContextError(error instanceof Error ? error.message : "Контекст недоступен"); },
@@ -119,6 +122,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   const botLocked = blocked || !bot?.installed || bot.management?.state !== "managed";
   const botCredentialsLocked = botLocked || status.bot.active === true;
   const account = userEdit?.value;
+  const accountGrants = account ? accountPermissions(draft, account) : new Set<Permission>();
 
   function editAccount(value: Partial<AccountDraft>) {
     setUserEdit(current => current && { ...current, value: { ...current.value, ...value } });
@@ -312,19 +316,23 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <label>Предпочитаемые сайты<input placeholder="example.com, docs.example.org" value={sitesText} disabled={blocked} onChange={event => { setSitesText(event.target.value); patch({ web_domains: event.target.value.split(",").map(value => value.trim()).filter(Boolean) }); }}/></label>
       <small>До 8 доменов. Пусто — весь интернет. Ассистент может уточнять область поиска.</small>
     </SettingsDialog>}
-    {contextOpen && <SettingsDialog title="Персонализация" close={() => setContextOpen(false)}>
-      <label>Характер Nodera<textarea maxLength={2000} value={draft.assistant_character ?? ""} disabled={blocked} onChange={event => patch({ assistant_character: event.target.value })}/></label>
-      {behavior}
+    {contextOpen && <SettingsDialog title="Персонализация" wide close={() => setContextOpen(false)}>
+      <nav className="noderaDialogTabs" aria-label="Разделы персонализации">{([{id: "character", label: "Характер"}, {id: "behavior", label: "Общение"}, {id: "memory", label: "Память пользователей"}] as const).map(tab => <button type="button" key={tab.id} className="ghostButton" aria-pressed={personalTab === tab.id} onClick={() => setPersonalTab(tab.id)}>{tab.label}</button>)}</nav>
+      {personalTab === "character" && <section className="noderaPersonalSection"><h3>Персонаж Nodera</h3><p>Общий характер ассистента: как она общается, что ценит и как проявляет себя. Настройки действуют для всех собеседников.</p><label>Характер Nodera<textarea rows={8} maxLength={2000} value={draft.assistant_character ?? ""} disabled={blocked} onChange={event => patch({ assistant_character: event.target.value })}/></label><small>Изменения сохраняются общей кнопкой «Сохранить» в разделе.</small></section>}
+      {personalTab === "behavior" && <section className="noderaPersonalSection">{behavior}<small>Манера общения и срок временной памяти. Изменения сохраняются кнопкой «Сохранить» в разделе.</small></section>}
+      {personalTab === "memory" && <section className="noderaPersonalSection"><h3>Личная память собеседника</h3><p>Сведения каждого пользователя хранятся отдельно. Добавление и удаление фактов применяются сразу.</p>
       {contextData?.cache && <p className="mcpFieldHint">Кеш персонализации: {(contextData.cache.used_bytes / 1024 / 1024).toFixed(1)} МБ / 5 ГБ. Временный контекст — {draft.memory_days ?? 30} дней; важные сведения хранятся до удаления.</p>}
       <label>Собеседник<select value={contextActor} disabled={contextBusy} onChange={event => setContextActor(event.target.value)}><option value="">Администратор панели</option>{draft.accounts.map(account => <option key={account.telegram_id} value={String(account.telegram_id)}>{account.name || account.telegram_id}</option>)}</select></label>
       {contextError && <p role="alert">{contextError}</p>}
       {!contextData && !contextError && <p role="status">Загрузка контекста…</p>}
-      {contextData && <><h3>Сохранённые предпочтения</h3>{contextData.facts.length ? contextData.facts.map(fact => <div className="noderaContextFact" key={fact.id}><span>{fact.text}<small>{fact.permanent ? "Долгосрочно" : `${draft.memory_days ?? 30} дней`}</small></span><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget", fact.id)}>Удалить</button></div>) : <p>Нет сохранённых предпочтений.</p>}
+      {contextData && <><h3>Сохранённые предпочтения</h3>{contextData.facts.length ? contextData.facts.slice(0, factLimit).map(fact => <div className="noderaContextFact" key={fact.id}><span>{fact.text}<small>{fact.permanent ? "Долгосрочно" : `${draft.memory_days ?? 30} дней`}</small></span><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget", fact.id)}>Удалить</button></div>) : <p>Нет сохранённых предпочтений.</p>}
+        {contextData.facts.length > factLimit && <button type="button" className="ghostButton" onClick={() => setFactLimit(value => value + 8)}>Ещё факты</button>}
         <label>Добавить предпочтение<input maxLength={300} value={contextText} disabled={contextBusy} onChange={event => setContextText(event.target.value)}/></label>
         <label className="mcpToggle"><input type="checkbox" checked={permanent} disabled={contextBusy} onChange={event => setPermanent(event.target.checked)}/>Хранить надолго</label>
         <button type="button" className="ghostButton" disabled={contextBusy || !contextText.trim()} onClick={() => void changeContext("remember")}>Запомнить</button>
-        <h3>Недавние темы</h3>{contextData.recent_topics.length ? <ul>{contextData.recent_topics.map((topic, index) => <li key={index}>{topic}</li>)}</ul> : <p>Нет контекста из других диалогов.</p>}
-        <button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget")}>Очистить персональный контекст</button></>}
+        <details><summary>Недавние темы</summary>{contextData.recent_topics.length ? <ul>{contextData.recent_topics.map((topic, index) => <li key={index}>{topic}</li>)}</ul> : <p>Нет контекста из других диалогов.</p>}
+        </details><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget")}>Очистить персональный контекст</button></>}
+      </section>}
     </SettingsDialog>}
   </section>;
 
@@ -337,13 +345,13 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     <div className="noderaTableScroll" tabIndex={0} role="region" aria-label="Данные и права пользователей"><table className="noderaAccessTable">
       <thead><tr><th>Пользователь</th><th>Права</th><th>Подключения</th><th aria-label="Действия"/></tr></thead>
       <tbody>
-        <tr><th scope="row">Панель</th><td>Админ</td><td><div className="noderaTags"><span className="noderaTag">VPS MCP</span><span className="noderaTag">Nodera</span></div></td><td>—</td></tr>
+        <tr><th scope="row">Панель</th><td>Владелец</td><td><div className="noderaTags"><span className="noderaTag">VPS MCP</span><span className="noderaTag">Nodera</span></div></td><td>—</td></tr>
         {draft.accounts.map((item, index) => {
           const contact = contactsById.get(item.telegram_id);
           return <tr key={item.telegram_id}>
           <th scope="row"><strong>{item.name || contact?.name || item.telegram_id}</strong><small>{contact?.username ? `@${contact.username} · ` : ""}{item.telegram_id}</small></th>
-          <td>{item.bot_access ? "Админ" : item.bot_chat_access ? "Чат" : "Гость"}</td>
-          <td><div className="noderaTags">{item.telegram_access && <span className="noderaTag">Telegram MCP</span>}{(item.vps_access || item.bot_access && draft.modules["nodera-bot"]) && <span className="noderaTag">VPS MCP</span>}{item.mihomo_profile_id && <span className="noderaTag isSelected">Mihomo · {subscriptions.items.find(profile => profile.id === item.mihomo_profile_id)?.name || item.mihomo_profile_id}</span>}</div></td>
+          <td>{roleNames[accountRole(item)]}</td>
+          <td><div className="noderaTags">{accountPermissions(draft, item).has("telegram_read") && <span className="noderaTag">Telegram MCP</span>}{["server_read", "server_manage", "diagnostics", "subscription_read", "subscription_manage", "roles_manage"].some(key => accountPermissions(draft, item).has(key as Permission)) && <span className="noderaTag">VPS MCP</span>}{item.mihomo_profile_id && <span className="noderaTag isSelected">Mihomo · {subscriptions.items.find(profile => profile.id === item.mihomo_profile_id)?.name || item.mihomo_profile_id}</span>}</div></td>
           <td><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} title="Настроить пользователя" disabled={blocked} onClick={() => setUserEdit({ index, value: item })}><ChatIcon name="gear"/></button></td>
         </tr>;})}
         {guests.slice(0, contactsLimit).map(item => <tr key={item.telegram_id}>
@@ -357,7 +365,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     {subscriptions.error && <small role="status">{subscriptions.error}</small>}
     {contacts?.revision === revision && contacts.error && <small role="status">{contacts.error}</small>}
     {guests.length > contactsLimit && <button type="button" className="ghostButton noderaMoreContacts" onClick={() => setContactsLimit(value => value + 20)}>Ещё пользователи</button>}
-    {userEdit && account && <SettingsDialog title={userEdit.index < 0 ? "Добавить пользователя" : "Пользователь"} close={() => setUserEdit(undefined)}
+    {userEdit && account && <SettingsDialog title={userEdit.index < 0 ? "Добавить пользователя" : "Пользователь"} wide close={() => setUserEdit(undefined)}
       blocked={blocked || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
       submit={() => {
         patch({ accounts: userEdit.index < 0 ? [...draft.accounts, account] : draft.accounts.map((item, index) => index === userEdit.index ? account : item) });
@@ -370,10 +378,12 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       </div>}
       <label>Telegram ID<input type="number" min={1} max={2 ** 52} required readOnly={userEdit.index >= 0 || userEdit.observed} value={account.telegram_id || ""} onChange={event => editAccount({ telegram_id: Number(event.target.value) })}/></label>
       <label>Имя в таблице<input value={account.name} maxLength={80} onChange={event => editAccount({ name: event.target.value })}/></label>
-      <label>Права<select aria-label="Права" value={account.bot_access ? "admin" : account.bot_chat_access ? "chat" : "guest"}
-        onChange={event => editAccount({ bot_access: event.target.value === "admin", bot_chat_access: event.target.value === "chat" })}>
-        <option value="guest">Гость</option><option value="chat">Чат с Нодерой</option><option value="admin">Администратор бота</option>
-      </select></label>
+      <label>Роль<select aria-label="Права" value={accountRole(account)} onChange={event => editAccount({ role: event.target.value as Role, permission_overrides: {} })}>{Object.entries(roleNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+      <small>Учётную запись можно добавить вручную по Telegram ID или выбрать из контактов бота. Роль привязана к ID, имя и username не выдают права.</small>
+      <details className="noderaPermissionOverrides"><summary>Индивидуальные права · {Object.keys(account.permission_overrides ?? {}).length} исключений</summary>
+        <button type="button" className="ghostButton" disabled={blocked || account.role === "owner"} onClick={() => editAccount({ role: accountRole(account), permission_overrides: {} })}>Использовать права роли</button>
+        <div className="noderaPermissionGrid">{Object.entries(permissionNames).map(([id, name]) => <label key={id}>{name}<select aria-label={name} disabled={blocked || account.role === "owner" || id === "roles_manage"} value={account.permission_overrides?.[id as Permission] === undefined ? "inherit" : account.permission_overrides[id as Permission] ? "allow" : "deny"} onChange={event => { const permissions = { ...account.permission_overrides }; if (event.target.value === "inherit") delete permissions[id as Permission]; else permissions[id as Permission] = event.target.value === "allow"; editAccount({ role: accountRole(account), permission_overrides: permissions }); }}><option value="inherit">По роли</option><option value="allow">Разрешено</option><option value="deny">Запрещено</option></select></label>)}</div>
+      </details>
       <label>Как Нодера обращается к пользователю<input value={account.address_as ?? ""} maxLength={80} onChange={event => editAccount({ address_as: event.target.value })}/></label>
       <label>Форма обращения<select aria-label="Форма обращения" value={account.address_gender ?? "auto"} onChange={event => editAccount({ address_gender: event.target.value as AccountDraft["address_gender"] })}>
         <option value="auto">По имени, при сомнении нейтрально</option><option value="neutral">Нейтральная</option><option value="male">Мужской род</option><option value="female">Женский род</option>
@@ -390,11 +400,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
           <div><dt>Дата рождения</dt><dd>{contact.birthdate ? `${contact.birthdate.day}.${contact.birthdate.month}${contact.birthdate.year ? `.${contact.birthdate.year}` : ""}` : "Не предоставлена Telegram"}</dd></div>
           <div><dt>Последний контакт</dt><dd>{new Date(contact.seen_at * 1000).toLocaleString("ru-RU")}</dd></div>{contact.bio && <div><dt>О себе</dt><dd>{contact.bio}</dd></div>}<div><dt>Пол</dt><dd>Telegram не предоставляет</dd></div></dl>;
       })()}
-      <div className="noderaBar">
-        <label className="mcpToggle"><input type="checkbox" checked={account.telegram_access} onChange={event => editAccount({ telegram_access: event.target.checked })}/>Telegram MCP</label>
-        <label className="mcpToggle"><input type="checkbox" checked={account.vps_access || account.bot_access && draft.modules["nodera-bot"]} disabled={account.bot_access && draft.modules["nodera-bot"]} onChange={event => editAccount({ vps_access: event.target.checked })}/>VPS MCP</label>
-      </div>
-      {account.telegram_access && <>
+      {accountGrants.has("telegram_read") && <>
         <Secret label="Telegram-сессия" configured={account.session_configured} value={account.session} onChange={session => editAccount({ session })}/>
         <label>Исключённые диалоги<input value={account.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => editAccount({ excluded_dialogs_text: event.target.value })}/></label>
       </>}
@@ -405,16 +411,20 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     </SettingsDialog>}
   </section>;
 
-  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{users}</>}</div>;
+  const roleSettings = <section className="noderaSettings" aria-label="Роли и права"><header className="noderaBlockHead"><h2>Роли и права</h2></header><p className="mcpFieldHint">Владелец управляет доступом. Администратор выполняет команды и диагностику. Для остальных ролей задайте доступные действия; подписка и Telegram-сессия привязываются отдельно.</p><div className="noderaRoleList">{(Object.keys(roleNames) as Role[]).map(role => <div className="noderaToolRow" key={role}><span><strong>{roleNames[role]}</strong><small>{(draft.role_permissions?.[role] ?? roleDefaults[role]).length} / {Object.keys(permissionNames).length} разрешений{role === "owner" ? " · полный доступ" : ""}</small></span><button type="button" className="mcpIconButton" aria-label={`Настроить роль ${roleNames[role]}`} disabled={blocked} onClick={() => setRoleEdit(role)}><ChatIcon name="gear"/></button></div>)}</div>
+    {roleEdit && <SettingsDialog title={`Права роли: ${roleNames[roleEdit]}`} wide close={() => setRoleEdit(undefined)}><label>Роль<select aria-label="Редактируемая роль" value={roleEdit} onChange={event => setRoleEdit(event.target.value as Role)}>{Object.entries(roleNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><p>{roleEdit === "owner" ? "Владелец всегда имеет все права. Управление ролями нельзя передать другой роли." : "Разрешения действуют для пользователей этой роли. Индивидуальные исключения указаны в настройках пользователя."}</p><div className="noderaPermissionGrid">{Object.entries(permissionNames).map(([id, name]) => <label className="mcpToggle" key={id}><input type="checkbox" checked={(draft.role_permissions?.[roleEdit] ?? roleDefaults[roleEdit]).includes(id as Permission)} disabled={blocked || roleEdit === "owner" || id === "roles_manage"} onChange={event => { const grants = new Set(draft.role_permissions?.[roleEdit] ?? roleDefaults[roleEdit]); if (event.target.checked) grants.add(id as Permission); else grants.delete(id as Permission); patch({ role_permissions: { ...draft.role_permissions, [roleEdit]: [...grants] } }); }}/>{name}</label>)}</div><small>Изменения применяются после сохранения настроек раздела.</small></SettingsDialog>}
+  </section>;
+
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{roleSettings}{users}</>}</div>;
 }
 
-export function SettingsDialog({ title, close, submit, blocked, children }: {
-  title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode;
+export function SettingsDialog({ title, close, submit, blocked, children, wide = false }: {
+  wide?: boolean; title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const id = useId();
   useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="noderaDialog" aria-labelledby={id} onClose={close}>
+  return <dialog ref={dialog} className={`noderaDialog${wide ? " noderaDialogWide" : ""}`} aria-labelledby={id} onClose={close}>
     <form onSubmit={event => { event.preventDefault(); if (!blocked) submit?.(); }}>
       <header><h2 id={id}>{title}</h2><button type="button" className="mcpIconButton" aria-label="Закрыть" onClick={close}><ChatIcon name="close"/></button></header>
       <div className="noderaDialogFields">{children}</div>

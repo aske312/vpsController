@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 import assistant_control as control
+import assistant_roles as roles
 
 MAX_CONTACTS = 500
 RETENTION = 30 * 86400
@@ -89,7 +90,7 @@ def interlocutor(api, settings, actor):
     user = next((entry for entry in settings['accounts'] if str(entry['telegram_id']) == actor), {})
     with control.operations.locked(api.DATA_DIR):
         contact = next((row for row in observed(api, settings) if str(row['telegram_id']) == actor), {}) if actor != 'panel' and settings.get('bot_token') else {}
-    return {'role': 'administrator' if actor == 'panel' or user.get('bot_access') else 'user',
+    return {'role': 'owner' if actor == 'panel' else roles.role(user), 'permissions': sorted(roles.effective(settings, actor)),
             'telegram_id': user.get('telegram_id'), 'name': user.get('address_as') or contact.get('name') or user.get('name', ''),
             'address_gender': user.get('address_gender', 'auto'), 'mihomo_profile_id': user.get('mihomo_profile_id'),
             'telegram': {key: contact[key] for key in ('username', 'name', 'last_name', 'language_code', 'is_premium', 'bio', 'birthdate') if key in contact}}
@@ -99,7 +100,7 @@ def remember(api, settings, contact, actor):
     if str(contact.telegram_id) != actor or contact.is_bot:
         raise HTTPException(403, 'Контакт не соответствует отправителю')
     user = next((a for a in settings['accounts'] if a['telegram_id'] == contact.telegram_id), {})
-    access = {'admin': bool(user.get('bot_access')), 'chat': bool(user.get('bot_access') or user.get('bot_chat_access'))}
+    access = {'admin': bool(roles.effective(settings, actor) & {'server_read', 'server_manage', 'diagnostics', 'subscriptions_admin', 'roles_manage'}), 'chat': roles.allows(settings, actor, 'chat')}
     with control.operations.locked(api.DATA_DIR):
         known = observed(api, settings)
         previous = next((row for row in known if row['telegram_id'] == contact.telegram_id), None)

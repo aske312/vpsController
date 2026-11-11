@@ -217,3 +217,25 @@ test('tools use switches and gears; model and tool count are separate header fac
   tree = view.render();
   assert.equal(nodes(tree, n => n.props.title === 'Интернет' && typeof n.type === 'function').length, 1);
 });
+
+test('access exposes all five roles, owner permissions remain fixed, and personalisation is wide and grouped', async () => {
+  const status = fixture(); status.context_tools = true;
+  const view = mount(status);
+  view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
+  let tree = view.render();
+  assert.equal(nodes(tree, n => n.props['aria-label']?.startsWith('Настроить роль ')).length, 5);
+  nodes(tree, n => n.props['aria-label'] === 'Настроить роль Владелец')[0].node.props.onClick();
+  tree = view.render();
+  const owner = nodes(tree, n => typeof n.type === 'function' && n.props.title === 'Права роли: Владелец')[0].node;
+  assert.equal(owner.props.wide, true);
+  assert.equal(nodes(owner, n => n.type === 'input' && n.props.type === 'checkbox').filter(item => !item.disabled).length, 0);
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
+  tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Настроить Персонализация')[0].node.props.onClick();
+  tree = view.render();
+  const personal = nodes(tree, n => typeof n.type === 'function' && n.props.title === 'Персонализация')[0].node;
+  assert.equal(personal.props.wide, true);
+  assert.equal(nodes(personal, n => n.type === 'nav' && n.props['aria-label'] === 'Разделы персонализации').length, 1);
+  assert.equal(nodes(personal, n => n.type === 'h3' && n.props.children === 'Личная память собеседника').length, 0);
+});

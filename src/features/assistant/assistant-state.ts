@@ -1,7 +1,38 @@
 export type ModuleId = "telegram-mcp" | "vps-controller-mcp" | "nodera-bot" | "ai-agent";
 export type McpId = "telegram-mcp" | "vps-controller-mcp";
 export type AppModuleId = "nodera-bot" | "ai-agent";
+export const roleNames = { owner: "Владелец", administrator: "Администратор", moderator: "Модератор", user: "Пользователь", guest: "Гость" } as const;
+export type Role = keyof typeof roleNames;
+export const permissionNames = {
+  chat: "Общение с AI", model_select: "Выбор модели", web: "Поиск в интернете", memory: "Личная память",
+  telegram_read: "Чтение своего Telegram", server_read: "Просмотр сервера и служб", server_manage: "Управление службами",
+  diagnostics: "Диагностика, сеть, безопасность и логи", subscription_read: "Просмотр своей подписки", subscription_manage: "Настройка своей подписки и устройств",
+  subscriptions_admin: "Управление всеми подписками", roles_manage: "Управление ролями и правами",
+} as const;
+export type Permission = keyof typeof permissionNames;
+export const roleDefaults: Record<Role, Permission[]> = {
+  owner: Object.keys(permissionNames) as Permission[],
+  administrator: (Object.keys(permissionNames) as Permission[]).filter(key => key !== "roles_manage"),
+  moderator: ["chat", "model_select", "web", "memory", "telegram_read", "server_read", "subscription_read", "subscription_manage"],
+  user: ["chat", "model_select", "web", "memory", "telegram_read", "subscription_read", "subscription_manage"], guest: ["chat", "web"],
+};
+export function accountRole(account: Account): Role { return account.role ?? (account.bot_access ? "administrator" : account.vps_access ? "moderator" : account.bot_chat_access || account.mihomo_profile_id || account.telegram_access ? "user" : "guest"); }
+export function accountPermissions(settings: Pick<Settings, "role_permissions">, account: Account): Set<Permission> {
+  if (!account.role) {
+    const result = new Set<Permission>();
+    if (account.bot_access || account.bot_chat_access) ["chat", "model_select", "web", "memory"].forEach(key => result.add(key as Permission));
+    if (account.bot_access || account.vps_access) ["server_read", "server_manage", "web", "memory"].forEach(key => result.add(key as Permission));
+    if (account.bot_access) ["diagnostics", "subscriptions_admin", "subscription_read", "subscription_manage"].forEach(key => result.add(key as Permission));
+    if (account.mihomo_profile_id) ["subscription_read", "subscription_manage", "web", "memory"].forEach(key => result.add(key as Permission));
+    if (account.telegram_access) result.add("telegram_read");
+    return result;
+  }
+  const result = new Set(settings.role_permissions?.[account.role] ?? roleDefaults[account.role]);
+  if (account.role !== "owner") { for (const [key, enabled] of Object.entries(account.permission_overrides ?? {})) { if (enabled) result.add(key as Permission); else result.delete(key as Permission); } result.delete("roles_manage"); }
+  return result;
+}
 export type Account = {
+  role?: Role | null; permission_overrides?: Partial<Record<Permission, boolean>>;
   telegram_id: number; name: string; bot_access: boolean; telegram_access: boolean; vps_access: boolean;
   bot_chat_access?: boolean; address_as?: string; mihomo_profile_id?: string | null; address_gender?: "auto" | "neutral" | "male" | "female";
   excluded_dialogs: number[]; session_configured: boolean;
@@ -13,6 +44,7 @@ export type Provider = {
 export type ProviderDraft = Provider & { api_key: string | null };
 export type ProviderUsage = { requests: number; prompt_tokens: number; completion_tokens: number; reported_requests: number };
 export type Settings = {
+  role_permissions?: Partial<Record<Role, Permission[]>>;
   revision: string; modules: Record<AppModuleId, boolean>; mcp: Record<McpId, boolean>; provider_url: string; model: string;
   model_mode?: "single" | "catalog";
   providers?: Provider[]; active_provider?: string | null;
@@ -49,16 +81,16 @@ export function makeDraft(settings: Settings): Draft {
 }
 export function settingsPayload(draft: Draft) {
   return {
-    expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
+    role_permissions: draft.role_permissions, expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
     assistant_style: draft.assistant_style, assistant_character: draft.assistant_character, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
     provider_url: draft.provider_url, model: draft.model, model_mode: draft.model_mode ?? "single", api_key: draft.api_key,
     providers: draft.providers?.map(({ id, name, provider_url, model, model_mode, api_key }) => ({ id, name, provider_url, model, model_mode, api_key })),
     active_provider: draft.active_provider,
     bot_token: draft.bot_token, telegram_api_id: draft.telegram_api_id, telegram_api_hash: draft.telegram_api_hash,
-    accounts: draft.accounts.map(account => ({ telegram_id: account.telegram_id, name: account.name, bot_access: account.bot_access,
-      bot_chat_access: account.bot_chat_access ?? false, address_as: account.address_as ?? "",
+    accounts: draft.accounts.map(account => ({ role: account.role, permission_overrides: account.permission_overrides, telegram_id: account.telegram_id, name: account.name, bot_access: accountPermissions(draft, account).has("subscriptions_admin"),
+      bot_chat_access: accountPermissions(draft, account).has("chat") && !accountPermissions(draft, account).has("subscriptions_admin"), address_as: account.address_as ?? "",
       mihomo_profile_id: account.mihomo_profile_id ?? null, address_gender: account.address_gender ?? "auto",
-      telegram_access: account.telegram_access, vps_access: account.vps_access, session: account.session,
+      telegram_access: accountPermissions(draft, account).has("telegram_read"), vps_access: ["server_read", "server_manage", "diagnostics"].some(key => accountPermissions(draft, account).has(key as Permission)), session: account.session,
       excluded_dialogs: account.excluded_dialogs_text.split(",").map(value => value.trim()).filter(Boolean).map(Number),
     })),
   };

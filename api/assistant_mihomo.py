@@ -13,6 +13,7 @@ import uuid
 from fastapi import HTTPException
 
 import assistant_control as control
+import assistant_roles as roles
 
 ID = r'[a-zA-Z0-9_-]{1,64}'
 READ_ROUTES = (
@@ -38,7 +39,7 @@ def profile_for(settings, actor):
 
 
 def administrator(settings, actor):
-    return actor == 'panel' or bool(profile_for(settings, actor).get('bot_access'))
+    return roles.allows(settings, actor, 'subscriptions_admin')
 
 
 def request(method, path, body=None, operation_id=None, *, timeout=35):
@@ -90,6 +91,7 @@ def authorize(settings, actor, method, path, body):
         raise HTTPException(403, 'Этот маршрут недоступен через MCP Mihomo')
     if not isinstance(body, dict) or len(json.dumps(body)) > 64000:
         raise HTTPException(422, 'Некорректное или слишком большое тело запроса')
+    roles.require(settings, actor, 'subscription_read' if method == 'GET' else 'subscription_manage')
     if administrator(settings, actor):
         return parsed.path
     user = profile_for(settings, actor)

@@ -2,6 +2,7 @@
 import re
 from fastapi import HTTPException
 import assistant_control as control
+import assistant_roles as roles
 
 
 def sanitize(api, value):
@@ -36,7 +37,7 @@ def sanitize(api, value):
 def call(api, name, arguments, actor):
     settings = control.read(api)
     user = next((row for row in settings['accounts'] if str(row['telegram_id']) == actor), {})
-    if actor != 'panel' and not user.get('bot_access'):
+    if not roles.allows(settings, actor, 'diagnostics'):
         raise HTTPException(403, 'Журналы, сеть и аудит доступны администратору')
     if name == 'vps_network':
         return sanitize(api, api.get_network(None))
@@ -65,7 +66,8 @@ def call(api, name, arguments, actor):
         check('ssh_password', None if ssh.get('password_authentication') not in ('yes', 'no') else ssh['password_authentication'] == 'no', 'SSH допускает вход по паролю', 'Используйте ключи SSH и настройку доступа в панели')
         updates = security.get('updates', {})
         check('security_updates', None if updates.get('security') is None else updates['security'] == 0, 'Ожидаются обновления безопасности ОС', 'Проверьте обновления ОС и отчёт безопасного обновления')
-        components = control.control_tool(api, 'vps_components', actor=actor)
+        # Diagnostic permission includes a version inventory, independently of server browsing.
+        components = control.control_tool(api, 'vps_components', actor='panel')
         return sanitize(api, {'scope': 'Пассивная диагностика приложения и конфигурации; не полный аудит CVE и не проверка эксплуатации',
                              'findings': findings, **components, 'dependencies': api.application_dependency_versions(),
                              'logs': api.application_logs(40, None), 'checked_at': control.operations.timestamp()})

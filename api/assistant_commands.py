@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 import assistant_control as control
+import assistant_roles as roles
 
 
 class Command(BaseModel):
@@ -71,6 +72,16 @@ def execute(api, actor, prompt):
     parts = prompt.strip().split()
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
+    settings = control.read(api)
+    permission = {'/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
+    if permission: roles.require(settings, actor, permission)
+    if command in ('/confirm', '/operation'):
+        pending = control.operations.read(pending_path(api, actor))
+        if command == '/operation' and not roles.allows(settings, actor, 'server_read') and args != [pending.get('operation_id')]:
+            raise HTTPException(403, 'Доступен только результат собственной операции')
+        if pending.get('kind') == 'roles': roles.require(settings, actor, 'roles_manage')
+        elif pending.get('kind') == 'mihomo': roles.require(settings, actor, 'subscription_manage' if command == '/confirm' else 'subscription_read')
+        else: roles.require(settings, actor, 'server_manage' if command == '/confirm' else 'server_read')
     if command in BLOCKED_COMMANDS:
         raise HTTPException(403, 'Nodera не может выключать VPS или переключать режим доступа к панели')
     if command == '/models' and (not args or len(args) == 1 and args[0].isdigit()):
@@ -143,7 +154,7 @@ def execute(api, actor, prompt):
             if not existing and (time.time() > record['expires'] or control._read(api)['revision'] != record['revision']):
                 path.unlink()
                 raise HTTPException(409, 'Подтверждение истекло или права изменились. Отправьте /service заново')
-            if not existing and record.get('kind') != 'mihomo':
+            if not existing and record.get('kind') not in ('mihomo', 'roles'):
                 definition = api.managed_services().get(record['service'], {})
                 if record['action'] not in controls(record['service'], definition):
                     path.unlink()
@@ -153,6 +164,9 @@ def execute(api, actor, prompt):
         # Use the panel's durable, idempotent service worker and admission lock.
         # Never hold the file lock across admission, which acquires it itself.
         try:
+            if record.get('kind') == 'roles':
+                import assistant_role_actions
+                return assistant_role_actions.confirm(api, actor, record)
             if record.get('kind') == 'mihomo':
                 import assistant_mihomo
                 return assistant_mihomo.confirm(api, actor, record)

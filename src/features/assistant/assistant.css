@@ -319,3 +319,35 @@ button.noderaTag { cursor:pointer; }
 @container (max-width:640px) { .noderaToolsList { grid-template-columns:1fr; } .noderaHeroFacts { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 
 .noderaHeroContent { width:min(100%,720px); }
+
+.noderaDialogWide { width:min(1000px,calc(100vw - 32px)); padding:0; max-height:calc(100dvh - 32px); }
+.noderaDialogWide > form { display:grid; grid-template-rows:auto minmax(0,1fr) auto; max-height:calc(100dvh - 34px); gap:0; }
+.noderaDialogWide > form > :is(header,footer) { padding:14px 18px; background:var(--panel); }
+.noderaDialogWide > form > header { border-bottom:1px solid var(--line); }
+.noderaDialogWide > form > footer { border-top:1px solid var(--line); }
+.noderaDialogWide .noderaDialogFields { overflow:auto; min-height:0; padding:16px 18px; overscroll-behavior:contain; }
+.noderaDialogTabs { display:flex; flex-wrap:wrap; gap:7px; }
+.noderaDialogTabs [aria-pressed="true"] { color:var(--cyan); border-color:var(--cyan); background:rgba(97,207,216,.09); }
+.noderaPersonalSection { display:grid; gap:14px; min-width:0; }
+.noderaPersonalSection > :is(p,h3) { margin:0; }
+.noderaPersonalSection > p { color:var(--muted); line-height:1.6; }
+.noderaPersonalSection textarea { min-height:180px; resize:vertical; line-height:1.6; }
+.noderaPersonalSection .mcpBehavior { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+.noderaPermissionGrid,.noderaRoleList { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 22px; }
+.noderaPermissionGrid > label { min-width:0; padding:10px 0; border-bottom:1px solid var(--line); }
+.noderaPermissionGrid .mcpToggle { justify-content:start; line-height:1.6; }
+.noderaPermissionOverrides { display:grid; gap:12px; }
+.noderaPermissionOverrides summary { cursor:pointer; margin-bottom:10px; }
+.noderaHeroDescription { margin:5px 0 0; font-size:12px; line-height:1.5; color:var(--muted); max-width:540px; }
+@media (max-width:640px) {
+ .noderaDialogWide { inset:8px; width:calc(100vw - 16px); max-height:calc(100dvh - 16px); }
+ .noderaDialogWide > form { max-height:calc(100dvh - 18px); }
+ .noderaDialogWide > form > :is(header,footer),.noderaDialogWide .noderaDialogFields { padding:12px; }
+ .noderaPermissionGrid,.noderaRoleList,.noderaPersonalSection .mcpBehavior { grid-template-columns:minmax(0,1fr); }
+ .noderaDialogTabs { display:grid; grid-template-columns:1fr 1fr; }
+ .noderaDialogTabs > :last-child { grid-column:1/-1; }
+ .noderaHeroDescription { font-size:11px; }
+}
+
+.noderaDialogWide { max-width:calc(100vw - 32px); }
+@media (max-width:640px) { .noderaDialogWide { max-width:calc(100vw - 16px); } }

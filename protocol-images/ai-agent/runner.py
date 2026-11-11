@@ -42,7 +42,7 @@ def persona(settings, actor='panel'):
               'technical': 'Используй точные технические формулировки и показывай подтверждающие данные.'}
     user = account(settings, actor) if actor != 'panel' else None
     context = dict(settings.get('interlocutor') or {})
-    context.update(role='administrator' if actor == 'panel' or user and user.get('bot_access') else 'user')
+    context.setdefault('role', 'owner' if actor == 'panel' else (user or {}).get('role') or ('administrator' if user and user.get('bot_access') else 'user'))
     address = (user or {}).get('address_as') or context.get('name') or (user or {}).get('name', '')
     gender = (user or {}).get('address_gender', 'auto')
     if gender == 'auto':
@@ -67,6 +67,7 @@ def persona(settings, actor='panel'):
             'Используй указанную form_of_address для грамматики: male — мужской род, female — женский, neutral — нейтральные обороты без угадывания. '
             'Это форма обращения по настройке или имени, а не подтверждённые сведения о поле. Не делай выводов по нику, фото или bio. '
             'При неопределённости используй «вы», «получилось», «можно настроить». Если человек уточнил обращение в диалоге, учитывай уточнение. '
+            'Роли: owner — владелец, administrator — администратор, moderator — модератор, user — пользователь, guest — гость. Ориентируйся на permissions собеседника, а не на предполагаемый статус по имени. Управление ролями доступно только владельцу через vps_access и подтверждение человеком. '
             'Администратор управляет сервером и всеми подписками. Пользователь управляет только привязанной подпиской; права проверяет API. '
             'При вопросах о подписке прочитай mihomo_capabilities и mihomo_api, при вопросах о собеседнике — vps_user. '
             'Не выдумывай дату рождения, пол и другие отсутствующие данные Telegram. '
@@ -95,6 +96,12 @@ def account(settings, actor):
 
 
 def allowed(settings, actor, module):
+    profile = account(settings, actor)
+    grants = (profile or {}).get('effective_permissions')
+    if grants is not None and actor != 'panel':
+        if module == 'web' and 'web' not in grants: return False
+        if module == 'telegram-mcp' and 'telegram_read' not in grants: return False
+        if module == 'vps-controller-mcp' and not set(grants) & {'server_read', 'server_manage', 'diagnostics', 'subscription_read', 'subscription_manage', 'subscriptions_admin', 'roles_manage'}: return False
     if module == 'web':
         user = account(settings, actor)
         return settings.get('web_enabled', True) and (actor == 'panel' or bool(user and (user.get('bot_access') or user.get('bot_chat_access') or user.get('vps_access') or user.get('mihomo_profile_id'))))
@@ -504,6 +511,11 @@ def serve_mcp(settings, actor, module):
         async def vps_diagnostics() -> dict:
             """Диагностировать приложение: версии, здоровье компонентов, журналы и риски конфигурации. Для проверки известных CVE сопоставь версии с официальными advisories через web_research; не объявляй полный аудит или эксплуатацию без доказательств."""
             return await vps_call(settings, actor, 'vps_diagnostics')
+
+        @server.tool()
+        async def vps_access(method: str = 'GET', body: dict | None = None) -> dict:
+            """Только владелец: GET читает роли и права; PATCH готовит назначение {telegram_id, role} либо матрицу {role_permissions:{role:[permissions]}}. Изменение требует подтверждения человеком."""
+            return await vps_call(settings, actor, 'vps_access', method=method, body=body or {})
 
         @server.tool()
         async def vps_user() -> dict:

@@ -529,14 +529,12 @@ def nodera_command(payload: assistant_commands.Command, settings: dict = Depends
                    actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
     command = payload.command.strip().split(maxsplit=1)
     confirmation_command = bool(command and command[0].split('@')[0].lower() in ('/confirm', '/cancel', '/operation'))
-    if confirmation_command and not any(str(user['telegram_id']) == actor and user.get('bot_access') for user in settings['accounts']):
-        pending = assistant_control.operations.read(assistant_commands.pending_path(sys.modules[__name__], actor))
-        if pending.get('kind') != 'mihomo' or not any(str(user['telegram_id']) == actor and user.get('mihomo_profile_id') for user in settings['accounts']):
-            raise HTTPException(403, 'Нет доступного действия вашей подписки')
-        if command[0].split('@')[0].lower() == '/operation' and (len(command) != 2 or command[1] != pending.get('operation_id')):
-            raise HTTPException(403, 'Доступен только результат вашей операции')
+    import assistant_roles
     model_command = bool(command and command[0].split('@')[0].lower() in ('/models', '/model'))
-    assistant_control.require_bot_actor(settings, actor, chat=model_command or confirmation_command)
+    if not confirmation_command:
+        assistant_control.require_bot_actor(settings, actor, chat=model_command)
+    elif not assistant_roles.effective(settings, actor):
+        raise HTTPException(403, 'Доступ к подтверждению не выдан')
     return {'text': assistant_commands.execute(sys.modules[__name__], actor, payload.command)}
 
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 import assistant_control as control
 import assistant_memory as memory
+import assistant_roles as roles
 
 
 class MemoryAction(BaseModel):
@@ -126,7 +127,7 @@ def authorize(api, authorization, actor, action, proof):
     if not authorization or not hmac.compare_digest(authorization, 'Bearer ' + settings.get('control_token', '')):
         raise HTTPException(401, 'Нужен служебный токен ассистента')
     user = next((row for row in settings['accounts'] if str(row['telegram_id']) == actor), {})
-    if actor != 'panel' and not any(user.get(key) for key in ('bot_access', 'bot_chat_access', 'vps_access', 'mihomo_profile_id')):
+    if not roles.allows(settings, actor, 'memory'):
         raise HTTPException(403, 'Контекст собеседника недоступен')
     if not settings.get('personalization_enabled', True):
         raise HTTPException(403, 'Персонализация выключена')

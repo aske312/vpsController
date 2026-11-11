@@ -379,7 +379,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
         <div className="noderaHeroContent">
           <div className="mcpIdentity">
             <ProtocolIcon protocol={panel === "users" ? "nodera-bot" : "nodera"}/>
-            <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1></div>
+            <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1><p className="noderaHeroDescription">{panel === "users" ? "Кто общается с ассистентом и какие действия ему доступны." : "Подключения AI, модель по умолчанию и инструменты ассистента."}</p></div>
 
           </div>
           <dl className="noderaHeroFacts">
