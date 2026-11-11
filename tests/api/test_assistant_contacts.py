@@ -45,6 +45,23 @@ class BotAccessTests(unittest.TestCase):
         self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 22}).status_code, 403)
         self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 11, 'is_bot': True}).status_code, 403)
 
+    def test_available_telegram_profile_fields_keep_birthdate_optional_and_never_invent_gender(self):
+        headers = self.enabled_bot()
+        self.approve()
+        client = TestClient(api.app)
+        result = client.post('/api/assistant/bot-contact', headers=headers, json={
+            'telegram_id': 11, 'name': 'Иван', 'last_name': 'Иванов', 'language_code': 'ru', 'is_premium': True,
+            'birthdate': {'day': 29, 'month': 2}, 'bio': 'Информация пользователя',
+        })
+        self.assertEqual(result.status_code, 200, result.text)
+        identity = contacts.interlocutor(api, control.read(api), '11')
+        self.assertEqual(identity['telegram']['birthdate'], {'day': 29, 'month': 2, 'year': None})
+        self.assertEqual(identity['telegram']['last_name'], 'Иванов')
+        self.assertNotIn('gender', identity['telegram'])
+        self.assertEqual(identity['role'], 'administrator')
+        invalid = client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 11, 'birthdate': {'day': 31, 'month': 2}})
+        self.assertEqual(invalid.status_code, 422)
+
     def test_recent_bot_contacts_appear_in_panel_without_receiving_permissions(self):
         headers = self.enabled_bot()
         client = TestClient(api.app)
@@ -76,7 +93,7 @@ class BotAccessTests(unittest.TestCase):
         payload.update(expected_revision=settings['revision'])
         payload['accounts'][0]['bot_access'] = True
         saved = self.save(payload)['settings']['accounts'][0]
-        self.assertEqual(saved['address_as'], '')
+        self.assertEqual(saved['address_as'], 'Саша')
         self.assertFalse(saved['bot_chat_access'])
 
     def test_live_admin_edits_revoke_both_ai_and_server_access_without_token_changes(self):

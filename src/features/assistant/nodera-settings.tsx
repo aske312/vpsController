@@ -12,7 +12,7 @@ export type Panel = typeof panels[number]["id"];
 type AccountDraft = Draft["accounts"][number];
 type Check = { ok: boolean; text: string; revision: string; actor: string; username?: string };
 type Quota = { unlimited: boolean; remaining: number; account_remaining?: number };
-type BotContact = { telegram_id: number; username: string; name: string; seen_at: number };
+type BotContact = { telegram_id: number; username: string; name: string; seen_at: number; last_name?: string; language_code?: string; is_premium?: boolean | null; bio?: string; birthdate?: { day: number; month: number; year?: number | null } | null };
 type Props = {
   panel: Exclude<Panel, "chat">;
   request: ReturnType<typeof createApiClient>;
@@ -52,6 +52,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   const [lookupError, setLookupError] = useState("");
   const [contacts, setContacts] = useState<{ revision: string; rows: BotContact[]; error?: string }>();
   const [contactsLimit, setContactsLimit] = useState(20);
+  const [subscriptions, setSubscriptions] = useState<{ items: {id: string; name: string}[]; error?: string }>({ items: [] });
 
   const providers = draft.providers ?? [];
   const revision = status.settings.revision;
@@ -65,6 +66,15 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     );
     return () => { current = false; };
   }, [panel, request, contactsEnabled, revision, refreshKey]);
+  useEffect(() => {
+    if (panel !== "users") return;
+    let current = true;
+    void request<{items: {id: string; name: string}[]}>("/assistant/mihomo-profiles", { cache: "no-store" }).then(
+      value => { if (current) setSubscriptions({ items: value.items ?? [] }); },
+      () => { if (current) setSubscriptions({ items: [], error: "Подписки Mihomo недоступны. Проверьте компонент." }); },
+    );
+    return () => { current = false; };
+  }, [panel, request, refreshKey]);
   const recent = contactsEnabled && contacts?.revision === revision ? contacts.rows : [];
   const contactsById = new Map(recent.map(item => [item.telegram_id, item]));
   const assignedIds = new Set(draft.accounts.map(item => item.telegram_id));
@@ -282,7 +292,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
             {contactsById.get(item.telegram_id)?.username && <small>@{contactsById.get(item.telegram_id)?.username}</small>}
             {!item.bot_access && item.address_as && <small>{item.address_as}</small>}</th>
           <td className="noderaIdColumn">{item.telegram_id}</td><td>{item.bot_access ? "Администратор" : item.bot_chat_access ? "Чат" : "Гость"}</td>
-          <td>{[item.telegram_access && "Telegram", (item.vps_access || item.bot_access && draft.modules["nodera-bot"]) && "VPS"].filter(Boolean).join(", ") || "—"}</td>
+          <td>{item.mihomo_profile_id && <small>{subscriptions.items.find(profile => profile.id === item.mihomo_profile_id)?.name || item.mihomo_profile_id}</small>}{[item.telegram_access && "Telegram", (item.vps_access || item.bot_access && draft.modules["nodera-bot"]) && "VPS"].filter(Boolean).join(", ") || "—"}</td>
           <td><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} disabled={blocked}
             onClick={() => setUserEdit({ index, value: item })}><ChatIcon name="gear"/></button></td>
         </tr>)}
@@ -316,10 +326,25 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <label>Telegram ID<input type="number" min={1} max={2 ** 52} required readOnly={userEdit.index >= 0 || userEdit.observed} value={account.telegram_id || ""} onChange={event => editAccount({ telegram_id: Number(event.target.value) })}/></label>
       <label>Имя в таблице<input value={account.name} maxLength={80} onChange={event => editAccount({ name: event.target.value })}/></label>
       <label>Роль в Telegram<select value={account.bot_access ? "admin" : account.bot_chat_access ? "chat" : "guest"}
-        onChange={event => editAccount({ bot_access: event.target.value === "admin", bot_chat_access: event.target.value === "chat", ...(event.target.value === "admin" ? { address_as: "" } : {}) })}>
+        onChange={event => editAccount({ bot_access: event.target.value === "admin", bot_chat_access: event.target.value === "chat" })}>
         <option value="guest">Гость</option><option value="chat">Чат с Нодерой</option><option value="admin">Администратор бота</option>
       </select></label>
-      {!account.bot_access && <label>Как Нодера обращается к пользователю<input value={account.address_as ?? ""} maxLength={80} onChange={event => editAccount({ address_as: event.target.value })}/></label>}
+      <label>Как Нодера обращается к пользователю<input value={account.address_as ?? ""} maxLength={80} onChange={event => editAccount({ address_as: event.target.value })}/></label>
+      <label>Форма обращения<select aria-label="Форма обращения" value={account.address_gender ?? "auto"} onChange={event => editAccount({ address_gender: event.target.value as AccountDraft["address_gender"] })}>
+        <option value="auto">По имени, при сомнении нейтрально</option><option value="neutral">Нейтральная</option><option value="male">Мужской род</option><option value="female">Женский род</option>
+      </select></label>
+      <label>Подписка Mihomo<select aria-label="Подписка Mihomo" value={account.mihomo_profile_id ?? ""} onChange={event => editAccount({ mihomo_profile_id: event.target.value || null })}>
+        <option value="">Без привязки</option>{subscriptions.items.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+        {account.mihomo_profile_id && !subscriptions.items.some(profile => profile.id === account.mihomo_profile_id) && <option value={account.mihomo_profile_id}>{account.mihomo_profile_id} · не подтверждена</option>}
+      </select></label>
+      <small>{subscriptions.error ?? "Пользователь сможет настраивать только эту подписку и её устройства. Лимиты изменяет администратор."}</small>
+      {(() => {
+        const contact = contactsById.get(account.telegram_id);
+        return contact && <dl className="noderaContactFacts"><div><dt>Telegram</dt><dd>{[contact.name, contact.last_name].filter(Boolean).join(" ") || "—"}{contact.username ? ` · @${contact.username}` : ""}</dd></div>
+          <div><dt>Язык / Premium</dt><dd>{contact.language_code || "Не указан"} / {contact.is_premium == null ? "Нет данных" : contact.is_premium ? "Да" : "Нет"}</dd></div>
+          <div><dt>Дата рождения</dt><dd>{contact.birthdate ? `${contact.birthdate.day}.${contact.birthdate.month}${contact.birthdate.year ? `.${contact.birthdate.year}` : ""}` : "Не предоставлена Telegram"}</dd></div>
+          {contact.bio && <div><dt>О себе</dt><dd>{contact.bio}</dd></div>}<div><dt>Пол</dt><dd>Telegram не предоставляет</dd></div></dl>;
+      })()}
       <div className="noderaBar">
         <label className="mcpToggle"><input type="checkbox" checked={account.telegram_access} onChange={event => editAccount({ telegram_access: event.target.checked })}/>Telegram MCP</label>
         <label className="mcpToggle"><input type="checkbox" checked={account.vps_access || account.bot_access && draft.modules["nodera-bot"]} disabled={account.bot_access && draft.modules["nodera-bot"]} onChange={event => editAccount({ vps_access: event.target.checked })}/>VPS MCP</label>
@@ -356,7 +381,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
   return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{modules}{behavior}</> : <>{telegram}{users}</>}</div>;
 }
 
-function SettingsDialog({ title, close, submit, blocked, children }: {
+export function SettingsDialog({ title, close, submit, blocked, children }: {
   title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);

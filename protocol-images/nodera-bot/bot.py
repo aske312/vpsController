@@ -4,6 +4,7 @@ This runtime does not import MCP/Telethon or execute an AI tool loop.
 """
 import asyncio
 import html
+import hashlib
 import json
 import logging
 import os
@@ -108,17 +109,42 @@ async def agent_request(settings, actor, prompt):
         answer = value['result']['answer']
         pending = value.get('pending_action')
         if pending:
+            if pending.get('changes'):
+                answer += '\n\nИзменения:\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
             answer += f"\n\nПодтвердите {pending['action']} для {pending['service']}:\n/confirm {pending['code']}"
         return answer
 
 
+_profile_cache = {}
+
+
+async def observed_profile(settings, sender):
+    key = (hashlib.sha256(settings['bot_token'].encode()).hexdigest(), sender['id'])
+    previous = _profile_cache.get(key)
+    if previous and time.monotonic() - previous[0] < 3600:
+        return previous[1]
+    details = {}
+    try:
+        chat = await bot_api(settings, 'getChat', chat_id=sender['id'])
+        if chat.get('id') == sender['id'] and chat.get('type') == 'private':
+            details = {'bio': str(chat.get('bio', ''))[:1024], 'birthdate': chat.get('birthdate')}
+    except Exception:
+        return previous[1] if previous else {}
+    if len(_profile_cache) >= 1000: _profile_cache.clear()
+    _profile_cache[key] = (time.monotonic(), details)
+    return details
+
+
 async def identify(settings, sender):
     """The gateway reads current permissions; credential snapshots are not ACLs."""
+    details = await observed_profile(settings, sender)
     async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
         response = await client.post('http://127.0.0.1:8000/api/assistant/bot-contact',
             headers={'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(sender['id'])},
             json={'telegram_id': sender['id'], 'username': sender.get('username', ''),
-                  'name': sender.get('first_name', '')[:80], 'is_bot': sender.get('is_bot', False)})
+                  'name': sender.get('first_name', '')[:80], 'last_name': sender.get('last_name', '')[:80],
+                  'language_code': sender.get('language_code', '')[:35], 'is_premium': sender.get('is_premium'),
+                  **details, 'is_bot': sender.get('is_bot', False)})
         if response.status_code != 200:
             return False
         access = response.json()
@@ -146,7 +172,7 @@ async def reply(settings, sender, prompt, access):
         except Exception:
             return 'Команды сервера сейчас недоступны. Проверьте панель и повторите /help.'
     if command.startswith('/'):
-        if access == 'chat' and command not in ('/models', '/model'):
+        if access == 'chat' and command not in ('/models', '/model', '/confirm', '/cancel', '/operation'):
             return 'Вам доступен чат. /help — доступные команды.'
         try:
             return await server_command(settings, sender['id'], prompt)
@@ -202,10 +228,10 @@ def inline_keyboard(answer, prompt, access, actions):
                    for action in available.split(', ') if action in ('start', 'stop', 'restart')]
             if row: rows.append(row)
     confirmation = re.search(r'/confirm ([0-9a-f]{8})', answer)
-    if access is True and confirmation:
+    if access and confirmation:
         rows.append([button('Подтвердить действие', '/confirm ' + confirmation[1]), button('Отмена', '/cancel')])
     operation = re.search(r'/operation ([0-9a-f]{32})', answer)
-    if access is True and operation:
+    if access and operation:
         rows.append([button('Проверить результат', '/operation ' + operation[1])])
     return {'inline_keyboard': rows} if rows else None
 

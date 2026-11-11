@@ -41,6 +41,8 @@ function mount(status, catalog = []) {
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
   new Function('require', 'exports', outputText)(require, exported);
   const request = async (path, options) => {
+    if (path === '/assistant/mihomo-profiles') return { items: [{id: 'own', name: 'Моя подписка'}] };
+    if (path === '/assistant/bot-users') return { items: [] };
     if (path === '/assistant/models') return { models: catalog };
     if (options?.method === 'PUT' || path === '/assistant/chat') writes.push(JSON.parse(options.body));
     if (path === '/assistant/chat') return { result: { answer: 'OK', tools_used: [] } };
@@ -80,6 +82,8 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
   view.render(); await Promise.resolve();
   let tree = view.render();
   assert.equal(nodes(tree, n => n.type === 'h1').length, 0);
+  nodes(tree, n => n.props['aria-label'] === 'Настройки')[0].node.props.onClick();
+  tree = view.render();
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
   tree = view.render();
   const toggle = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox')[0];
@@ -99,12 +103,43 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
 test('running Telegram bot locks its token and shows the stop action', async () => {
   const view = mount(fixture());
   view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.props['aria-label'] === 'Настройки')[0].node.props.onClick();
   nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   const tree = view.render();
   const toggles = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox');
   assert.equal(toggles.length, 0);
   assert.equal(nodes(tree, n => n.type === 'fieldset' && n.props.className === 'noderaBotToken')[0].disabled, true);
   assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Остановить')[0].disabled, false);
+});
+
+test('chat scope lives in settings and subscription binding is saved with address preferences', async () => {
+  const status = fixture();
+  status.settings.accounts = [{ telegram_id: 11, name: 'User', bot_chat_access: true, bot_access: false,
+    telegram_access: false, vps_access: false, excluded_dialogs: [], session_configured: false }];
+  const view = mount(status);
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  assert.equal(nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Контур').length, 0);
+  const gear = nodes(tree, n => n.props['aria-label'] === 'Настройки')[0].node;
+  assert.equal(gear.props.children.includes('Настройки'), false);
+  gear.props.onClick();
+  tree = view.render();
+  assert.equal(nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Контур').length, 1);
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
+  view.render(); await Promise.resolve();
+  tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Настроить пользователя User')[0].node.props.onClick();
+  tree = view.render();
+  nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Подписка Mihomo')[0].node.props.onChange({ target: { value: 'own' } });
+  tree = view.render();
+  nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Форма обращения')[0].node.props.onChange({ target: { value: 'male' } });
+  tree = view.render();
+  nodes(tree, n => n.props.title === 'Пользователь' && typeof n.props.submit === 'function')[0].node.props.submit();
+  tree = view.render();
+  nodes(tree, n => n.type === 'button' && n.props.children === 'Сохранить')[0].node.props.onClick();
+  await Promise.resolve();
+  assert.equal(view.writes[0].accounts[0].mihomo_profile_id, 'own');
+  assert.equal(view.writes[0].accounts[0].address_gender, 'male');
 });
 
 test('catalog mode loads any number of models and sends the chat selection without changing settings', async () => {

@@ -135,11 +135,15 @@ def execute(api, actor, prompt):
                 return 'Ожидающая команда отменена.'
             if not re.fullmatch(r'[0-9a-f]{8}', args[0]) or not hmac.compare_digest(args[0], record['code']):
                 raise HTTPException(409, 'Неверный код подтверждения')
+            if record.get('completed_text'):
+                return record['completed_text']
+            if record.get('kind') == 'mihomo' and record.get('submitted'):
+                raise HTTPException(409, 'Запрос уже отправлен. Проверьте результат: /operation ' + record['operation_id'])
             existing = control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'))
             if not existing and (time.time() > record['expires'] or control._read(api)['revision'] != record['revision']):
                 path.unlink()
                 raise HTTPException(409, 'Подтверждение истекло или права изменились. Отправьте /service заново')
-            if not existing:
+            if not existing and record.get('kind') != 'mihomo':
                 definition = api.managed_services().get(record['service'], {})
                 if record['action'] not in controls(record['service'], definition):
                     path.unlink()
@@ -149,11 +153,15 @@ def execute(api, actor, prompt):
         # Use the panel's durable, idempotent service worker and admission lock.
         # Never hold the file lock across admission, which acquires it itself.
         try:
+            if record.get('kind') == 'mihomo':
+                import assistant_mihomo
+                return assistant_mihomo.confirm(api, actor, record)
             result = api.manage_service(record['service'], api.ServiceAction(action=record['action']), None, record['operation_id'])
-        except HTTPException:
+        except HTTPException as exc:
             with control.operations.locked(api.DATA_DIR):
                 current = control.operations.read(path)
-                if current.get('operation_id') == record['operation_id'] and not control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json')):
+                definite_rejection = record.get('kind') != 'mihomo' or exc.status_code in (403, 404, 409, 422)
+                if definite_rejection and current.get('operation_id') == record['operation_id'] and not control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json')):
                     record['submitted'] = False
                     control.operations.atomic_json(path, record)
             raise

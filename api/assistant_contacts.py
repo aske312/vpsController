@@ -1,12 +1,13 @@
 """Observed private bot contacts. Username lookup never grants permissions."""
 import hashlib
+import datetime
 import json
 import re
 import time
 import urllib.request
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, StrictBool, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 import assistant_control as control
 
@@ -21,11 +22,28 @@ def username(value):
     return value
 
 
+class Birthdate(BaseModel):
+    model_config = {'extra': 'forbid'}
+    day: int = Field(strict=True, ge=1, le=31)
+    month: int = Field(strict=True, ge=1, le=12)
+    year: int | None = Field(default=None, strict=True, ge=1, le=9999)
+
+    @model_validator(mode='after')
+    def valid_date(self):
+        datetime.date(self.year or 2000, self.month, self.day)
+        return self
+
+
 class Contact(BaseModel):
     model_config = {'extra': 'forbid'}
     telegram_id: int = Field(strict=True, gt=0, le=2**52)
     username: str = Field(default='', max_length=64)
     name: str = Field(default='', max_length=80)
+    last_name: str = Field(default='', max_length=80)
+    language_code: str = Field(default='', max_length=35, pattern=r'^[a-zA-Z0-9_-]*$')
+    is_premium: StrictBool | None = None
+    bio: str = Field(default='', max_length=1024)
+    birthdate: Birthdate | None = None
     is_bot: StrictBool = False
 
     @field_validator('username')
@@ -64,7 +82,17 @@ def list_recent(api):
         return []
     with control.operations.locked(api.DATA_DIR):
         rows = sorted(observed(api, settings), key=lambda row: row['seen_at'], reverse=True)
-    return [{key: row[key] for key in ('telegram_id', 'username', 'name', 'seen_at')} for row in rows]
+    return rows
+
+
+def interlocutor(api, settings, actor):
+    user = next((entry for entry in settings['accounts'] if str(entry['telegram_id']) == actor), {})
+    with control.operations.locked(api.DATA_DIR):
+        contact = next((row for row in observed(api, settings) if str(row['telegram_id']) == actor), {}) if actor != 'panel' and settings.get('bot_token') else {}
+    return {'role': 'administrator' if actor == 'panel' or user.get('bot_access') else 'user',
+            'telegram_id': user.get('telegram_id'), 'name': user.get('address_as') or contact.get('name') or user.get('name', ''),
+            'address_gender': user.get('address_gender', 'auto'), 'mihomo_profile_id': user.get('mihomo_profile_id'),
+            'telegram': {key: contact[key] for key in ('username', 'name', 'last_name', 'language_code', 'is_premium', 'bio', 'birthdate') if key in contact}}
 
 
 def remember(api, settings, contact, actor):
@@ -75,12 +103,12 @@ def remember(api, settings, contact, actor):
     with control.operations.locked(api.DATA_DIR):
         known = observed(api, settings)
         previous = next((row for row in known if row['telegram_id'] == contact.telegram_id), None)
-        if previous and previous['username'] == contact.username and previous['name'] == contact.name and time.time() - previous['seen_at'] < 3600:
+        details = contact.model_dump(exclude={'is_bot'})
+        if previous and all(previous.get(key) == value for key, value in details.items()) and time.time() - previous['seen_at'] < 3600:
             return access
         rows = [row for row in known if row['telegram_id'] != contact.telegram_id
                 and (not contact.username or row['username'] != contact.username)]
-        rows.append({'telegram_id': contact.telegram_id, 'username': contact.username,
-                     'name': contact.name, 'seen_at': int(time.time())})
+        rows.append({**details, 'seen_at': int(time.time())})
         control.operations.atomic_json(path(api, settings), {'items': rows[-MAX_CONTACTS:]})
     return access
 

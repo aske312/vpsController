@@ -3,7 +3,7 @@ export type McpId = "telegram-mcp" | "vps-controller-mcp";
 export type AppModuleId = "nodera-bot" | "ai-agent";
 export type Account = {
   telegram_id: number; name: string; bot_access: boolean; telegram_access: boolean; vps_access: boolean;
-  bot_chat_access?: boolean; address_as?: string;
+  bot_chat_access?: boolean; address_as?: string; mihomo_profile_id?: string | null; address_gender?: "auto" | "neutral" | "male" | "female";
   excluded_dialogs: number[]; session_configured: boolean;
 };
 export type Provider = {
@@ -56,6 +56,7 @@ export function settingsPayload(draft: Draft) {
     bot_token: draft.bot_token, telegram_api_id: draft.telegram_api_id, telegram_api_hash: draft.telegram_api_hash,
     accounts: draft.accounts.map(account => ({ telegram_id: account.telegram_id, name: account.name, bot_access: account.bot_access,
       bot_chat_access: account.bot_chat_access ?? false, address_as: account.address_as ?? "",
+      mihomo_profile_id: account.mihomo_profile_id ?? null, address_gender: account.address_gender ?? "auto",
       telegram_access: account.telegram_access, vps_access: account.vps_access, session: account.session,
       excluded_dialogs: account.excluded_dialogs_text.split(",").map(value => value.trim()).filter(Boolean).map(Number),
     })),

@@ -11,7 +11,7 @@ import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-fi
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import type { SystemAction } from "../../control-panel/system-operation";
 import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId, type ProviderUsage } from "./assistant-state";
-import { NoderaSettings, panels, type Panel } from "./nodera-settings";
+import { NoderaSettings, SettingsDialog, panels, type Panel } from "./nodera-settings";
 
 type Client = ReturnType<typeof createApiClient>;
 type Props = {
@@ -21,7 +21,7 @@ type Props = {
   admitOperation: (path: string, options: RequestInit) => Promise<SystemAction | null | undefined>;
   onOperation: (operation: SystemAction) => void;
 };
-type PendingAction = { service: string; action: string; code: string; expires: number };
+type PendingAction = { service: string; action: string; code: string; expires: number; changes?: Record<string, unknown> };
 type Turn = { pending_action?: PendingAction; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string };
 type Conversation = { id: string; title: string; updated_at: string; turns: number };
 function shortTitle(title: string) {
@@ -34,7 +34,7 @@ function rememberConversation(actor: string, identity: string | null) {
 
 export function AssistantView({ request, refreshKey, busy, onDirtyChange, confirmAction, admitOperation, onOperation }: Props) {
   const [panel, setPanel] = useState<Panel>('chat');
-  const sectionMenu = useRef<HTMLDetailsElement>(null);
+  const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
   const [status, setStatus] = useState<McpStatus>();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -252,7 +252,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   async function confirmService(turn: Turn) {
     const action = turn.pending_action;
     if (!action || writing.current || !await confirmAction({ title: `${action.action}: ${action.service}?`,
-      message: "Действие может прервать соединения этой службы.", confirmLabel: "Подтвердить", danger: action.action !== "start" })) return;
+      message: "Подтвердите изменение. Оно может повлиять на подключения и устройства.", confirmLabel: "Подтвердить", danger: action.action !== "start" })) return;
     writing.current = true; setWorking("service"); setError("");
     try {
       const result = await request<{ text: string }>("/assistant/service-confirm", { method: "POST",
@@ -297,15 +297,9 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   const selectPanel = (next: Panel) => {
     setPanel(next);
     setModelMenu(false);
-    sectionMenu.current?.removeAttribute("open");
+    setChatSettingsOpen(false);
   };
-  const sectionPicker = <details ref={sectionMenu} className="noderaSectionMenu" onKeyDown={event => {
-    if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
-  }}>
-    <summary className="ghostButton" aria-label="Настройки" title="Настройки"><ChatIcon name="gear"/>Настройки{dirty && <i/>}</summary>
-    <nav aria-label="Разделы Nodera">{panels.filter(item => item.id !== panel).map(item =>
-      <button key={item.id} type="button" onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}</nav>
-  </details>;
+  const sectionPicker = <button type="button" className="mcpIconButton noderaSettingsButton" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" aria-expanded={chatSettingsOpen} onClick={() => setChatSettingsOpen(true)}><ChatIcon name="gear"/>{dirty && <i/>}</button>;
   const needsUpdate = status.nodera_available_version && status.nodera_version !== status.nodera_available_version;
   const canUpdate = !status.nodera_management || status.nodera_management.state === "managed" && !status.nodera_management.retained;
   const isChat = panel === "chat";
@@ -319,12 +313,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     {needsUpdate && <div className="mcpRuntimeUpdate" role="status"><span>{status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"}</span><button type="button" className="ghostButton" disabled={blocked || dirty || !canUpdate} onClick={() => void updateAgent()}>Обновить Nodera</button></div>}
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!blocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
       <div className="mcpChatHead">
-        {status.settings.accounts.length > 0 && actorSelect}
-        {cacheEnabled && <label className="mcpConversationPicker">Диалог<select aria-label="Сохранённый диалог" value={conversationId ?? ""} title={conversations.find(item => item.id === conversationId)?.title} disabled={blocked} onChange={event => {
-          if (event.target.value) void loadConversation(event.target.value); else newChat();
-        }}>
-          <option value="">Новый диалог</option>{conversations.map(item => <option key={item.id} value={item.id}>{shortTitle(item.title)}</option>)}
-        </select></label>}
+        <div className="noderaChatScope"><strong>Nodera</strong><small title={actorName}>{actorName}</small></div>
         {!selectedComponent?.configured && <button type="button" className="ghostButton" onClick={() => selectPanel("settings")}>Подключить AI</button>}
         <div className="mcpChatActions">
           <button type="button" className="mcpIconButton" aria-label="Новый чат" title="Новый чат" disabled={blocked || !turns.length} onClick={newChat}><ChatIcon name="new"/></button>
@@ -338,7 +327,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
         {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
-        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.pending_action && <div className="mcpServiceConfirmation"><span>{turn.pending_action.action} · {turn.pending_action.service}</span><button type="button" className="ghostButton" disabled={blocked} onClick={() => void confirmService(turn)}>Подтвердить действие</button></div>}{turn.action_result && <p className="mcpNotice" role="status">{turn.action_result}</p>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
+        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.pending_action && <div className="mcpServiceConfirmation"><span>{turn.pending_action.action} · {turn.pending_action.service}</span>{turn.pending_action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(turn.pending_action.changes, null, 2)}</pre></details>}<button type="button" className="ghostButton" disabled={blocked} onClick={() => void confirmService(turn)}>Подтвердить действие</button></div>}{turn.action_result && <p className="mcpNotice" role="status">{turn.action_result}</p>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
       </div>
       <div className="mcpComposer">
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={blocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}
@@ -358,6 +347,16 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
       </div>
       <p className="mcpChatHint">Shift+Enter — новая строка · файлы передаются выбранному AI-провайдеру</p>
     </section>
+    {chatSettingsOpen && <SettingsDialog title="Настройки чата" close={() => setChatSettingsOpen(false)}>
+        {status.settings.accounts.length > 0 && actorSelect}
+        {cacheEnabled && <label className="mcpConversationPicker">Диалог<select aria-label="Сохранённый диалог" value={conversationId ?? ""} title={conversations.find(item => item.id === conversationId)?.title} disabled={blocked} onChange={event => {
+          if (event.target.value) void loadConversation(event.target.value); else newChat();
+        }}>
+          <option value="">Новый диалог</option>{conversations.map(item => <option key={item.id} value={item.id}>{shortTitle(item.title)}</option>)}
+        </select></label>}
+      <nav className="noderaHeroNav" aria-label="Разделы Nodera">{panels.filter(item => item.id !== "chat").map(item =>
+        <button key={item.id} type="button" onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}</nav>
+    </SettingsDialog>}
     {panel !== "chat" && <>
       <section className={`mcpHero noderaHero ${panel === "users" ? "isTelegram" : ""}`}>
         <div className="noderaHeroContent">

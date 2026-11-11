@@ -489,8 +489,15 @@ def nodera_chat(payload: assistant_control.Chat, settings: dict = Depends(requir
 def nodera_command(payload: assistant_commands.Command, settings: dict = Depends(require_nodera_bot_transport),
                    actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
     command = payload.command.strip().split(maxsplit=1)
+    confirmation_command = bool(command and command[0].split('@')[0].lower() in ('/confirm', '/cancel', '/operation'))
+    if confirmation_command and not any(str(user['telegram_id']) == actor and user.get('bot_access') for user in settings['accounts']):
+        pending = assistant_control.operations.read(assistant_commands.pending_path(sys.modules[__name__], actor))
+        if pending.get('kind') != 'mihomo' or not any(str(user['telegram_id']) == actor and user.get('mihomo_profile_id') for user in settings['accounts']):
+            raise HTTPException(403, 'Нет доступного действия вашей подписки')
+        if command[0].split('@')[0].lower() == '/operation' and (len(command) != 2 or command[1] != pending.get('operation_id')):
+            raise HTTPException(403, 'Доступен только результат вашей операции')
     model_command = bool(command and command[0].split('@')[0].lower() in ('/models', '/model'))
-    assistant_control.require_bot_actor(settings, actor, chat=model_command)
+    assistant_control.require_bot_actor(settings, actor, chat=model_command or confirmation_command)
     return {'text': assistant_commands.execute(sys.modules[__name__], actor, payload.command)}
 
 
@@ -498,6 +505,13 @@ def nodera_command(payload: assistant_commands.Command, settings: dict = Depends
 def nodera_contact(payload: assistant_contacts.Contact, settings: dict = Depends(require_nodera_bot_transport),
                    actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
     return assistant_contacts.remember(sys.modules[__name__], settings, payload, actor)
+
+
+@app.get('/api/assistant/mihomo-profiles')
+def assistant_mihomo_profiles(_: None = Depends(require_token)) -> dict:
+    import assistant_mihomo
+    data = assistant_mihomo.profiles(sys.modules[__name__])
+    return {'items': [{key: item.get(key) for key in ('id', 'name')} for item in data['items']]}
 
 
 @app.post('/api/assistant/bot-users/lookup')

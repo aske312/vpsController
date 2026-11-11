@@ -19,6 +19,19 @@ class Visible(HTMLParser):
 
 
 class AssistantFormatTests(unittest.TestCase):
+    def test_interlocutor_role_and_gender_are_separate_from_the_female_agent(self):
+        for name, expected in [('Александр', 'male'), ('Анна', 'female'), ('Саша', 'neutral'), ('user312', 'neutral')]:
+            settings = {'accounts': [{'telegram_id': 11, 'name': name, 'bot_access': False}]}
+            text = runner.persona(settings, '11')
+            self.assertIn('"form_of_address": "' + expected + '"', text)
+            self.assertIn('"role": "user"', text)
+            self.assertIn('Твой женский род относится только к тебе', text)
+        settings['accounts'][0].update(bot_access=True, address_as='Саша', address_gender='male')
+        text = runner.persona(settings, '11')
+        self.assertIn('"role": "administrator"', text)
+        self.assertIn('"form_of_address": "male"', text)
+        self.assertIn('Саша', text)
+
     def test_telegram_escapes_symbols_and_keeps_code_literal(self):
         value = bot.telegram_html('**Нодера**: <script>&\n```py\nprint("<>&_*")\n```')
         self.assertIn('<b>Нодера</b>', value)
