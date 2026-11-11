@@ -244,9 +244,6 @@
  .noderaWorkspace.isChat .mcpChatHint { display:none; }
 }
 
-.noderaDefaultAI { align-items:end; padding-bottom:10px; border-bottom:1px solid var(--line); }
-.noderaDefaultAI > label { flex:1 1 180px; max-width:320px; }
-.noderaDefaultAI > small { flex-basis:100%; }
 .mcpServiceConfirmation { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:8px; color:var(--amber); }
 
 .mcpWorkspace .noderaSettingsButton { position:relative; width:32px; height:32px; border:1px solid var(--line-strong); background:rgba(22,42,56,.8); color:var(--text); }
@@ -258,3 +255,49 @@
 .noderaContactFacts dd { margin:0; overflow-wrap:anywhere; }
 .mcpServiceConfirmation details { max-width:100%; }
 .mcpServiceConfirmation pre { overflow:auto; max-height:180px; padding:8px; font-size:10px; }
+
+.noderaAISwitch { display:inline-flex; align-items:center; gap:7px; padding:5px 8px; border:1px solid var(--line-strong); border-radius:20px; color:var(--muted); background:rgba(5,13,22,.8); font-size:11px; cursor:pointer; }
+.noderaSwitchTrack { display:inline-flex; align-items:center; width:30px; height:17px; padding:2px; border-radius:20px; background:#354552; }
+.noderaSwitchTrack > span { width:13px; height:13px; border-radius:50%; background:#a4b2bc; transition:transform .15s; }
+.noderaAISwitch[aria-checked=true] { color:var(--cyan); }
+.noderaAISwitch[aria-checked=true] .noderaSwitchTrack { background:rgba(97,207,216,.3); }
+.noderaAISwitch[aria-checked=true] .noderaSwitchTrack > span { background:var(--cyan); transform:translateX(13px); }
+.mcpWorkspace .noderaProviderChoice { display:flex; align-items:center; gap:7px; color:var(--text); cursor:pointer; }
+.mcpWorkspace .noderaProviderChoice input { width:14px; height:14px; min-height:0; padding:0; accent-color:var(--cyan); }
+.noderaProviderModel { display:flex; align-items:center; gap:3px; }
+.noderaProviderModel select { flex:1; }
+.noderaProviderTable { min-width:500px; table-layout:fixed; }
+.noderaProviderTable th:first-child { width:32%; }
+.noderaProviderTable th:last-child { width:40px; }
+.noderaProviderTable .isDefaultProvider { background:rgba(97,207,216,.035); }
+.noderaAccessTable { min-width:1050px; font-size:11px; }
+.noderaAccessTable :is(th,td) { vertical-align:top; }
+.noderaAccessTable tbody th { min-width:115px; }
+.noderaAccessTable td:nth-child(2) { width:220px; min-width:190px; }
+.noderaAccessTable td:nth-child(3) { min-width:140px; }
+.noderaAccessTable td:nth-child(4) { min-width:140px; }
+.noderaAccessTable td:nth-child(5) { min-width:120px; }
+.noderaAccessTable td:nth-child(6) { min-width:180px; }
+.mcpWorkspace .noderaAccessTable :is(select,input) { min-height:30px; padding:4px 6px; font-size:11px; }
+.noderaAccessTable small { display:block; margin-top:4px; }
+.noderaUserDetails,.noderaUserEditors { display:grid; gap:5px; }
+.noderaTags { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:5px; }
+.noderaTag { display:inline-flex; align-items:center; padding:3px 7px; border:1px solid var(--line); border-radius:999px; background:rgba(30,49,65,.45); color:var(--muted); font:10px/1.4 var(--ui-font); overflow-wrap:anywhere; }
+button.noderaTag { cursor:pointer; }
+.noderaTag.isSelected { color:var(--cyan); background:rgba(97,207,216,.09); border-color:rgba(97,207,216,.3); }
+.mcpWorkspace .noderaUserBio { color:var(--text); font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }
+@container (max-width:640px) { .noderaProviderTable { min-width:340px; } .noderaProviderTable th:first-child { width:40%; } }
+@media (prefers-reduced-motion:reduce) { .noderaSwitchTrack > span { transition:none; } }
+
+@container (max-width:480px) {
+ .noderaSwitchLabel { display:none; }
+ .noderaAISwitch { padding:4px 6px; }
+ .noderaProviderTable,.noderaProviderTable tbody { display:block; min-width:0; }
+ .noderaProviderTable thead { display:none; }
+ .noderaProviderTable tbody tr { display:grid; grid-template-columns:minmax(0,1fr) 32px; gap:4px; padding:7px 0; border-bottom:1px solid var(--line); }
+ .noderaProviderTable tbody :is(th,td) { width:auto; min-width:0; border:0; padding:4px; }
+ .noderaProviderTable tbody th:first-child { width:auto; grid-column:1; grid-row:1; }
+ .noderaProviderTable tbody td:nth-child(2) { grid-column:1/-1; grid-row:2; }
+ .noderaProviderTable tbody td:nth-child(2)::before { content:"Модель по умолчанию"; display:block; margin-bottom:4px; font-size:10px; color:var(--muted); }
+ .noderaProviderTable tbody td:last-child { grid-column:2; grid-row:1; }
+}

@@ -82,13 +82,11 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
   view.render(); await Promise.resolve();
   let tree = view.render();
   assert.equal(nodes(tree, n => n.type === 'h1').length, 0);
-  nodes(tree, n => n.props['aria-label'] === 'Настройки')[0].node.props.onClick();
-  tree = view.render();
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
   tree = view.render();
-  const toggle = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox')[0];
+  const toggle = nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'AI')[0];
   assert.equal(toggle.disabled, false);
-  toggle.node.props.onChange({ target: { checked: true } });
+  toggle.node.props.onClick();
   tree = view.render();
   const save = nodes(tree, n => n.type === 'button' && n.props.children === 'Сохранить')[0];
   assert.equal(save.disabled, false);
@@ -103,7 +101,6 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
 test('running Telegram bot locks its token and shows the stop action', async () => {
   const view = mount(fixture());
   view.render(); await Promise.resolve();
-  nodes(view.render(), n => n.props['aria-label'] === 'Настройки')[0].node.props.onClick();
   nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   const tree = view.render();
   const toggles = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox');
@@ -122,7 +119,7 @@ test('chat scope lives in settings and subscription binding is saved with addres
   assert.equal(nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Контур').length, 0);
   const gear = nodes(tree, n => n.props['aria-label'] === 'Настройки')[0].node;
   assert.equal(gear.props.children.includes('Настройки'), false);
-  gear.props.onClick();
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки чата')[0].node.props.onClick();
   tree = view.render();
   assert.equal(nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Контур').length, 1);
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();

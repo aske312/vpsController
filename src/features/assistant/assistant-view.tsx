@@ -35,6 +35,7 @@ function rememberConversation(actor: string, identity: string | null) {
 export function AssistantView({ request, refreshKey, busy, onDirtyChange, confirmAction, admitOperation, onOperation }: Props) {
   const [panel, setPanel] = useState<Panel>('chat');
   const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
+  const sectionMenu = useRef<HTMLDetailsElement>(null);
   const [status, setStatus] = useState<McpStatus>();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -298,8 +299,17 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     setPanel(next);
     setModelMenu(false);
     setChatSettingsOpen(false);
+    sectionMenu.current?.removeAttribute("open");
   };
-  const sectionPicker = <button type="button" className="mcpIconButton noderaSettingsButton" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" aria-expanded={chatSettingsOpen} onClick={() => setChatSettingsOpen(true)}><ChatIcon name="gear"/>{dirty && <i/>}</button>;
+  const sectionPicker = <details ref={sectionMenu} className="noderaSectionMenu" onKeyDown={event => {
+    if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+  }}>
+    <summary role="button" className="mcpIconButton noderaSettingsButton" aria-label="Настройки" title="Настройки"><ChatIcon name="gear"/>{dirty && <i/>}</summary>
+    <nav aria-label="Настройки Nodera">
+      <button type="button" onClick={() => { sectionMenu.current?.removeAttribute("open"); setChatSettingsOpen(true); }}><ChatIcon name="chat"/>Настройки чата</button>
+      {panels.filter(item => item.id !== "chat").map(item => <button key={item.id} type="button" onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}
+    </nav>
+  </details>;
   const needsUpdate = status.nodera_available_version && status.nodera_version !== status.nodera_available_version;
   const canUpdate = !status.nodera_management || status.nodera_management.state === "managed" && !status.nodera_management.retained;
   const isChat = panel === "chat";
@@ -354,8 +364,6 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
         }}>
           <option value="">Новый диалог</option>{conversations.map(item => <option key={item.id} value={item.id}>{shortTitle(item.title)}</option>)}
         </select></label>}
-      <nav className="noderaHeroNav" aria-label="Разделы Nodera">{panels.filter(item => item.id !== "chat").map(item =>
-        <button key={item.id} type="button" onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}</nav>
     </SettingsDialog>}
     {panel !== "chat" && <>
       <section className={`mcpHero noderaHero ${panel === "users" ? "isTelegram" : ""}`}>
@@ -363,7 +371,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
           <div className="mcpIdentity">
             <ProtocolIcon protocol={panel === "users" ? "nodera-bot" : "nodera"}/>
             <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1></div>
-            <span className="mcpBadge">{panel === "users" ? botStatus : status.settings.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span>
+            {panel === "settings" ? <button type="button" role="switch" aria-label="AI" aria-checked={draft.modules["ai-agent"]} className="noderaAISwitch" title={draft.modules["ai-agent"] ? "Выключить AI" : "Включить AI"} disabled={blocked || !selectedComponent?.installed} onClick={() => patch({ modules: { ...draft.modules, "ai-agent": !draft.modules["ai-agent"] } })}><span className="noderaSwitchTrack"><span/></span><span className="noderaSwitchLabel">{draft.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span></button> : <span className="mcpBadge">{botStatus}</span>}
           </div>
           <p className="noderaHeroDescription"><span className="noderaHeroDetail">{panel === "settings"
             ? "Выберите AI по умолчанию, подключите инструменты VPS и Telegram, настройте характер и память Нодеры."
