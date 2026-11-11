@@ -18,9 +18,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Prepare isolated network tests
-        timeout-minutes: 5
-        uses: ./.github/actions/network-test-dependencies
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -38,6 +35,9 @@ jobs:
           /tmp/nodera-bot-runtime/bin/python tests/assistant_bot_smoke.py
       - name: Verify gateway reload with stalled VPN streams
         run: python tests/gateway_reload_smoke.py
+      - name: Prepare isolated network tests
+        timeout-minutes: 5
+        uses: ./.github/actions/network-test-dependencies
       - name: Verify disposable WireGuard peer in isolated network
         run: sudo "$(command -v python)" tests/relay_peer_smoke.py
       - name: Verify shared subscription limits in isolated network
