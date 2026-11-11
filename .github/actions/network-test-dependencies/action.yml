@@ -1,21 +1,32 @@
 name: Network test dependencies
-description: Install required network tools using the standard Ubuntu mirrors
+description: Install required network tools using a reachable Ubuntu archive mirror
 runs:
   using: composite
   steps:
     - name: Install WireGuard and nftables
       shell: bash
       run: |
-        echo 'Checking runner DNS before installing network test dependencies'
-        timeout 20s getent ahostsv4 archive.ubuntu.com
-        timeout 20s sudo -u _apt getent ahostsv4 archive.ubuntu.com
-        # Hosted Ubuntu runners use Azure mirror lists, whose DNS can fail
-        # independently of the standard Ubuntu archive and security mirrors.
+        # Probe independent mirror domains before APT's longer DNS retries.
+        # APT still verifies all indexes and packages with Ubuntu's signing keys.
+        source /etc/os-release
+        mirror=''
+        for host in archive.ubuntu.com mirrors.edge.kernel.org; do
+          echo "Checking Ubuntu mirror: $host"
+          if timeout 15s getent ahostsv4 "$host" &&
+             timeout 15s sudo -u _apt getent ahostsv4 "$host" &&
+             curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
+               "https://$host/ubuntu/dists/$VERSION_CODENAME/InRelease" -o /dev/null; then
+            mirror="https://$host/ubuntu"
+            break
+          fi
+        done
+        if [[ -z "$mirror" ]]; then
+          echo '::error::Runner cannot reach either Ubuntu archive mirror'
+          exit 1
+        fi
         for list in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt; do
           if [[ -f "$list" ]]; then
-            mirror=archive.ubuntu.com
-            [[ "$list" != *-security.txt ]] || mirror=security.ubuntu.com
-            sudo sed -i "s/azure\.archive\.ubuntu\.com/$mirror/g" "$list"
+            printf '%s\n' "$mirror" | sudo tee "$list" >/dev/null
           fi
         done
         sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o APT::Update::Error-Mode=any update -qq
