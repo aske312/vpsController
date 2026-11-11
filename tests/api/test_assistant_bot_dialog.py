@@ -60,7 +60,7 @@ class BotDialogTests(unittest.IsolatedAsyncioTestCase):
         self.assert_typing_stopped()
 
     async def test_start_and_help_introduce_assistant_and_only_list_information(self):
-        for role in (True, 'chat', False):
+        for role in (True, 'chat'):
             with patch.object(bot, 'agent_request', new=AsyncMock()) as agent, patch.object(bot, 'server_command', new=AsyncMock()) as server:
                 for command in ('/start', '/help'):
                     result = await bot.reply({}, {'id': 11}, command, role)
@@ -82,3 +82,13 @@ class BotDialogTests(unittest.IsolatedAsyncioTestCase):
         text = bot.informational_reply('/services', raw)
         self.assertEqual(text, 'Состояние служб:\nfixture · running')
         self.assertIsNone(bot.inline_keyboard(text, '/services', True, {}))
+
+    async def test_guest_only_id_and_subscription_only_customer_never_call_ai(self):
+        with patch.object(bot, 'agent_request', new=AsyncMock()) as agent, patch.object(bot, 'server_command', new=AsyncMock(return_value='https://example.com/s/private')) as server:
+            for prompt in ('/start', '/help', '/models', '/status', '/subscription', '/userid', 'Hello'):
+                self.assertEqual(await bot.reply({}, {'id': 22}, prompt, False), '')
+            self.assertIn('22', await bot.reply({}, {'id': 22}, '/id', False))
+            self.assertIn('/subscription', await bot.reply({}, {'id': 22}, 'Hello', 'subscription'))
+            self.assertEqual(await bot.reply({}, {'id': 22}, '/subscription', 'subscription'), 'https://example.com/s/private')
+            server.assert_awaited_once_with({}, 22, '/subscription')
+            agent.assert_not_awaited()

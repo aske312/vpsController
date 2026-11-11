@@ -73,7 +73,7 @@ def execute(api, actor, prompt):
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
     settings = control.read(api)
-    permission = {'/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
+    permission = {'/subscription': 'subscription_read', '/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
     if permission: roles.require(settings, actor, permission)
     if command in ('/confirm', '/operation'):
         pending = control.operations.read(pending_path(api, actor))
@@ -82,6 +82,12 @@ def execute(api, actor, prompt):
         if pending.get('kind') == 'roles': roles.require(settings, actor, 'roles_manage')
         elif pending.get('kind') == 'mihomo': roles.require(settings, actor, 'subscription_manage' if command == '/confirm' else 'subscription_read')
         else: roles.require(settings, actor, 'server_manage' if command == '/confirm' else 'server_read')
+    if command == '/subscription' and not args:
+        import assistant_mihomo
+        linked = assistant_mihomo.profile_for(settings, actor).get('mihomo_profile_id')
+        if not linked: return 'К учётной записи не привязана подписка Mihomo. Обратитесь к владельцу.'
+        result = assistant_mihomo.call(api, actor, 'GET', '/profiles/' + linked + '/subscription', {})
+        return 'Ваша подписка Mihomo:\n' + result['url'] if result.get('url') else 'Подписка привязана, но публичная ссылка ещё не настроена. Обратитесь к владельцу.'
     if command in BLOCKED_COMMANDS:
         raise HTTPException(403, 'Nodera не может выключать VPS или переключать режим доступа к панели')
     if command == '/models' and (not args or len(args) == 1 and args[0].isdigit()):

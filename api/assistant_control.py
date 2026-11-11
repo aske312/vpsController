@@ -29,7 +29,7 @@ from component_registry import ComponentRegistry, RegistryError
 
 MODULES = ('nodera-bot', 'ai-agent')
 MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp')
-ACCOUNT_OPTIONS = ('address_as', 'bot_chat_access', 'mihomo_profile_id', 'address_gender', 'role', 'permission_overrides')
+ACCOUNT_OPTIONS = ('address_as', 'bot_chat_access', 'mihomo_profile_id', 'address_gender', 'role', 'permission_overrides', 'products')
 BOT_UNIT = 'vps-control-nodera-bot.service'
 AGENT_UNIT = 'vps-control-ai-agent.service'
 _runtime_slots = threading.BoundedSemaphore(2)
@@ -40,6 +40,7 @@ class Account(BaseModel):
     telegram_id: int = Field(strict=True, gt=0, le=2**52)
     name: str = Field(default='', max_length=80)
     role: Literal['owner', 'administrator', 'moderator', 'user', 'guest'] | None = None
+    products: list[Literal['assistant', 'mihomo']] | None = Field(default=None, max_length=2)
     permission_overrides: dict[str, StrictBool] = Field(default_factory=dict)
     bot_access: StrictBool = False
     bot_chat_access: StrictBool = False
@@ -50,6 +51,15 @@ class Account(BaseModel):
     vps_access: StrictBool = False
     excluded_dialogs: list[int] = Field(default_factory=list, max_length=100)
     session: str | None = Field(default=None, max_length=4096)
+
+    @model_validator(mode='after')
+    def role_bounds(self):
+        if self.products is not None and len(set(self.products)) != len(self.products): raise ValueError('Продукты не должны повторяться')
+        if self.role in roles.FIXED and self.permission_overrides: raise ValueError('Права владельца, администратора и гостя фиксированы')
+        if self.role in ('owner', 'administrator') and self.products is not None and set(self.products) != {'assistant', 'mihomo'}: raise ValueError('Владельцу и администратору доступны оба продукта')
+        if self.role == 'guest' and self.products: raise ValueError('Гостю доступна только команда /id')
+        if self.role == 'user' and any(enabled and key not in roles.USER_ALLOWED for key, enabled in self.permission_overrides.items()): raise ValueError('Пользователю недоступны административные и сервисные права')
+        return self
 
     @field_validator('permission_overrides')
     @classmethod
@@ -107,6 +117,7 @@ class Settings(BaseModel):
     memory_days: int = Field(default=30, strict=True, ge=1, le=90)
     telegram_api_id: int | None = Field(default=None, strict=True, gt=0)
     telegram_api_hash: str | None = Field(default=None, max_length=32)
+    role_policy_version: Literal[2] = 2
     role_permissions: dict[str, list[str]] = Field(default_factory=dict)
     accounts: list[Account] = Field(default_factory=list, max_length=30)
 
@@ -116,7 +127,8 @@ class Settings(BaseModel):
         if set(value) - set(roles.ROLES): raise ValueError('Неизвестная роль')
         for role, grants in value.items():
             if len(grants) != len(set(grants)) or set(grants) - set(roles.PERMISSIONS): raise ValueError('Неизвестное разрешение')
-            if role == 'owner' and set(grants) != set(roles.PERMISSIONS): raise ValueError('Владелец всегда имеет все права')
+            if role in roles.FIXED and set(grants) != set(roles.DEFAULTS[role]): raise ValueError('Права владельца, администратора и гостя фиксированы')
+            if role == 'user' and set(grants) - roles.USER_ALLOWED: raise ValueError('Пользователь может работать только с AI и своей подпиской')
             if role != 'owner' and 'roles_manage' in grants: raise ValueError('Управлять ролями может только владелец')
         return value
 
@@ -340,7 +352,7 @@ def _read(api):
                 item.update(account)
             assembled.update(settings)
         extensions = operations.read(directory(api) / 'ai-agent' / (revision + '.nodera.json'))
-        for key in ('providers', 'active_provider', 'role_permissions'):
+        for key in ('providers', 'active_provider', 'role_permissions', 'role_policy_version'):
             if key in extensions:
                 assembled[key] = extensions[key]
         options = extensions.get('accounts', {})
@@ -356,6 +368,7 @@ def _read(api):
         return {'revision': '0' * 32, 'modules': {key: False for key in MODULES},
                 'mcp': {key: False for key in MCP_MODULES}, 'mcp_installed': [],
                 'provider_url': '', 'model': '', 'accounts': [], 'telegram_api_id': None}
+    roles.migrate_settings(value)
     try:
         Settings.model_validate({key: item for key, item in value.items() if key not in ('revision', 'control_token')} | {'expected_revision': value['revision'], 'component': 'ai-agent'})
     except (ValueError, KeyError):
@@ -392,7 +405,7 @@ def store(api, value):
            'accounts': [{key: a.get(key, False if key == 'bot_access' else '') for key in ('telegram_id', 'name', 'bot_access')}
                         for a in value['accounts']]}
     # Keep the active connection and legacy ACL readable after an application rollback.
-    extensions = {key: value[key] for key in ('providers', 'active_provider', 'role_permissions') if key in value}
+    extensions = {key: value[key] for key in ('providers', 'active_provider', 'role_permissions', 'role_policy_version') if key in value}
     extensions['accounts'] = {str(account['telegram_id']): {key: account[key] for key in ACCOUNT_OPTIONS if key in account}
                               for account in value['accounts']}
     for component, settings in (('ai-agent', ai), ('nodera-bot', bot)):
@@ -439,7 +452,8 @@ def public(value):
     result['accounts'] = [roles.migrated(value, account) for account in result['accounts']]
     for account in result['accounts']:
         grants = roles.account_grants(value, account)
-        account.update(bot_access='subscriptions_admin' in grants, bot_chat_access='chat' in grants and 'subscriptions_admin' not in grants, vps_access=bool(grants & {'server_read', 'server_manage', 'diagnostics'}), telegram_access='telegram_read' in grants)
+        account['products'] = sorted(roles.products(account))
+        account.update(bot_access='subscriptions_admin' in grants, bot_chat_access='chat' in grants and 'subscriptions_admin' not in grants, vps_access=bool(grants & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), telegram_access='telegram_read' in grants)
     result['role_permissions'] = {key: value.get('role_permissions', {}).get(key, grants) for key, grants in roles.DEFAULTS.items()}
     result['active_provider'] = active_provider(value)
     return result
@@ -607,7 +621,7 @@ def configure(api, payload):
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}
         if submitted['mcp_installed'] is None:
             submitted['mcp_installed'] = list(dict.fromkeys(old['mcp_installed'] + [key for key, enabled in payload.mcp.items() if enabled]))
-        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'role_permissions', 'assistant_style', 'assistant_character', 'assistant_instructions', 'personalization_enabled', 'web_domains', 'web_enabled', 'memory_enabled', 'memory_days')
+        ai_keys = ('provider_url', 'model', 'model_mode', 'api_key', 'telegram_api_id', 'telegram_api_hash', 'mcp', 'mcp_installed', 'role_permissions', 'role_policy_version', 'assistant_style', 'assistant_character', 'assistant_instructions', 'personalization_enabled', 'web_domains', 'web_enabled', 'memory_enabled', 'memory_days')
         keys = ai_keys + ('bot_token',) if unified else ai_keys if payload.component == 'ai-agent' else ('bot_token',)
         value.update({key: submitted[key] for key in keys})
         if unified and submitted['providers'] is not None:
@@ -658,7 +672,7 @@ def configure(api, payload):
         for account in value['accounts']:
             if account.get('role'):
                 grants = roles.account_grants(value, account)
-                account.update(bot_access='subscriptions_admin' in grants, bot_chat_access='chat' in grants and 'subscriptions_admin' not in grants, vps_access=bool(grants & {'server_read', 'server_manage', 'diagnostics'}), telegram_access='telegram_read' in grants)
+                account.update(bot_access='subscriptions_admin' in grants, bot_chat_access='chat' in grants and 'subscriptions_admin' not in grants, vps_access=bool(grants & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), telegram_access='telegram_read' in grants)
         value['revision'] = uuid.uuid4().hex
         value['control_token'] = old.get('control_token') or secrets.token_urlsafe(48)
         store(api, value)
@@ -819,7 +833,7 @@ def runtime_request(api, mode, body):
     grants = roles.effective(value, str(body.get('actor', 'panel')))
     value['web_enabled'] = value.get('web_enabled', True) and 'web' in grants
     value['personalization_enabled'] = value.get('personalization_enabled', True) and 'memory' in grants
-    value['accounts'] = [{**row, 'effective_permissions': sorted(roles.account_grants(value, row)), 'bot_access': roles.allows(value, str(row['telegram_id']), 'subscriptions_admin'), 'bot_chat_access': roles.allows(value, str(row['telegram_id']), 'chat'), 'vps_access': bool(roles.account_grants(value, row) & {'server_read', 'server_manage', 'diagnostics'}), 'telegram_access': roles.allows(value, str(row['telegram_id']), 'telegram_read')} for row in value['accounts']]
+    value['accounts'] = [{**row, 'effective_permissions': sorted(roles.account_grants(value, row)), 'bot_access': roles.allows(value, str(row['telegram_id']), 'subscriptions_admin'), 'bot_chat_access': roles.allows(value, str(row['telegram_id']), 'chat'), 'vps_access': bool(roles.account_grants(value, row) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), 'telegram_access': roles.allows(value, str(row['telegram_id']), 'telegram_read')} for row in value['accounts']]
     value['server_name'] = socket.gethostname()
     import assistant_contacts
     value['interlocutor'] = assistant_contacts.interlocutor(api, value, str(body.get('actor', 'panel')))
@@ -924,7 +938,7 @@ def authorize_control(api, authorization, actor):
         raise HTTPException(401, 'Нужен служебный токен MCP', headers={'WWW-Authenticate': 'Bearer'})
     if not value['mcp']['vps-controller-mcp']:
         raise HTTPException(403, 'Модуль vpsController MCP выключен')
-    if actor != 'panel' and not (roles.effective(value, actor) & {'server_read', 'server_manage', 'diagnostics', 'subscription_read', 'subscription_manage', 'subscriptions_admin', 'roles_manage'}):
+    if actor != 'panel' and not (roles.effective(value, actor) & roles.VPS_PERMISSIONS):
         raise HTTPException(403, 'Пользователю не разрешён контур vpsController')
     require_installed(api, 'ai-agent')
 
@@ -950,7 +964,7 @@ def authorize_bot(api, authorization, actor, *, chat=False):
 
 def require_bot_actor(value, actor, *, chat=False):
     grants = roles.effective(value, actor)
-    if not (('chat' in grants) if chat else (grants & {'server_read', 'server_manage', 'diagnostics', 'subscriptions_admin', 'roles_manage'})):
+    if not (('chat' in grants) if chat else (grants & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'subscriptions_admin', 'roles_manage'})):
         raise HTTPException(403, 'Доступ к этому действию в Telegram не выдан')
 
 

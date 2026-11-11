@@ -57,9 +57,11 @@ def telegram_chunks(text):
         chunks.append(current + ''.join('</' + name + '>' for name in reversed(stack)))
     return chunks
 
-PUBLIC_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка'), ('id', 'Мой Telegram ID')]
-CHAT_COMMANDS = PUBLIC_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI')]
-ADMIN_COMMANDS = PUBLIC_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
+PUBLIC_COMMANDS = [('id', 'Мой Telegram ID')]
+MEMBER_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка')] + PUBLIC_COMMANDS
+SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка Mihomo')]
+CHAT_COMMANDS = MEMBER_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI')]
+ADMIN_COMMANDS = SUBSCRIPTION_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
     ('services', 'Состояние служб'), ('components', 'Установленные компоненты')]
 TYPING_INTERVAL = 4
@@ -85,10 +87,10 @@ async def typing(settings, actor):
             await task
 
 
-async def command_menu(settings, actor=None, admin=False, chat=False):
+async def command_menu(settings, actor=None, admin=False, chat=False, subscription=False):
     scope = {'type': 'chat', 'chat_id': actor} if actor else {'type': 'all_private_chats'}
     await bot_api(settings, 'setMyCommands', scope=scope,
-                  commands=[{'command': name, 'description': description} for name, description in (ADMIN_COMMANDS if admin else CHAT_COMMANDS if chat else PUBLIC_COMMANDS)])
+                  commands=[{'command': name, 'description': description} for name, description in (ADMIN_COMMANDS if admin else (CHAT_COMMANDS + ([('subscription', 'Моя подписка Mihomo')] if subscription else [])) if chat else SUBSCRIPTION_COMMANDS if subscription else PUBLIC_COMMANDS)])
 
 
 async def server_command(settings, actor, prompt):
@@ -168,23 +170,22 @@ async def identify(settings, sender):
         if response.status_code != 200:
             return False
         access = response.json()
-        return True if access.get('admin') is True else 'chat' if access.get('chat') is True else False
+        return True if access.get('admin') is True else ('chat-subscription' if access.get('subscription') else 'chat') if access.get('chat') is True else 'subscription' if access.get('subscription') else False
 
 
 def public_reply(sender, command):
-    if command in ('/id', '/userid'):
+    if command == '/id':
         tag = '\nТег: @' + sender['username'] if sender.get('username') else ''
-        return f"Ваш Telegram ID: {sender['id']}{tag}\nДля доступа к ассистенту передайте этот ID владельцу."
-    if command in ('/start', '/help'):
-        return 'Привет! Я Нодера, ваш AI-ассистент 👋\nПомогаю с вопросами и доступными вам настройками. Чтобы начать общение, попросите владельца открыть доступ.\n/id — ваш Telegram ID, /help — справка.'
-    return 'Я Нодера, ваш AI-ассистент 👋 Чтобы начать общение, обратитесь к владельцу. Ваш Telegram ID: /id.'
+        return f"Ваш Telegram ID: {sender['id']}{tag}\nДля доступа передайте этот ID владельцу."
+    return ''
 
 
-def assistant_help(admin=False):
-    text = ('Привет! Я Нодера, ваш AI-ассистент 👋\n'
-            'Отвечаю на вопросы, помогаю разобраться с подпиской и доступными настройками. '
+def assistant_help(admin=False, subscription=False):
+    text = ('Привет! Я Нодера, ваш AI-ассистент 👋\n' +
+            ('Отвечаю на вопросы, помогаю с вашей подпиской Mihomo и доступными настройками. ' if subscription else 'Отвечаю на вопросы и помогаю с доступными вам задачами. ') +
             'Просто напишите, чем помочь — команды помнить не нужно.\n\n'
             'Информация:\n/id — ваш Telegram ID\n/models — доступные модели\n/model — текущая модель')
+    if subscription: text += '\n/subscription — ваша подписка Mihomo'
     if admin:
         text += '\n/status — состояние сервера\n/resources — ресурсы\n/services — состояние служб\n/components — компоненты'
     return text
@@ -202,12 +203,14 @@ def informational_reply(command, answer):
 
 async def reply(settings, sender, prompt, access):
     command = prompt.split()[0].split('@')[0].lower()
-    if command in ('/id', '/userid') or not access:
-        return public_reply(sender, command)
+    if not access: return public_reply(sender, command)
+    if command in ('/id', '/userid'): return public_reply(sender, '/id')
+    if access == 'subscription' and command not in ('/subscription', '/confirm', '/cancel', '/operation'):
+        return 'Доступна ваша подписка Mihomo: /subscription. AI-ассистент для этой учётной записи не подключён.'
     if command in ('/start', '/help'):
-        return assistant_help(access is True)
+        return assistant_help(access is True, access in (True, 'chat-subscription'))
     if command.startswith('/'):
-        if access == 'chat' and command not in ('/models', '/model', '/confirm', '/cancel', '/operation'):
+        if access in ('chat', 'chat-subscription') and command not in ('/models', '/model', '/subscription', '/confirm', '/cancel', '/operation'):
             return 'Вам доступен чат. /help — доступные команды.'
         try:
             return informational_reply(command, await server_command(settings, sender['id'], prompt))
@@ -220,7 +223,7 @@ async def reply(settings, sender, prompt, access):
         return 'Сейчас не получилось подготовить ответ. Попробуйте немного позже.'
 
 
-BUTTON_COMMANDS = {'Сервер': '/status', 'Ресурсы': '/resources', 'Службы': '/services',
+BUTTON_COMMANDS = {'Моя подписка': '/subscription', 'Сервер': '/status', 'Ресурсы': '/resources', 'Службы': '/services',
                    'Компоненты': '/components', 'Модели AI': '/models',
                    'Текущая модель': '/model', 'AI по умолчанию': '/model default', 'Помощь': '/help'}
 
@@ -229,10 +232,12 @@ def reply_keyboard(access):
     rows = [['Модели AI', 'Текущая модель'], ['Помощь']]
     if access is True:
         rows = [['Сервер', 'Ресурсы'], ['Службы', 'Компоненты']] + rows
+    if access == 'subscription': rows = [['Моя подписка', 'Помощь']]
+    elif access in (True, 'chat-subscription'): rows = [['Моя подписка']] + rows
     if not access:
         return {'remove_keyboard': True}
     return {'keyboard': [[{'text': text} for text in row] for row in rows],
-            'resize_keyboard': True, 'is_persistent': True, 'input_field_placeholder': 'Напишите вопрос Нодере…'}
+            'resize_keyboard': True, 'is_persistent': True, 'input_field_placeholder': 'Команды подписки Mihomo' if access == 'subscription' else 'Напишите вопрос Нодере…'}
 
 
 def inline_keyboard(answer, prompt, access, actions):
@@ -308,10 +313,10 @@ async def bot(settings):
                 except Exception: access = False
                 if not prompt: continue
                 admin = access is True
-                role = 'admin' if admin else 'chat' if access == 'chat' else 'guest'
+                role = 'admin' if admin else str(access) if access else 'guest'
                 if menus.get(actor) != role:
                     try:
-                        await command_menu(settings, actor, admin, access == 'chat')
+                        await command_menu(settings, actor, admin, access in ('chat', 'chat-subscription'), access in (True, 'subscription', 'chat-subscription'))
                         if len(menus) >= 1000: menus.clear()
                         menus[actor] = role
                     except Exception: logging.error('NoderaBot private command menu could not be updated')
@@ -323,6 +328,7 @@ async def bot(settings):
                     if current_access != access:
                         access = False
                         answer = public_reply(sender, '')
+                if not answer: continue
                 if len(callbacks) >= 1000: callbacks.clear()
                 actions = {}
                 markup = inline_keyboard(answer, prompt, access, actions)

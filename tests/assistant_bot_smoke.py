@@ -43,11 +43,11 @@ async def main():
         except asyncio.CancelledError: pass
         assert json.loads((Path(folder) / 'offset.json').read_text())['offset'] == 6
         server.assert_awaited_once_with(settings, 11, '/status')
-    assert len(sent) == 3
+    assert len(sent) == 2
     assert 24 in seen
     assert 'NoderaBot' in next(row['text'] for row in sent if row['chat_id']==11)
     assert '23' in next(row['text'] for row in sent if row['chat_id']==23)
-    assert 'NoderaBot' not in next(row['text'] for row in sent if row['chat_id']==22)
+    assert not any(row['chat_id'] == 22 for row in sent)
     print('standalone guest replies, self ID, current admin roles, private chats, persisted offset and absence of MCP/Telethon: passed')
 
 

@@ -163,3 +163,43 @@ class MihomoOperatorTests(unittest.TestCase):
         self.assertEqual(user['address_gender'], 'neutral')
         legacy = json.loads((self.root / 'assistant/ai-agent' / (control.read(api)['revision'] + '.json')).read_text())
         self.assertNotIn('mihomo_profile_id', legacy['accounts'][0])
+
+    def test_user_can_edit_own_profile_but_cannot_change_any_limit_or_service(self):
+        settings = control.read(api)
+        settings['accounts'][0].update(role='user', products=['mihomo'], permission_overrides={})
+        control.store(api, settings)
+        for body in ({'limits': {'traffic_gb': 100}}, {'limits': {'days': 90}}, {'limits': {'speed_mbps': 100}}, {'limits': None}, {'limits': {}}):
+            self.assertEqual(self.prepare({**body, 'expected_revision': 'a' * 64}).status_code, 403)
+        self.assertEqual(self.prepare({'name': 'My name', 'expected_revision': 'a' * 64}).status_code, 200)
+        for name in ('vps_services', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'):
+            self.assertEqual(self.tool(name=name).status_code, 403)
+        self.assertEqual(self.client.post('/api/assistant/bot-chat', headers=self.headers, json={'prompt': 'Hello'}).status_code, 403)
+
+    def test_partial_quota_edit_preserves_expiry_and_speed_without_granting_expiry_right(self):
+        settings = control.read(api)
+        settings['accounts'][0].update(role='moderator', products=['mihomo'], permission_overrides={'subscription_quota': True})
+        control.store(api, settings)
+        self.rows[0]['limits'] = {'traffic_gb': 10, 'speed_mbps': 5, 'days': 30}
+        self.assertEqual(self.prepare({'limits': {'traffic_gb': 20}, 'expected_revision': 'a' * 64}).status_code, 200)
+        record = control.operations.read(commands.pending_path(api, '11'))
+        commands.execute(api, '11', '/confirm ' + record['code'])
+        write = next(row for row in self.calls if row[0] == 'PATCH')
+        self.assertEqual(write[2]['limits'], {'traffic_gb': 20, 'speed_mbps': 5, 'days': 30})
+        self.assertEqual(self.prepare({'limits': {'days': 90}, 'expected_revision': 'a' * 64}).status_code, 403)
+
+    def test_subscription_only_bot_delivers_own_link_without_ai_product(self):
+        settings = control.read(api)
+        settings['modules']['ai-agent'] = False
+        settings['modules']['nodera-bot'] = True
+        settings['bot_token'] = self.payload()['bot_token']
+        settings['accounts'][0].update(role='user', products=['mihomo'], permission_overrides={})
+        control.store(api, settings)
+        with patch.object(bridge, 'request', return_value={'url': 'https://subscription.example/s/own'}), patch.object(control, 'runtime_request') as model:
+            response = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/subscription'})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn('https://subscription.example/s/own', response.json()['text'])
+            self.assertEqual(self.client.post('/api/assistant/bot-chat', headers=self.headers, json={'prompt': 'Hi'}).status_code, 403)
+            model.assert_not_called()
+        settings['accounts'][0]['products'] = ['assistant']
+        control.store(api, settings)
+        self.assertEqual(self.tool(name='mihomo_api', path='/profiles/own/subscription').status_code, 403)

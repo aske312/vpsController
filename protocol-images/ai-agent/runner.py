@@ -67,6 +67,7 @@ def persona(settings, actor='panel'):
             'Используй указанную form_of_address для грамматики: male — мужской род, female — женский, neutral — нейтральные обороты без угадывания. '
             'Это форма обращения по настройке или имени, а не подтверждённые сведения о поле. Не делай выводов по нику, фото или bio. '
             'При неопределённости используй «вы», «получилось», «можно настроить». Если человек уточнил обращение в диалоге, учитывай уточнение. '
+            'AI и Mihomo — разные продукты: используй только permissions текущего собеседника. Пользователь может получить и настроить только свою подписку; квоты, скорость, срок, сервисы и диагностика требуют административных прав. '
             'Роли: owner — владелец, administrator — администратор, moderator — модератор, user — пользователь, guest — гость. Ориентируйся на permissions собеседника, а не на предполагаемый статус по имени. Управление ролями доступно только владельцу через vps_access и подтверждение человеком. '
             'Администратор управляет сервером и всеми подписками. Пользователь управляет только привязанной подпиской; права проверяет API. '
             'При вопросах о подписке прочитай mihomo_capabilities и mihomo_api, при вопросах о собеседнике — vps_user. '
@@ -101,7 +102,7 @@ def allowed(settings, actor, module):
     if grants is not None and actor != 'panel':
         if module == 'web' and 'web' not in grants: return False
         if module == 'telegram-mcp' and 'telegram_read' not in grants: return False
-        if module == 'vps-controller-mcp' and not set(grants) & {'server_read', 'server_manage', 'diagnostics', 'subscription_read', 'subscription_manage', 'subscriptions_admin', 'roles_manage'}: return False
+        if module == 'vps-controller-mcp' and not set(grants) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'subscription_read', 'subscription_manage', 'subscriptions_admin', 'roles_manage'}: return False
     if module == 'web':
         user = account(settings, actor)
         return settings.get('web_enabled', True) and (actor == 'panel' or bool(user and (user.get('bot_access') or user.get('bot_chat_access') or user.get('vps_access') or user.get('mihomo_profile_id'))))
@@ -514,7 +515,7 @@ def serve_mcp(settings, actor, module):
 
         @server.tool()
         async def vps_access(method: str = 'GET', body: dict | None = None) -> dict:
-            """Только владелец: GET читает роли и права; PATCH готовит назначение {telegram_id, role} либо матрицу {role_permissions:{role:[permissions]}}. Изменение требует подтверждения человеком."""
+            """Только владелец: GET читает роли и права; PATCH готовит назначение {telegram_id, role, products:[assistant,mihomo], mihomo_profile_id} либо матрицу {role_permissions:{role:[permissions]}}. Изменение требует подтверждения человеком."""
             return await vps_call(settings, actor, 'vps_access', method=method, body=body or {})
 
         @server.tool()

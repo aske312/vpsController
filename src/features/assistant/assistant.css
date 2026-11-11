@@ -351,3 +351,8 @@ button.noderaTag { cursor:pointer; }
 
 .noderaDialogWide { max-width:calc(100vw - 32px); }
 @media (max-width:640px) { .noderaDialogWide { max-width:calc(100vw - 16px); } }
+
+.noderaProducts,.noderaPermissionGroup { display:grid; gap:12px; min-width:0; }
+.noderaProducts { padding:12px; border:1px solid var(--line); border-radius:8px; }
+.noderaPermissionGroup h3 { margin:8px 0 0; font-size:13px; }
+.noderaPermissionGroup input:disabled + span { color:var(--muted); }

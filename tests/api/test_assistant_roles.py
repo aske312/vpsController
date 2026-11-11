@@ -15,7 +15,7 @@ class AssistantRoleTests(unittest.TestCase):
 
     def test_explicit_role_is_authoritative_and_owner_rights_cannot_be_delegated(self):
         settings = {'accounts': [{'telegram_id': 11, 'role': 'guest', 'bot_access': True, 'vps_access': True}]}
-        self.assertEqual(roles.effective(settings, '11'), {'chat', 'web'})
+        self.assertEqual(roles.effective(settings, '11'), set())
         self.assertEqual(roles.effective(settings, 'unknown'), set())
         self.assertEqual(roles.effective(settings, 'panel'), set(roles.PERMISSIONS))
         for role in roles.ROLES:
@@ -75,11 +75,30 @@ class AssistantRoleTests(unittest.TestCase):
             configure.assert_not_called()
         self.assertFalse(any(row['telegram_id'] == 22 for row in control.read(api)['accounts']))
 
-    def test_guest_chat_uses_default_model_without_persistent_memory(self):
-        payload = self.payload(); payload['accounts'][0]['role'] = 'guest'; self.save(payload)
-        with patch.object(control, 'runtime_request', return_value={'ok': True, 'result': {'answer': 'Hello', 'tools_used': []}}):
-            result = control.chat_request(api, control.Chat(prompt='Hello'), '11', 'bot')
-        self.assertNotIn('conversation_id', result)
-        import assistant_memory
-        self.assertEqual(list(assistant_memory.folder(api, '11', 'bot').glob('*.json')), [])
-        with self.assertRaises(api.HTTPException): control.chat_request(api, control.Chat(prompt='Hi', model='another-model'), '11', 'bot')
+    def test_guest_has_no_ai_or_other_permissions_even_with_stale_grants(self):
+        payload = self.payload(); payload['accounts'][0].update(role='guest', products=[], permission_overrides={}); self.save(payload)
+        with patch.object(control, 'runtime_request') as runtime:
+            with self.assertRaises(api.HTTPException): control.chat_request(api, control.Chat(prompt='Hello'), '11', 'bot')
+            runtime.assert_not_called()
+        self.assertEqual(roles.effective({'role_permissions': {'guest': list(roles.PERMISSIONS)}, 'accounts': [{'telegram_id': 11, 'role': 'guest', 'permission_overrides': {'chat': True}, 'products': ['assistant', 'mihomo']}]}, '11'), set())
+
+    def test_user_products_are_independent_and_administrative_overrides_are_rejected(self):
+        settings = {'accounts': [{'telegram_id': 11, 'role': 'user', 'products': ['assistant'], 'mihomo_profile_id': 'own'}]}
+        self.assertTrue(roles.allows(settings, '11', 'chat'))
+        self.assertFalse(roles.allows(settings, '11', 'subscription_read'))
+        settings['accounts'][0]['products'] = ['mihomo']
+        self.assertFalse(roles.allows(settings, '11', 'chat'))
+        self.assertTrue(roles.allows(settings, '11', 'subscription_devices'))
+        for permission in ('server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'subscription_quota', 'subscription_speed', 'subscription_expiry', 'subscriptions_admin'):
+            self.assertFalse(roles.allows(settings, '11', permission))
+            with self.assertRaises(ValueError): control.Account(telegram_id=11, role='user', permission_overrides={permission: True})
+
+    def test_policy_upgrade_preserves_custom_scopes_and_locks_guest_and_admin(self):
+        value = {'role_permissions': {'owner': list(roles.EXPANSIONS), 'administrator': ['chat'], 'guest': ['chat', 'web'], 'moderator': ['diagnostics'], 'user': ['chat', 'server_manage']}, 'accounts': [{'telegram_id': 11, 'role': 'guest', 'permission_overrides': {'chat': True}, 'bot_chat_access': True}]}
+        roles.migrate_settings(value)
+        self.assertEqual(value['role_policy_version'], 2)
+        self.assertEqual(value['role_permissions']['guest'], [])
+        self.assertEqual(set(value['role_permissions']['administrator']), set(roles.PERMISSIONS) - {'roles_manage'})
+        self.assertIn('logs_read', value['role_permissions']['moderator'])
+        self.assertNotIn('server_manage', value['role_permissions']['user'])
+        self.assertEqual(value['accounts'][0]['products'], [])

@@ -92,6 +92,26 @@ def authorize(settings, actor, method, path, body):
     if not isinstance(body, dict) or len(json.dumps(body)) > 64000:
         raise HTTPException(422, 'Некорректное или слишком большое тело запроса')
     roles.require(settings, actor, 'subscription_read' if method == 'GET' else 'subscription_manage')
+    if method != 'GET':
+        if re.fullmatch(rf'/profiles/{ID}', parsed.path) and method == 'PATCH':
+            fields = {'name': 'subscription_name', 'channels': 'subscription_connections', 'connections': 'subscription_connections', 'devices': 'subscription_devices', 'routing': 'subscription_routing'}
+            if set(body) - {*fields, 'limits', 'expected_revision', 'operation_id'}: raise HTTPException(403, 'Поле подписки недоступно')
+            for field, permission in fields.items():
+                if field in body: roles.require(settings, actor, permission)
+            if 'limits' in body:
+                if not roles.effective(settings, actor) & {'subscription_quota', 'subscription_speed', 'subscription_expiry'}: raise HTTPException(403, 'Пользователь не меняет квоту, скорость и срок подписки')
+                limits = body['limits']
+                if limits is not None and (not isinstance(limits, dict) or set(limits) - {'traffic_gb', 'speed_mbps', 'days'}): raise HTTPException(422, 'Некорректные лимиты подписки')
+                for key, permission in {'traffic_gb': 'subscription_quota', 'speed_mbps': 'subscription_speed', 'days': 'subscription_expiry'}.items():
+                    if limits is None or key in limits: roles.require(settings, actor, permission)
+        elif method == 'DELETE' and re.fullmatch(rf'/profiles/{ID}/devices/{ID}', parsed.path): roles.require(settings, actor, 'subscription_devices')
+        elif method == 'DELETE' and re.fullmatch(rf'/profiles/{ID}', parsed.path): roles.require(settings, actor, 'subscriptions_delete')
+        elif method == 'POST' and parsed.path == '/profiles':
+            for permission in ('subscriptions_create', 'subscription_quota', 'subscription_speed', 'subscription_expiry'): roles.require(settings, actor, permission)
+        elif parsed.path.startswith('/modules/'): roles.require(settings, actor, 'modules_manage')
+        elif parsed.path.startswith('/routing/'): roles.require(settings, actor, 'routing_manage')
+        elif parsed.path.startswith('/dns/'): roles.require(settings, actor, 'dns_manage')
+        elif parsed.path in ('/reconciliation', '/recovery'): roles.require(settings, actor, 'recovery')
     if administrator(settings, actor):
         return parsed.path
     user = profile_for(settings, actor)
@@ -106,7 +126,7 @@ def authorize(settings, actor, method, path, body):
     if method == 'GET' and re.fullmatch(re.escape(own) + r'/(stats|subscription|config|client-verification)', parsed.path):
         return parsed.path
     if method == 'PATCH' and parsed.path == own:
-        allowed = {'name', 'channels', 'connections', 'devices', 'routing', 'expected_revision', 'operation_id'}
+        allowed = {'name', 'channels', 'connections', 'devices', 'routing', 'limits', 'expected_revision', 'operation_id'}
         if not set(body) <= allowed:
             raise HTTPException(403, 'Лимиты и срок подписки изменяет администратор')
         # User-supplied HWID identity would allow adopting somebody else's device.
@@ -121,6 +141,7 @@ def authorize(settings, actor, method, path, body):
 
 def profiles(api, actor='panel'):
     settings = control.read(api)
+    roles.require(settings, actor, 'subscription_read')
     result = request('GET', '/profiles')
     items = result.get('items', [])
     if not administrator(settings, actor):
@@ -138,13 +159,14 @@ def capabilities(api, actor):
         'reads': list(READ_ROUTES) if admin else ['/profiles', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config'],
         'writes': WRITE_ROUTES if admin else {'PATCH': [f'/profiles/{linked}'], 'DELETE': [f'/profiles/{linked}/devices/<id>']},
         'confirmation_required': True,
+        'permissions': sorted(roles.effective(settings, actor)),
         'profile_fields': ['name', 'channels', 'connections', 'devices', 'routing'] + (['limits'] if admin else []),
         'connection_fields': {'id': 'optional existing ID', 'component': 'module ID', 'name': 'label', 'device_id': 'device ID', 'settings': 'module connection settings'},
         'device_fields': {'id': 'existing ID or new manual ID', 'name': 'label', 'manual': 'true for new manual device', 'routing': 'device policy', 'personal_rule_ids': 'array of IDs'},
         'settings_fields': ['values', 'expected_revision'],
         'instructions': 'Сначала прочитайте /profiles и схему настроек. При PATCH передавайте expected_revision из свежего ответа. '
                         'Для устройств передавайте полный список с сохранением остальных устройств; для подключений — полный список без credential. '
-                        'Не меняйте лимиты по просьбе обычного пользователя. Изменения требуют подтверждения собеседником.',
+                        'Квота, скорость и срок — отдельные административные разрешения, пользователь их не меняет. Изменения требуют подтверждения собеседником.',
     }
 
 
@@ -157,7 +179,8 @@ def call(api, actor, method, path, body):
         # Config and subscription link belong to the already authorized profile.
         value = request(method, path)
         if not administrator(settings, actor) and route == '/modules':
-            return {'items': [{key: module[key] for key in ('id', 'name', 'description', 'installed', 'active', 'connection_settings') if key in module}
+            return {'items': [{**{key: module[key] for key in ('id', 'name', 'description') if key in module},
+                               'connection_settings': [{key: field[key] for key in ('key', 'label', 'type', 'options', 'min', 'max', 'placeholder', 'required', 'help') if key in field} for field in module.get('connection_settings', [])]}
                               for module in value.get('items', [])]}
         if not administrator(settings, actor) and route == '/routing/schema':
             return {'schema': value.get('schema', []), 'presets': value.get('presets', [])}
@@ -191,6 +214,10 @@ def confirm(api, actor, record):
     settings = control.read(api)
     authorize(settings, actor, record['method'], record['path'], record['body'])
     body = dict(record['body'])
+    if record['method'] == 'PATCH' and re.fullmatch(rf'/profiles/{ID}', record['path']) and 'limits' in body:
+        current = next((entry for entry in profiles(api, actor)['items'] if record['path'] == '/profiles/' + entry['id']), None)
+        if not current or current.get('revision') != body.get('expected_revision'): raise HTTPException(409, 'Подписка изменилась; подготовьте изменение заново')
+        if body['limits'] is not None: body['limits'] = {**current.get('limits', {}), **body['limits']}
     if not administrator(settings, actor) and 'devices' in body:
         current = next((entry for entry in profiles(api, actor)['items'] if record['path'] == '/profiles/' + entry['id']), None)
         if not current:
@@ -200,9 +227,10 @@ def confirm(api, actor, record):
         devices = []
         for device in body['devices']:
             prior = existing.get(device['id'])
+            if any(key in device and device[key] != (prior or {}).get(key) for key in ('routing', 'personal_rule_ids')): roles.require(settings, actor, 'subscription_routing')
             if not prior and device.get('manual') is not True:
                 raise HTTPException(422, 'Новое устройство должно быть ручным; HWID регистрируется клиентом')
-            devices.append({**device, **{key: prior[key] for key in metadata if prior and key in prior}})
+            devices.append({**({key: prior[key] for key in ('routing', 'personal_rule_ids') if key in prior} if prior else {}), **device, **{key: prior[key] for key in metadata if prior and key in prior}})
         body['devices'] = devices
     result = request(record['method'], record['path'], body, record['operation_id'])
     text = ('Операция ' + result['id'] + '\n/operation ' + result['id']) if isinstance(result, dict) and result.get('id') else 'Изменения Mihomo сохранены.'

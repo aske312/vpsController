@@ -37,8 +37,7 @@ def sanitize(api, value):
 def call(api, name, arguments, actor):
     settings = control.read(api)
     user = next((row for row in settings['accounts'] if str(row['telegram_id']) == actor), {})
-    if not roles.allows(settings, actor, 'diagnostics'):
-        raise HTTPException(403, 'Журналы, сеть и аудит доступны администратору')
+    roles.require(settings, actor, {'vps_logs': 'logs_read', 'vps_network': 'network_read', 'vps_security': 'security_read', 'vps_diagnostics': 'diagnostics'}[name])
     if name == 'vps_network':
         return sanitize(api, api.get_network(None))
     if name == 'vps_security':
@@ -53,7 +52,7 @@ def call(api, name, arguments, actor):
         output = api.run('journalctl', '-r', '-u', definition['unit'], '-n', str(lines), '--no-pager', '-o', 'short-iso', timeout=12)
         return sanitize(api, {'service': service, 'lines': output.splitlines()})
     if name == 'vps_diagnostics':
-        security = api.security(None)
+        security = api.security(None) if roles.allows(settings, actor, 'security_read') else {}
         findings = []
         def check(identity, observed, risk, advice):
             findings.append({'id': identity, 'state': 'unknown' if observed is None else 'passed' if observed else 'risk', 'risk': risk, 'recommendation': advice})
@@ -70,5 +69,5 @@ def call(api, name, arguments, actor):
         components = control.control_tool(api, 'vps_components', actor='panel')
         return sanitize(api, {'scope': 'Пассивная диагностика приложения и конфигурации; не полный аудит CVE и не проверка эксплуатации',
                              'findings': findings, **components, 'dependencies': api.application_dependency_versions(),
-                             'logs': api.application_logs(40, None), 'checked_at': control.operations.timestamp()})
+                             'logs': api.application_logs(40, None) if roles.allows(settings, actor, 'logs_read') else {'available': False, 'reason': 'Нет права на чтение логов'}, 'checked_at': control.operations.timestamp()})
     raise HTTPException(404, 'Диагностика не найдена')

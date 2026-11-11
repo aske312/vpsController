@@ -4,35 +4,60 @@ export type AppModuleId = "nodera-bot" | "ai-agent";
 export const roleNames = { owner: "Владелец", administrator: "Администратор", moderator: "Модератор", user: "Пользователь", guest: "Гость" } as const;
 export type Role = keyof typeof roleNames;
 export const permissionNames = {
-  chat: "Общение с AI", model_select: "Выбор модели", web: "Поиск в интернете", memory: "Личная память",
-  telegram_read: "Чтение своего Telegram", server_read: "Просмотр сервера и служб", server_manage: "Управление службами",
-  diagnostics: "Диагностика, сеть, безопасность и логи", subscription_read: "Просмотр своей подписки", subscription_manage: "Настройка своей подписки и устройств",
-  subscriptions_admin: "Управление всеми подписками", roles_manage: "Управление ролями и правами",
+  chat: "Общение с AI", model_select: "Выбор модели AI", web: "Поиск в интернете", memory: "Личная память", telegram_read: "Чтение своего Telegram",
+  server_read: "Просмотр сервера и служб", server_manage: "Управление службами", diagnostics: "Диагностика приложения", logs_read: "Чтение логов", network_read: "Просмотр сети", security_read: "Просмотр безопасности",
+  subscription_read: "Получение своей подписки", subscription_manage: "Редактирование своей подписки", subscription_name: "Название своей подписки", subscription_connections: "Подключения своей подписки", subscription_devices: "Устройства своей подписки", subscription_routing: "Маршрутизация своей подписки",
+  subscription_quota: "Изменение квоты трафика", subscription_speed: "Изменение скорости", subscription_expiry: "Изменение срока действия", subscriptions_admin: "Доступ ко всем подпискам", subscriptions_create: "Создание подписок", subscriptions_delete: "Удаление подписок", modules_manage: "Управление модулями Mihomo", routing_manage: "Глобальная маршрутизация Mihomo", dns_manage: "Глобальные настройки DNS", recovery: "Восстановление Mihomo", roles_manage: "Управление ролями и правами",
 } as const;
 export type Permission = keyof typeof permissionNames;
+export type Product = "assistant" | "mihomo";
+export const productNames: Record<Product, string> = { assistant: "AI-ассистент", mihomo: "Подписка Mihomo" };
+export const userPermissions: Permission[] = ["chat", "model_select", "web", "memory", "telegram_read", "subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing"];
+export const fixedRoles: Role[] = ["owner", "administrator", "guest"];
 export const roleDefaults: Record<Role, Permission[]> = {
-  owner: Object.keys(permissionNames) as Permission[],
-  administrator: (Object.keys(permissionNames) as Permission[]).filter(key => key !== "roles_manage"),
-  moderator: ["chat", "model_select", "web", "memory", "telegram_read", "server_read", "subscription_read", "subscription_manage"],
-  user: ["chat", "model_select", "web", "memory", "telegram_read", "subscription_read", "subscription_manage"], guest: ["chat", "web"],
+  owner: Object.keys(permissionNames) as Permission[], administrator: (Object.keys(permissionNames) as Permission[]).filter(key => key !== "roles_manage"),
+  moderator: [...userPermissions, "server_read"], user: userPermissions, guest: [],
 };
+export const permissionGroups: {title: string; items: Permission[]}[] = [
+  {title: "AI и общение", items: ["chat", "model_select", "web", "memory", "telegram_read"]},
+  {title: "Своя подписка", items: ["subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing"]},
+  {title: "Сервис и диагностика", items: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read"]},
+  {title: "Администрирование Mihomo", items: ["subscription_quota", "subscription_speed", "subscription_expiry", "subscriptions_admin", "subscriptions_create", "subscriptions_delete", "modules_manage", "routing_manage", "dns_manage", "recovery"]},
+  {title: "Владение", items: ["roles_manage"]},
+];
+function isMihomo(key: Permission) { return key.startsWith("subscription") || ["modules_manage", "routing_manage", "dns_manage", "recovery"].includes(key); }
 export function accountRole(account: Account): Role { return account.role ?? (account.bot_access ? "administrator" : account.vps_access ? "moderator" : account.bot_chat_access || account.mihomo_profile_id || account.telegram_access ? "user" : "guest"); }
+export function accountProducts(account: Account): Product[] {
+  if (account.role === "owner" || account.role === "administrator" || !account.role && account.bot_access) return ["assistant", "mihomo"];
+  if (account.role === "guest") return [];
+  if (account.products != null) return account.products;
+  const products: Product[] = [];
+  if (account.bot_access || account.bot_chat_access || account.telegram_access || account.vps_access) products.push("assistant");
+  if (account.mihomo_profile_id) products.push("mihomo");
+  if (!products.length && (account.role === "user" || account.role === "moderator")) products.push("assistant");
+  return products;
+}
 export function accountPermissions(settings: Pick<Settings, "role_permissions">, account: Account): Set<Permission> {
+  if (account.role && fixedRoles.includes(account.role)) return new Set(roleDefaults[account.role]);
+  let result: Set<Permission>;
   if (!account.role) {
-    const result = new Set<Permission>();
+    result = new Set<Permission>();
+    if (account.bot_access) roleDefaults.administrator.filter(key => key !== "telegram_read").forEach(key => result.add(key));
     if (account.bot_access || account.bot_chat_access) ["chat", "model_select", "web", "memory"].forEach(key => result.add(key as Permission));
-    if (account.bot_access || account.vps_access) ["server_read", "server_manage", "web", "memory"].forEach(key => result.add(key as Permission));
-    if (account.bot_access) ["diagnostics", "subscriptions_admin", "subscription_read", "subscription_manage"].forEach(key => result.add(key as Permission));
-    if (account.mihomo_profile_id) ["subscription_read", "subscription_manage", "web", "memory"].forEach(key => result.add(key as Permission));
+    if (account.vps_access) ["server_read", "server_manage", "web", "memory"].forEach(key => result.add(key as Permission));
+    if (account.mihomo_profile_id) ["subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing", "web", "memory"].forEach(key => result.add(key as Permission));
     if (account.telegram_access) result.add("telegram_read");
-    return result;
+  } else {
+    result = new Set(settings.role_permissions?.[account.role] ?? roleDefaults[account.role]);
+    for (const [key, enabled] of Object.entries(account.permission_overrides ?? {})) { if (enabled) result.add(key as Permission); else result.delete(key as Permission); }
+    if (account.role === "user") result = new Set([...result].filter(key => userPermissions.includes(key)));
+    result.delete("roles_manage");
   }
-  const result = new Set(settings.role_permissions?.[account.role] ?? roleDefaults[account.role]);
-  if (account.role !== "owner") { for (const [key, enabled] of Object.entries(account.permission_overrides ?? {})) { if (enabled) result.add(key as Permission); else result.delete(key as Permission); } result.delete("roles_manage"); }
-  return result;
+  const products = accountProducts(account);
+  return new Set([...result].filter(key => isMihomo(key) ? products.includes("mihomo") : products.includes("assistant")));
 }
 export type Account = {
-  role?: Role | null; permission_overrides?: Partial<Record<Permission, boolean>>;
+  products?: Product[] | null; role?: Role | null; permission_overrides?: Partial<Record<Permission, boolean>>;
   telegram_id: number; name: string; bot_access: boolean; telegram_access: boolean; vps_access: boolean;
   bot_chat_access?: boolean; address_as?: string; mihomo_profile_id?: string | null; address_gender?: "auto" | "neutral" | "male" | "female";
   excluded_dialogs: number[]; session_configured: boolean;
@@ -44,7 +69,7 @@ export type Provider = {
 export type ProviderDraft = Provider & { api_key: string | null };
 export type ProviderUsage = { requests: number; prompt_tokens: number; completion_tokens: number; reported_requests: number };
 export type Settings = {
-  role_permissions?: Partial<Record<Role, Permission[]>>;
+  role_policy_version?: 2; role_permissions?: Partial<Record<Role, Permission[]>>;
   revision: string; modules: Record<AppModuleId, boolean>; mcp: Record<McpId, boolean>; provider_url: string; model: string;
   model_mode?: "single" | "catalog";
   providers?: Provider[]; active_provider?: string | null;
@@ -81,16 +106,16 @@ export function makeDraft(settings: Settings): Draft {
 }
 export function settingsPayload(draft: Draft) {
   return {
-    role_permissions: draft.role_permissions, expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
+    role_policy_version: 2, role_permissions: draft.role_permissions, expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
     assistant_style: draft.assistant_style, assistant_character: draft.assistant_character, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
     provider_url: draft.provider_url, model: draft.model, model_mode: draft.model_mode ?? "single", api_key: draft.api_key,
     providers: draft.providers?.map(({ id, name, provider_url, model, model_mode, api_key }) => ({ id, name, provider_url, model, model_mode, api_key })),
     active_provider: draft.active_provider,
     bot_token: draft.bot_token, telegram_api_id: draft.telegram_api_id, telegram_api_hash: draft.telegram_api_hash,
-    accounts: draft.accounts.map(account => ({ role: account.role, permission_overrides: account.permission_overrides, telegram_id: account.telegram_id, name: account.name, bot_access: accountPermissions(draft, account).has("subscriptions_admin"),
+    accounts: draft.accounts.map(account => ({ role: account.role, products: accountProducts(account), permission_overrides: account.permission_overrides, telegram_id: account.telegram_id, name: account.name, bot_access: accountPermissions(draft, account).has("subscriptions_admin"),
       bot_chat_access: accountPermissions(draft, account).has("chat") && !accountPermissions(draft, account).has("subscriptions_admin"), address_as: account.address_as ?? "",
       mihomo_profile_id: account.mihomo_profile_id ?? null, address_gender: account.address_gender ?? "auto",
-      telegram_access: accountPermissions(draft, account).has("telegram_read"), vps_access: ["server_read", "server_manage", "diagnostics"].some(key => accountPermissions(draft, account).has(key as Permission)), session: account.session,
+      telegram_access: accountPermissions(draft, account).has("telegram_read"), vps_access: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read"].some(key => accountPermissions(draft, account).has(key as Permission)), session: account.session,
       excluded_dialogs: account.excluded_dialogs_text.split(",").map(value => value.trim()).filter(Boolean).map(Number),
     })),
   };
