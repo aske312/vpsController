@@ -58,6 +58,15 @@ def observed(api, settings):
             and isinstance(row.get('seen_at'), (int, float)) and time.time() - row['seen_at'] < RETENTION]
 
 
+def list_recent(api):
+    settings = control.read(api)
+    if not settings.get('bot_token'):
+        return []
+    with control.operations.locked(api.DATA_DIR):
+        rows = sorted(observed(api, settings), key=lambda row: row['seen_at'], reverse=True)
+    return [{key: row[key] for key in ('telegram_id', 'username', 'name', 'seen_at')} for row in rows]
+
+
 def remember(api, settings, contact, actor):
     if str(contact.telegram_id) != actor or contact.is_bot:
         raise HTTPException(403, 'Контакт не соответствует отправителю')

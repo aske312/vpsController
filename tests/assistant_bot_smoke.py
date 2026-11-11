@@ -30,16 +30,21 @@ async def main():
                 {'update_id': 2, 'message': {'from': {'id': 22}, 'chat': {'type': 'private'}, 'text': '/status'}},
                 {'update_id': 3, 'message': {'from': {'id': 11}, 'chat': {'type': 'private'}, 'text': '/status'}},
                 {'update_id': 4, 'message': {'from': {'id': 23, 'username': 'visitor'}, 'chat': {'type': 'private'}, 'text': '/id'}},
+                {'update_id': 5, 'message': {'from': {'id': 24}, 'chat': {'type': 'private'}, 'photo': [{}]}},
             ]
         if method == 'sendMessage': sent.append(payload); return {}
         raise AssertionError(method)
-    async def identify(settings, sender): return sender['id'] == 11
+    seen = set()
+    async def identify(settings, sender):
+        seen.add(sender['id'])
+        return sender['id'] == 11
     with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', identify), patch.object(bot, 'server_command', new=AsyncMock(return_value='NoderaBot server status')) as server, patch.object(bot, 'agent_request', new=AsyncMock(side_effect=AssertionError('Unexpected AI request'))):
         try: await bot.bot(settings)
         except asyncio.CancelledError: pass
-        assert json.loads((Path(folder) / 'offset.json').read_text())['offset'] == 5
+        assert json.loads((Path(folder) / 'offset.json').read_text())['offset'] == 6
         server.assert_awaited_once_with(settings, 11, '/status')
     assert len(sent) == 3
+    assert 24 in seen
     assert 'NoderaBot' in next(row['text'] for row in sent if row['chat_id']==11)
     assert '23' in next(row['text'] for row in sent if row['chat_id']==23)
     assert 'NoderaBot' not in next(row['text'] for row in sent if row['chat_id']==22)

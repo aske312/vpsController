@@ -175,13 +175,14 @@ async def bot(settings):
                 actor = sender.get('id')
                 if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
                 prompt = message.get('text', '').strip()
-                if not prompt or time.monotonic() - last.get(actor, 0) < 3: continue
+                if time.monotonic() - last.get(actor, 0) < 3: continue
                 if len(last) >= 1000:
                     last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
                     if len(last) >= 1000: continue
                 last[actor] = time.monotonic()
                 try: access = await identify(settings, sender)
                 except Exception: access = False
+                if not prompt: continue
                 admin = access is True
                 if menus.get(actor) is not admin:
                     try:

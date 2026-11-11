@@ -305,7 +305,21 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     {message && <span className="sr-only" role="status">{message}</span>}
     {needsUpdate && <div className="mcpRuntimeUpdate" role="status"><span>{status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"}</span><button type="button" className="ghostButton" disabled={blocked || dirty || !canUpdate} onClick={() => void updateAgent()}>Обновить Nodera</button></div>}
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!blocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
-      <div className="mcpChatHead">{status.settings.accounts.length > 0 && actorSelect}{cacheEnabled && <label className="mcpConversationPicker">Диалог<select aria-label="Сохранённый диалог" value={conversationId ?? ''} title={conversations.find(item => item.id === conversationId)?.title} disabled={blocked} onChange={event => { if (event.target.value) void loadConversation(event.target.value); else newChat(); }}><option value="">Новый диалог</option>{conversations.map(item => <option key={item.id} value={item.id}>{shortTitle(item.title)}</option>)}</select></label>}<div className="mcpChatActions"><button type="button" className="mcpIconButton" aria-label="Новый чат" title="Новый чат" disabled={blocked || !turns.length} onClick={newChat}><ChatIcon name="new"/></button><button type="button" className="mcpIconButton" aria-label="Скачать диалог" title="Скачать Markdown" disabled={!turns.length} onClick={exportConversation}><ChatIcon name="download"/></button><button type="button" className="mcpIconButton" aria-label="Удалить диалог" title="Удалить диалог" disabled={blocked || !conversationId} onClick={() => void removeConversation()}><ChatIcon name="close"/></button></div>{!selectedComponent?.configured && <button type="button" className="ghostButton" onClick={() => selectPanel("settings")}>Подключить AI</button>}{panel === "chat" && sectionPicker}</div>
+      <div className="mcpChatHead">
+        {status.settings.accounts.length > 0 && actorSelect}
+        {cacheEnabled && <label className="mcpConversationPicker">Диалог<select aria-label="Сохранённый диалог" value={conversationId ?? ""} title={conversations.find(item => item.id === conversationId)?.title} disabled={blocked} onChange={event => {
+          if (event.target.value) void loadConversation(event.target.value); else newChat();
+        }}>
+          <option value="">Новый диалог</option>{conversations.map(item => <option key={item.id} value={item.id}>{shortTitle(item.title)}</option>)}
+        </select></label>}
+        {!selectedComponent?.configured && <button type="button" className="ghostButton" onClick={() => selectPanel("settings")}>Подключить AI</button>}
+        <div className="mcpChatActions">
+          <button type="button" className="mcpIconButton" aria-label="Новый чат" title="Новый чат" disabled={blocked || !turns.length} onClick={newChat}><ChatIcon name="new"/></button>
+          <button type="button" className="mcpIconButton" aria-label="Скачать диалог" title="Скачать Markdown" disabled={!turns.length} onClick={exportConversation}><ChatIcon name="download"/></button>
+          <button type="button" className="mcpIconButton" aria-label="Удалить диалог" title="Удалить диалог" disabled={blocked || !conversationId} onClick={() => void removeConversation()}><ChatIcon name="close"/></button>
+          {isChat && sectionPicker}
+        </div>
+      </div>
       {memoryError && <p className="mcpNotice error" role="alert">{memoryError}</p>}
       {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}</p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
@@ -336,7 +350,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
         <div className="noderaHeroContent">
           <div className="mcpIdentity">
             <ProtocolIcon protocol={panel === "users" ? "nodera-bot" : "nodera"}/>
-            <div><span className="eyebrow">NODERA</span><h1>{panel === "users" ? "Пользователи" : "Настройки"}</h1></div>
+            <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1></div>
             <span className="mcpBadge">{panel === "users" ? botStatus : status.settings.modules["ai-agent"] ? "AI включён" : "AI выключен"}</span>
           </div>
           <dl className="noderaHeroFacts">
@@ -351,18 +365,20 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
             </>}
           </dl>
         </div>
-        <div className="mcpActions">
-          <label className="mcpToggle"><input type="checkbox" checked={draft.modules["ai-agent"]} disabled={blocked || !agentInstalled} onChange={event => patch({ modules: { ...draft.modules, "ai-agent": event.target.checked } })}/>AI</label>
-          {dirty && <>
+        <div className="noderaHeroBar">
+          <nav className="noderaHeroNav" aria-label="Разделы Nodera">
+            {panels.map(item => <button key={item.id} type="button" aria-current={item.id === panel ? "page" : undefined}
+              onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}
+          </nav>
+          {dirty && <div className="mcpActions">
             <button type="button" className="ghostButton" disabled={blocked} onClick={discardSettings}>Отменить</button>
             <button type="button" className="primaryButton" disabled={blocked || conflict} onClick={() => void save()}>Сохранить</button>
-          </>}
-          {sectionPicker}
+          </div>}
         </div>
       </section>
       {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
       <NoderaSettings panel={panel} request={request} status={status} draft={draft} patch={patch}
-        blocked={blocked} dirty={dirty} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
+        blocked={blocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
         runAction={runAction} working={working}/>
     </>}
   </div>;

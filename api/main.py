@@ -505,6 +505,11 @@ def nodera_user_lookup(payload: assistant_contacts.Lookup, _: None = Depends(req
     return assistant_contacts.lookup(sys.modules[__name__], payload.username)
 
 
+@app.get('/api/assistant/bot-users')
+def nodera_bot_users(_: None = Depends(require_token)) -> dict:
+    return {'items': assistant_contacts.list_recent(sys.modules[__name__])}
+
+
 def require_assistant_control(authorization: str | None = Header(default=None),
                               actor: str = Header(default='', alias='X-MCP-Actor')) -> None:
     assistant_control.authorize_control(sys.modules[__name__], authorization, actor)

@@ -45,6 +45,18 @@ class BotAccessTests(unittest.TestCase):
         self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 22}).status_code, 403)
         self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={'telegram_id': 11, 'is_bot': True}).status_code, 403)
 
+    def test_recent_bot_contacts_appear_in_panel_without_receiving_permissions(self):
+        headers = self.enabled_bot()
+        client = TestClient(api.app)
+        self.assertEqual(client.post('/api/assistant/bot-contact', headers=headers, json={
+            'telegram_id': 11, 'username': 'visitor', 'name': 'Visitor'}).status_code, 200)
+        self.assertEqual(client.get('/api/assistant/bot-users', headers=headers).status_code, 401)
+        with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
+            items = client.get('/api/assistant/bot-users').json()['items']
+        self.assertEqual([(item['telegram_id'], item['username']) for item in items], [(11, 'visitor')])
+        self.assertEqual(control.read(api)['accounts'], [])
+        self.assertEqual(client.post('/api/assistant/bot-chat', headers=headers, json={'prompt': 'Hello'}).status_code, 403)
+
     def test_chat_role_has_personalization_but_cannot_run_server_commands(self):
         headers = self.enabled_bot()
         payload = self.payload()

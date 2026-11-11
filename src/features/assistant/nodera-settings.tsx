@@ -5,13 +5,14 @@ import { moduleState, type Draft, type McpId, type McpStatus, type ModuleId, typ
 
 export const panels = [
   { id: "chat", label: "Чат", icon: "chat" },
-  { id: "settings", label: "Настройки", icon: "gear" },
-  { id: "users", label: "Пользователи", icon: "users" },
+  { id: "settings", label: "Настройки AI", icon: "gear" },
+  { id: "users", label: "Доступ", icon: "users" },
 ] as const;
 export type Panel = typeof panels[number]["id"];
 type AccountDraft = Draft["accounts"][number];
 type Check = { ok: boolean; text: string; revision: string; actor: string; username?: string };
 type Quota = { unlimited: boolean; remaining: number; account_remaining?: number };
+type BotContact = { telegram_id: number; username: string; name: string; seen_at: number };
 type Props = {
   panel: Exclude<Panel, "chat">;
   request: ReturnType<typeof createApiClient>;
@@ -20,6 +21,7 @@ type Props = {
   patch: (update: Partial<Draft>) => void;
   blocked: boolean;
   dirty: boolean;
+  refreshKey: number;
   working: string;
   actor: string;
   actorSelect: ReactNode;
@@ -30,7 +32,7 @@ type Props = {
 
 const moduleDescriptions: Record<McpId, string> = {
   "telegram-mcp": "Диалоги, история и поиск.",
-  "vps-controller-mcp": "Метрики, службы и компоненты.",
+  "vps-controller-mcp": "Метрики, службы, компоненты и состояние панели.",
 };
 const blankAccount = (): AccountDraft => ({
   telegram_id: 0, name: "", bot_access: false, bot_chat_access: false, address_as: "",
@@ -38,17 +40,35 @@ const blankAccount = (): AccountDraft => ({
   excluded_dialogs_text: "", session: null, session_configured: false,
 });
 
-export function NoderaSettings({ panel, request, status, draft, patch, blocked, dirty, actor, actorSelect, checks, check, runAction, working }: Props) {
+export function NoderaSettings({ panel, request, status, draft, patch, blocked, dirty, refreshKey, actor, actorSelect, checks, check, runAction, working }: Props) {
   const [providerEdit, setProviderEdit] = useState<ProviderDraft>();
   const [providerChecks, setProviderChecks] = useState<Record<string, { text: string; failed?: boolean; quota?: Quota | null }>>({});
   const [checkingProvider, setCheckingProvider] = useState<string>();
   const [telegramMcpOpen, setTelegramMcpOpen] = useState(false);
-  const [userEdit, setUserEdit] = useState<{ index: number; value: AccountDraft }>();
+  const [userEdit, setUserEdit] = useState<{ index: number; value: AccountDraft; observed?: boolean }>();
   const [lookup, setLookup] = useState("");
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupError, setLookupError] = useState("");
+  const [contacts, setContacts] = useState<{ revision: string; rows: BotContact[]; error?: string }>();
+  const [contactsLimit, setContactsLimit] = useState(20);
 
   const providers = draft.providers ?? [];
+  const revision = status.settings.revision;
+  const contactsEnabled = status.settings.bot_token_configured;
+  useEffect(() => {
+    if (panel !== "users" || !contactsEnabled) return;
+    let current = true;
+    void request<{ items: BotContact[] }>("/assistant/bot-users", { cache: "no-store" }).then(
+      result => { if (current) setContacts({ revision, rows: result.items ?? [] }); },
+      () => { if (current) setContacts(previous => ({ revision, rows: previous?.revision === revision ? previous.rows : [], error: "Контакты Telegram недоступны" })); },
+    );
+    return () => { current = false; };
+  }, [panel, request, contactsEnabled, revision, refreshKey]);
+  const recent = contactsEnabled && contacts?.revision === revision ? contacts.rows : [];
+  const contactsById = new Map(recent.map(item => [item.telegram_id, item]));
+  const assignedIds = new Set(draft.accounts.map(item => item.telegram_id));
+  const guests = recent.filter(item => !assignedIds.has(item.telegram_id));
+  const agent = status.modules.find(item => item.id === "ai-agent");
   const bot = status.modules.find(item => item.id === "nodera-bot");
   const botLocked = blocked || !bot?.installed || bot.management?.state !== "managed";
   const botCredentialsLocked = botLocked || status.bot.active === true;
@@ -109,10 +129,14 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
 
   const connections = <section className="noderaSettings" aria-label="Подключения">
     <header className="noderaBlockHead"><h2>Подключения</h2>
+      <div className="noderaBar">
+      <label className="mcpToggle"><input type="checkbox" checked={draft.modules["ai-agent"]} disabled={blocked || !agent?.installed}
+        onChange={event => patch({ modules: { ...draft.modules, "ai-agent": event.target.checked } })}/>AI включён</label>
       <button type="button" className="ghostButton" disabled={blocked || providers.length >= 12}
         onClick={() => setProviderEdit({ id: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join(""), name: "", provider_url: "", api_key: null, api_key_configured: false, model: "", model_mode: "catalog" })}>
         <ChatIcon name="plus"/>Добавить API
       </button>
+      </div>
     </header>
     {!providers.length ? <p className="mcpFieldHint">Нет подключений</p> : <div className="noderaTableScroll"><table className="noderaProviderTable">
       <thead><tr><th>Провайдер</th><th className="noderaProviderStat">Модели</th><th className="noderaProviderStat">Запросы</th><th className="noderaProviderStat">Токены вход / выход</th><th className="noderaProviderStat">Квота ключа</th><th aria-label="Действия"/></tr></thead>
@@ -198,7 +222,8 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <div className="mcpModuleGrid">{status.mcp_modules.map(item => {
         const enabled = draft.mcp[item.id];
         return <article key={item.id} className={`mcpModule ${enabled ? "isInstalled" : ""}`}>
-          <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name="module"/></span><strong>{item.name}</strong></div></header>
+          <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name={item.id === "telegram-mcp" ? "telegram" : "module"}/></span>
+            <strong>{item.id === "vps-controller-mcp" ? "mcp_312_node_net" : item.name}</strong></div></header>
           <p>{item.description ?? moduleDescriptions[item.id]}</p>
           <footer>
             <button type="button" className="ghostButton" aria-pressed={enabled} aria-label={`${item.name} · ${enabled ? "Включён" : "Выключен"}`}
@@ -233,26 +258,42 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       <tbody>
         <tr><th scope="row">Администратор панели</th><td className="noderaIdColumn">—</td><td>—</td><td>VPS</td><td>—</td></tr>
         {draft.accounts.map((item, index) => <tr key={item.telegram_id}>
-          <th scope="row">{item.name || item.telegram_id}{item.name && <small className="noderaInlineId">{item.telegram_id}</small>}{!item.bot_access && item.address_as && <small>{item.address_as}</small>}</th>
+          <th scope="row">{item.name || item.telegram_id}{item.name && <small className="noderaInlineId">{item.telegram_id}</small>}
+            {contactsById.get(item.telegram_id)?.username && <small>@{contactsById.get(item.telegram_id)?.username}</small>}
+            {!item.bot_access && item.address_as && <small>{item.address_as}</small>}</th>
           <td className="noderaIdColumn">{item.telegram_id}</td><td>{item.bot_access ? "Администратор" : item.bot_chat_access ? "Чат" : "Гость"}</td>
           <td>{[item.telegram_access && "Telegram", (item.vps_access || item.bot_access && draft.modules["nodera-bot"]) && "VPS"].filter(Boolean).join(", ") || "—"}</td>
           <td><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} disabled={blocked}
             onClick={() => setUserEdit({ index, value: item })}><ChatIcon name="gear"/></button></td>
         </tr>)}
+        {guests.slice(0, contactsLimit).map(item => <tr key={item.telegram_id}>
+          <th scope="row">{item.name || item.telegram_id}
+            {item.name && <small className="noderaInlineId">{item.telegram_id}</small>}
+            {item.username && <small>@{item.username}</small>}
+          </th>
+          <td className="noderaIdColumn">{item.telegram_id}</td><td>Гость</td><td>—</td>
+          <td><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`}
+            title="Настроить права" disabled={blocked || draft.accounts.length >= 30} onClick={() => {
+              setLookup(""); setLookupError("");
+              setUserEdit({ index: -1, observed: true, value: { ...blankAccount(), telegram_id: item.telegram_id, name: item.name || item.username } });
+            }}><ChatIcon name="gear"/></button></td>
+        </tr>)}
       </tbody>
     </table></div>
+    {contacts?.revision === revision && contacts.error && <small role="status">{contacts.error}</small>}
+    {guests.length > contactsLimit && <button type="button" className="ghostButton noderaMoreContacts" onClick={() => setContactsLimit(value => value + 20)}>Ещё пользователи</button>}
     {userEdit && account && <SettingsDialog title={userEdit.index < 0 ? "Добавить пользователя" : "Пользователь"} close={() => setUserEdit(undefined)}
       blocked={blocked || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
       submit={() => {
         patch({ accounts: userEdit.index < 0 ? [...draft.accounts, account] : draft.accounts.map((item, index) => index === userEdit.index ? account : item) });
         setUserEdit(undefined);
       }}>
-      {userEdit.index < 0 && bot?.installed && status.settings.bot_token_configured && <div className="noderaBar">
+      {userEdit.index < 0 && !userEdit.observed && bot?.installed && status.settings.bot_token_configured && <div className="noderaBar">
         <label>Найти в Telegram<input value={lookup} placeholder="@username" maxLength={65} onChange={event => setLookup(event.target.value)}/></label>
         <button type="button" className="ghostButton" disabled={blocked || lookingUp || !lookup.trim()} onClick={() => void findUser()}>Найти</button>
         {lookupError && <small role="alert">{lookupError}</small>}
       </div>}
-      <label>Telegram ID<input type="number" min={1} max={2 ** 52} required readOnly={userEdit.index >= 0} value={account.telegram_id || ""} onChange={event => editAccount({ telegram_id: Number(event.target.value) })}/></label>
+      <label>Telegram ID<input type="number" min={1} max={2 ** 52} required readOnly={userEdit.index >= 0 || userEdit.observed} value={account.telegram_id || ""} onChange={event => editAccount({ telegram_id: Number(event.target.value) })}/></label>
       <label>Имя в таблице<input value={account.name} maxLength={80} onChange={event => editAccount({ name: event.target.value })}/></label>
       <label>Роль в Telegram<select value={account.bot_access ? "admin" : account.bot_chat_access ? "chat" : "guest"}
         onChange={event => editAccount({ bot_access: event.target.value === "admin", bot_chat_access: event.target.value === "chat", ...(event.target.value === "admin" ? { address_as: "" } : {}) })}>
@@ -261,7 +302,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       {!account.bot_access && <label>Как Нодера обращается к пользователю<input value={account.address_as ?? ""} maxLength={80} onChange={event => editAccount({ address_as: event.target.value })}/></label>}
       <div className="noderaBar">
         <label className="mcpToggle"><input type="checkbox" checked={account.telegram_access} onChange={event => editAccount({ telegram_access: event.target.checked })}/>Telegram MCP</label>
-        <label className="mcpToggle"><input type="checkbox" checked={account.vps_access || account.bot_access && draft.modules["nodera-bot"]} disabled={account.bot_access && draft.modules["nodera-bot"]} onChange={event => editAccount({ vps_access: event.target.checked })}/>VPS MCP</label>
+        <label className="mcpToggle"><input type="checkbox" checked={account.vps_access || account.bot_access && draft.modules["nodera-bot"]} disabled={account.bot_access && draft.modules["nodera-bot"]} onChange={event => editAccount({ vps_access: event.target.checked })}/>312node.net MCP</label>
       </div>
       {account.telegram_access && <>
         <Secret label="Telegram-сессия" configured={account.session_configured} value={account.session} onChange={session => editAccount({ session })}/>
@@ -281,12 +322,14 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         <label>Манера общения<select value={draft.assistant_style} onChange={event => patch({ assistant_style: event.target.value as Draft["assistant_style"] })}>
           <option value="balanced">Спокойно и по делу</option><option value="concise">Кратко</option><option value="friendly">Дружелюбно</option><option value="technical">Технически подробно</option>
         </select></label>
-        <label className="mcpToggle"><input type="checkbox" checked={draft.memory_enabled} onChange={event => patch({ memory_enabled: event.target.checked })}/>Сохранять диалоги</label>
-        <label>Срок хранения, дни<input type="number" min={1} max={90} disabled={!draft.memory_enabled} value={draft.memory_days}
-          onChange={event => patch({ memory_days: Number(event.target.value) })}/></label>
+        <div className="noderaMemory">
+          <label className="mcpToggle"><input type="checkbox" checked={draft.memory_enabled} onChange={event => patch({ memory_enabled: event.target.checked })}/>Сохранять диалоги</label>
+          {draft.memory_enabled && <><label>Срок хранения, дни<input type="number" min={1} max={90} value={draft.memory_days}
+            onChange={event => patch({ memory_days: Number(event.target.value) })}/></label>
+            <small>От последнего сообщения в диалоге.</small></>}
+        </div>
       </div>
-      {draft.memory_enabled && <small>Срок отсчитывается от последнего сообщения в диалоге.</small>}
-      <label>Дополнительные инструкции<textarea value={draft.assistant_instructions} maxLength={4000} rows={4}
+      <label className="noderaInstructions">Дополнительные инструкции<textarea value={draft.assistant_instructions} maxLength={4000} rows={5}
         onChange={event => patch({ assistant_instructions: event.target.value })}/></label>
     </fieldset>
   </section>;

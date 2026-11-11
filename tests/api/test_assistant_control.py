@@ -104,7 +104,8 @@ class AssistantTests(unittest.TestCase):
             self.assertEqual(install.call_args.kwargs, {'start_bot': False})
             self.assertEqual(checked.called, active)
             self.assertEqual(perform.called, active)
-            self.assertEqual((control.runtime_directory() / 'nodera-version').read_text().strip(), '1.0.0')
+            manifest = json.loads((ROOT / 'protocol-images/nodera/manifest.json').read_text(encoding='utf-8'))
+            self.assertEqual((control.runtime_directory() / 'nodera-version').read_text().strip(), manifest['version'])
 
     def test_two_modules_and_mcp_options_have_no_false_health_claims(self):
         with patch.object(control, 'runtime_ready', return_value=False):
@@ -351,6 +352,15 @@ class AssistantTests(unittest.TestCase):
             'installed': True, 'private_key': 'never-send', 'password': 'never-send'}]}):
             result = control.control_tool(api, 'vps_components')
         self.assertNotIn('never-send', json.dumps(result))
+
+    def test_metrics_tool_returns_bounded_resource_points_only(self):
+        points = [{'at': i, 'cpu_percent': 15, 'internal': 'hidden'} for i in range(80)]
+        with patch.object(api, 'get_metrics_history', return_value={'resolution_s': 60, 'points': points}) as history:
+            result = control.control_tool(api, 'vps_metrics')
+        history.assert_called_once_with('hour', None)
+        self.assertEqual(len(result['points']), 60)
+        self.assertEqual(result['points'][0]['at'], 20)
+        self.assertNotIn('hidden', json.dumps(result))
 
     def test_corrupted_config_is_not_treated_as_new_installation(self):
         control.directory(api).mkdir()

@@ -28,6 +28,10 @@ HELP = ('Команды сервера:\n'
         '/id — ваш Telegram ID\n\n'
         'Пример: /service mihomo restart. Остановка или перезапуск прерывает соединения этой службы.')
 
+BLOCKED_COMMANDS = {'/poweroff', '/shutdown', '/halt', '/access-mode', '/panel-access', '/protected-access'}
+BLOCKED_SERVICES = {'poweroff', 'shutdown', 'halt', 'access-mode', 'panel-access', 'protected-access'}
+BLOCKED_UNITS = {'poweroff.target', 'halt.target', 'shutdown.target', 'systemd-poweroff.service', 'systemd-halt.service'}
+
 
 def number(value, suffix=''):
     return f'{value:g}{suffix}' if type(value) in (int, float) else 'нет данных'
@@ -45,8 +49,10 @@ def used(total, available):
 
 def controls(identity, definition):
     # Keep the bot's own transport and the SSH recovery path available.
+    if identity == 'nodera-bot' or identity in BLOCKED_SERVICES or definition.get('unit') in BLOCKED_UNITS:
+        return []
     return [action for action in definition.get('controls', [])
-            if identity != 'nodera-bot' and not (identity == 'ssh' and action == 'stop')]
+            if action in ('start', 'stop', 'restart') and not (identity == 'ssh' and action == 'stop')]
 
 
 def operation_text(value):
@@ -65,6 +71,8 @@ def execute(api, actor, prompt):
     parts = prompt.strip().split()
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
+    if command in BLOCKED_COMMANDS:
+        raise HTTPException(403, 'Nodera не может выключать VPS или переключать режим доступа к панели')
     if command == '/models' and (not args or len(args) == 1 and args[0].isdigit()):
         return control.bot_models(api, actor, page=int(args[0]) if args else 1)
     if command == '/model' and len(args) <= 1:
@@ -131,6 +139,11 @@ def execute(api, actor, prompt):
             if not existing and (time.time() > record['expires'] or control._read(api)['revision'] != record['revision']):
                 path.unlink()
                 raise HTTPException(409, 'Подтверждение истекло или права изменились. Отправьте /service заново')
+            if not existing:
+                definition = api.managed_services().get(record['service'], {})
+                if record['action'] not in controls(record['service'], definition):
+                    path.unlink()
+                    raise HTTPException(403, 'Действие больше недоступно через Nodera')
             record['submitted'] = True
             control.operations.atomic_json(path, record)
         # Use the panel's durable, idempotent service worker and admission lock.

@@ -76,6 +76,16 @@ class ServerCommandTests(unittest.TestCase):
             self.assertEqual(self.call('/operation ' + identity).json(), first.json())
             self.assertEqual(self.call('/cancel').status_code, 409)
 
+    def test_poweroff_and_protected_access_are_blocked_before_service_admission(self):
+        with patch.object(api, 'manage_service') as action:
+            for prompt in ('/poweroff', '/shutdown', '/access-mode vpn', '/panel-access vpn'):
+                self.assertEqual(self.call(prompt).status_code, 403)
+            code = self.prepare()
+            self.services.return_value['fixture']['unit'] = 'poweroff.target'
+            self.assertEqual(self.call('/service fixture start').status_code, 409)
+            self.assertEqual(self.call('/confirm ' + code).status_code, 403)
+            action.assert_not_called()
+
     def test_cancel_replacement_invalid_actions_and_admission_conflict(self):
         with patch.object(api, 'manage_service') as action:
             for prompt in ('/service ../../tmp restart', '/service fixture shell', '/service ssh stop', '/service nodera-bot restart'):

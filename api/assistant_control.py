@@ -236,7 +236,7 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: str = Field(pattern=r'^vps_(overview|services|components)$')
+    name: Literal['vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel']
 
 
 class Action(BaseModel):
@@ -496,12 +496,13 @@ def status(api):
             'chat_persona': agent_version >= (1, 2, 0),
             'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
                              'installed': key in value['mcp_installed'],
-                             'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'vpsController MCP'))],
+                             'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'mcp_312_node_net'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
             'tools': {'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
-                      'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components']}}
+                      'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
+                          (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else [])}}
 
 
 def configure(api, payload):
@@ -841,6 +842,17 @@ def control_tool(api, name):
         }} for key, definition in api.managed_services().items()
             for observation in [api.observe_service(definition['unit'])]]}
     if name == 'vps_components':
-        return {'components': [{key: item.get(key) for key in ('id', 'name', 'installed', 'version', 'management')}
+        return {'components': [{key: item.get(key) for key in ('id', 'name', 'installed', 'version', 'installed_version', 'available_version', 'update_available', 'management')}
                                for item in api.protocol_images(None)['items']]}
+    if name == 'vps_metrics':
+        history = api.get_metrics_history('hour', None)
+        fields = ('cpu_percent', 'memory_used_percent', 'disk_used_percent', 'rx_bps', 'tx_bps')
+        points = [{key: point.get(key) for key in ('at', *fields)} for point in history['points']
+                  if any(point.get(key) is not None for key in fields)]
+        return {'period': 'hour', 'resolution_s': history['resolution_s'], 'points': points[-60:]}
+    if name == 'vps_panel':
+        return {'commit': api.installed_build_commit(), 'channel': api.expected_application_branch(),
+                'access_mode': 'vpn' if os.getenv('ACCESS_MODE') == 'vpn' else 'external',
+                'services': {unit: api.observe_service(unit).get('runtime', {}).get('state')
+                             for unit in ('vps-control-api.service', 'vps-control-web.service', 'caddy.service')}}
     raise HTTPException(404, 'Инструмент не найден')
