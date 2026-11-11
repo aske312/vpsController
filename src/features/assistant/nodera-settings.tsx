@@ -292,7 +292,7 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         <button type="button" className="ghostButton" disabled={blocked || !status.context_tools} onClick={() => { setContextActor(actor); setContextOpen(true); }}>Контекст собеседника</button></footer>
       </article>
     </div>
-    {contextOpen && <SettingsDialog title="Контекст собеседника" close={() => { if (!contextBusy) setContextOpen(false); }}>
+    {contextOpen && <SettingsDialog title="Контекст собеседника" close={() => setContextOpen(false)}>
       <label>Собеседник<select value={contextActor} disabled={contextBusy} onChange={event => setContextActor(event.target.value)}><option value="">Администратор панели</option>{draft.accounts.map(account => <option key={account.telegram_id} value={String(account.telegram_id)}>{account.name || account.telegram_id}</option>)}</select></label>
       {contextError && <p role="alert">{contextError}</p>}
       {!contextData && !contextError && <p role="status">Загрузка контекста…</p>}
