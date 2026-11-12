@@ -26,6 +26,17 @@ EXPANSIONS = {
 
 
 def migrate_settings(settings):
+    # Fixed roles saved before terminal_read was introduced remain valid.
+    # Only the exact previous fixed policy is upgraded; custom roles and
+    # malformed/incomplete policies must still go through strict validation.
+    policies = settings.get('role_permissions', {})
+    if isinstance(policies, dict):
+        for name in ('owner', 'administrator'):
+            grants = policies.get(name)
+            if (isinstance(grants, list) and all(isinstance(key, str) for key in grants)
+                    and len(grants) == len(set(grants))
+                    and set(grants) == set(DEFAULTS[name]) - {'terminal_read'}):
+                policies[name] = list(DEFAULTS[name])
     if settings.get('role_policy_version', 1) >= 2: return
     policies = settings.get('role_permissions', {})
     accounts = settings.get('accounts', [])

@@ -14,13 +14,25 @@ import assistant_control as control
 MARKER = '# Managed by vps-control: '
 
 
-def checked(command, *, timeout=60):
+def run(*command, timeout=60, check=False):
     import operation_log
     with operation_log.command(Path(os.getenv('DATA_DIR', '/var/lib/vps-control')), command) as completed:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
         completed(result.returncode)
-    if result.returncode:
+    if check and result.returncode:
         raise RuntimeError('Assistant installation or service command failed')
+    return result.stdout.strip()
+
+
+def checked(command, *, timeout=60):
+    return run(*command, timeout=timeout, check=True)
+
+
+def image_api():
+    from service_state import observe_service
+    return SimpleNamespace(DATA_DIR=Path(os.getenv('DATA_DIR', '/var/lib/vps-control')),
+                           INSTALL_DIR=Path(os.getenv('INSTALL_DIR', '/opt/vps-control')),
+                           observe_service=observe_service, run=run)
 
 
 def quoted(value):
@@ -211,9 +223,7 @@ def perform(api, action, *, restoring=False):
 
 if __name__ == '__main__':
     if sys.argv[1] in ('image-install', 'image-remove'):
-        from service_state import observe_service
-        api = SimpleNamespace(DATA_DIR=Path(os.getenv('DATA_DIR', '/var/lib/vps-control')),
-                              INSTALL_DIR=Path(os.getenv('INSTALL_DIR', '/opt/vps-control')), observe_service=observe_service)
+        api = image_api()
         if sys.argv[2] == 'nodera':
             (install_nodera if sys.argv[1] == 'image-install' else remove_nodera)(api)
         else:

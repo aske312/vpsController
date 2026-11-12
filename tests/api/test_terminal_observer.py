@@ -13,6 +13,24 @@ import terminal_observer as terminal
 
 
 class TerminalTests(unittest.TestCase):
+    def test_standalone_installer_provisions_identity_with_its_own_command_runner(self):
+        import assistant_worker as worker
+        with patch.dict('os.environ', {'DATA_DIR': tempfile.gettempdir()}), \
+             patch.object(worker.subprocess, 'run', side_effect=[
+                 types.SimpleNamespace(returncode=2, stdout=''),
+                 types.SimpleNamespace(returncode=0, stdout=''),
+                 types.SimpleNamespace(returncode=0, stdout='')]) as execute, \
+             patch.object(terminal, 'identity', return_value=(991, 991)) as validate:
+            terminal.provision(worker.image_api())
+        self.assertEqual([call.args[0][0] for call in execute.call_args_list], ['getent', 'groupadd', 'useradd'])
+        validate.assert_called_once()
+        with patch.object(worker.subprocess, 'run', side_effect=[
+                 types.SimpleNamespace(returncode=2, stdout=''),
+                 types.SimpleNamespace(returncode=1, stdout='')]), \
+             patch.object(terminal, 'identity') as validate:
+            with self.assertRaises(RuntimeError): terminal.provision(worker.image_api())
+            validate.assert_not_called()
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.env = types.SimpleNamespace(DATA_DIR=self.root, managed_services=lambda: {'api': {'unit': 'vps-control-api.service'}})

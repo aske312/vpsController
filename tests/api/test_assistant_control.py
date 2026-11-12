@@ -63,6 +63,25 @@ class AssistantTests(unittest.TestCase):
                 'accounts': [{'telegram_id': 11, 'bot_access': True, 'telegram_access': True, 'vps_access': False,
                               'session': '1' + 'a' * 352, 'excluded_dialogs': [-1001]}]}
 
+    def test_saved_fixed_roles_before_terminal_permission_remain_readable(self):
+        import assistant_roles as roles
+        payload = self.payload()
+        payload['role_permissions'] = {name: list(roles.DEFAULTS[name]) for name in roles.ROLES}
+        saved = self.save(payload)['settings']
+        extension = control.directory(api) / 'ai-agent' / (saved['revision'] + '.nodera.json')
+        value = json.loads(extension.read_text(encoding='utf-8'))
+        for name in ('owner', 'administrator'):
+            value['role_permissions'][name].remove('terminal_read')
+        control.operations.atomic_json(extension, value)
+        restored = control.read(api)
+        for name in ('owner', 'administrator'):
+            self.assertEqual(restored['role_permissions'][name], roles.DEFAULTS[name])
+        self.assertNotIn('terminal_read', restored['role_permissions']['moderator'])
+        self.assertEqual(control.status(api)['settings']['revision'], saved['revision'])
+        value['role_permissions']['owner'].remove('chat')
+        control.operations.atomic_json(extension, value)
+        with self.assertRaises(control.operations.OperationConflict): control.read(api)
+
     def save(self, payload=None):
         return control.configure(api, control.Settings.model_validate(payload or self.payload()))
 
