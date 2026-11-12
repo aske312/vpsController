@@ -30,10 +30,30 @@ class AssistantTests(unittest.TestCase):
             (runtime / ('runner.py' if component == 'ai-agent' else 'bot.py')).touch()
             (runtime / 'version').write_text('1.0.0')
 
+    def test_agent_install_copies_and_verifies_pinned_telegram_runtime(self):
+        unit = self.root / 'ai-agent.service'
+        self.observe.return_value['active'] = True
+        with patch.object(worker, 'assert_unit_owner', return_value=unit), patch.object(worker, 'require_idle'), \
+             patch.object(worker, 'checked') as checked, patch.object(control, 'migrate_settings'), patch.object(api, 'INSTALL_DIR', ROOT):
+            worker.install(api, 'ai-agent')
+        root = control.runtime_directory('ai-agent')
+        source = ROOT / 'protocol-images/ai-agent'
+        self.assertEqual((root / 'telegram_guarded.py').read_bytes(), (source / 'telegram_guarded.py').read_bytes())
+        self.assertEqual((root / 'telegram_catalog.json').read_bytes(), (source / 'telegram_catalog.json').read_bytes())
+        self.assertFalse(list((root / 'vendor').rglob('*.pyc')))
+        manifest = json.loads((root / 'vendor/tg-mcp-guarded/SOURCE.json').read_text())
+        for name, digest in manifest['files'].items():
+            import hashlib
+            self.assertEqual(hashlib.sha256((root / 'vendor/tg-mcp-guarded' / name).read_bytes()).hexdigest(), digest)
+        commands = [call.args[0] for call in checked.call_args_list]
+        self.assertIn([str(root / 'venv/bin/python'), str(source / 'telegram_guarded.py')], commands)
+        self.assertIn([str(root / 'venv/bin/python'), str(root / 'runner.py'), '--self-check'], commands)
+        self.assertEqual((root / 'version').read_text().strip(), '1.17.0')
+
     def payload(self):
         return {'expected_revision': '0' * 32, 'component': 'ai-agent',
                 'modules': {'ai-agent': True, 'nodera-bot': False},
-                'mcp': {'telegram-mcp': True, 'vps-controller-mcp': True},
+                'mcp': {'telegram-mcp': True, 'vps-controller-mcp': True, 'mihomo-mcp': True},
                 'provider_url': 'https://provider.example/v1', 'model': 'configured-model', 'api_key': 'secret-ai',
                 'telegram_api_id': 123, 'telegram_api_hash': 'a' * 32,
                 'bot_token': '123456:abcdefghijklmnopqrstuvwxyz0123456789',
@@ -286,7 +306,7 @@ class AssistantTests(unittest.TestCase):
         payload = self.payload()
         saved = self.save(payload)
         before = control.read(api)['accounts'][0]['session']
-        payload.update(expected_revision=saved['settings']['revision'], mcp_installed=['telegram-mcp'])
+        payload.update(expected_revision=saved['settings']['revision'], mcp_installed=['telegram-mcp', 'mihomo-mcp'])
         payload['mcp']['vps-controller-mcp'] = False
         saved = self.save(payload)
         self.assertFalse(next(row for row in saved['mcp_modules'] if row['id'] == 'vps-controller-mcp')['installed'])
@@ -341,6 +361,24 @@ class AssistantTests(unittest.TestCase):
         with TestClient(api.app) as client:
             self.assertEqual(client.post('/api/assistant/models', json={'provider_url': 'https://api.nyxos.shop'}).status_code, 401)
 
+    def test_background_catalog_checks_do_not_consume_chat_capacity(self):
+        self.save()
+        self.assertTrue(control._runtime_slots.acquire(blocking=False))
+        self.assertTrue(control._runtime_slots.acquire(blocking=False))
+        try:
+            with patch.object(control.assistant_provider, 'catalog', return_value=['model']):
+                self.assertEqual(control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1')), {'models': ['model']})
+        finally:
+            control._runtime_slots.release(); control._runtime_slots.release()
+        self.assertTrue(control._catalog_slots.acquire(blocking=False))
+        try:
+            with self.assertRaises(api.HTTPException) as caught:
+                control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1'))
+            self.assertEqual(caught.exception.status_code, 429)
+            self.assertTrue(control._runtime_slots.acquire(blocking=False))
+            control._runtime_slots.release()
+        finally: control._catalog_slots.release()
+
     def test_catalog_chat_selection_is_request_scoped_and_single_mode_rejects_override(self):
         payload = self.payload()
         saved = self.save(payload)
@@ -381,7 +419,9 @@ class AssistantTests(unittest.TestCase):
         control.authorize_control(api, token, 'panel')
         value['mcp']['vps-controller-mcp'] = False
         control.store(api, value)
-        with self.assertRaises(api.HTTPException): control.authorize_control(api, token, 'panel')
+        with self.assertRaises(api.HTTPException): control.authorize_control(api, token, 'panel', 'vps-controller-mcp')
+        scoped = 'Bearer ' + control.mcp_transport_token(value['control_token'], 'mihomo-mcp', 'panel')
+        control.authorize_control(api, scoped, 'panel', 'mihomo-mcp')
 
     def test_routes_require_admin_or_dedicated_service_token(self):
         self.save()

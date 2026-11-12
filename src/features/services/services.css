@@ -161,6 +161,13 @@
 .opsField select,.opsField input:not([type='checkbox']) { width:100%; min-width:0; height:28px; padding:3px 5px; font-size:11px; }
 .opsField.toggle { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .servicesLogControls .opsField { min-height:28px; }
+.servicesObservability { grid-template-columns:150px minmax(0,1fr); }
+.servicesObservability .servicesLogControls { grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); margin-block:10px; }
+.servicesObservability .opsField input { min-width:0; width:100%; }
+.servicesObservability table { width:100%; border-collapse:collapse; font-size:12px; }
+.servicesObservability th,.servicesObservability td { padding:8px; text-align:left; vertical-align:top; border-bottom:1px solid rgba(121,151,174,.16); }
+.servicesObservability details { margin-block:12px; }
+.servicesObservability summary { cursor:pointer; }
 .servicesLogActions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; margin-top:0; padding-top:6px; border-top:1px solid rgba(91,116,141,.12); }
 .servicesLogActions button,.servicesMaintenanceHead button { min-height:27px; padding:4px 8px; font-size:10px; }
 .serviceToggle input:focus-visible + span { outline:2px solid var(--cyan); outline-offset:3px; }

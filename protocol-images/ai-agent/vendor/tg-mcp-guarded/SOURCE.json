@@ -1,0 +1,28 @@
+{
+  "repository": "https://github.com/matskevich/tg-mcp-guarded",
+  "commit": "0985b4898e8e81978bebb7499c1cf16c7685cd32",
+  "license": "MIT",
+  "profile": "read-and-actions",
+  "files": {
+    "LICENSE": "f56c7b3b4cd9f2de1dda36ebb8c3a09d57938020d0f20ab3c599aafb4cf2cc16",
+    "tganalytics/mcp_actions_batch.py": "2dd22dfe7094f0eba3b0f864e600ffa3fc89d7927988156519a1e1aa1445a817",
+    "tganalytics/mcp_actions_lane.py": "c1ffd40b76aad4955aa3ce03297d726c983139d52f9e5f2c36da3d919a8246bf",
+    "tganalytics/mcp_actions_policy.py": "86fa8ade658ecbc4d75856452f30fdb48b906b0d3295d0d629aa15a65e6666e5",
+    "tganalytics/mcp_actions_state.py": "b03f63798493a3129ad7d57286147698b79d1e4b6fe5b468ed840337de1e9602",
+    "tganalytics/mcp_server_actions.py": "3b7e270166bea100a0266414f4ecfb1718b1e50a3d3774680e1671a2ae7b3422",
+    "tganalytics/mcp_server_common.py": "4d3ce59d5f63855cde12c3a4f87b78d8a3eb20a859a80c2997b84901f4e4db52",
+    "tganalytics/mcp_server_read.py": "7c9bde4306ed898ff983fbaac06b5c1eac371b3d5c8608c8b51f341e8fb4c9aa",
+    "tganalytics/tganalytics/__init__.py": "c850bfe3402ef4aed7f90934640c68f3739f1300676096a80919f62cfdc5888b",
+    "tganalytics/tganalytics/config/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tganalytics/tganalytics/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tganalytics/tganalytics/domain/bot_workflow.py": "71bef32f6103fc868256f2f9c08dc41fe284d577a160a3076df03963320bd791",
+    "tganalytics/tganalytics/domain/groups.py": "d12d59cedb7356d363bd5de7c710f6bd90f5f841254dbc8e20273f6cedb9a42b",
+    "tganalytics/tganalytics/infra/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tganalytics/tganalytics/infra/limiter.py": "112dfdbfcb1565f975ae1e348a9c48d4890f72c5c1181e94cc8b9929ef666558",
+    "tganalytics/tganalytics/infra/managed_bot.py": "cbe04dc5a17f67fbe36780a625e2c854f2e581a94e89a38554cb7d22c6f4b5ca",
+    "tganalytics/tganalytics/infra/metrics.py": "d3612cd800e8e7e1a3c9b1f628bc43008ae3379d2503cabd37a681dfaf52974a",
+    "tganalytics/tganalytics/infra/paths.py": "5ebe7d1f568e8c0e6b4256fc0b80d989a3e28bc38e05205e1db2dea6e13322fb",
+    "tganalytics/tganalytics/infra/reply_budget.py": "583297657a92c4d104b979f9b8fc6288791d1f7e6652428f23a80b92bb596183",
+    "tganalytics/tganalytics/infra/tele_client.py": "1057f1b5481a6ac788074a12aa52af021d9fa6393b0ffce627ebf347c6ac1c1d"
+  }
+}

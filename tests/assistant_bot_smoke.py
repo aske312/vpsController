@@ -17,6 +17,7 @@ async def main():
     settings = {'modules': {'nodera-bot': True, 'ai-agent': False}, 'bot_token': 'isolated',
                 'accounts': []}  # The running service can start before the first admin is added.
     sent = []
+    delivered = asyncio.Event()
     calls = 0
     async def transport(settings, method, **payload):
         nonlocal calls
@@ -24,7 +25,9 @@ async def main():
         if method == 'setMyCommands': return True
         if method == 'getUpdates':
             calls += 1
-            if calls > 1: raise asyncio.CancelledError()
+            if calls > 1:
+                await asyncio.wait_for(delivered.wait(), timeout=2)
+                raise asyncio.CancelledError()
             return [
                 {'update_id': 1, 'message': {'from': {'id': 11}, 'chat': {'type': 'group'}, 'text': '/status'}},
                 {'update_id': 2, 'message': {'from': {'id': 22}, 'chat': {'type': 'private'}, 'text': '/status'}},
@@ -32,11 +35,15 @@ async def main():
                 {'update_id': 4, 'message': {'from': {'id': 23, 'username': 'visitor'}, 'chat': {'type': 'private'}, 'text': '/id'}},
                 {'update_id': 5, 'message': {'from': {'id': 24}, 'chat': {'type': 'private'}, 'photo': [{}]}},
             ]
-        if method == 'sendMessage': sent.append(payload); return {}
+        if method == 'sendMessage':
+            sent.append(payload)
+            if len(sent) == 2 and 24 in seen: delivered.set()
+            return {}
         raise AssertionError(method)
     seen = set()
     async def identify(settings, sender):
         seen.add(sender['id'])
+        if len(sent) == 2 and 24 in seen: delivered.set()
         return sender['id'] == 11
     with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', identify), patch.object(bot, 'server_command', new=AsyncMock(return_value='NoderaBot server status')) as server, patch.object(bot, 'agent_request', new=AsyncMock(side_effect=AssertionError('Unexpected AI request'))):
         try: await bot.bot(settings)

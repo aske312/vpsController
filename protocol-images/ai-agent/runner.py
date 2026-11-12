@@ -1,6 +1,6 @@
 """AI-agent image: stdio MCP servers and a bounded AI tool loop.
 
-No shell tool, Telegram account writes, or administrator panel password.
+No shell tool or administrator panel password. Telegram writes require human approval.
 """
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ import io
 from contextlib import AsyncExitStack, asynccontextmanager
 import ipaddress
 import json
+import hashlib
+import hmac
 import logging
 import os
 import re
@@ -30,6 +32,34 @@ logging.basicConfig(level=logging.ERROR, stream=sys.stderr)
 logging.getLogger('httpx').setLevel(logging.ERROR)
 MAX_ROUNDS = 6
 VPS_URL = 'http://127.0.0.1:8000/api/assistant/control-tool'
+MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp', 'mihomo-mcp')
+MIHOMO_TOOLS = {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_user', 'vps_compare'}
+
+
+def tool_module(name):
+    if name == 'telegram_prepare': return 'telegram-mcp'
+    return 'mihomo-mcp' if name in MIHOMO_TOOLS else 'vps-controller-mcp'
+
+
+def mcp_transport_token(root, module, actor):
+    return hmac.new(root.encode(), f'nodera-mcp-v1:{module}:{actor}'.encode(), hashlib.sha256).hexdigest()
+
+
+def scoped_mcp_settings(settings, actor, module):
+    value = {'modules': dict(settings['modules']), 'mcp': dict(settings['mcp']), 'accounts': []}
+    fields = ('telegram_id', 'telegram_access', 'session', 'excluded_dialogs', 'effective_permissions', 'telegram_tools', 'telegram_action_targets') if module == 'telegram-mcp' else (
+        'telegram_id', 'vps_access', 'bot_access', 'mihomo_profile_id', 'effective_permissions')
+    value['accounts'] = [{key: row[key] for key in fields if key in row} for row in settings['accounts'] if str(row['telegram_id']) == str(actor)]
+    if module == 'telegram-mcp':
+        value.update({key: settings.get(key) for key in ('telegram_api_id', 'telegram_api_hash', 'telegram_state_dir')})
+        if settings.get('control_token'):
+            value.update(control_token=mcp_transport_token(settings['control_token'], module, actor),
+                         control_token_scope={'module': module, 'actor': str(actor)})
+    else:
+        value.update(control_token=mcp_transport_token(settings['control_token'], module, actor),
+                     control_token_scope={'module': module, 'actor': str(actor)},
+                     diagnostic_trace_headers=settings.get('diagnostic_trace_headers', {}))
+    return value
 
 
 class AttachmentError(ValueError):
@@ -70,9 +100,13 @@ def persona(settings, actor='panel'):
             'AI и Mihomo — разные продукты: используй только permissions текущего собеседника. Пользователь может получить и настроить только свою подписку; квоты, скорость, срок, сервисы и диагностика требуют административных прав. '
             'Роли: owner — владелец, administrator — администратор, moderator — модератор, user — пользователь, guest — гость. Ориентируйся на permissions собеседника, а не на предполагаемый статус по имени. Управление ролями доступно только владельцу через vps_access и подтверждение человеком. '
             'Администратор управляет сервером и всеми подписками. Пользователь управляет только привязанной подпиской; права проверяет API. '
-            'При вопросах о подписке прочитай mihomo_capabilities и mihomo_api, при вопросах о собеседнике — vps_user. '
+            'Контуры MCP независимы: VPS Controller — сервер, службы и системная диагностика; Mihomo — профили, подключения, модули и маршрутизация движка. '
+            'При вопросах о подписке используй Mihomo MCP: mihomo_capabilities, mihomo_api, mihomo_compare; при вопросах о собеседнике — mihomo_user. '
             'Не выдумывай дату рождения, пол и другие отсутствующие данные Telegram. '
             'Используй только предоставленные инструменты и сообщай о недоступных возможностях. '
+            'Разбор ошибки сервера начинай с vps_incident по ID запроса, trace или периоду. Затем используй vps_changes и vps_probe по next_steps; сравнение подключений доступно через mihomo_compare. '
+            'В диагностических отчётах observations — измерения, confirmed — подтверждённые выводы, hypotheses — предположения. Цитируй evidence, учитывай missing_data и coverage. '
+            'Не выдавай первое сохранённое событие за точное начало проблемы, временную связь с изменением — за причину, выдачу подписки — за клиентское подключение, неизвестный счётчик — за ноль. '
             'Оценивай службу по runtime.state, reason и service_type. active/exited для oneshot с сохранением состояния означает применённую настройку, а не упавший постоянный процесс. '
             'Для диагностики приложения используй vps_diagnostics, vps_logs, vps_network и vps_security. Различай доказанные ошибки, риски конфигурации и предположения. Для CVE сверяй точную версию и условия уязвимости с официальными источниками через интернет. Не выполняй активные атаки и не утверждай, что проверка охватывает все уязвимости. '
             'Для актуальных сведений о VPS и Telegram вызывай соответствующий инструмент. '
@@ -102,80 +136,59 @@ def allowed(settings, actor, module):
     if grants is not None and actor != 'panel':
         if module == 'web' and 'web' not in grants: return False
         if module == 'telegram-mcp' and 'telegram_read' not in grants: return False
-        if module == 'vps-controller-mcp' and not set(grants) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'subscription_read', 'subscription_manage', 'subscriptions_admin', 'roles_manage'}: return False
+        if module == 'vps-controller-mcp' and not set(grants) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'roles_manage'}: return False
+        if module == 'mihomo-mcp' and not any(key.startswith('subscription') or key in ('modules_manage', 'routing_manage', 'dns_manage', 'recovery') for key in grants): return False
     if module == 'web':
         user = account(settings, actor)
         return settings.get('web_enabled', True) and (actor == 'panel' or bool(user and (user.get('bot_access') or user.get('bot_chat_access') or user.get('vps_access') or user.get('mihomo_profile_id'))))
-    if not settings['mcp'].get(module):
+    enabled = settings['mcp'].get(module, settings['mcp'].get('vps-controller-mcp', False) if module == 'mihomo-mcp' else False)
+    if not enabled:
         return False
-    if module == 'vps-controller-mcp' and actor == 'panel':
+    if module in ('vps-controller-mcp', 'mihomo-mcp') and actor == 'panel':
         return True
     profile = account(settings, actor)
     if not profile:
         return False
-    return bool((profile.get('vps_access') or profile.get('mihomo_profile_id') or profile.get('bot_access') and settings['modules'].get('nodera-bot')) if module == 'vps-controller-mcp' else
-                profile.get('telegram_access') and profile.get('session'))
-
-
-@asynccontextmanager
-async def telegram(settings, actor):
-    from telethon import TelegramClient
-    from telethon.sessions import StringSession
-    if not allowed(settings, actor, 'telegram-mcp'):
-        raise PermissionError('Контур Telegram недоступен этому пользователю')
-    profile = account(settings, actor)
-    client = TelegramClient(StringSession(profile['session']), settings['telegram_api_id'],
-                            settings['telegram_api_hash'], receive_updates=False,
-                            flood_sleep_threshold=0, request_retries=1, connection_retries=1)
-    try:
-        await client.connect()
-        me = await client.get_me()
-        if not me or me.id != profile['telegram_id']:
-            raise PermissionError('Telegram-сессия не принадлежит выбранному пользователю')
-        yield client, profile
-    finally:
-        await client.disconnect()
+    if grants is not None and module in ('vps-controller-mcp', 'mihomo-mcp'):
+        return True
+    if module == 'vps-controller-mcp': return bool(profile.get('vps_access') or profile.get('bot_access') and settings['modules'].get('nodera-bot'))
+    if module == 'mihomo-mcp': return bool(profile.get('mihomo_profile_id') or profile.get('bot_access') and settings['modules'].get('nodera-bot'))
+    return bool(profile.get('telegram_access') and profile.get('session'))
 
 
 async def telegram_call(settings, actor, name, arguments):
-    from telethon import utils
-    async with telegram(settings, actor) as (client, profile):
-        if name == 'tg_auth_status':
-            return {'authorized': True, 'telegram_id': profile['telegram_id']}
-        limit = arguments.get('limit', 20)
-        if type(limit) is not int or not 1 <= limit <= 50:
-            raise ValueError('Лимит должен быть от 1 до 50')
-        excluded = set(profile.get('excluded_dialogs', []))
-        if name == 'tg_dialogs':
-            return {'dialogs': [{'id': d.id, 'title': d.name, 'unread_count': d.unread_count}
-                                for d in await client.get_dialogs(limit=limit) if d.id not in excluded]}
-        chat_id = arguments.get('chat_id')
-        if type(chat_id) is not int or not chat_id or chat_id in excluded:
-            raise PermissionError('Диалог не разрешён')
-        # StringSession intentionally stores no entity/access-hash cache.
-        # Resolve numeric IDs from this account's dialogs before history reads.
-        dialogs = await client.get_dialogs(limit=500)
-        entity = next((dialog.entity for dialog in dialogs if dialog.id == chat_id), None)
-        if entity is None:
-            raise ValueError('Диалог не найден среди 500 последних диалогов аккаунта')
-        if utils.get_peer_id(entity) in excluded:
-            raise PermissionError('Диалог исключён')
-        query = arguments.get('query') if name == 'tg_search' else None
-        if name == 'tg_search' and (not isinstance(query, str) or not 1 <= len(query) <= 200):
-            raise ValueError('Нужен поисковый запрос длиной до 200 символов')
-        messages = await client.get_messages(entity, limit=limit, search=query)
-        return {'chat_id': chat_id, 'messages': [
-            {'id': message.id, 'date': message.date.isoformat(), 'text': (message.message or '')[:4000]}
-            for message in messages]}
+    from telegram_guarded import ReadAdapter
+    adapter = ReadAdapter(settings, actor)
+    aliases = {'tg_dialogs': 'tg_get_my_dialogs', 'tg_history': 'tg_get_messages', 'tg_search': 'tg_search_messages'}
+    arguments = dict(arguments)
+    if 'chat_id' in arguments: arguments['group'] = str(arguments.pop('chat_id'))
+    try: return await adapter.call(aliases.get(name, name), arguments)
+    finally: await adapter.close()
 
 
 async def vps_call(settings, actor, name, **arguments):
-    if not allowed(settings, actor, 'vps-controller-mcp'):
-        raise PermissionError('Контур VPS недоступен этому пользователю')
-    async with httpx.AsyncClient(timeout=25, trust_env=False) as client:
+    module = tool_module(name)
+    if not allowed(settings, actor, module):
+        raise PermissionError('Контур MCP недоступен этому пользователю')
+    scope = settings.get('control_token_scope')
+    if scope is not None and scope != {'module': module, 'actor': str(actor)}:
+        raise PermissionError('Учётные данные принадлежат другому контуру или пользователю')
+    token = settings['control_token'] if scope else mcp_transport_token(settings['control_token'], module, actor)
+    trace_headers = {key: value for key, value in settings.get('diagnostic_trace_headers', {}).items()
+                     if key in ('X-VPS-Trace-ID', 'X-VPS-Parent-ID', 'X-VPS-Trace-At', 'X-VPS-Trace-Proof') and isinstance(value, str) and len(value) <= 128}
+    async with httpx.AsyncClient(timeout=60 if name in ('vps_incident', 'vps_changes', 'vps_probe', 'vps_compare', 'mihomo_compare') else 25, trust_env=False) as client:
         response = await client.post(VPS_URL, json={'name': name, **arguments}, headers={
-            'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)})
+            'Authorization': 'Bearer ' + token, 'X-MCP-Actor': str(actor), 'X-MCP-Module': module, **trace_headers})
         if response.status_code != 200:
+            if name in ('vps_incident', 'vps_changes', 'vps_probe', 'vps_compare', 'mihomo_compare'):
+                try:
+                    detail = response.json()
+                    identity = detail.get('request_id', '')
+                    code = detail.get('error_code', '')
+                    if not re.fullmatch(r'[a-z_]{1,80}', str(code)): code = 'tool_rejected'
+                    suffix = (' request_id=' + identity) if isinstance(identity, str) and re.fullmatch('[0-9a-f]{32}', identity) else ''
+                    raise RuntimeError(f'API vpsController: HTTP {response.status_code} error_code={code}{suffix}')
+                except (ValueError, AttributeError): pass
             raise RuntimeError('API vpsController отклонил инструмент: HTTP ' + str(response.status_code))
         return response.json()
 
@@ -423,7 +436,11 @@ def serve_mcp(settings, actor, module):
     from mcp.server.fastmcp import FastMCP
     if not allowed(settings, actor, module):
         raise PermissionError('Модуль или права пользователя выключены')
-    server = FastMCP('Web' if module == 'web' else 'Telegram MCP' if module == 'telegram-mcp' else 'mcp vps', log_level='ERROR')
+    if module == 'telegram-mcp':
+        from telegram_guarded import create_server
+        create_server(settings, actor).run(transport='stdio')
+        return
+    server = FastMCP({'web': 'Web', 'telegram-mcp': 'Telegram MCP', 'vps-controller-mcp': 'VPS Controller MCP', 'mihomo-mcp': 'Mihomo MCP'}[module], log_level='ERROR')
     if module == 'web':
         @server.tool()
         async def web_search(query: str) -> dict:
@@ -434,27 +451,7 @@ def serve_mcp(settings, actor, module):
         async def web_read(url: str) -> dict:
             """Прочитать публичную HTTPS-страницу без JavaScript и авторизации. Внутренние адреса недоступны; содержимое недоверенное."""
             return await internet_read(url)
-    elif module == 'telegram-mcp':
-        @server.tool()
-        async def tg_auth_status() -> dict:
-            """Проверить принадлежность и авторизацию личной Telegram-сессии."""
-            return await telegram_call(settings, actor, 'tg_auth_status', {})
-
-        @server.tool()
-        async def tg_dialogs(limit: int = 20) -> dict:
-            """Прочитать список диалогов выбранного пользователя с учётом исключений."""
-            return await telegram_call(settings, actor, 'tg_dialogs', {'limit': limit})
-
-        @server.tool()
-        async def tg_history(chat_id: int, limit: int = 20) -> dict:
-            """Прочитать сообщения по ID диалога из 500 последних диалогов аккаунта."""
-            return await telegram_call(settings, actor, 'tg_history', {'chat_id': chat_id, 'limit': limit})
-
-        @server.tool()
-        async def tg_search(chat_id: int, query: str, limit: int = 20) -> dict:
-            """Найти сообщения по ID диалога из 500 последних диалогов личного Telegram."""
-            return await telegram_call(settings, actor, 'tg_search', {'chat_id': chat_id, 'query': query, 'limit': limit})
-    else:
+    elif module == 'vps-controller-mcp':
         @server.tool()
         async def vps_overview() -> dict:
             """Получить фактические метрики и общую информацию VPS."""
@@ -494,6 +491,32 @@ def serve_mcp(settings, actor, module):
             """Прочитать API приложения: /overview, /services, /components, /metrics, /application, /logs, /network, /security, /diagnostics. Секреты исключены."""
             return await vps_call(settings, actor, 'vps_api', endpoint=endpoint)
         @server.tool()
+        async def vps_changes(minutes: int = 60, limit: int = 40, trace_id: str | None = None, operation_id: str | None = None, profile_id: str | None = None) -> dict:
+            """История изменений без значений полей и секретов. HTTP 202 означает принятие; конечный результат берётся из операции. Временная связь с ошибкой не доказывает причинность."""
+            return await vps_call(settings, actor, 'vps_changes', body={'minutes': minutes, 'limit': limit, 'trace_id': trace_id, 'operation_id': operation_id, 'profile_id': profile_id})
+
+        @server.tool()
+        async def vps_incident(minutes: int = 60, request_id: str | None = None, trace_id: str | None = None,
+                               operation_id: str | None = None, profile_id: str | None = None, include_journal: bool = False,
+                               journal_service: str = 'application', include_connections: bool = True, limit: int = 40) -> dict:
+            """Начни разбор ошибки здесь: единый отчёт со связанными HTTP-событиями, trace, операциями, изменениями, текущими службами и соединениями. Отдельно observations, confirmed, hypotheses, missing_data, next_steps. Нельзя выдавать гипотезы за установленную причину или первое сохранённое событие за точное начало инцидента. Журналы включаются явно."""
+            return await vps_call(settings, actor, 'vps_incident', body={'minutes': minutes, 'request_id': request_id,
+                'trace_id': trace_id, 'operation_id': operation_id, 'profile_id': profile_id, 'include_journal': include_journal,
+                'journal_service': journal_service, 'include_connections': include_connections, 'limit': limit})
+
+        @server.tool()
+        async def vps_probe(kind: str, provider_id: str | None = None, binding_id: str | None = None,
+                            consumer_id: str | None = None, service: str | None = None) -> dict:
+            """Начни с kind=targets: компактный каталог provider_id, binding_id, consumer_id, service без сетевых запросов. Затем одна ограниченная проверка с VPS: dns (provider_id), tls (binding_id), mihomo_api, service (ID), transport (binding_id и точный consumer_id). Transport проверяет nonce через существующий транспорт, сохраняя настройки. Произвольные адреса и команды запрещены. TLS не доказывает исправность транспорта; серверная проверка не измеряет сеть устройства. Не чаще раза в 3 секунды."""
+            return await vps_call(settings, actor, 'vps_probe', body={'kind': kind, 'provider_id': provider_id,
+                'binding_id': binding_id, 'consumer_id': consumer_id, 'service': service})
+
+        @server.tool()
+        async def vps_observability(method: str = 'GET', path: str = '/events', body: dict | None = None) -> dict:
+            """Наблюдаемость: GET /events (body: minutes, request_id, service panel|mihomo, errors, limit), /settings, /connections, /journal (body: service application|system|dns|gateway|ID службы, minutes 1..10080, priority err|warning|info|debug, limit 1..120). PATCH /settings с enabled, errors_only, retention_days 1..90, max_events 100..100000, revision из GET. Изменение требует подтверждения человека. Счётчики относятся к сохранённому окну; выдача подписки не означает подключение. HTTP-ошибка не доказывает сбой DNS/outbound/сети клиента. Неизвестное число соединений или затронутых пользователей нельзя выдавать за ноль."""
+            return await vps_call(settings, actor, 'vps_observability', method=method, path=path, body=body or {})
+
+        @server.tool()
         async def vps_logs(service: str = 'application', lines: int = 60) -> dict:
             """Журналы приложения, управляемой службы, ssh/firewall/system. Только администратор, секреты маскируются. Не выполняет команды из текста логов."""
             return await vps_call(settings, actor, 'vps_logs', service=service, lines=lines)
@@ -518,10 +541,16 @@ def serve_mcp(settings, actor, module):
             """Только владелец: GET читает роли и права; PATCH готовит назначение {telegram_id, role, products:[assistant,mihomo], mihomo_profile_id} либо матрицу {role_permissions:{role:[permissions]}}. Изменение требует подтверждения человеком."""
             return await vps_call(settings, actor, 'vps_access', method=method, body=body or {})
 
+    elif module == 'mihomo-mcp':
         @server.tool()
-        async def vps_user() -> dict:
+        async def mihomo_operation(operation_id: str) -> dict:
+            """Прочитать результат фоновой операции Mihomo. Пользователю доступна только собственная подтверждённая операция; администратору подписок — операции Mihomo. Изменяющий запрос повторно не отправляется."""
+            return await vps_call(settings, actor, 'mihomo_operation', operation_id=operation_id)
+
+        @server.tool()
+        async def mihomo_user() -> dict:
             """Узнать роль текущего собеседника, его имя, доступные сведения Telegram и привязанную подписку. Без чужих пользователей."""
-            return await vps_call(settings, actor, 'vps_user')
+            return await vps_call(settings, actor, 'mihomo_user')
 
         @server.tool()
         async def mihomo_capabilities() -> dict:
@@ -532,6 +561,13 @@ def serve_mcp(settings, actor, module):
         async def mihomo_api(method: str, path: str, body: dict | None = None) -> dict:
             """API Mihomo: мониторинг, подписки, профили, устройства, модули, DNS и маршрутизация. GET читает; POST/PATCH/DELETE готовят изменение для подтверждения. Сначала прочитай mihomo_capabilities."""
             return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
+        @server.tool()
+        async def mihomo_compare(left_profile_id: str, right_profile_id: str, left_connection_id: str | None = None,
+                              right_connection_id: str | None = None) -> dict:
+            """Сравнить два профиля или два подключения (можно одного профиля): транспорт, безопасные настройки, endpoints, DNS/маршрутизацию, версии клиентов и доступные счётчики. Только администратор подписок. Ревизии проверяются повторно; при изменении конфигурации вывод остаётся unknown. Ключи, пароли и ссылки подписок не возвращаются."""
+            return await vps_call(settings, actor, 'mihomo_compare', body={'left_profile_id': left_profile_id,
+                'right_profile_id': right_profile_id, 'left_connection_id': left_connection_id, 'right_connection_id': right_connection_id})
+
     server.run(transport='stdio')
 
 
@@ -564,16 +600,14 @@ async def mcp_connections(settings, actor):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     async with AsyncExitStack() as stack:
-        # Only this request's account is made available to its tool subprocesses.
-        scoped = {**settings, 'api_key': '', 'bot_token': '',
-                  'accounts': [a for a in settings['accounts'] if str(a['telegram_id']) == str(actor)]}
+        # Each subprocess receives only its own contour and actor credentials.
         with tempfile.TemporaryDirectory(prefix='nodera-mcp-') as folder:
-            path = Path(folder) / 'settings.json'
-            path.write_text(json.dumps(scoped), encoding='utf-8'); path.chmod(0o600)
             connections = native_connections(settings, actor)
-            for module in ('telegram-mcp', 'vps-controller-mcp'):
+            for module in MCP_MODULES:
                 if not allowed(settings, actor, module):
                     continue
+                path = Path(folder) / (module + '.json')
+                path.write_text(json.dumps(scoped_mcp_settings(settings, actor, module)), encoding='utf-8'); path.chmod(0o600)
                 env = {key: os.environ[key] for key in ('PATH', 'LANG', 'SSL_CERT_FILE') if key in os.environ}
                 env.update(NODERA_CONFIG=str(path), NODERA_ACTOR=str(actor))
                 transport = await stack.enter_async_context(stdio_client(StdioServerParameters(
@@ -581,6 +615,8 @@ async def mcp_connections(settings, actor):
                 session = await stack.enter_async_context(ClientSession(*transport))
                 await session.initialize()
                 for tool in (await session.list_tools()).tools:
+                    if tool.name in connections:
+                        raise RuntimeError('Имя инструмента повторяется в разных контурах MCP')
                     connections[tool.name] = (session, tool)
             # Exit child sessions before deleting their configuration file.
             try:
@@ -719,17 +755,17 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
 
 
 async def check(settings, module, actor):
-    if not (settings['mcp'] if module in ('telegram-mcp', 'vps-controller-mcp') else settings['modules']).get(module):
+    enabled = settings['mcp'].get(module, settings['mcp'].get('vps-controller-mcp', False)) if module in MCP_MODULES else settings['modules'].get(module)
+    if not enabled:
         raise ValueError('Сначала включите и сохраните модуль')
     if module == 'telegram-mcp':
         return await telegram_call(settings, actor, 'tg_auth_status', {})
     if module == 'vps-controller-mcp':
-        user = account(settings, actor)
-        if user and user.get('mihomo_profile_id') and not user.get('vps_access') and not user.get('bot_access'):
-            await vps_call(settings, actor, 'vps_user')
-            return {'api_reachable': True, 'scope': 'subscription'}
         result = await vps_call(settings, actor, 'vps_overview')
         return {'api_reachable': True, 'server': result.get('server', {}).get('name')}
+    if module == 'mihomo-mcp':
+        await vps_call(settings, actor, 'mihomo_capabilities')
+        return {'api_reachable': True, 'scope': 'mihomo'}
     if module == 'ai-agent':
         result = await provider_request(settings, [{'role': 'user', 'content': 'Ответь одним словом: OK'}], [])
         if not result.get('content'):
@@ -753,6 +789,11 @@ def safe_error(exc):
 async def request_main(payload, mode):
     settings = payload['settings']
     actor = str(payload.get('actor', 'panel'))
+    if mode == '--telegram-action':
+        from telegram_guarded import ReadAdapter
+        adapter = ReadAdapter(settings, actor)
+        try: return await adapter.call(payload['tool'], payload['arguments'], execute=True)
+        finally: await adapter.close()
     if mode == '--chat':
         return await chat(settings, actor, payload['prompt'], payload.get('attachments'), payload.get('history'))
     if mode == '--check':
@@ -764,6 +805,8 @@ if __name__ == '__main__':
     try:
         if sys.argv[1] == '--self-check':
             import mcp, telethon, pypdf
+            from telegram_guarded import verify_vendor
+            verify_vendor()
             print('AI-agent runtime ready')
         elif sys.argv[1] == '--mcp':
             serve_mcp(json.loads(Path(os.environ['NODERA_CONFIG']).read_text()), os.environ['NODERA_ACTOR'], sys.argv[2])

@@ -119,11 +119,30 @@ async def bot_api(settings, method, **payload):
 
 
 async def agent_request(settings, actor, prompt):
-    async with httpx.AsyncClient(timeout=150, trust_env=False) as client:
-        response = await client.post('http://127.0.0.1:8000/api/assistant/bot-chat',
-            headers={'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)},
-            json={'prompt': prompt})
+    headers = {'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)}
+    request_id = secrets.token_hex(16)
+    async with httpx.AsyncClient(timeout=300, trust_env=False) as client:
+        task = asyncio.create_task(client.post('http://127.0.0.1:8000/api/assistant/bot-chat',
+            headers=headers, json={'prompt': prompt, 'request_id': request_id}))
+        notified = False
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=3)
+                if not task.done() and not notified:
+                    try:
+                        queue = await client.get('http://127.0.0.1:8000/api/assistant/bot-queue', headers=headers, params={'request_id': request_id}, timeout=5)
+                        if queue.status_code == 200 and queue.json().get('state') == 'queued':
+                            await bot_api(settings, 'sendMessage', chat_id=actor, text='Запрос в очереди AI. Дождитесь ответа; повторять сообщение не нужно.')
+                            notified = True
+                    except Exception: pass
+            response = await task
+        finally:
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError): await task
         if response.status_code != 200:
+            if response.status_code in (429, 503):
+                return 'Очередь AI занята или время ожидания истекло. Дождитесь ответа на предыдущие сообщения и попробуйте позже.'
             if response.status_code == 409:
                 return 'Сейчас я не могу подготовить ответ. Информационные команды доступны; владелец может проверить настройки AI.'
             return 'Не получилось подготовить ответ. Попробуйте немного позже.'
@@ -135,6 +154,40 @@ async def agent_request(settings, actor, prompt):
                 answer += '\n\nИзменения:\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
             answer += f"\n\nПодтвердите {pending['action']} для {pending['service']}:\n/confirm {pending['code']}"
         return answer
+
+
+QUEUE_NOTICE = 'Сообщение принято в очередь. Сначала отвечу на ваши предыдущие вопросы.'
+BUSY_NOTICE = 'Слишком много сообщений. Дождитесь ответа на предыдущий вопрос; это сообщение не принято в очередь.'
+
+
+class MessageDispatcher:
+    """Bounded parallel users with strict ordering inside each user's dialog."""
+    def __init__(self, capacity=16, per_actor=3):
+        self.capacity, self.per_actor = capacity, per_actor
+        self.tasks, self.pending, self.locks = set(), {}, {}
+
+    def submit(self, actor, action):
+        if len(self.tasks) >= self.capacity or self.pending.get(actor, 0) >= self.per_actor: return False
+        self.pending[actor] = self.pending.get(actor, 0) + 1
+        lock = self.locks.setdefault(actor, asyncio.Lock())
+        async def run():
+            try:
+                async with lock: await action()
+            except asyncio.CancelledError: raise
+            except Exception: logging.error('NoderaBot message processing or delivery failed')
+            finally:
+                self.pending[actor] -= 1
+                if not self.pending[actor]:
+                    self.pending.pop(actor); self.locks.pop(actor, None)
+        task = asyncio.create_task(run(), name=f'nodera-message-{actor}')
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return True
+
+    async def close(self):
+        for task in list(self.tasks): task.cancel()
+        await asyncio.gather(*list(self.tasks), return_exceptions=True)
+        self.tasks.clear(); self.pending.clear(); self.locks.clear()
 
 
 _profile_cache = {}
@@ -281,65 +334,84 @@ async def bot(settings):
     last = {}
     menus = {}
     callbacks = {}
-    while True:
-        try:
-            updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'callback_query'])
-            for update in updates:
-                offset = max(offset, update['update_id'] + 1)
-                temporary = state_file.with_suffix('.tmp')
-                temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
-                callback = update.get('callback_query')
-                message = callback.get('message', {}) if callback else update.get('message', {})
-                sender = callback.get('from', {}) if callback else message.get('from', {})
-                actor = sender.get('id')
-                if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
-                if callback:
-                    await bot_api(settings, 'answerCallbackQuery', callback_query_id=callback['id'])
-                    key = callback.get('data', '')
-                    prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
-                    if not prompt:
-                        await bot_api(settings, 'sendMessage', chat_id=actor, text='Это меню устарело. Откройте раздел кнопкой ниже.')
+    dispatcher = MessageDispatcher()
+    notices = {}
+    async def deliver(sender, prompt):
+        actor = sender['id']
+        try: access = await identify(settings, sender)
+        except Exception: access = False
+        if not prompt: return
+        admin = access is True
+        role = 'admin' if admin else str(access) if access else 'guest'
+        if menus.get(actor) != role:
+            try:
+                await command_menu(settings, actor, admin, access in ('chat', 'chat-subscription'), access in (True, 'subscription', 'chat-subscription'))
+                if len(menus) >= 1000: menus.clear()
+                menus[actor] = role
+            except Exception: logging.error('NoderaBot private command menu could not be updated')
+        answer = await reply(settings, sender, prompt, access)
+        if access:
+            # A request can outlive a permission change.
+            try: current_access = await identify(settings, sender)
+            except Exception: current_access = False
+            if current_access != access:
+                access = False
+                answer = public_reply(sender, '')
+        if not answer: return
+        if len(callbacks) >= 1000: callbacks.clear()
+        actions = {}
+        markup = inline_keyboard(answer, prompt, access, actions)
+        if actions: callbacks[actor] = actions
+        for chunk in telegram_chunks(answer):
+            await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=reply_keyboard(access))
+        if markup:
+            await bot_api(settings, 'sendMessage', chat_id=actor, text='Выберите действие:', reply_markup=markup)
+    try:
+        while True:
+            try:
+                updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'callback_query'])
+                for update in updates:
+                    offset = max(offset, update['update_id'] + 1)
+                    temporary = state_file.with_suffix('.tmp')
+                    temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
+                    callback = update.get('callback_query')
+                    message = callback.get('message', {}) if callback else update.get('message', {})
+                    sender = callback.get('from', {}) if callback else message.get('from', {})
+                    actor = sender.get('id')
+                    if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
+                    if callback:
+                        await bot_api(settings, 'answerCallbackQuery', callback_query_id=callback['id'])
+                        key = callback.get('data', '')
+                        prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
+                        if not prompt:
+                            await bot_api(settings, 'sendMessage', chat_id=actor, text='Это меню устарело. Откройте раздел кнопкой ниже.')
+                            continue
+                    else:
+                        prompt = message.get('text', '').strip()
+                        prompt = BUTTON_COMMANDS.get(prompt, prompt)
+                    if not prompt.startswith('/') and time.monotonic() - last.get(actor, 0) < 3:
+                        if time.monotonic() - notices.get(actor, 0) >= 10:
+                            notices[actor] = time.monotonic()
+                            await bot_api(settings, 'sendMessage', chat_id=actor, text=BUSY_NOTICE)
                         continue
-                else:
-                    prompt = message.get('text', '').strip()
-                    prompt = BUTTON_COMMANDS.get(prompt, prompt)
-                if not prompt.startswith('/') and time.monotonic() - last.get(actor, 0) < 3: continue
-                if len(last) >= 1000:
-                    last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
-                    if len(last) >= 1000: continue
-                if not prompt.startswith('/'):
-                    last[actor] = time.monotonic()
-                try: access = await identify(settings, sender)
-                except Exception: access = False
-                if not prompt: continue
-                admin = access is True
-                role = 'admin' if admin else str(access) if access else 'guest'
-                if menus.get(actor) != role:
-                    try:
-                        await command_menu(settings, actor, admin, access in ('chat', 'chat-subscription'), access in (True, 'subscription', 'chat-subscription'))
-                        if len(menus) >= 1000: menus.clear()
-                        menus[actor] = role
-                    except Exception: logging.error('NoderaBot private command menu could not be updated')
-                answer = await reply(settings, sender, prompt, access)
-                if access:
-                    # A request can outlive a permission change.
-                    try: current_access = await identify(settings, sender)
-                    except Exception: current_access = False
-                    if current_access != access:
-                        access = False
-                        answer = public_reply(sender, '')
-                if not answer: continue
-                if len(callbacks) >= 1000: callbacks.clear()
-                actions = {}
-                markup = inline_keyboard(answer, prompt, access, actions)
-                if actions: callbacks[actor] = actions
-                for chunk in telegram_chunks(answer):
-                    await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=reply_keyboard(access))
-                if markup:
-                    await bot_api(settings, 'sendMessage', chat_id=actor, text='Выберите действие:', reply_markup=markup)
-        except Exception:
-            logging.error('NoderaBot polling or delivery failed')
-            await asyncio.sleep(5)
+                    if len(last) >= 1000:
+                        last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
+                        if len(last) >= 1000: continue
+                    if not prompt.startswith('/'):
+                        last[actor] = time.monotonic()
+                    # Explicit commands remain responsive while this user's AI
+                    # dialog waits; commands themselves keep their own ordering.
+                    stream = (actor, 'command') if prompt.startswith('/') else actor
+                    accepted = dispatcher.submit(stream, lambda sender=sender, prompt=prompt: deliver(sender, prompt))
+                    if (not accepted or dispatcher.pending.get(stream, 0) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
+                        notices[actor] = time.monotonic()
+                        if len(notices) > 1000: notices = {actor: time.monotonic()}
+                        await bot_api(settings, 'sendMessage', chat_id=actor, text=QUEUE_NOTICE if accepted else BUSY_NOTICE)
+            except Exception:
+                logging.error('NoderaBot polling or delivery failed')
+                await asyncio.sleep(5)
+    finally:
+        await dispatcher.close()
 
 
 if __name__ == '__main__':

@@ -19,6 +19,7 @@ import { AppWorkspace } from "./components/app-workspace";
 import { OperationHistory } from "./components/operation-history";
 import { OperationHistorySettings, useOperationHistorySettings } from "../features/services/operation-history-settings";
 import { ServicesDashboard } from "../features/services/services-view";
+import { ObservabilityPanel } from "../features/services/observability-panel";
 import { NetworkView, type NetworkListState } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
@@ -1520,7 +1521,7 @@ export function ControlPanel() {
       />}
 
       {tab === "services" && <ServicesDashboard
-        operationHistorySettings={<OperationHistorySettings policy={operationHistoryPolicy} confirm={askConfirmation} busy={busy} />}
+        operationHistorySettings={<><OperationHistorySettings policy={operationHistoryPolicy} confirm={askConfirmation} busy={busy} /><ObservabilityPanel key={token} request={request} busy={busy} services={services?.items} /></>}
         services={services}
         busy={busy}
         serviceModeActive={serviceModeActive}

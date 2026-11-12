@@ -27,6 +27,8 @@ def sanitize(api, value):
                 if secret: item = item.replace(secret, '[redacted]')
             item = re.sub(r'(?i)(Bearer\s+|(?:password|token|secret|api[_-]?key)[\s=:]+)[^\s,;]+', r'\1[redacted]', item)
             item = re.sub(r'bot[0-9]{5,}:[A-Za-z0-9_-]{20,}', 'bot[redacted]', item)
+            item = re.sub(r'(?i)(?:https?|ss|vless|trojan|hysteria2|tuic)://[^\s<>"\x27]+', '[redacted-url]', item)
+            item = re.sub(r'/(?:api/mihomo/subscriptions|s)/[^\s?"\x27]+', '/subscription/[redacted]', item)
             text = item[:min(1200, max(0, remaining))]
             remaining -= len(text)
             return text

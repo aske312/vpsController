@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, StringConstraints
@@ -72,6 +73,7 @@ from service_state import observe_service
 import port_allocation
 from component_registry import ComponentRegistry, RegistryError
 from request_limits import RequestBodyLimit
+import observability
 
 APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
@@ -349,6 +351,7 @@ app = FastAPI(
 )
 logger = logging.getLogger("vps-control.mihomo")
 app.add_middleware(RequestBodyLimit)
+app.add_middleware(observability.RequestEvidence, root=lambda: DATA_ROOT.parent, service='mihomo')
 PUBLIC_COMMAND_ERROR = "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
 TECHNICAL_ERROR_MARKERS = ("traceback", "systemctl", "journalctl", "apt-get", "dpkg", "stderr", "stdout", "command failed", "exit status", "failed to start")
 
@@ -366,17 +369,32 @@ class ProfileFormatError(HTTPException):
 
 
 @app.exception_handler(HTTPException)
-async def public_http_exception_handler(_, exc: HTTPException) -> JSONResponse:
+async def public_http_exception_handler(request, exc: HTTPException) -> JSONResponse:
     if isinstance(exc, ProfileFormatError):
+        if request is not None:
+            request.state.evidence_reason = 'subscription_unsupported_format'
         return JSONResponse(status_code=exc.status_code, content={
             "detail": exc.detail, "code": exc.code, "supported_formats": ["mihomo", "yaml"],
+            **observability.error_fields(request, exc.status_code, 'mihomo'),
         }, headers=exc.headers)
     detail = public_http_error(exc.status_code, exc.detail)
     if detail == PUBLIC_COMMAND_ERROR:
-        logger.error("Suppressed technical Mihomo error (%s): %s", exc.status_code, exc.detail)
+        logger.error("Suppressed technical Mihomo error status=%s request_id=%s", exc.status_code, observability.request_id.get())
     action = get_action_payload()
     operation_id = str(action.get("action", ""))
-    return JSONResponse(status_code=exc.status_code, content={"detail": detail, "operation_id": operation_id}, headers=exc.headers)
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail, "operation_id": operation_id,
+                        **observability.error_fields(request, exc.status_code, 'mihomo')}, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def unexpected_http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=500, content={'detail': PUBLIC_COMMAND_ERROR, **observability.error_fields(request, 500, 'mihomo')},
+                        headers={'X-Request-ID': getattr(request.state, 'request_id', ''), 'X-Trace-ID': getattr(request.state, 'trace_id', '')})
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return observability.validation_response(request, exc, 'mihomo')
 
 
 class ModuleSettingsPatch(BaseModel):
@@ -461,6 +479,7 @@ def run(*args: str, check: bool = False, input_text: str | None = None) -> subpr
         check=False,
     )
     if check and result.returncode:
+        observability.tracing.failure('command_failed')
         message = result.stderr.strip() or result.stdout.strip() or f"Command failed: {' '.join(args)}"
         raise RuntimeError(message)
     return result
@@ -545,6 +564,7 @@ def write_action(action: str, message: str, state: str = "running", progress: in
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "started_at": previous.get("started_at") if continuing and previous.get("started_at") else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+    payload.update(observability.tracing.snapshot())
     atomic_json(ACTION_FILE, payload)
     application_operation.atomic_json(ACTION_FILE.parent / "operations" / f"{identity}.json", {**payload, "state": "succeeded" if state == "done" else state, "source": "mihomo"})
     from operation_log import append
@@ -5522,10 +5542,12 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
     try:
         nonce = subscription_signing.validate_nonce(request.headers.get('x-subscription-nonce', ''))
     except ValueError:
+        request.state.evidence_reason = 'subscription_invalid_nonce'
         raise HTTPException(400, 'Некорректный nonce подписки') from None
     try:
         signer = subscription_signing.server_signer()
     except (OSError, ValueError, TypeError):
+        request.state.evidence_reason = 'subscription_signer_unavailable'
         raise HTTPException(503, 'Подпись подписки временно недоступна') from None
     selected_profile: dict[str, Any] | None = None
     bound_device: str | None = None
@@ -5542,8 +5564,10 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                 break
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    request.state.observed_profile = str(selected_profile['id'])
     access = subscription_limits.status(selected_profile, DATA_ROOT / "subscription-limits")
     if access["state"] in {"expired", "exhausted"}:
+        request.state.evidence_reason = 'subscription_' + access['state']
         raise HTTPException(status_code=403, detail="Срок подписки истёк" if access["state"] == "expired" else "Объём трафика подписки исчерпан")
     metadata = subscription_device_metadata(request)
     # Reject retired clients before recording access, binding HWID or provisioning.
@@ -5559,6 +5583,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
         })
     raw_hwid = (request.headers.get("x-device-id") or request.headers.get("x-hwid") or request.query_params.get("hwid") or "").strip()
     if len(raw_hwid) > 256:
+        request.state.evidence_reason = 'subscription_invalid_device'
         raise HTTPException(status_code=422, detail="HWID is too long")
     selected_device = bound_device or str(normalize_profile(selected_profile)["common_device_id"])
     if bound_device is not None:
@@ -5574,6 +5599,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                     if bound_device != str(selected_profile["common_device_id"]) and not device.get("manual"):
                         metadata = subscription_device_metadata(request)
                         if not device_matches_client(device, metadata):
+                            request.state.evidence_reason = 'subscription_client_mismatch'
                             raise HTTPException(status_code=403, detail="Ссылка привязана к другому приложению. Добавьте общую ссылку профиля")
                         saved_hash = device.get("hwid_hash")
                         hwid_hash = hmac.new(str(latest["subscription_token"]).encode(), raw_hwid.encode(), hashlib.sha256).hexdigest() if raw_hwid else None
@@ -5601,7 +5627,11 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request), read_only=allow_changes is False)
-    config, extension = render_client_profile(selected_profile, selected_device)
+    try:
+        config, extension = render_client_profile(selected_profile, selected_device)
+    except Exception:
+        request.state.evidence_reason = 'subscription_render_failed'
+        raise
     delivery = None
     if allow_changes is not False and any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
         delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Header
+from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -50,6 +51,8 @@ import component_checks
 import assistant_personalization
 import assistant_contacts
 import assistant_commands
+import observability
+import diagnostic_tools
 import network_routes
 import network_probe
 import network_check_targets
@@ -180,6 +183,7 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
+    expose_headers=['X-Request-ID', 'X-Trace-ID'],
 )
 
 PUBLIC_COMMAND_ERROR = "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
@@ -193,11 +197,22 @@ def public_http_error(status_code: int, detail: object) -> str:
 
 
 @app.exception_handler(HTTPException)
-async def public_http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+async def public_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     detail = public_http_error(exc.status_code, exc.detail)
     if detail == PUBLIC_COMMAND_ERROR:
-        logger.error("Suppressed technical API error (%s): %s", exc.status_code, exc.detail)
-    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=exc.headers)
+        logger.error("Suppressed technical API error status=%s request_id=%s", exc.status_code, observability.request_id.get())
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail, **observability.error_fields(request, exc.status_code, 'panel')}, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def unexpected_http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=500, content={'detail': PUBLIC_COMMAND_ERROR, **observability.error_fields(request, 500, 'panel')},
+                        headers={'X-Request-ID': getattr(request.state, 'request_id', ''), 'X-Trace-ID': getattr(request.state, 'trace_id', '')})
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return observability.validation_response(request, exc, 'panel')
 
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
@@ -283,6 +298,7 @@ AWG_PROFILE = {
     "H3": os.getenv("AWG_H3", "1000000000"), "H4": os.getenv("AWG_H4", "1400000000"),
 }
 DATA_DIR = Path(os.getenv("DATA_DIR", "/var/lib/vps-control"))
+app.add_middleware(observability.RequestEvidence, root=lambda: DATA_DIR, service='panel')
 metrics_history_store = MetricsHistory(DATA_DIR / "metrics" / "history.sqlite3")
 metrics_monitor: MetricsMonitor | None = None
 ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control/environment"))
@@ -447,7 +463,7 @@ def assistant_action(payload: assistant_control.Action, _: None = Depends(requir
 
 
 @app.post('/api/assistant/check/{module}')
-def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'nodera-bot', 'ai-agent'],
+def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'mihomo-mcp', 'nodera-bot', 'ai-agent'],
                     payload: assistant_control.Check, _: None = Depends(require_token)) -> dict:
     if module != 'nodera-bot' and payload.bot_token is not None:
         raise HTTPException(422, 'Токен бота можно передать только для проверки NoderaBot')
@@ -459,6 +475,15 @@ def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'noder
 @app.post('/api/assistant/chat')
 def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
     return assistant_control.chat_request(sys.modules[__name__], payload, str(payload.telegram_id) if payload.telegram_id else 'panel')
+
+
+@app.get('/api/assistant/queue')
+def assistant_queue(request_id: str | None = None, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    import assistant_broker
+    import assistant_roles
+    actor = str(telegram_id) if telegram_id else 'panel'
+    if actor != 'panel': assistant_roles.require(assistant_control.read(sys.modules[__name__]), actor, 'chat')
+    return assistant_broker.broker.status(actor, request_id)
 
 
 @app.get('/api/assistant/context')
@@ -524,6 +549,14 @@ def nodera_chat(payload: assistant_control.Chat, settings: dict = Depends(requir
     return assistant_control.chat_request(sys.modules[__name__], payload, actor, 'bot', settings=settings)
 
 
+@app.get('/api/assistant/bot-queue')
+def nodera_queue(request_id: str | None = None, settings: dict = Depends(require_nodera_bot_transport),
+                 actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    import assistant_broker
+    assistant_control.require_bot_actor(settings, actor, chat=True)
+    return assistant_broker.broker.status(actor, request_id)
+
+
 @app.post('/api/assistant/bot-command')
 def nodera_command(payload: assistant_commands.Command, settings: dict = Depends(require_nodera_bot_transport),
                    actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
@@ -564,13 +597,16 @@ def nodera_bot_users(_: None = Depends(require_token)) -> dict:
 
 
 def require_assistant_control(authorization: str | None = Header(default=None),
-                              actor: str = Header(default='', alias='X-MCP-Actor')) -> None:
-    assistant_control.authorize_control(sys.modules[__name__], authorization, actor)
+                              actor: str = Header(default='', alias='X-MCP-Actor'),
+                              module: str | None = Header(default=None, alias='X-MCP-Module')) -> None:
+    assistant_control.authorize_control(sys.modules[__name__], authorization, actor, module)
 
 
 @app.post('/api/assistant/control-tool', dependencies=[Depends(require_assistant_control)])
 def assistant_control_tool(payload: assistant_control.ToolCall,
-                           actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+                           actor: str = Header(default='', alias='X-MCP-Actor'),
+                           module: str | None = Header(default=None, alias='X-MCP-Module')) -> dict:
+    assistant_control.require_tool_module(sys.modules[__name__], payload.name, module)
     return assistant_control.control_tool(sys.modules[__name__], payload.name, payload.model_dump(exclude={'name'}, exclude_none=True), actor)
 
 
@@ -579,8 +615,10 @@ def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _:
     api = sys.modules[__name__]
     actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
     value = assistant_control.read(api)
-    assistant_control.authorize_control(api, 'Bearer ' + value['control_token'], actor)
     record = assistant_control.operations.read(assistant_commands.pending_path(api, actor))
+    module = 'mihomo-mcp' if record.get('kind') == 'mihomo' else 'vps-controller-mcp'
+    scoped_token = assistant_control.mcp_transport_token(value['control_token'], module, actor)
+    assistant_control.authorize_control(api, 'Bearer ' + scoped_token, actor, module)
     text = assistant_commands.execute(api, actor, '/confirm ' + payload.code)
     operation = None
     if record.get('operation_id'):
@@ -603,13 +641,16 @@ def run(*args: str, timeout: int = 8, check: bool = False) -> str:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
     except FileNotFoundError:
         if check:
+            observability.tracing.failure('command_missing')
             raise HTTPException(status_code=409, detail=f"{args[0]} is not installed")
         return ""
     except subprocess.TimeoutExpired:
         if check:
+            observability.tracing.failure('command_timeout')
             raise HTTPException(status_code=504, detail=f"{args[0]} timed out")
         return ""
     if check and result.returncode:
+        observability.tracing.failure('command_failed')
         raise HTTPException(status_code=500, detail=result.stderr.strip() or f"{args[0]} failed")
     return result.stdout.strip()
 
@@ -4313,6 +4354,7 @@ def replay_application_operation(identity, expected_action: str | None = None) -
             return None
         if expected_action and existing.get("action") != expected_action:
             raise HTTPException(status_code=409, detail="Идентификатор операции уже использован для другой команды")
+        observability.tracing.operation(identity)
         return get_application_operation(identity, None)
     except ValueError:
         raise HTTPException(status_code=409, detail="Не удалось прочитать предыдущую операцию") from None
@@ -4927,6 +4969,45 @@ def timer_details(timer_id: str) -> dict:
         "next_run": observation.get("next_run"),
         "runtime": observation["runtime"],
     }
+
+
+@app.get('/api/observability/events')
+def observability_events(minutes: int = 60, request_id: str | None = None, service: str | None = None,
+                         errors: bool = False, limit: int = 60, trace_id: str | None = None, operation_id: str | None = None,
+                         profile_id: str | None = None, _: None = Depends(require_token)) -> dict:
+    import observability_control
+    return observability_control.evidence(sys.modules[__name__], minutes, request_id, service, errors, limit, trace_id, operation_id, profile_id)
+
+
+@app.post('/api/observability/diagnose/{tool}')
+def diagnostic_report(tool: Literal['vps_incident', 'vps_changes', 'vps_probe', 'vps_compare'],
+                      body: dict, _: None = Depends(require_token)) -> dict:
+    return diagnostic_tools.call(sys.modules[__name__], tool, {'body': body}, 'panel')
+
+
+@app.get('/api/observability/settings')
+def observability_settings(_: None = Depends(require_token)) -> dict:
+    import observability_control
+    return observability_control.evidence(sys.modules[__name__])['settings']
+
+
+@app.put('/api/observability/settings')
+def update_observability_settings(payload: observability.Settings, _: None = Depends(require_token)) -> dict:
+    import observability_control
+    return observability_control.configure(sys.modules[__name__], payload)
+
+
+@app.get('/api/observability/connections')
+def observability_connections(_: None = Depends(require_token)) -> dict:
+    import observability_control
+    return observability_control.connections(sys.modules[__name__])
+
+
+@app.get('/api/observability/journal')
+def observability_journal(service: str = 'application', minutes: int = 60, priority: str = 'info',
+                          limit: int = 60, _: None = Depends(require_token)) -> dict:
+    import observability_control
+    return observability_control.journal(sys.modules[__name__], service, minutes, priority, limit)
 
 
 @app.get("/api/services/operation-history")

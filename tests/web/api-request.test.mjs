@@ -8,6 +8,15 @@ afterEach(() => { globalThis.fetch = originalFetch; Date.now = originalNow; inva
 const client = (options = {}) => createApiClient("test-token", { retryDelaysMs: [0, 0], ...options });
 const ok = () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
 
+test("HTTP errors expose a valid request ID for correlation without accepting arbitrary header text", async () => {
+  const identity = "a".repeat(32);
+  globalThis.fetch = async () => Response.json({ detail: "Failure" }, { status: 409, headers: { "X-Request-ID": identity } });
+  await assert.rejects(client()("/private"), { message: `Failure · запрос ${identity}` });
+  await assert.rejects(client({ formatHttpError: () => "Ошибка сервера" })("/private"), { message: `Ошибка сервера · запрос ${identity}`, requestId: identity });
+  globalThis.fetch = async () => Response.json({ detail: "Failure" }, { status: 409, headers: { "X-Request-ID": "untrusted text" } });
+  await assert.rejects(client()("/private"), { message: "Failure" });
+});
+
 test("401 expires all clients of the same session and clears access to cached responses", async () => {
   const first = createApiClient("expired-session", {retryDelaysMs: []});
   const second = createApiClient("expired-session", {retryDelaysMs: []});

@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 import uuid
+import diagnostic_context as tracing
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,6 +100,9 @@ def atomic_json(path: Path, value: dict, *, canonical: bool = False) -> None:
 def persist_payload(data_dir: Path, identity: str, value: dict) -> tuple[Path, str]:
     """Caller holds admission lock. Secrets stay out of argv and public history."""
     identity = operation_id(identity)
+    target = value.get('profile_id')
+    if tracing.current.get() is not None and isinstance(target, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', target):
+        tracing.current.get()['target_profile_id'] = target
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()
     path = data_dir / "operation-inputs" / f"{identity}.json"
@@ -215,6 +219,9 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
             unit = f"vps-control-action-{time.time_ns()}"
             value = {"id": identity, "request_hash": request_hash, "unit": f"{unit}.service", "action": action,
                      "state": "queued", "progress": 0, "message": message, "started_at": timestamp(), "updated_at": timestamp(), "boot_id": boot_id()}
+            value.update(tracing.snapshot())
+            value.setdefault('trace_id', uuid.uuid4().hex)
+            tracing.operation(identity)
             try:
                 save(data_dir, action_file, value)
             except OSError:
@@ -228,6 +235,7 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
     try:
         result = launch(["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec",
                          f"--setenv=VPS_CONTROL_OPERATION_ID={identity}", f"--setenv=VPS_CONTROL_OPERATION_UNIT={unit}.service",
+                         *[f'--setenv=VPS_CONTROL_{key.upper()}={value[key]}' for key in ('trace_id', 'parent_request_id') if tracing.valid(value.get(key))],
                          *properties, *command], capture_output=True, text=True, timeout=10, check=False)
     except subprocess.TimeoutExpired:
         value.update(state="unknown", message="Подтверждение запуска не получено; проверяем состояние без повторного запуска")

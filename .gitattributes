@@ -3,4 +3,5 @@
 # Unix executables must remain directly runnable when a release is prepared
 # or individual files are copied from a Windows checkout.
 *.sh text eol=lf
+protocol-images/ai-agent/vendor/** text eol=lf whitespace=-blank-at-eof
 scripts/vpn-monitor-sample text eol=lf

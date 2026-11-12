@@ -13,6 +13,7 @@ import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-fi
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
 import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId, type ProviderUsage } from "./assistant-state";
+import { ProviderMonitor, initialProviderConnection, providerStatusText, type ProviderConnection } from "./provider-connection";
 import { NoderaSettings, SettingsDialog, panels, type Panel } from "./nodera-settings";
 
 type Client = ReturnType<typeof createApiClient>;
@@ -68,17 +69,22 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   const modelButton = useRef<HTMLButtonElement>(null);
   const modelMenuPanel = useRef<HTMLDivElement>(null);
   const fileRead = useRef(false);
-  const catalogVersion = useRef(0);
+  const apiMonitor = useRef<ProviderMonitor | null>(null);
+  const [apiConnection, setApiConnection] = useState<ProviderConnection>(initialProviderConnection);
+  const [chatConnection, setChatConnection] = useState<"unknown" | "responding" | "failed">("unknown");
   const [turns, setTurns] = useState<Turn[]>([]);
   const nextTurn = useRef(0);
   const [checks, setChecks] = useState<Partial<Record<ModuleId, { ok: boolean; text: string; revision: string; actor: string; username?: string }>>>({});
   const version = useRef(0);
   const client = useRef(request);
   const writing = useRef(false);
+  const chatRequestId = useRef("");
+  const [chatQueue, setChatQueue] = useState<{state: string; position: number; waiting?: number} | null>(null);
   const dirtyRef = useRef(false);
   const dirty = changed(draft, status?.settings);
-  const catalogRevision = status?.settings.model_mode === "catalog" && status.settings.api_key_configured ? status.settings.revision : "";
+  const catalogRevision = status?.settings.api_key_configured ? status.settings.revision : "";
   const savedProviderUrl = status?.settings.provider_url ?? "";
+  const savedProviderId = status?.settings.active_provider ?? null;
   const cacheEnabled = status?.settings.memory_enabled ?? true;
   const agentInstalled = status?.modules.some(item => item.id === 'ai-agent' && item.installed) === true;
   useEffect(() => { client.current = request; }, [request]);
@@ -98,24 +104,43 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     }
   }, [request]);
   useEffect(() => { void load(); }, [load, refreshKey]);
-  const loadModels = useCallback(async (provider_url: string, api_key: string | null) => {
-    const generation = ++catalogVersion.current;
-    setCatalogLoading(true); setCatalogError("");
-    try {
-      const result = await request<{ models: string[] }>("/assistant/models", { method: "POST", body: JSON.stringify({ provider_url, api_key }) });
-      if (generation !== catalogVersion.current || client.current !== request) return;
-      setCatalog(result.models);
-    } catch (cause) {
-      if (generation === catalogVersion.current && client.current === request) {
-        setCatalog([]);
-        setCatalogError(cause instanceof Error ? cause.message : "Каталог моделей недоступен");
-      }
-    } finally { if (generation === catalogVersion.current) setCatalogLoading(false); }
-  }, [request]);
   useEffect(() => {
-    if (catalogRevision && savedProviderUrl && !dirtyRef.current) void loadModels(savedProviderUrl, null);
-  }, [catalogRevision, savedProviderUrl, loadModels]);
-  useEffect(() => () => { catalogVersion.current += 1; }, []);
+    if (working !== "chat") return;
+    let current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const observe = async () => {
+      try {
+        const value = await request<{state: string; position: number; waiting: number}>(`/assistant/queue?request_id=${chatRequestId.current}${actor ? `&telegram_id=${actor}` : ""}`, {cache: "no-store"});
+        if (current) setChatQueue(value);
+      } catch { /* The chat result remains authoritative; never repeat its POST. */ }
+      if (current && typeof window !== "undefined") timer = setTimeout(() => void observe(), 1500);
+    };
+    void observe();
+    return () => { current = false; clearTimeout(timer); };
+  }, [working, request, actor]);
+  const loadModels = useCallback(async () => { await apiMonitor.current?.refresh(); }, []);
+  useEffect(() => {
+    apiMonitor.current?.stop();
+    setCatalog([]); setCatalogError(""); setCatalogLoading(false); setApiConnection(initialProviderConnection); setChatConnection("unknown");
+    if (!catalogRevision || !savedProviderUrl) { apiMonitor.current = null; return; }
+    const monitor = new ProviderMonitor({
+      automatic: typeof window !== "undefined",
+      canPoll: () => !writing.current && (typeof document === "undefined" || document.visibilityState !== "hidden"),
+      fetch: signal => request<{ models: string[] }>("/assistant/models", { method: "POST", signal,
+        body: JSON.stringify({ provider_url: savedProviderUrl, provider_id: savedProviderId, api_key: null }) }),
+      publish: value => { setApiConnection(value); setCatalog(value.models); setCatalogError(value.error); setCatalogLoading(value.state === "checking"); },
+    });
+    apiMonitor.current = monitor;
+    void monitor.refresh();
+    const resume = () => monitor.resume();
+    if (typeof window !== "undefined") { window.addEventListener("online", resume); window.addEventListener("focus", resume); }
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", resume);
+    return () => {
+      monitor.stop();
+      if (typeof window !== "undefined") { window.removeEventListener("online", resume); window.removeEventListener("focus", resume); }
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", resume);
+    };
+  }, [catalogRevision, savedProviderUrl, savedProviderId, request]);
   useEffect(() => { if (modelMenu) modelMenuPanel.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus(); }, [modelMenu]);
   const loadConversation = useCallback(async (identity: string) => {
     if (writing.current || fileRead.current) return;
@@ -160,16 +185,16 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
   function patch(update: Partial<Draft>) {
     dirtyRef.current = true;
     if ("provider_url" in update || "api_key" in update) {
-      catalogVersion.current += 1; setCatalog([]); setCatalogLoading(false); setCatalogError(""); setModel("");
+      setModel("");
     }
     if ("bot_token" in update) setChecks(current => ({ ...current, "nodera-bot": undefined }));
     setDraft(current => current ? { ...current, ...update } : current);
   }
   function discardSettings() {
     if (!status) return;
-    catalogVersion.current += 1; setCatalog([]); setCatalogLoading(false); setCatalogError("");
+    setModel("");
     setDraft(makeDraft(status.settings)); setChecks({}); dirtyRef.current = false;
-    if (status.settings.model_mode === "catalog") void loadModels(status.settings.provider_url, null);
+    if (status.settings.model_mode === "catalog") void loadModels();
   }
   async function save(value = draft, botOnly = false) {
     if (!value || writing.current) return;
@@ -237,6 +262,9 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     const id = ++nextTurn.current;
     const question = prompt.trim();
     const attached = files;
+    const connection = apiMonitor.current;
+    chatRequestId.current = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+    setChatQueue({state: "submitting", position: 0});
     interacted.current = true;
     const history = status?.chat_attachments ? chatHistory(turns, attached) : [];
     writing.current = true; setWorking("chat"); setError(""); setPrompt(""); setFiles([]); setModelMenu(false);
@@ -244,15 +272,17 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     try {
       const result = await request<{ result: { answer: string; tools_used: string[] }; conversation_id?: string; cache_error?: string; provider_usage?: Record<string, ProviderUsage>; pending_action?: PendingAction }>("/assistant/chat", {
         method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null, model: selectedModel,
+          request_id: chatRequestId.current,
           attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history, conversation_id: conversationId }),
       });
       if (client.current === request) {
+        if (apiMonitor.current === connection) setChatConnection("responding");
         setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action } : turn));
         setConversationId(result.conversation_id ?? null); rememberConversation(actor, result.conversation_id ?? null); setMemoryError(result.cache_error ?? '');
         if (result.provider_usage) setStatus(current => current ? { ...current, provider_usage: result.provider_usage } : current);
         if (cacheEnabled) void loadConversations();
       }
-    } catch (cause) { setTurns(current => current.map(turn => turn.id === id ? { ...turn, error: cause instanceof Error ? cause.message : "AI не ответил" } : turn)); }
+    } catch (cause) { if (apiMonitor.current === connection) { setChatConnection("failed"); void loadModels(); } setTurns(current => current.map(turn => turn.id === id ? { ...turn, error: cause instanceof Error ? cause.message : "AI не ответил" } : turn)); }
     finally { writing.current = false; setWorking(""); }
   }
   async function confirmService(turn: Turn) {
@@ -333,6 +363,10 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!blocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
       <div className="mcpChatHead">
         <div className="noderaChatScope"><strong>Nodera</strong><small title={actorName}>{actorName}</small></div>
+        <div className="mcpApiStatus" role="status" aria-live="polite">
+          <span title={apiConnection.error || (apiConnection.checkedAt ? new Date(apiConnection.checkedAt).toLocaleTimeString("ru-RU") : "")}>{providerStatusText(apiConnection)}</span>
+          <small>{chatConnection === "responding" ? "Последний ответ AI получен" : chatConnection === "failed" ? "Ошибка последнего запроса к AI" : "Ответ AI ещё не проверен"}</small>
+        </div>
         {!selectedComponent?.configured && <button type="button" className="ghostButton" onClick={() => selectPanel("settings")}>Подключить AI</button>}
         <div className="mcpChatActions">
           <button type="button" className="mcpIconButton" aria-label="Новый чат" title="Новый чат" disabled={blocked || !turns.length} onClick={newChat}><ChatIcon name="new"/></button>
@@ -342,8 +376,10 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
         </div>
       </div>
       {memoryError && <p className="mcpNotice error" role="alert">{memoryError}</p>}
-      {catalogError && status.settings.model_mode === "catalog" && <p className="mcpNotice error" role="alert">{catalogError}</p>}
+      {catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}
+      {apiConnection.state === "error" && <p className="mcpNotice" role="status">Проверка повторяется автоматически. Сохранённая модель и последний каталог доступны. <button type="button" className="ghostButton" onClick={() => void loadModels()}>Проверить API сейчас</button></p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
+      {working === "chat" && <p className="mcpNotice" role="status">{chatQueue?.state === "queued" ? `Запрос в очереди AI · позиция ${chatQueue.position}` : chatQueue?.state === "running" ? "AI выполняет запрос" : "Запрос принят, ожидаем ответ AI…"}</p>}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
         {!turns.length && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
         {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small><AssistantAnswer text={turn.error || turn.answer || "Обрабатывает запрос…"}/>{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.pending_action && <div className="mcpServiceConfirmation"><span>{turn.pending_action.action} · {turn.pending_action.service}</span>{turn.pending_action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(turn.pending_action.changes, null, 2)}</pre></details>}<button type="button" className="ghostButton" disabled={blocked} onClick={() => void confirmService(turn)}>Подтвердить действие</button></div>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
@@ -360,7 +396,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
               if (options.length && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
                 event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : event.key === 'ArrowDown' ? (index + 1) % options.length : (index - 1 + options.length) % options.length; options[next].focus();
               }
-            }}><header><span>Модели · {availableModels.length}</span><button type="button" className="mcpIconButton" aria-label="Обновить модели" disabled={catalogLoading} onClick={() => void loadModels(savedProviderUrl, null)}><ChatIcon name="refresh"/></button></header><div role="listbox" aria-label="Доступные модели">{availableModels.map(id => <button type="button" role="option" aria-selected={id === selectedModel} key={id} onClick={() => { setModel(id); setModelMenu(false); modelButton.current?.focus(); }}><span>{id}</span>{id === selectedModel && <ChatIcon name="check"/>}</button>)}{!availableModels.length && <p>{catalogLoading ? 'Загрузка…' : 'Каталог пуст'}</p>}</div></div></>}
+            }}><header><span>Модели · {availableModels.length}</span><button type="button" className="mcpIconButton" aria-label="Обновить модели" disabled={catalogLoading} onClick={() => void loadModels()}><ChatIcon name="refresh"/></button></header><div role="listbox" aria-label="Доступные модели">{availableModels.map(id => <button type="button" role="option" aria-selected={id === selectedModel} key={id} onClick={() => { setModel(id); setModelMenu(false); modelButton.current?.focus(); }}><span>{id}</span>{id === selectedModel && <ChatIcon name="check"/>}</button>)}{!availableModels.length && <p>{catalogLoading ? 'Загрузка…' : 'Каталог пуст'}</p>}</div></div></>}
           </div>
           <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title="Отправить" disabled={blocked || dirty || !(prompt.trim() || files.length) || !selectedModel || !agentReady} onClick={() => void send()}>{working === "chat" || readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
       </div>
@@ -407,7 +443,7 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
         </div>
       </section>
       {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
-      <NoderaSettings panel={panel} request={request} status={status} draft={draft} patch={patch}
+      <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
         blocked={blocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
         working={working}/>
     </>}

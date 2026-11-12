@@ -71,6 +71,16 @@ def install(api, component, *, start_bot=True):
     checked([str(python), '-m', 'pip', '--disable-pip-version-check', 'install', '-r', str(requirements)], timeout=600)
     checked([str(python), '-m', 'pip', 'check'])
     script_name = 'runner.py' if component == 'ai-agent' else 'bot.py'
+    if component == 'ai-agent':
+        checked([str(python), str(image / 'telegram_guarded.py')])
+        shutil.copyfile(image / 'telegram_guarded.py', root / 'telegram_guarded.py')
+        (root / 'telegram_guarded.py').chmod(0o644)
+        shutil.copyfile(image / 'telegram_catalog.json', root / 'telegram_catalog.json')
+        (root / 'telegram_catalog.json').chmod(0o644)
+        shutil.copytree(image / 'vendor' / 'tg-mcp-guarded', root / 'vendor' / 'tg-mcp-guarded', dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
+        for asset in (root / 'vendor').rglob('*'):
+            asset.chmod(0o755 if asset.is_dir() else 0o644)
     shutil.copyfile(image / script_name, root / script_name)
     (root / script_name).chmod(0o644)
     checked([str(python), str(root / script_name), '--self-check'])

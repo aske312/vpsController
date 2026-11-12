@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+import tempfile
+import os
 from unittest.mock import AsyncMock, patch
 
 from tests.api.support import load_module
@@ -8,6 +10,63 @@ bot = load_module('assistant_dialog_bot', 'protocol-images/nodera-bot/bot.py')
 
 
 class BotDialogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_polling_loop_delivers_second_user_before_first_ai_answer_finishes(self):
+        fast, slow, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        polls = 0
+        async def transport(settings, method, **payload):
+            nonlocal polls
+            if method == 'getWebhookInfo': return {}
+            if method == 'getUpdates':
+                polls += 1
+                if polls == 1:
+                    return [{'update_id': actor, 'message': {'chat': {'type':'private'}, 'from': {'id':actor}, 'text':'fixture'}} for actor in (11,22)]
+                await asyncio.wait_for(fast.wait(), 1)
+                self.assertFalse(slow.is_set())
+                release.set()
+                await asyncio.wait_for(slow.wait(), 1)
+                raise asyncio.CancelledError()
+            if method == 'sendMessage':
+                (slow if payload['chat_id'] == 11 else fast).set()
+            return True
+        async def answer(settings, sender, prompt, access):
+            if sender['id'] == 11: await release.wait()
+            return 'fixture reply'
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY':folder}), \
+             patch.object(bot, 'bot_api', side_effect=transport), patch.object(bot, 'identify', new=AsyncMock(return_value='chat')), \
+             patch.object(bot, 'command_menu', new=AsyncMock()), patch.object(bot, 'reply', side_effect=answer):
+            with self.assertRaises(asyncio.CancelledError):
+                await bot.bot({'modules':{'nodera-bot':True}, 'bot_token':'fixture', 'control_token':'fixture'})
+        self.assertTrue(fast.is_set() and slow.is_set())
+    async def test_dispatcher_keeps_other_users_responsive_and_preserves_each_dialog_order(self):
+        dispatcher = bot.MessageDispatcher(capacity=4, per_actor=2)
+        release = asyncio.Event(); first = asyncio.Event(); other = asyncio.Event(); order = []
+        async def slow():
+            order.append('A1-start'); first.set(); await release.wait(); order.append('A1-end')
+        async def next_a(): order.append('A2')
+        async def user_b(): order.append('B'); other.set()
+        self.assertTrue(dispatcher.submit(11, slow))
+        await first.wait()
+        self.assertTrue(dispatcher.submit(11, next_a))
+        self.assertFalse(dispatcher.submit(11, next_a))
+        self.assertTrue(dispatcher.submit(22, user_b))
+        await asyncio.wait_for(other.wait(), 1)
+        self.assertNotIn('A2', order)
+        release.set(); await asyncio.gather(*list(dispatcher.tasks))
+        self.assertLess(order.index('B'), order.index('A1-end'))
+        self.assertLess(order.index('A1-end'), order.index('A2'))
+        await dispatcher.close()
+        self.assertFalse(dispatcher.tasks or dispatcher.pending or dispatcher.locks)
+
+    async def test_shutdown_cancels_active_and_queued_messages_without_replaying_them(self):
+        dispatcher = bot.MessageDispatcher()
+        started = asyncio.Event()
+        async def slow(): started.set(); await asyncio.Event().wait()
+        queued = AsyncMock()
+        dispatcher.submit(11, slow); dispatcher.submit(11, queued)
+        await started.wait(); await dispatcher.close()
+        queued.assert_not_awaited()
+        self.assertFalse(dispatcher.pending)
+
     def assert_typing_stopped(self):
         self.assertFalse(any(task.get_name().startswith('nodera-typing-') for task in asyncio.all_tasks()))
 

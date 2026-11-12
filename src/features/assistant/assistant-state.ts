@@ -1,5 +1,5 @@
-export type ModuleId = "telegram-mcp" | "vps-controller-mcp" | "nodera-bot" | "ai-agent";
-export type McpId = "telegram-mcp" | "vps-controller-mcp";
+export type ModuleId = "telegram-mcp" | "vps-controller-mcp" | "mihomo-mcp" | "nodera-bot" | "ai-agent";
+export type McpId = "telegram-mcp" | "vps-controller-mcp" | "mihomo-mcp";
 export type AppModuleId = "nodera-bot" | "ai-agent";
 export const roleNames = { owner: "Владелец", administrator: "Администратор", moderator: "Модератор", user: "Пользователь", guest: "Гость" } as const;
 export type Role = keyof typeof roleNames;
@@ -57,6 +57,7 @@ export function accountPermissions(settings: Pick<Settings, "role_permissions">,
   return new Set([...result].filter(key => isMihomo(key) ? products.includes("mihomo") : products.includes("assistant")));
 }
 export type Account = {
+  telegram_tools?: string[] | null; telegram_action_targets?: string[];
   products?: Product[] | null; role?: Role | null; permission_overrides?: Partial<Record<Permission, boolean>>;
   telegram_id: number; name: string; bot_access: boolean; telegram_access: boolean; vps_access: boolean;
   bot_chat_access?: boolean; address_as?: string; mihomo_profile_id?: string | null; address_gender?: "auto" | "neutral" | "male" | "female";
@@ -69,6 +70,7 @@ export type Provider = {
 export type ProviderDraft = Provider & { api_key: string | null };
 export type ProviderUsage = { requests: number; prompt_tokens: number; completion_tokens: number; reported_requests: number };
 export type Settings = {
+  telegram_tool_catalog?: {name: string; title: string; profile: "read" | "actions"}[];
   role_policy_version?: 2; role_permissions?: Partial<Record<Role, Permission[]>>;
   revision: string; modules: Record<AppModuleId, boolean>; mcp: Record<McpId, boolean>; provider_url: string; model: string;
   model_mode?: "single" | "catalog";
@@ -81,7 +83,7 @@ export type Settings = {
 };
 export type Draft = Omit<Settings, "revision" | "accounts" | "providers"> & {
   expected_revision: string; api_key: string | null; bot_token: string | null; telegram_api_hash: string | null;
-  accounts: (Account & { session: string | null; excluded_dialogs_text: string })[];
+  accounts: (Account & { session: string | null; excluded_dialogs_text: string; telegram_action_targets_text?: string })[];
   providers?: ProviderDraft[];
 };
 export type Observation = { active?: boolean; unit_present?: boolean | null; state?: string; runtime?: { state: string; reason?: string } };
@@ -96,13 +98,17 @@ export type McpStatus = {
   settings: Settings; runtime_installed: boolean; bot: Observation; agent?: Observation; legacy_bot: Observation;
   modules: { id: ModuleId; name: string; enabled: boolean; configured: boolean; installed: boolean; management: {state: string; retained?: boolean}; execution: "service" | "on-demand" }[];
   mcp_modules: { id: McpId; name: string; description?: string; enabled: boolean; configured: boolean; installed?: boolean; execution: "on-demand" }[];
-  tools: Record<"telegram-mcp" | "vps-controller-mcp", string[]>;
+  tools: Record<McpId, string[]>;
 };
 export function makeDraft(settings: Settings): Draft {
   const { revision, accounts, providers, ...rest } = settings;
-  return { ...rest, assistant_style: settings.assistant_style ?? 'balanced', assistant_character: settings.assistant_character ?? '', assistant_instructions: settings.assistant_instructions ?? '', personalization_enabled: settings.personalization_enabled ?? true, web_domains: settings.web_domains ?? [], web_enabled: settings.web_enabled ?? true, memory_enabled: settings.memory_enabled ?? true, memory_days: settings.memory_days ?? 30, mcp_installed: settings.mcp_installed ?? Object.keys(settings.mcp) as McpId[], model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
+  const legacy = !Object.hasOwn(settings.mcp, "mihomo-mcp");
+  const mcp = { ...settings.mcp, "mihomo-mcp": settings.mcp["mihomo-mcp"] ?? settings.mcp["vps-controller-mcp"] };
+  const installed = settings.mcp_installed ?? Object.keys(mcp) as McpId[];
+  const mcpInstalled = legacy && installed.includes("vps-controller-mcp") ? [...new Set([...installed, "mihomo-mcp" as const])] : installed;
+  return { ...rest, mcp, assistant_style: settings.assistant_style ?? 'balanced', assistant_character: settings.assistant_character ?? '', assistant_instructions: settings.assistant_instructions ?? '', personalization_enabled: settings.personalization_enabled ?? true, web_domains: settings.web_domains ?? [], web_enabled: settings.web_enabled ?? true, memory_enabled: settings.memory_enabled ?? true, memory_days: settings.memory_days ?? 30, mcp_installed: mcpInstalled, model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
     providers: providers?.map(provider => ({ ...provider, api_key: null })),
-    accounts: accounts.map(account => ({ ...account, session: null, excluded_dialogs_text: account.excluded_dialogs.join(", ") })) };
+    accounts: accounts.map(account => ({ ...account, session: null, excluded_dialogs_text: account.excluded_dialogs.join(", "), telegram_action_targets_text: (account.telegram_action_targets ?? []).join(", ") })) };
 }
 export function settingsPayload(draft: Draft) {
   return {
@@ -117,11 +123,15 @@ export function settingsPayload(draft: Draft) {
       mihomo_profile_id: account.mihomo_profile_id ?? null, address_gender: account.address_gender ?? "auto",
       telegram_access: accountPermissions(draft, account).has("telegram_read"), vps_access: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read"].some(key => accountPermissions(draft, account).has(key as Permission)), session: account.session,
       excluded_dialogs: account.excluded_dialogs_text.split(",").map(value => value.trim()).filter(Boolean).map(Number),
+      telegram_tools: account.telegram_tools,
+      telegram_action_targets: account.telegram_action_targets_text === undefined ? account.telegram_action_targets ?? [] : account.telegram_action_targets_text.split(",").map(value => value.trim()).filter(Boolean),
     })),
   };
 }
+export const defaultTelegramTools = ["tg_auth_status", "tg_get_my_dialogs", "tg_get_messages", "tg_search_messages", "tg_get_stats"];
+export function enabledTelegramTools(account: Pick<Account, "telegram_tools">) { return account.telegram_tools ?? defaultTelegramTools; }
 export function chatModels(settings: Settings, catalog: string[]): string[] {
-  return [...new Set((settings.model_mode === "catalog" ? catalog : [settings.model]).filter(Boolean))];
+  return [...new Set((settings.model_mode === "catalog" ? [settings.model, ...catalog] : [settings.model]).filter(Boolean))];
 }
 export function changed(draft: Draft | null, settings: Settings | undefined) {
   return Boolean(draft && settings && JSON.stringify(settingsPayload(draft)) !== JSON.stringify(settingsPayload(makeDraft(settings))));

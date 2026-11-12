@@ -230,7 +230,7 @@ def execute_direct_vless(plan: ProbePlan, binary: str, origin_address: str, *, t
                                         "fingerprint": plan.fingerprint, "consumer_id": plan.consumer_id,
                                         "origin_address": witness.address}
                             break
-                        except ConnectionRefusedError:
+                        except (ConnectionRefusedError, TimeoutError):
                             time.sleep(min(0.05, max(0, deadline - time.monotonic())))
                         except OSError:
                             break

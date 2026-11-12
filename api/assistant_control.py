@@ -24,15 +24,28 @@ import application_operation as operations
 import assistant_provider
 import assistant_memory
 import assistant_roles as roles
+import assistant_telegram
 import socket
 from component_registry import ComponentRegistry, RegistryError
 
 MODULES = ('nodera-bot', 'ai-agent')
-MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp')
-ACCOUNT_OPTIONS = ('address_as', 'bot_chat_access', 'mihomo_profile_id', 'address_gender', 'role', 'permission_overrides', 'products')
+MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp', 'mihomo-mcp')
+LEGACY_MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp')
+MIHOMO_TOOLS = {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_user', 'vps_compare'}
+
+
+def tool_module(name):
+    if name == 'telegram_prepare': return 'telegram-mcp'
+    return 'mihomo-mcp' if name in MIHOMO_TOOLS else 'vps-controller-mcp'
+
+
+def mcp_transport_token(root, module, actor):
+    return hmac.new(root.encode(), f'nodera-mcp-v1:{module}:{actor}'.encode(), hashlib.sha256).hexdigest()
+ACCOUNT_OPTIONS = ('address_as', 'bot_chat_access', 'mihomo_profile_id', 'address_gender', 'role', 'permission_overrides', 'products', 'telegram_tools', 'telegram_action_targets')
 BOT_UNIT = 'vps-control-nodera-bot.service'
 AGENT_UNIT = 'vps-control-ai-agent.service'
 _runtime_slots = threading.BoundedSemaphore(2)
+_catalog_slots = threading.BoundedSemaphore(1)
 
 
 class Account(BaseModel):
@@ -50,7 +63,23 @@ class Account(BaseModel):
     telegram_access: StrictBool = False
     vps_access: StrictBool = False
     excluded_dialogs: list[int] = Field(default_factory=list, max_length=100)
+    telegram_tools: list[str] | None = Field(default=None, max_length=54)
+    telegram_action_targets: list[str] = Field(default_factory=list, max_length=100)
     session: str | None = Field(default=None, max_length=4096)
+
+    @field_validator('telegram_tools')
+    @classmethod
+    def valid_telegram_tools(cls, value):
+        if value is not None and (len(value) != len(set(value)) or set(value) - assistant_telegram.TOOLS.keys()):
+            raise ValueError('Неизвестный или повторяющийся инструмент Telegram')
+        return value
+
+    @field_validator('telegram_action_targets')
+    @classmethod
+    def valid_telegram_targets(cls, value):
+        if any(not item.strip() or len(item) > 160 or any(ord(char) < 32 for char in item) or ',' in item for item in value):
+            raise ValueError('Укажите ID, username, телефон или название новой группы без управляющих символов')
+        return list(dict.fromkeys(item.strip() for item in value))
 
     @model_validator(mode='after')
     def role_bounds(self):
@@ -99,7 +128,7 @@ class Settings(BaseModel):
     component: Literal['ai-agent', 'nodera-bot', 'nodera']
     modules: dict[str, StrictBool]
     mcp: dict[str, StrictBool]
-    mcp_installed: list[Literal['telegram-mcp', 'vps-controller-mcp']] | None = None
+    mcp_installed: list[Literal['telegram-mcp', 'vps-controller-mcp', 'mihomo-mcp']] | None = None
     bot_token: str | None = Field(default=None, max_length=256)
     provider_url: str = Field(default='', max_length=512)
     model: str = Field(default='', max_length=128)
@@ -153,8 +182,8 @@ class Settings(BaseModel):
     @field_validator('mcp')
     @classmethod
     def mcp_names(cls, value):
-        if set(value) != set(MCP_MODULES):
-            raise ValueError('Укажите состояние двух MCP-подключений агента')
+        if set(value) not in (set(MCP_MODULES), set(LEGACY_MCP_MODULES)):
+            raise ValueError('Укажите состояние MCP-подключений агента')
         return value
 
     @field_validator('bot_token')
@@ -236,6 +265,7 @@ class ChatMessage(BaseModel):
 class Chat(BaseModel):
     model_config = {'extra': 'forbid'}
     prompt: str = Field(default='', max_length=12000)
+    request_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
     history: list[ChatMessage] = Field(default_factory=list, max_length=40)
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
@@ -288,7 +318,7 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_capabilities', 'mihomo_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access']
+    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare']
     service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
@@ -352,6 +382,15 @@ def _read(api):
                 item.update(account)
             assembled.update(settings)
         extensions = operations.read(directory(api) / 'ai-agent' / (revision + '.nodera.json'))
+        if 'mcp_scopes' in extensions:
+            if not isinstance(extensions['mcp_scopes'], dict) or set(extensions['mcp_scopes']) != {'mihomo-mcp'}:
+                raise operations.OperationConflict('Настройки контуров MCP повреждены')
+            assembled['mcp'] = {**assembled['mcp'], **extensions['mcp_scopes']}
+            installed = extensions.get('mcp_scope_installed', [])
+            if not isinstance(installed, list) or any(key != 'mihomo-mcp' for key in installed):
+                raise operations.OperationConflict('Настройки контуров MCP повреждены')
+            prior_installed = assembled.get('mcp_installed')
+            assembled['mcp_installed'] = list(dict.fromkeys((list(LEGACY_MCP_MODULES) if prior_installed is None else prior_installed) + installed))
         for key in ('providers', 'active_provider', 'role_permissions', 'role_policy_version'):
             if key in extensions:
                 assembled[key] = extensions[key]
@@ -369,6 +408,10 @@ def _read(api):
                 'mcp': {key: False for key in MCP_MODULES}, 'mcp_installed': [],
                 'provider_url': '', 'model': '', 'accounts': [], 'telegram_api_id': None}
     roles.migrate_settings(value)
+    if isinstance(value.get('mcp'), dict) and set(value['mcp']) == set(LEGACY_MCP_MODULES):
+        value['mcp'] = {**value['mcp'], 'mihomo-mcp': value['mcp']['vps-controller-mcp']}
+        if value.get('mcp_installed') is not None and 'vps-controller-mcp' in value['mcp_installed']:
+            value['mcp_installed'] = list(dict.fromkeys([*value['mcp_installed'], 'mihomo-mcp']))
     try:
         Settings.model_validate({key: item for key, item in value.items() if key not in ('revision', 'control_token')} | {'expected_revision': value['revision'], 'component': 'ai-agent'})
     except (ValueError, KeyError):
@@ -397,15 +440,17 @@ def store(api, value):
     revision = value['revision']
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
-    ai['mcp_installed'] = list(dict.fromkeys(value.get('mcp_installed', list(MCP_MODULES)) + [key for key, enabled in value['mcp'].items() if enabled]))
+    ai['mcp_installed'] = [key for key in LEGACY_MCP_MODULES if key in value.get('mcp_installed', LEGACY_MCP_MODULES) or value['mcp'].get(key)]
     ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
-    ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp=value['mcp'],
+    ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp={key: value['mcp'][key] for key in LEGACY_MCP_MODULES},
               accounts=[{key: item for key, item in a.items() if key not in ('bot_access', *ACCOUNT_OPTIONS)} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
            'accounts': [{key: a.get(key, False if key == 'bot_access' else '') for key in ('telegram_id', 'name', 'bot_access')}
                         for a in value['accounts']]}
     # Keep the active connection and legacy ACL readable after an application rollback.
     extensions = {key: value[key] for key in ('providers', 'active_provider', 'role_permissions', 'role_policy_version') if key in value}
+    extensions['mcp_scopes'] = {'mihomo-mcp': value['mcp'].get('mihomo-mcp', value['mcp']['vps-controller-mcp'])}
+    extensions['mcp_scope_installed'] = ['mihomo-mcp'] if 'mihomo-mcp' in value.get('mcp_installed', []) or extensions['mcp_scopes']['mihomo-mcp'] else []
     extensions['accounts'] = {str(account['telegram_id']): {key: account[key] for key in ACCOUNT_OPTIONS if key in account}
                               for account in value['accounts']}
     for component, settings in (('ai-agent', ai), ('nodera-bot', bot)):
@@ -450,6 +495,7 @@ def public(value):
     result['providers'] = [{key: item for key, item in provider.items() if key != 'api_key'} |
                            {'api_key_configured': bool(provider.get('api_key'))} for provider in providers(value)]
     result['accounts'] = [roles.migrated(value, account) for account in result['accounts']]
+    result['telegram_tool_catalog'] = assistant_telegram.CATALOG
     for account in result['accounts']:
         grants = roles.account_grants(value, account)
         account['products'] = sorted(roles.products(account))
@@ -569,19 +615,22 @@ def status(api):
             'chat_persona': agent_version >= (1, 2, 0),
             'web_tools': agent_version >= (1, 7, 0),
             'context_tools': agent_version >= (1, 9, 0),
-            'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key),
+            'mcp_modules': [{'id': key, 'name': name, 'enabled': value['mcp'][key], 'configured': ready(value, key) and (key != 'mihomo-mcp' or agent_version >= (1, 15, 0)),
                              'installed': key in value['mcp_installed'],
-                             'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'mcp vps'))],
+                             'execution': 'on-demand'} for key, name in zip(MCP_MODULES, ('Telegram MCP', 'VPS Controller', 'Mihomo'))],
             'bot': observations['nodera-bot'], 'agent': observations['ai-agent'],
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
             'tools': {'web': (['web_search', 'web_read'] + (['web_research'] if agent_version >= (1, 9, 0) else [])) if agent_version >= (1, 7, 0) else [],
-                      'personalization': ['context_read', 'context_remember', 'context_forget'] if agent_version >= (1, 9, 0) else [], 'telegram-mcp': ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search'],
+                      'personalization': ['context_read', 'context_remember', 'context_forget'] if agent_version >= (1, 9, 0) else [], 'telegram-mcp': (list(assistant_telegram.TOOLS) if agent_version >= (1, 17, 0) else ['tg_auth_status', 'tg_get_my_dialogs', 'tg_get_messages', 'tg_search_messages', 'tg_get_stats'] if agent_version >= (1, 16, 0) else ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search']),
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
                           (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else []) +
                           (['vps_service_action', 'vps_operation', 'vps_api'] if agent_version >= (1, 5, 0) else []) +
-                          (['vps_user', 'mihomo_capabilities', 'mihomo_api'] if agent_version >= (1, 6, 0) else []) +
-                          (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else []) + (['vps_access'] if agent_version >= (1, 11, 0) else [])}}
+                          (['vps_user', 'mihomo_capabilities', 'mihomo_api'] if (1, 6, 0) <= agent_version < (1, 15, 0) else []) +
+                          (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else []) + (['vps_access'] if agent_version >= (1, 11, 0) else []) +
+                          (['vps_observability'] if agent_version >= (1, 13, 0) else []) +
+                          (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []),
+                      'mihomo-mcp': ['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] if agent_version >= (1, 15, 0) else []}}
 
 
 def configure(api, payload):
@@ -614,6 +663,10 @@ def configure(api, payload):
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
+        if 'mihomo-mcp' not in submitted['mcp']:
+            submitted['mcp']['mihomo-mcp'] = old['mcp']['mihomo-mcp']
+            if submitted['mcp_installed'] is not None and 'mihomo-mcp' in old['mcp_installed']:
+                submitted['mcp_installed'] = list(dict.fromkeys([*submitted['mcp_installed'], 'mihomo-mcp']))
         if 'role_permissions' not in payload.model_fields_set: submitted['role_permissions'] = old.get('role_permissions', {})
         for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
             if key not in payload.model_fields_set:
@@ -713,8 +766,8 @@ def model_catalog(api, payload):
         key = provider.get('api_key', '')
     if not key:
         raise HTTPException(422, 'Укажите API-ключ для загрузки каталога')
-    if not _runtime_slots.acquire(blocking=False):
-        raise HTTPException(429, 'Два запроса к модулям уже выполняются; дождитесь завершения')
+    if not _catalog_slots.acquire(blocking=False):
+        raise HTTPException(429, 'Проверка каталога API уже выполняется; повторите немного позже')
     try:
         result = {'models': assistant_provider.catalog(payload.provider_url, key)}
         if payload.include_quota:
@@ -729,10 +782,29 @@ def model_catalog(api, payload):
     except Exception:
         raise HTTPException(502, 'Не удалось загрузить каталог моделей. Проверьте адрес, ключ и доступность провайдера') from None
     finally:
-        _runtime_slots.release()
+        _catalog_slots.release()
 
 
 def chat_request(api, payload, actor='panel', channel='panel', *, settings=None):
+    import assistant_broker
+    initial = read(api) if settings is None else settings
+    if actor != 'panel': roles.require(initial, actor, 'chat')
+    provider = active_provider(initial) or 'default'
+    with assistant_broker.broker.admit(str(actor), provider, payload.request_id, len(payload.model_dump_json().encode())):
+        current = read(api)
+        if current['revision'] != initial['revision']:
+            raise HTTPException(409, 'Настройки AI изменились за время ожидания; отправьте запрос заново')
+        try:
+            return _chat_request(api, payload, actor, channel, settings=current if settings is None else settings)
+        except HTTPException as exc:
+            if isinstance(exc.detail, str) and 'AI-провайдер вернул HTTP 429' in exc.detail:
+                assistant_broker.broker.defer(provider, 30)
+            elif isinstance(exc.detail, str) and any(f'AI-провайдер вернул HTTP {code}' in exc.detail for code in (502, 503, 504)):
+                assistant_broker.broker.defer(provider, 10)
+            raise
+
+
+def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None):
     settings = read(api) if settings is None else settings
     if actor != 'panel': roles.require(settings, actor, 'chat')
     if actor != 'panel' and payload.model and payload.model != settings.get('model'):
@@ -764,11 +836,12 @@ def chat_request(api, payload, actor='panel', channel='panel', *, settings=None)
     body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
     import assistant_commands
-    if any(tool in output['result'].get('tools_used', []) for tool in ('vps_service_action', 'mihomo_api', 'vps_access')):
+    confirmation_tools = {'vps_service_action', 'mihomo_api', 'vps_access', 'vps_observability'} | {name for name, row in assistant_telegram.TOOLS.items() if row['profile'] == 'actions'}
+    if any(tool in confirmation_tools for tool in output['result'].get('tools_used', [])):
         pending = operations.read(assistant_commands.pending_path(api, actor))
         if pending and not pending.get('submitted') and pending.get('expires', 0) > time.time():
             output['pending_action'] = {key: pending[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
-            if pending.get('kind') in ('mihomo', 'roles'):
+            if pending.get('kind') in ('mihomo', 'roles', 'observability', 'telegram'):
                 import assistant_mihomo
                 output['pending_action']['changes'] = assistant_mihomo.sanitize(pending['body'])
     try:
@@ -835,6 +908,9 @@ def runtime_request(api, mode, body):
     value['personalization_enabled'] = value.get('personalization_enabled', True) and 'memory' in grants
     value['accounts'] = [{**row, 'effective_permissions': sorted(roles.account_grants(value, row)), 'bot_access': roles.allows(value, str(row['telegram_id']), 'subscriptions_admin'), 'bot_chat_access': roles.allows(value, str(row['telegram_id']), 'chat'), 'vps_access': bool(roles.account_grants(value, row) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), 'telegram_access': roles.allows(value, str(row['telegram_id']), 'telegram_read')} for row in value['accounts']]
     value['server_name'] = socket.gethostname()
+    value['telegram_state_dir'] = str(directory(api) / 'telegram-state')
+    import diagnostic_context
+    value['diagnostic_trace_headers'] = diagnostic_context.outgoing()
     import assistant_contacts
     value['interlocutor'] = assistant_contacts.interlocutor(api, value, str(body.get('actor', 'panel')))
     body = dict(body)
@@ -896,7 +972,7 @@ def runtime_request(api, mode, body):
     command = [str(python), str(runtime_directory(component) / ('runner.py' if component == 'ai-agent' else 'bot.py')), mode]
     # The worker never inherits panel passwords, cookies or unrelated service credentials.
     env = {key: os.environ[key] for key in ('PATH', 'LANG', 'SYSTEMROOT', 'SSL_CERT_FILE') if key in os.environ}
-    if not _runtime_slots.acquire(blocking=False):
+    if not _runtime_slots.acquire(timeout=10):
         raise HTTPException(429, 'Два запроса к модулям уже выполняются; дождитесь завершения')
     try:
         with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -929,18 +1005,33 @@ def runtime_request(api, mode, body):
     return output
 
 
-def authorize_control(api, authorization, actor):
+def authorize_control(api, authorization, actor, module=None):
     if not authorization or not re.fullmatch(r'Bearer [A-Za-z0-9_-]{32,128}', authorization):
         raise HTTPException(401, 'Нужен служебный токен MCP', headers={'WWW-Authenticate': 'Bearer'})
     value = read(api)
     expected = value.get('control_token', '')
+    if module is not None and expected:
+        expected = mcp_transport_token(expected, module, actor)
     if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
         raise HTTPException(401, 'Нужен служебный токен MCP', headers={'WWW-Authenticate': 'Bearer'})
-    if not value['mcp']['vps-controller-mcp']:
-        raise HTTPException(403, 'Модуль vpsController MCP выключен')
-    if actor != 'panel' and not (roles.effective(value, actor) & roles.VPS_PERMISSIONS):
-        raise HTTPException(403, 'Пользователю не разрешён контур vpsController')
+    if module not in (None, *MCP_MODULES):
+        raise HTTPException(403, 'Неизвестный контур MCP')
+    selected = [module] if module else ['vps-controller-mcp', 'mihomo-mcp']
+    enabled = [key for key in selected if value['mcp'].get(key)]
+    if not enabled:
+        raise HTTPException(403, 'Контур MCP выключен')
+    grants = roles.effective(value, actor)
+    if actor != 'panel' and not any(grants & (roles.MIHOMO if key == 'mihomo-mcp' else {'telegram_read'} if key == 'telegram-mcp' else roles.SERVER_PERMISSIONS) for key in enabled):
+        raise HTTPException(403, 'Пользователю не разрешён этот контур MCP')
     require_installed(api, 'ai-agent')
+
+
+def require_tool_module(api, name, module=None):
+    expected = tool_module(name)
+    if module is not None and module != expected:
+        raise HTTPException(403, 'Инструмент принадлежит другому контуру MCP')
+    if not read(api)['mcp'].get(expected):
+        raise HTTPException(403, 'Контур MCP этого инструмента выключен')
 
 
 def authorize_bot_transport(api, authorization):
@@ -971,12 +1062,38 @@ def require_bot_actor(value, actor, *, chat=False):
 def control_tool(api, name, arguments=None, actor='panel'):
     import assistant_commands
     arguments = arguments or {}
+    if name == 'telegram_prepare':
+        return assistant_telegram.prepare(api, actor, arguments.get('body', {}))
+    if name == 'mihomo_operation':
+        identity = arguments.get('operation_id', '')
+        if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity): raise HTTPException(422, 'Укажите ID операции Mihomo')
+        settings = read(api)
+        pending = operations.read(assistant_commands.pending_path(api, actor))
+        own = pending.get('kind') == 'mihomo' and pending.get('operation_id') == identity
+        if not own: roles.require(settings, actor, 'subscriptions_admin')
+        result = api.get_application_operation(identity, None)
+        if not str(result.get('action', '')).startswith('mihomo-'): raise HTTPException(403, 'Доступны только операции Mihomo')
+        return {key: result.get(key) for key in ('id', 'action', 'state', 'updated_at')}
+    if name == 'mihomo_compare':
+        import diagnostic_tools
+        result = diagnostic_tools.call(api, 'vps_compare', arguments, actor)
+        result['tool'] = 'mihomo_compare'
+        settings = read(api)
+        if not settings['mcp'].get('vps-controller-mcp'):
+            result['next_steps'] = [{'tool': 'mihomo_api', 'arguments': {'method': 'GET', 'path': '/profiles'}, 'reason': 'review_available_profiles'}]
+        return result
+    if name in ('vps_changes', 'vps_incident', 'vps_probe', 'vps_compare'):
+        import diagnostic_tools
+        return diagnostic_tools.call(api, name, arguments, actor)
+    if name == 'vps_observability':
+        import observability_control
+        return observability_control.call(api, arguments, actor)
     if name in ('vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'):
         import assistant_diagnostics
         return assistant_diagnostics.call(api, name, arguments, actor)
-    if name in ('vps_user', 'mihomo_capabilities', 'mihomo_api'):
+    if name in ('vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api'):
         import assistant_mihomo
-        if name == 'vps_user':
+        if name in ('vps_user', 'mihomo_user'):
             import assistant_contacts
             return assistant_contacts.interlocutor(api, read(api), actor)
         if name == 'mihomo_capabilities':

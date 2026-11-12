@@ -9,6 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import diagnostic_context as tracing
 
 from fastapi import HTTPException
 
@@ -49,6 +50,7 @@ def request(method, path, body=None, operation_id=None, *, timeout=35):
         raise HTTPException(503, 'Служебное подключение к Mihomo не настроено')
     credentials = (os.getenv('ADMIN_USER', 'admin') + ':' + password).encode()
     headers = {'Authorization': 'Basic ' + base64.b64encode(credentials).decode(), 'Content-Type': 'application/json'}
+    headers.update(tracing.outgoing())
     if operation_id:
         headers['X-Operation-ID'] = operation_id
     data = json.dumps(body).encode() if body is not None and method != 'GET' else None
@@ -60,10 +62,12 @@ def request(method, path, body=None, operation_id=None, *, timeout=35):
                 raise HTTPException(502, 'Ответ Mihomo слишком большой')
             return json.loads(raw) if 'json' in response.headers.get('Content-Type', '') else raw.decode('utf-8')
     except urllib.error.HTTPError as exc:
+        tracing.failure('mihomo_rejected')
         # Do not forward manager diagnostics, credentials or arbitrary response bodies.
         raise HTTPException(exc.code if exc.code in (404, 409, 422, 503) else 502,
                             'Mihomo отклонил запрос. Проверьте профиль, ревизию настроек и состояние операции.') from None
     except (OSError, ValueError):
+        tracing.failure('mihomo_unavailable')
         raise HTTPException(503, 'API Mihomo недоступен. Проверьте компонент и результат прежней операции перед повтором.') from None
 
 

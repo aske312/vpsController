@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changed, chatModels, makeDraft, moduleState, settingsPayload } from "../../src/features/assistant/assistant-state.ts";
+import { changed, chatModels, makeDraft, moduleState, settingsPayload, enabledTelegramTools } from "../../src/features/assistant/assistant-state.ts";
 
 const settings = {
   revision: "a".repeat(32), modules: { "ai-agent": true, "nodera-bot": false },
@@ -9,6 +9,18 @@ const settings = {
   accounts: [{ telegram_id: 11, name: "One", bot_access: true, telegram_access: true, vps_access: false,
     session_configured: true, excluded_dialogs: [-1001] }],
 };
+
+test("Telegram tools remain opt-in, explicit denial persists, and target editing survives save", () => {
+  const draft = makeDraft(settings);
+  assert.equal(enabledTelegramTools(draft.accounts[0]).length, 5);
+  draft.accounts[0].telegram_tools = [];
+  assert.deepEqual(enabledTelegramTools(draft.accounts[0]), []);
+  assert.deepEqual(settingsPayload(draft).accounts[0].telegram_tools, []);
+  draft.accounts[0].telegram_tools = ['tg_send_message', 'tg_get_contacts'];
+  draft.accounts[0].telegram_action_targets_text = '42, @example';
+  assert.deepEqual(settingsPayload(draft).accounts[0].telegram_action_targets, ['42', '@example']);
+  assert.deepEqual(settingsPayload(draft).accounts[0].telegram_tools, ['tg_send_message', 'tg_get_contacts']);
+});
 
 test("drafts preserve saved secrets without reading them back and detect actual changes", () => {
   const draft = makeDraft(settings);
@@ -24,11 +36,31 @@ test("drafts preserve saved secrets without reading them back and detect actual 
   assert.equal(settingsPayload(draft).api_key, "");
 });
 
+test("a saved default model remains usable when discovery is unavailable", () => {
+  assert.deepEqual(chatModels({...settings, model_mode: 'catalog'}, []), ['model']);
+  assert.deepEqual(chatModels({...settings, model_mode: 'catalog'}, ['other']), ['model', 'other']);
+});
+
 test('legacy settings remain single; catalog mode exposes the provider catalog without a configured model', () => {
   assert.equal(makeDraft(settings).model_mode, 'single');
   assert.equal(changed(makeDraft(settings), settings), false);
   assert.deepEqual(chatModels(settings, ['other-model']), ['model']);
   assert.deepEqual(chatModels({ ...settings, model: '', model_mode: 'catalog' }, ['other-model', 'model', 'model']), ['other-model', 'model']);
+});
+
+test('MCP migration preserves the old subscription access while explicit scopes toggle independently', () => {
+  const legacy = { ...settings, mcp: { 'telegram-mcp': false, 'vps-controller-mcp': true }, mcp_installed: ['vps-controller-mcp'] };
+  const migrated = makeDraft(legacy);
+  assert.equal(migrated.mcp['mihomo-mcp'], true);
+  assert.equal(migrated.mcp_installed.includes('mihomo-mcp'), true);
+  assert.equal(changed(migrated, legacy), false);
+  const split = { ...legacy, mcp: { ...legacy.mcp, 'mihomo-mcp': false } };
+  const draft = makeDraft(split);
+  assert.equal(draft.mcp['mihomo-mcp'], false);
+  draft.mcp['vps-controller-mcp'] = false;
+  assert.equal(settingsPayload(draft).mcp['mihomo-mcp'], false);
+  draft.mcp['mihomo-mcp'] = true;
+  assert.equal(settingsPayload(draft).mcp['vps-controller-mcp'], false);
 });
 
 test("configured credentials do not claim that the provider or an on-demand MCP worker is running", () => {

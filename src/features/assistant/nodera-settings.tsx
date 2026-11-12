@@ -2,6 +2,8 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
+import { enabledTelegramTools } from "./assistant-state";
+import { providerStatusText, type ProviderConnection } from "./provider-connection";
 import { accountProducts, productNames, type Product, fixedRoles, userPermissions, permissionGroups, accountPermissions, accountRole, permissionNames, roleDefaults, roleNames, type Role, type Permission, moduleState, type Draft, type McpId, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
 
 export const panels = [
@@ -15,6 +17,7 @@ type Check = { ok: boolean; text: string; revision: string; actor: string; usern
 type Quota = { unlimited: boolean; remaining: number; account_remaining?: number };
 type BotContact = { telegram_id: number; username: string; name: string; seen_at: number; last_name?: string; language_code?: string; is_premium?: boolean | null; bio?: string; birthdate?: { day: number; month: number; year?: number | null } | null };
 type Props = {
+  apiConnection?: ProviderConnection;
   panel: Exclude<Panel, "chat">;
   request: ReturnType<typeof createApiClient>;
   status: McpStatus;
@@ -31,8 +34,9 @@ type Props = {
 };
 
 const moduleDescriptions: Record<McpId, string> = {
-  "telegram-mcp": "Диалоги, история и поиск.",
-  "vps-controller-mcp": "Мониторинг VPS и модулей, управление службами с подтверждением, API приложения.",
+  "telegram-mcp": "tg-mcp-guarded: чтение и действия с отдельными правами пользователя и подтверждением изменений.",
+  "vps-controller-mcp": "Состояние сервера, службы, системные журналы и диагностика приложения.",
+  "mihomo-mcp": "Профили, подключения, модули, DNS и маршрутизация Mihomo. Изменения — с подтверждением.",
 };
 const blankAccount = (): AccountDraft => ({
   role: "guest", products: [], permission_overrides: {}, telegram_id: 0, name: "", bot_access: false, bot_chat_access: false, address_as: "",
@@ -40,7 +44,7 @@ const blankAccount = (): AccountDraft => ({
   excluded_dialogs_text: "", session: null, session_configured: false,
 });
 
-export function NoderaSettings({ panel, request, status, draft, patch, blocked, dirty, refreshKey, actor, actorSelect, checks, check, working }: Props) {
+export function NoderaSettings({ apiConnection, panel, request, status, draft, patch, blocked, dirty, refreshKey, actor, actorSelect, checks, check, working }: Props) {
   const notify = useNotifier("nodera", "Nodera");
   const [sitesText, setSitesText] = useState((draft.web_domains ?? []).join(", "));
   useEffect(() => {
@@ -195,13 +199,15 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
         const usage = status.provider_usage?.[provider.id];
         const active = draft.active_provider === provider.id;
         const probeResult = providerChecks[provider.id];
-        const models = [...new Set([provider.model, ...(providerModels[provider.id] ?? [])].filter(Boolean))];
+        const observed = provider.id === status.settings.active_provider && provider.api_key === null && provider.provider_url === status.settings.provider_url ? apiConnection : undefined;
+        const models = [...new Set([provider.model, ...(observed?.models ?? []), ...(providerModels[provider.id] ?? [])].filter(Boolean))];
         const tokens = usage?.reported_requests ? `${usage.prompt_tokens.toLocaleString("ru")} / ${usage.completion_tokens.toLocaleString("ru")}` : "—";
         const quota = probeResult?.quota ? probeResult.quota.unlimited ? "Без лимита" : probeResult.quota.remaining.toLocaleString("ru") : "—";
         const statistics = <><small>Запросы · {usage?.requests ?? 0}</small><small>Токены · {tokens}</small><small>Квота · {quota}</small>{probeResult?.quota?.account_remaining !== undefined && <small>Аккаунт · {probeResult.quota.account_remaining.toLocaleString("ru")}</small>}</>;
         return <tr key={provider.id} className={active ? "isDefaultProvider" : undefined}>
           <td className="noderaDefaultColumn"><input type="radio" name="nodera-default-provider" aria-label={`API по умолчанию: ${provider.name}`} checked={active} disabled={blocked} onChange={() => patch({ active_provider: provider.id })}/></td><th scope="row"><strong>{provider.name}</strong>
             <small>{provider.provider_url}</small><span className="noderaProviderCompact">{statistics}</span>
+            <small role="status" title={observed?.error}>{observed ? providerStatusText(observed) : probeResult ? "Проверено вручную" : "API ещё не проверен"}{observed?.checkedAt ? ` · ${new Date(observed.checkedAt).toLocaleTimeString("ru-RU")}` : ""}</small>
             {probeResult?.text && <small className={probeResult.failed ? "mcpCheck error" : "mcpCheck"} role="status">{probeResult.text}</small>}
           </th>
           <td><div className="noderaProviderModel"><select aria-label={`Модель по умолчанию: ${provider.name}`} value={provider.model} disabled={blocked || provider.model_mode === "single"}
@@ -258,10 +264,15 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
     <fieldset disabled={blocked} className="mcpSkills">
       <div className="mcpModuleGrid">{status.mcp_modules.map(item => {
         const enabled = draft.mcp[item.id];
+        const selectedAccount = draft.accounts.find(account => String(account.telegram_id) === actor);
+        const telegramAllowed = selectedAccount && accountPermissions(draft, selectedAccount).has("telegram_read") && Boolean(selectedAccount.session || selectedAccount.session_configured);
         return <article key={item.id} className={`mcpModule ${enabled ? "isInstalled" : ""}`}>
           <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name={item.id === "telegram-mcp" ? "telegram" : "module"}/></span>
-            <strong>{item.id === "vps-controller-mcp" ? "mcp vps" : item.name}</strong></div></header>
+            <strong>{item.name}</strong></div></header>
           <p>{item.description ?? moduleDescriptions[item.id]}</p>
+          <p className="mcpFieldHint" aria-label={`Количество инструментов ${item.name}`}>Инструментов: {(status.tools[item.id] ?? []).length}
+            {item.id === "telegram-mcp" && actor && <> · разрешено пользователю: {telegramAllowed ? enabledTelegramTools(selectedAccount).filter(name => (status.tools[item.id] ?? []).includes(name)).length : 0}</>}
+          </p>
           <footer>
             <button type="button" className="ghostButton" aria-pressed={enabled} aria-label={`${item.name} · ${enabled ? "Включён" : "Выключен"}`}
               onClick={() => patch({ mcp: { ...draft.mcp, [item.id]: !enabled },
@@ -269,7 +280,9 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
               {enabled ? "Включён" : "Выключен"}
             </button>
             {item.id === "telegram-mcp" && <button type="button" className="mcpIconButton" aria-label="Настроить Telegram MCP" title="Настроить" onClick={() => setTelegramMcpOpen(true)}><ChatIcon name="gear"/></button>}
+            {item.id !== "telegram-mcp" && <button type="button" className="ghostButton" disabled={blocked || dirty || !item.enabled || !item.configured} onClick={() => void check(item.id)}>Проверить подключение</button>}
           </footer>
+          {checkResult(item.id)}
         </article>;
       })}</div>
     </fieldset>
@@ -404,6 +417,18 @@ export function NoderaSettings({ panel, request, status, draft, patch, blocked, 
       {accountGrants.has("telegram_read") && <>
         <Secret label="Telegram-сессия" configured={account.session_configured} value={account.session} onChange={session => editAccount({ session })}/>
         <label>Исключённые диалоги<input value={account.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => editAccount({ excluded_dialogs_text: event.target.value })}/></label>
+        <p className="mcpFieldHint">Инструменты Telegram включаются отдельно для этого пользователя. Новые возможности применяются в AI-agent 1.17 и новее. Исключения действуют и при расширенном доступе.</p>
+        {(["read", "actions"] as const).map(profile => <details className="noderaPermissionOverrides" key={profile}>
+          <summary>{profile === "read" ? "Чтение, поиск и вложения" : "Действия и пакетные операции"} · {(draft.telegram_tool_catalog ?? []).filter(tool => tool.profile === profile && enabledTelegramTools(account).includes(tool.name)).length} включено</summary>
+          <div className="noderaPermissionGrid">{(draft.telegram_tool_catalog ?? []).filter(tool => tool.profile === profile).map(tool => <label className="mcpToggle" key={tool.name} title={tool.name}>
+            <input type="checkbox" disabled={blocked} checked={enabledTelegramTools(account).includes(tool.name)} onChange={event => {
+              const tools = new Set(enabledTelegramTools(account));
+              if (event.target.checked) tools.add(tool.name); else tools.delete(tool.name);
+              editAccount({ telegram_tools: [...tools] });
+            }}/>{tool.title}</label>)}</div>
+        </details>)}
+        <label>Разрешённые адресаты действий<input value={account.telegram_action_targets_text ?? (account.telegram_action_targets ?? []).join(", ")} placeholder="ID, username, телефон или название новой группы через запятую" onChange={event => editAccount({ telegram_action_targets_text: event.target.value })}/></label>
+        <small>Пустой список запрещает действия. Отправка, удаление и управление требуют подтверждения кнопкой или /confirm. Выбор сессии доступен только для своего аккаунта. Вложения до 20 МБ сохраняются в отдельном каталоге пользователя; пути сервера недоступны.</small>
       </>}
       {userEdit.index >= 0 && <button type="button" className="ghostButton" disabled={blocked} onClick={() => {
         patch({ accounts: draft.accounts.filter((_, index) => index !== userEdit.index) });

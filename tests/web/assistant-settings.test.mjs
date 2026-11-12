@@ -6,9 +6,10 @@ import ts from 'typescript';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
 import * as answerFormat from '../../src/features/assistant/answer-format.ts';
+import * as providerConnection from '../../src/features/assistant/provider-connection.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
-function mount(status, catalog = []) {
+function mount(status, catalog = [], overrides = {}) {
   const slots = [], effects = [], writes = [], notifications = [];
   let cursor = 0;
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
@@ -32,20 +33,21 @@ function mount(status, catalog = []) {
   };
   const requireActual = createRequire(import.meta.url), exported = {};
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
-  const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {};
   const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
-    : name.endsWith('/notification-center') ? { useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+    : name === './provider-connection' ? providerConnection : name.endsWith('/notification-center') ? { useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
-  const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
   new Function('require', 'exports', outputText)(require, exported);
   const request = async (path, options) => {
     if (path === '/assistant/mihomo-profiles') return { items: [{id: 'own', name: 'Моя подписка'}] };
     if (path === '/assistant/bot-users') return { items: [] };
-    if (path === '/assistant/models') return { models: catalog };
+    if (path === '/assistant/models') return overrides.models ? overrides.models(options) : { models: catalog };
+    if (path.startsWith('/assistant/queue?')) return overrides.queue ? overrides.queue(path) : {state:'running', position:0, waiting:0};
     if (options?.method === 'PUT' || path === '/assistant/chat') writes.push(JSON.parse(options.body));
-    if (path === '/assistant/chat') return { result: { answer: 'OK', tools_used: [] } };
+    if (path === '/assistant/chat') return overrides.chat ? overrides.chat(options) : { result: { answer: 'OK', tools_used: [] } };
     return status;
   };
   const props = { request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
@@ -76,6 +78,115 @@ function fixture() {
     modules: ['ai-agent', 'nodera-bot'].map(id => ({ id, installed: true, configured: id === 'nodera-bot', management: { state: 'managed' } })),
     mcp_modules: [], tools: {}, bot: { active: true }, legacy_bot: {} };
 }
+
+test('a pending chat shows queue position and submits the question only once', async () => {
+  const status = fixture();
+  Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true, configured:true});
+  let resolve;
+  const view = mount(status, [], {chat: () => new Promise(done => resolve = done), queue: () => ({state:'queued', position:2, waiting:2})});
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:'hello',style:{},scrollHeight:48}});
+  tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
+  view.render(); await Promise.resolve(); tree = view.render();
+  assert.equal(nodes(tree, n => n.props.role === 'status' && n.props.children === 'Запрос в очереди AI · позиция 2').length, 1);
+  assert.match(view.writes[0].request_id, /^[0-9a-f]{32}$/);
+  resolve({result:{answer:'finished', tools_used:[]}});
+  await new Promise(setImmediate); tree = view.render();
+  assert.equal(view.writes.length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'status' && n.props.children === 'Запрос в очереди AI · позиция 2').length, 0);
+});
+
+test('all MCP cards show their actual tool counts', async () => {
+  const status = fixture();
+  status.mcp_modules = [{id:'telegram-mcp', name:'Telegram MCP'}, {id:'vps-controller-mcp', name:'VPS Controller'}, {id:'mihomo-mcp', name:'Mihomo'}];
+  status.tools = {'telegram-mcp': Array.from({length:54}, (_,i) => `tg_${i}`), 'vps-controller-mcp': Array.from({length:17}, (_,i) => `vps_${i}`), 'mihomo-mcp': ['a','b','c','d','e']};
+  const view = mount(status); view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
+  const tree = view.render();
+  for (const [name, count] of [['Telegram MCP',54],['VPS Controller',17],['Mihomo',5]]) {
+    const item = nodes(tree, n => n.props['aria-label'] === `Количество инструментов ${name}`)[0].node;
+    assert.equal(item.props.children.includes(count), true);
+  }
+});
+
+test('catalog failure is visible and keeps chat available with the saved model; checking restores status', async () => {
+  const status = fixture();
+  Object.assign(status.settings, {model_mode:'catalog', model:'saved-model', api_key_configured:true,
+    active_provider:'a'.repeat(32), provider_url:'https://provider.example/v1', modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true, configured:true});
+  let requests = 0;
+  const view = mount(status, [], {models: async options => {
+    assert.equal(JSON.parse(options.body).provider_id, status.settings.active_provider);
+    if (++requests === 1) throw new Error('temporary outage');
+    return {models:['saved-model','new-model']};
+  }});
+  view.render(); await Promise.resolve(); view.render(); await new Promise(setImmediate);
+  let tree = view.render();
+  assert.equal(nodes(tree, n => n.props.role === 'alert' && n.props.children === 'temporary outage').length, 1);
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:'hello', style:{}, scrollHeight:48}});
+  tree = view.render();
+  assert.equal(nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].disabled, false);
+  nodes(tree, n => n.type === 'button' && n.props.children === 'Проверить API сейчас')[0].node.props.onClick();
+  await new Promise(setImmediate); tree = view.render();
+  assert.equal(nodes(tree, n => n.type === 'span' && n.props.children === 'Каталог API доступен').length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'alert' && n.props.children === 'temporary outage').length, 0);
+});
+
+test('Telegram exposes all 54 switches per user and saves individual tools with allowed targets', async () => {
+  const status = fixture();
+  status.settings.telegram_tool_catalog = JSON.parse(readFileSync(new URL('../../protocol-images/ai-agent/telegram_catalog.json', import.meta.url), 'utf8'));
+  status.settings.accounts = [{ telegram_id: 11, name: 'Fixture', bot_access: false, bot_chat_access: true,
+    telegram_access: true, vps_access: false, session_configured: true, excluded_dialogs: [99] }];
+  const view = mount(status);
+  view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
+  let tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Настроить пользователя Fixture')[0].node.props.onClick();
+  tree = view.render();
+  const tools = nodes(tree, n => n.type === 'label' && n.props.title?.startsWith('tg_'));
+  assert.equal(tools.length, 54);
+  assert.equal(tools.filter(({node}) => nodes(node, n => n.type === 'input' && n.props.checked).length).length, 5);
+  const send = tools.find(({node}) => node.props.title === 'tg_send_message').node;
+  nodes(send, n => n.type === 'input')[0].node.props.onChange({target: {checked: true}});
+  tree = view.render();
+  assert.equal(nodes(nodes(tree, n => n.props.title === 'tg_send_message')[0].node, n => n.type === 'input')[0].node.props.checked, true);
+  nodes(tree, n => n.type === 'input' && n.props.placeholder?.startsWith('ID, username'))[0].node.props.onChange({target: {value: '42, @example'}});
+  tree = view.render();
+  nodes(tree, n => typeof n.type === 'function' && n.props.title === 'Пользователь')[0].node.props.submit();
+  tree = view.render();
+  nodes(tree, n => n.type === 'button' && n.props.children === 'Сохранить')[0].node.props.onClick();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(view.writes[0].accounts[0].telegram_tools.includes('tg_send_message'), true);
+  assert.equal(view.writes[0].accounts[0].telegram_tools.includes('tg_delete_messages'), false);
+  assert.deepEqual(view.writes[0].accounts[0].telegram_action_targets, ['42', '@example']);
+  assert.deepEqual(view.writes[0].accounts[0].excluded_dialogs, [99]);
+});
+
+test('Mihomo and VPS have separate settings cards and saving one scope leaves the other disabled', async () => {
+  const status = fixture();
+  status.settings.mcp = { 'telegram-mcp': false, 'vps-controller-mcp': false, 'mihomo-mcp': false };
+  status.mcp_modules = [
+    { id: 'telegram-mcp', name: 'Telegram MCP', enabled: false, configured: true },
+    { id: 'vps-controller-mcp', name: 'VPS Controller', enabled: false, configured: true },
+    { id: 'mihomo-mcp', name: 'Mihomo', enabled: false, configured: true },
+  ];
+  const view = mount(status);
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
+  tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Mihomo · Выключен')[0].node.props.onClick();
+  tree = view.render();
+  assert.equal(nodes(tree, n => n.props['aria-label'] === 'VPS Controller · Выключен').length, 1);
+  assert.equal(nodes(tree, n => n.props['aria-label'] === 'Mihomo · Включён').length, 1);
+  nodes(tree, n => n.type === 'button' && n.props.children === 'Сохранить')[0].node.props.onClick();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(view.writes[0].mcp['mihomo-mcp'], true);
+  assert.equal(view.writes[0].mcp['vps-controller-mcp'], false);
+});
 
 test('AI settings can be edited and submitted while NoderaBot is running', async () => {
   const view = mount(fixture());
@@ -150,7 +261,7 @@ test('catalog mode loads any number of models and sends the chat selection witho
   Object.assign(status.modules[0], { enabled: true, configured: true });
   const models = Array.from({ length: 250 }, (_, i) => `model-${i}`);
   const view = mount(status, models);
-  view.render(); await Promise.resolve(); view.render(); await Promise.resolve();
+  view.render(); await Promise.resolve(); view.render(); await new Promise(setImmediate);
   let tree = view.render();
   const selector = nodes(tree, n => n.type === 'button' && n.props['aria-label'] === 'Модель для запроса')[0];
   assert.equal(selector.node.props['aria-expanded'], false);

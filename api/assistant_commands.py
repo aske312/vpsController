@@ -80,6 +80,7 @@ def execute(api, actor, prompt):
         if command == '/operation' and not roles.allows(settings, actor, 'server_read') and args != [pending.get('operation_id')]:
             raise HTTPException(403, 'Доступен только результат собственной операции')
         if pending.get('kind') == 'roles': roles.require(settings, actor, 'roles_manage')
+        elif pending.get('kind') == 'telegram': roles.require(settings, actor, 'telegram_read')
         elif pending.get('kind') == 'mihomo': roles.require(settings, actor, 'subscription_manage' if command == '/confirm' else 'subscription_read')
         else: roles.require(settings, actor, 'server_manage' if command == '/confirm' else 'server_read')
     if command == '/subscription' and not args:
@@ -147,6 +148,10 @@ def execute(api, actor, prompt):
                 raise HTTPException(409, 'Нет ожидающей команды. /help — справка')
             if command == '/cancel':
                 if record.get('submitted'):
+                    operation = control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'))
+                    if record.get('kind') == 'telegram' and operation.get('state') == 'unknown':
+                        path.unlink()
+                        return 'Ожидание результата снято. Действие Telegram не отменено: его результат неизвестен. Проверьте чат перед повтором.'
                     raise HTTPException(409, 'Команда уже отправлена. /operation ' + record['operation_id'])
                 path.unlink()
                 return 'Ожидающая команда отменена.'
@@ -154,13 +159,15 @@ def execute(api, actor, prompt):
                 raise HTTPException(409, 'Неверный код подтверждения')
             if record.get('completed_text'):
                 return record['completed_text']
-            if record.get('kind') == 'mihomo' and record.get('submitted'):
+            if record.get('kind') == 'mihomo' and not settings.get('mcp', {}).get('mihomo-mcp', settings.get('mcp', {}).get('vps-controller-mcp', False)):
+                raise HTTPException(403, 'Контур Mihomo MCP выключен; изменение не отправлено')
+            if record.get('kind') in ('mihomo', 'telegram') and record.get('submitted'):
                 raise HTTPException(409, 'Запрос уже отправлен. Проверьте результат: /operation ' + record['operation_id'])
             existing = control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'))
             if not existing and (time.time() > record['expires'] or control._read(api)['revision'] != record['revision']):
                 path.unlink()
                 raise HTTPException(409, 'Подтверждение истекло или права изменились. Отправьте /service заново')
-            if not existing and record.get('kind') not in ('mihomo', 'roles'):
+            if not existing and record.get('kind') not in ('mihomo', 'roles', 'observability', 'telegram'):
                 definition = api.managed_services().get(record['service'], {})
                 if record['action'] not in controls(record['service'], definition):
                     path.unlink()
@@ -170,6 +177,12 @@ def execute(api, actor, prompt):
         # Use the panel's durable, idempotent service worker and admission lock.
         # Never hold the file lock across admission, which acquires it itself.
         try:
+            if record.get('kind') == 'telegram':
+                import assistant_telegram
+                return assistant_telegram.confirm(api, actor, record)
+            if record.get('kind') == 'observability':
+                import observability_control
+                return observability_control.confirm(api, actor, record)
             if record.get('kind') == 'roles':
                 import assistant_role_actions
                 return assistant_role_actions.confirm(api, actor, record)
@@ -180,7 +193,7 @@ def execute(api, actor, prompt):
         except HTTPException as exc:
             with control.operations.locked(api.DATA_DIR):
                 current = control.operations.read(path)
-                definite_rejection = record.get('kind') != 'mihomo' or exc.status_code in (403, 404, 409, 422)
+                definite_rejection = record.get('kind') not in ('mihomo', 'telegram') or exc.status_code in (403, 404, 409, 422)
                 if definite_rejection and current.get('operation_id') == record['operation_id'] and not control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json')):
                     record['submitted'] = False
                     control.operations.atomic_json(path, record)

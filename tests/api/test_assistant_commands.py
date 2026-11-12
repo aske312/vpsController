@@ -85,13 +85,20 @@ class ServerCommandTests(unittest.TestCase):
         async def run():
             settings = {'modules': {'nodera-bot': True}, 'bot_token': 'fixture'}
             sent, polls = [], 0
+            delivered = asyncio.Event()
 
             async def transport(settings, method, **payload):
                 nonlocal polls
                 if method == 'getWebhookInfo': return {'url': ''}
                 if method in ('setMyCommands', 'answerCallbackQuery'): return True
-                if method == 'sendMessage': sent.append(payload); return {}
+                if method == 'sendMessage':
+                    sent.append(payload)
+                    if 'Ответ AI' in payload.get('text', ''): delivered.set()
+                    return {}
                 if method == 'getUpdates':
+                    # Telegram polling performs I/O; let independently dispatched
+                    # messages deliver their keyboard before emitting callbacks.
+                    await asyncio.sleep(0)
                     polls += 1
                     if polls == 1:
                         return [{'update_id': 1, 'message': {'from': {'id': 11}, 'chat': {'type': 'private'}, 'text': 'Модели AI'}}]
@@ -102,16 +109,15 @@ class ServerCommandTests(unittest.TestCase):
                                 'data': data, 'message': {'chat': {'type': 'private'}}}}]
                     if polls == 4:
                         return [{'update_id': 4, 'message': {'from': {'id': 11}, 'chat': {'type': 'private'}, 'text': 'Обычный вопрос'}}]
+                    await asyncio.wait_for(delivered.wait(), 1)
                     raise asyncio.CancelledError()
                 raise AssertionError(method)
 
-            ticks = iter(range(100, 10000, 4))
             with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), \
                     patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', new=AsyncMock(side_effect=lambda _, sender: sender['id'] == 11)), \
-                    patch.object(bot.time, 'monotonic', side_effect=lambda: next(ticks)), \
                     patch.object(bot, 'server_command', new=AsyncMock(side_effect=['Модели · страница 1/1\nselected-model\n\n/model <ID> — выбрать', 'Выбрана модель: selected-model'])) as server, \
                     patch.object(bot, 'agent_request', new=AsyncMock(return_value='Ответ AI')) as agent:
-                try: await bot.bot(settings)
+                try: await asyncio.wait_for(bot.bot(settings), 3)
                 except asyncio.CancelledError: pass
                 self.assertEqual([call.args[2] for call in server.await_args_list], ['/models', '/model selected-model'])
                 agent.assert_awaited_once_with(settings, 11, 'Обычный вопрос')

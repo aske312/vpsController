@@ -3276,6 +3276,7 @@ clear_managed_logs() {
   info "Очистка системных и мониторинговых журналов"
   journalctl --rotate
   journalctl --vacuum-time=1s
+  "${INSTALL_DIR}/venv/bin/python" "${INSTALL_DIR}/api/observability.py" clear "${DATA_DIR}"
   find "${DATA_DIR}/monitor" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.log' -o -name '*.gz' \) -delete 2>/dev/null || true
   ok "управляемые журналы очищены."
 }

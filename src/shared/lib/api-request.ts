@@ -130,11 +130,15 @@ function clearPersistedCache(token: string) {
 export class ApiRequestError extends Error {
   kind: "network" | "http" | "response";
   status?: number;
-  constructor(message: string, kind: "network" | "http" | "response", status?: number) {
-    super(message);
+  requestId?: string;
+  constructor(message: string, kind: "network" | "http" | "response", status?: number, requestId?: string) {
+    const identity = requestId && /^[0-9a-f]{32}$/.test(requestId) ? requestId : undefined;
+    const suffix = identity ? ` · запрос ${identity}` : "";
+    super(suffix && !message.endsWith(suffix) ? message + suffix : message);
     this.name = "ApiRequestError";
     this.kind = kind;
     this.status = status;
+    this.requestId = identity;
   }
 }
 
@@ -159,7 +163,7 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
   const { pending, cache, readVersions } = state;
   const transportKey = JSON.stringify([options.readTimeoutMs ?? 20000, options.retryDelaysMs ?? [400, 1200]]);
   const formatCause = (cause: unknown) => cause instanceof ApiRequestError && cause.kind === "http" && options.formatHttpError
-    ? new ApiRequestError(options.formatHttpError(cause.message, cause.status || 500), cause.kind, cause.status) : cause;
+    ? new ApiRequestError(options.formatHttpError(cause.message, cause.status || 500), cause.kind, cause.status, cause.requestId) : cause;
   const invalidateReads = () => {
     state.generation += 1;
     pending.clear();
@@ -204,7 +208,8 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
             }
             if (body?.operation_id) detail += ` · операция ${body.operation_id}`;
           } catch { /* Do not display an HTML gateway page in the UI. */ }
-          throw new ApiRequestError(detail, "http", response.status);
+          const requestId = response.headers.get("X-Request-ID");
+          throw new ApiRequestError(detail, "http", response.status, requestId ?? undefined);
         }
         if (response.status === 204 || method === "HEAD") return null;
         // Consume inside the retry boundary: a stream may break after headers arrive.

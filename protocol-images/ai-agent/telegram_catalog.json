@@ -1,0 +1,272 @@
+[
+  {
+    "name": "tg_list_sessions",
+    "title": "Список сессий",
+    "profile": "read"
+  },
+  {
+    "name": "tg_use_session",
+    "title": "Выбор своей сессии",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_group_info",
+    "title": "Информация о чате",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_participants",
+    "title": "Участники чата",
+    "profile": "read"
+  },
+  {
+    "name": "tg_search_participants",
+    "title": "Поиск участников",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_messages",
+    "title": "Чтение сообщений",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_messages_since",
+    "title": "Сообщения после даты",
+    "profile": "read"
+  },
+  {
+    "name": "tg_search_messages",
+    "title": "Поиск в чате",
+    "profile": "read"
+  },
+  {
+    "name": "tg_search_global_messages",
+    "title": "Поиск во всех чатах",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_message_count",
+    "title": "Число сообщений",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_group_creation_date",
+    "title": "Дата создания чата",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_my_dialogs",
+    "title": "Список диалогов",
+    "profile": "read"
+  },
+  {
+    "name": "tg_resolve_username",
+    "title": "Поиск по username",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_user_by_id",
+    "title": "Профиль по ID",
+    "profile": "read"
+  },
+  {
+    "name": "tg_search_contacts",
+    "title": "Поиск контактов",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_contacts",
+    "title": "Контакты",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_saved_contacts",
+    "title": "Сохранённые контакты",
+    "profile": "read"
+  },
+  {
+    "name": "tg_download_media",
+    "title": "Скачивание вложений",
+    "profile": "read"
+  },
+  {
+    "name": "tg_get_stats",
+    "title": "Статистика ограничений",
+    "profile": "read"
+  },
+  {
+    "name": "tg_auth_status",
+    "title": "Проверка сессии",
+    "profile": "read"
+  },
+  {
+    "name": "tg_create_private_group",
+    "title": "Создание группы",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_create_managed_bot",
+    "title": "Создание управляемого бота",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_set_channel_comments_join_requirement",
+    "title": "Настройка комментариев канала",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_click_inline_button",
+    "title": "Нажатие кнопок бота",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_run_bot_steps",
+    "title": "Сценарии взаимодействия с ботом",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_send_message",
+    "title": "Отправка сообщений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_pin_message",
+    "title": "Закрепление сообщений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_create_write_lane",
+    "title": "Создание разрешения на отправку",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_approve_write_lane",
+    "title": "Подтверждение разрешения на отправку",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_get_write_lane",
+    "title": "Просмотр разрешения на отправку",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_list_write_lanes",
+    "title": "Список разрешений на отправку",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_revoke_write_lane",
+    "title": "Отзыв разрешения на отправку",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_send_message_with_lane",
+    "title": "Отправка по разрешению",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_send_file",
+    "title": "Отправка файлов",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_delete_messages",
+    "title": "Удаление сообщений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_clear_history",
+    "title": "Очистка истории",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_leave_dialog",
+    "title": "Выход из чата",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_delete_contacts",
+    "title": "Удаление контактов",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_delete_contacts_by_phones",
+    "title": "Удаление контактов по телефонам",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_edit_message",
+    "title": "Редактирование сообщений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_forward_messages",
+    "title": "Пересылка сообщений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_add_member_to_group",
+    "title": "Добавление участника",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_remove_member_from_group",
+    "title": "Удаление участника",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_migrate_member",
+    "title": "Замена участника",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_create_add_member_batch",
+    "title": "Подготовка добавления в несколько групп",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_create_delete_messages_batch_from_manifest",
+    "title": "Подготовка удаления по файлу",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_create_leave_dialog_batch_from_candidates",
+    "title": "Подготовка выхода из чатов по файлу",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_create_add_member_batch_from_report",
+    "title": "Подготовка добавления по отчёту",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_approve_batch",
+    "title": "Подтверждение пакета действий",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_get_batch_status",
+    "title": "Статус пакета действий",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_run_delete_messages_batch",
+    "title": "Выполнение пакета удалений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_run_leave_dialog_batch",
+    "title": "Выполнение пакета выходов",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_run_add_member_batch",
+    "title": "Выполнение пакета добавлений",
+    "profile": "actions"
+  },
+  {
+    "name": "tg_get_actions_policy",
+    "title": "Правила действий",
+    "profile": "actions"
+  }
+]

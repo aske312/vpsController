@@ -11,6 +11,7 @@ USER_ALLOWED = {'chat', 'model_select', 'web', 'memory', 'telegram_read', 'subsc
 FIXED = {'owner', 'administrator', 'guest'}
 MIHOMO = {key for key in PERMISSIONS if key.startswith('subscription')} | {'modules_manage', 'routing_manage', 'dns_manage', 'recovery'}
 VPS_PERMISSIONS = set(PERMISSIONS) - {'chat', 'model_select', 'web', 'memory', 'telegram_read'}
+SERVER_PERMISSIONS = VPS_PERMISSIONS - MIHOMO
 DEFAULTS = {
     'owner': list(PERMISSIONS),
     'administrator': [item for item in PERMISSIONS if item != 'roles_manage'],
