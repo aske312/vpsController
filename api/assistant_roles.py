@@ -2,7 +2,7 @@
 from fastapi import HTTPException
 
 ROLES = ('owner', 'administrator', 'moderator', 'user', 'guest')
-PERMISSIONS = ('chat', 'model_select', 'web', 'memory', 'telegram_read', 'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read',
+PERMISSIONS = ('chat', 'model_select', 'web', 'memory', 'telegram_read', 'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'terminal_read',
                'subscription_read', 'subscription_manage', 'subscription_name', 'subscription_connections', 'subscription_devices', 'subscription_routing',
                'subscription_quota', 'subscription_speed', 'subscription_expiry', 'subscriptions_admin', 'subscriptions_create', 'subscriptions_delete',
                'modules_manage', 'routing_manage', 'dns_manage', 'recovery', 'roles_manage')

@@ -8,7 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 
 _observations: ContextVar[dict | None] = ContextVar("service_observations", default=None)
-_PROPERTIES = "LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description,Type,RemainAfterExit,MainPID"
+_PROPERTIES = "LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description,Type,RemainAfterExit,MainPID,Result,ExecMainStatus,ExecMainStartTimestamp,ExecMainExitTimestamp"
 _TIMER_PROPERTIES = ",LastTriggerUSec,NextElapseUSecRealtime"
 
 
@@ -36,7 +36,7 @@ def observe_service(unit: str, *, timer: bool = False) -> dict:
     return observation
 
 
-def prime_services(units, *, timers=()) -> None:
+def prime_services(units, *, timers=(), fallback=True) -> None:
     """Batch fresh observations into the current response's private scope."""
     scope = _observations.get()
     if scope is None:
@@ -46,6 +46,10 @@ def prime_services(units, *, timers=()) -> None:
     if not keys:
         return
     names = sorted({unit for unit, _ in keys})
+    checked_at = datetime.now(timezone.utc).isoformat()
+    if not fallback:
+        # A compact diagnostic report has one batch budget, not N fallback timeouts.
+        for key in keys: scope[key] = _service_observation({}, checked_at, timer=key[1])
     try:
         result = subprocess.run(
             ["systemctl", "show", *names, "--property=Id," + _PROPERTIES + _TIMER_PROPERTIES],
@@ -55,7 +59,6 @@ def prime_services(units, *, timers=()) -> None:
         return  # Individual reads retain their existing failure semantics.
     if result.returncode not in (0, 4):
         return
-    checked_at = datetime.now(timezone.utc).isoformat()
     for block in result.stdout.strip().split("\n\n"):
         properties = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
         unit = properties.get("Id")
@@ -113,7 +116,24 @@ def _service_observation(properties, checked_at, *, timer=False):
     elif state in {"activating", "deactivating", "reloading", "refreshing", "maintenance"}:
         reason = "Служба меняет состояние; ожидается подтверждение результата"
     restarts = properties.get("NRestarts", "")
+    execution_state = 'applied' if runtime == 'running' and properties.get('Type') == 'oneshot' and substate == 'exited' else runtime
+    if (properties.get('Type') == 'oneshot' and state == 'inactive' and properties.get('Result') == 'success'
+            and properties.get('ExecMainStatus') == '0' and properties.get('ExecMainExitTimestamp') not in (None, '', 'n/a')):
+        execution_state = 'succeeded'
     observation = {
+        "reason": reason,
+        "execution": {
+            "state": execution_state,
+            "reason": "Одноразовая задача успешно завершилась; постоянный процесс не требуется" if execution_state == 'succeeded' else reason,
+            "result": properties.get("Result") or None,
+            "exit_code": int(properties["ExecMainStatus"]) if properties.get("ExecMainStatus", "").isdecimal() else None,
+            "main_pid": int(properties['MainPID']) if properties.get('MainPID', '').isdecimal() else None,
+            "last_started_at": properties.get("ExecMainStartTimestamp") if properties.get("ExecMainStartTimestamp") not in (None, '', 'n/a') else None,
+            "last_finished_at": properties.get("ExecMainExitTimestamp") if properties.get("ExecMainExitTimestamp") not in (None, '', 'n/a') else None,
+            "last_success_at": properties.get("ExecMainExitTimestamp") if execution_state in ('applied', 'succeeded') and properties.get("Result") == "success" and properties.get("ExecMainStatus") == "0" and properties.get("ExecMainExitTimestamp") not in (None, '', 'n/a') else None,
+            "last_error": properties.get("Result") if properties.get("Result") not in (None, "", "success") else None,
+            "history_scope": "latest_systemd_execution_only; earlier_success_or_error_unknown",
+        },
         "unit_present": present,
         "installed": present is True,  # Legacy field describes the unit, not a component.
         "active": state == "active" and present is not False and runtime == "running",

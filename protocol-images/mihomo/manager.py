@@ -469,15 +469,10 @@ class ProfileUpdate(BaseModel):
 
 
 def run(*args: str, check: bool = False, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        list(args),
-        input=input_text,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=120,
-        check=False,
-    )
+    import operation_log
+    with operation_log.command(DATA_ROOT.parent, args, 'mihomo') as completed:
+        result = subprocess.run(list(args), input=input_text, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, check=False)
+        completed(result.returncode)
     if check and result.returncode:
         observability.tracing.failure('command_failed')
         message = result.stderr.strip() or result.stdout.strip() or f"Command failed: {' '.join(args)}"
@@ -565,6 +560,20 @@ def write_action(action: str, message: str, state: str = "running", progress: in
         "started_at": previous.get("started_at") if continuing and previous.get("started_at") else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     payload.update(observability.tracing.snapshot())
+    observability.tracing.operation(identity)
+    old_record = application_operation.read(ACTION_FILE.parent / 'operations' / f'{identity}.json')
+    for key in ('configuration_before',):
+        if key in old_record: payload[key] = old_record[key]
+    payload['diagnostics_version'] = 2
+    if state in ('done', 'failed'): payload['finished_at'] = payload['updated_at']
+    if state in ('done', 'failed'):
+        try:
+            observed = observe_service('vps-control-mihomo-manager.service')
+            runtime = observed.get('runtime', {}).get('state', 'unknown')
+            payload['health_check'] = {'state': 'passed' if runtime == 'running' else 'unknown' if runtime == 'unknown' else 'failed',
+                'checks': [{'component': 'mihomo', 'level': 'runtime', 'state': 'passed' if runtime == 'running' else 'unknown' if runtime == 'unknown' else 'failed', 'observed': runtime}]}
+        except Exception: payload['health_check'] = {'state': 'unknown', 'checks': []}
+    application_operation.enrich(ACTION_FILE.parent, payload)
     atomic_json(ACTION_FILE, payload)
     application_operation.atomic_json(ACTION_FILE.parent / "operations" / f"{identity}.json", {**payload, "state": "succeeded" if state == "done" else state, "source": "mihomo"})
     from operation_log import append

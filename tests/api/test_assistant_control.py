@@ -33,9 +33,12 @@ class AssistantTests(unittest.TestCase):
     def test_agent_install_copies_and_verifies_pinned_telegram_runtime(self):
         unit = self.root / 'ai-agent.service'
         self.observe.return_value['active'] = True
+        import terminal_observer
         with patch.object(worker, 'assert_unit_owner', return_value=unit), patch.object(worker, 'require_idle'), \
-             patch.object(worker, 'checked') as checked, patch.object(control, 'migrate_settings'), patch.object(api, 'INSTALL_DIR', ROOT):
+             patch.object(worker, 'checked') as checked, patch.object(control, 'migrate_settings'), patch.object(api, 'INSTALL_DIR', ROOT), \
+             patch.object(terminal_observer, 'provision') as observer:
             worker.install(api, 'ai-agent')
+        observer.assert_called_once_with(api)
         root = control.runtime_directory('ai-agent')
         source = ROOT / 'protocol-images/ai-agent'
         self.assertEqual((root / 'telegram_guarded.py').read_bytes(), (source / 'telegram_guarded.py').read_bytes())
@@ -48,7 +51,7 @@ class AssistantTests(unittest.TestCase):
         commands = [call.args[0] for call in checked.call_args_list]
         self.assertIn([str(root / 'venv/bin/python'), str(source / 'telegram_guarded.py')], commands)
         self.assertIn([str(root / 'venv/bin/python'), str(root / 'runner.py'), '--self-check'], commands)
-        self.assertEqual((root / 'version').read_text().strip(), '1.17.0')
+        self.assertEqual((root / 'version').read_text().strip(), json.loads((source / 'manifest.json').read_text())['version'])
 
     def payload(self):
         return {'expected_revision': '0' * 32, 'component': 'ai-agent',
@@ -341,7 +344,8 @@ class AssistantTests(unittest.TestCase):
         before = control.read(api)
         with patch.object(control.assistant_provider, 'catalog', return_value=['model-a', 'model-b']) as discover:
             result = control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1'))
-            self.assertEqual(result, {'models': ['model-a', 'model-b']})
+            self.assertEqual(result['models'], ['model-a', 'model-b'])
+            self.assertRegex(result['operation_id'], r'^[0-9a-f]{32}$')
             discover.assert_called_once_with('https://provider.example/v1', 'secret-ai')
             with self.assertRaises(api.HTTPException) as caught:
                 control.model_catalog(api, control.Catalog(provider_url='https://another.example'))
@@ -367,7 +371,7 @@ class AssistantTests(unittest.TestCase):
         self.assertTrue(control._runtime_slots.acquire(blocking=False))
         try:
             with patch.object(control.assistant_provider, 'catalog', return_value=['model']):
-                self.assertEqual(control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1')), {'models': ['model']})
+                self.assertEqual(control.model_catalog(api, control.Catalog(provider_url='https://provider.example/v1'))['models'], ['model'])
         finally:
             control._runtime_slots.release(); control._runtime_slots.release()
         self.assertTrue(control._catalog_slots.acquire(blocking=False))

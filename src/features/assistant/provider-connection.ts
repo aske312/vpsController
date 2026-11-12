@@ -1,10 +1,13 @@
+import type { ProviderCatalog, ProviderObservation } from "./provider-details";
+
 export type ProviderConnection = {
   state: "unchecked" | "checking" | "available" | "error";
   models: string[]; checkedAt: number | null; error: string;
+  observation?: ProviderObservation;
 };
 export const initialProviderConnection: ProviderConnection = { state: "unchecked", models: [], checkedAt: null, error: "" };
 type MonitorOptions = {
-  fetch: (signal: AbortSignal) => Promise<{ models: string[] }>;
+  fetch: (signal: AbortSignal) => Promise<ProviderCatalog>;
   publish: (value: ProviderConnection) => void;
   automatic: boolean; canPoll?: () => boolean;
   schedule?: typeof setTimeout; cancel?: typeof clearTimeout; now?: () => number;
@@ -52,7 +55,8 @@ export class ProviderMonitor {
       ]);
       if (this.stopped) return;
       if (!Array.isArray(result.models) || !result.models.length || result.models.some(id => typeof id !== "string" || !id || id.length > 128)) throw new Error("API вернул некорректный каталог моделей");
-      this.publish({ state: "available", models: [...new Set(result.models)], checkedAt: (this.options.now ?? Date.now)(), error: "" });
+      this.publish({ state: "available", models: [...new Set(result.models)], checkedAt: (this.options.now ?? Date.now)(), error: "",
+        observation: { provider_info: result.provider_info, ...("quota" in result ? { quota: result.quota, quota_checked_at: result.quota_checked_at ?? result.provider_info?.checked_at ?? (this.options.now ?? Date.now)() / 1000 } : {}) } });
       this.later(60000);
     } catch (cause) {
       if (this.stopped) return;

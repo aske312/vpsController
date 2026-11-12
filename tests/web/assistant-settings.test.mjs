@@ -7,6 +7,7 @@ import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
 import * as answerFormat from '../../src/features/assistant/answer-format.ts';
 import * as providerConnection from '../../src/features/assistant/provider-connection.ts';
+import * as providerDetails from '../../src/features/assistant/provider-details.ts';
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
 function mount(status, catalog = [], overrides = {}) {
@@ -36,7 +37,7 @@ function mount(status, catalog = [], overrides = {}) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {};
   const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
-    : name === './provider-connection' ? providerConnection : name.endsWith('/notification-center') ? { useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
   const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
@@ -78,6 +79,25 @@ function fixture() {
     modules: ['ai-agent', 'nodera-bot'].map(id => ({ id, installed: true, configured: id === 'nodera-bot', management: { state: 'managed' } })),
     mcp_modules: [], tools: {}, bot: { active: true }, legacy_bot: {} };
 }
+
+test('saved connection data is visible in AI settings before a manual check and unavailable fields are omitted', async () => {
+  const status = fixture(), identity = 'b'.repeat(32);
+  status.settings.providers = [{ id: identity, name: 'Fixture API', provider_url: 'https://provider.example/v1', model: '', model_mode: 'catalog', api_key_configured: true }];
+  status.settings.active_provider = identity;
+  status.provider_observations = { [identity]: { quota: { unlimited: true, remaining: -50, used: 0, expires_at: 0 }, quota_checked_at: 1700000000,
+    provider_info: { checked_at: 1700000000, catalog_latency_ms: 123, models_count: 43 } } };
+  const view = mount(status);
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
+  tree = view.render();
+  const text = JSON.stringify(tree);
+  assert.match(text, /Без лимита/);
+  assert.match(text, /Без срока/);
+  assert.match(text, /Использовано/);
+  assert.match(text, /моделей 43/);
+  assert.doesNotMatch(text, /Аккаунт ·/);
+});
 
 test('a pending chat shows queue position and submits the question only once', async () => {
   const status = fixture();

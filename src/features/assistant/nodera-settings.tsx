@@ -4,6 +4,7 @@ import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
 import { enabledTelegramTools } from "./assistant-state";
 import { providerStatusText, type ProviderConnection } from "./provider-connection";
+import { latestObservation, quotaFacts, quotaText, queueProviderCatalog, type ProviderObservation, type ProviderCatalog } from "./provider-details";
 import { accountProducts, productNames, type Product, fixedRoles, userPermissions, permissionGroups, accountPermissions, accountRole, permissionNames, roleDefaults, roleNames, type Role, type Permission, moduleState, type Draft, type McpId, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
 
 export const panels = [
@@ -14,7 +15,7 @@ export const panels = [
 export type Panel = typeof panels[number]["id"];
 type AccountDraft = Draft["accounts"][number];
 type Check = { ok: boolean; text: string; revision: string; actor: string; username?: string };
-type Quota = { unlimited: boolean; remaining: number; account_remaining?: number };
+type ProviderCheck = ProviderObservation & { text: string; failed?: boolean; checking?: boolean };
 type BotContact = { telegram_id: number; username: string; name: string; seen_at: number; last_name?: string; language_code?: string; is_premium?: boolean | null; bio?: string; birthdate?: { day: number; month: number; year?: number | null } | null };
 type Props = {
   apiConnection?: ProviderConnection;
@@ -85,7 +86,9 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     finally { setContextBusy(false); }
   }
   const [providerEdit, setProviderEdit] = useState<ProviderDraft>();
-  const [providerChecks, setProviderChecks] = useState<Record<string, { text: string; failed?: boolean; quota?: Quota | null }>>({});
+  const [providerChecks, setProviderChecks] = useState<Record<string, ProviderCheck>>({});
+  const providerChecksRef = useRef(providerChecks);
+  providerChecksRef.current = providerChecks;
   const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
   const [checkingProvider, setCheckingProvider] = useState<string>();
   const [telegramMcpOpen, setTelegramMcpOpen] = useState(false);
@@ -98,6 +101,35 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const [subscriptions, setSubscriptions] = useState<{ items: {id: string; name: string}[]; error?: string }>({ items: [] });
 
   const providers = draft.providers ?? [];
+  const providersRef = useRef(providers);
+  providersRef.current = providers;
+  useEffect(() => {
+    if (panel !== "settings" || blocked || dirty) return;
+    const controller = new AbortController();
+    const saved = status.settings.providers ?? [];
+    async function collect() {
+      for (const provider of saved) {
+        if (controller.signal.aborted) return;
+        if (!provider.api_key_configured) continue;
+        const cached = latestObservation(status.provider_observations?.[provider.id], providerChecksRef.current[provider.id]);
+        if (cached?.quota_checked_at && Date.now() / 1000 - cached.quota_checked_at < 60) continue;
+        if (provider.id === status.settings.active_provider) continue; // The existing monitor refreshes the active connection.
+        setProviderChecks(current => ({ ...current, [provider.id]: { ...current[provider.id], text: "Проверка API…", checking: true } }));
+        try {
+          const result = await queueProviderCatalog(`${status.settings.revision}:${provider.id}`, () => request<ProviderCatalog>("/assistant/models", { method: "POST", signal: controller.signal,
+            body: JSON.stringify({ provider_url: provider.provider_url, provider_id: provider.id, api_key: null, include_quota: true }) }), controller.signal);
+          if (controller.signal.aborted) return;
+          setProviderModels(current => ({ ...current, [provider.id]: result.models }));
+          setProviderChecks(current => ({ ...current, [provider.id]: { ...result, text: `Каталог доступен · моделей ${result.models.length}` } }));
+        } catch (cause) {
+          if (controller.signal.aborted) return;
+          setProviderChecks(current => ({ ...current, [provider.id]: { ...current[provider.id], text: cause instanceof Error ? cause.message : "Проверка недоступна", failed: true, checking: false } }));
+        }
+      }
+    }
+    void collect();
+    return () => controller.abort();
+  }, [panel, blocked, dirty, request, status.settings.revision, status.settings.providers, status.settings.active_provider, status.provider_observations]);
   const revision = status.settings.revision;
   const contactsEnabled = status.settings.bot_token_configured;
   useEffect(() => {
@@ -137,24 +169,29 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     patch({ providers: exists ? providers.map(item => item.id === provider.id ? provider : item) : [...providers, provider],
       active_provider: draft.active_provider ?? provider.id });
     setProviderChecks(current => ({ ...current, [provider.id]: { text: "" } }));
+    setProviderModels(current => ({ ...current, [provider.id]: [] }));
     setProviderEdit(undefined);
   }
 
   async function probe(provider: ProviderDraft) {
     setCheckingProvider(provider.id);
     try {
-      const result = await request<{ models: string[]; quota?: Quota | null }>("/assistant/models", {
+      const result = await queueProviderCatalog(provider.api_key === null ? `${status.settings.revision}:${provider.id}` : `draft:${provider.id}:${Date.now()}`, () => request<ProviderCatalog>("/assistant/models", {
         method: "POST", body: JSON.stringify({ provider_url: provider.provider_url, api_key: provider.api_key, provider_id: provider.id, include_quota: true }),
-      });
+      }));
+      const current = providersRef.current.find(row => row.id === provider.id);
+      if (!current || current.provider_url !== provider.provider_url || current.api_key !== provider.api_key) return;
       setProviderModels(current => ({ ...current, [provider.id]: result.models }));
       notify.success(`Подключение проверено · моделей ${result.models.length}`);
       const available = provider.model_mode === "catalog" || result.models.includes(provider.model);
       setProviderChecks(current => ({ ...current, [provider.id]: available
-        ? { text: `Каталог доступен · моделей ${result.models.length}`, quota: result.quota }
-        : { text: "Модель отсутствует в каталоге", failed: true, quota: result.quota } }));
+        ? { ...result, text: `Каталог доступен · моделей ${result.models.length}` }
+        : { ...result, text: "Модель отсутствует в каталоге", failed: true } }));
     } catch (cause) {
+      const current = providersRef.current.find(row => row.id === provider.id);
+      if (!current || current.provider_url !== provider.provider_url || current.api_key !== provider.api_key) return;
       notify.error(cause instanceof Error ? cause.message : "Проверка не выполнена");
-      setProviderChecks(current => ({ ...current, [provider.id]: { text: cause instanceof Error ? cause.message : "Проверка не выполнена", failed: true } }));
+      setProviderChecks(current => ({ ...current, [provider.id]: { ...current[provider.id], text: cause instanceof Error ? cause.message : "Проверка не выполнена", failed: true } }));
     } finally {
       setCheckingProvider(undefined);
     }
@@ -200,27 +237,38 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         const active = draft.active_provider === provider.id;
         const probeResult = providerChecks[provider.id];
         const observed = provider.id === status.settings.active_provider && provider.api_key === null && provider.provider_url === status.settings.provider_url ? apiConnection : undefined;
+        const saved = status.settings.providers?.find(row => row.id === provider.id);
+        const cached = provider.api_key === null && saved?.provider_url === provider.provider_url ? status.provider_observations?.[provider.id] : undefined;
+        const observation = latestObservation(cached, probeResult, observed?.observation);
+        const info = observation?.provider_info;
+        const facts = quotaFacts(observation);
+        const checkedModels = observed?.models.length ? observed.models : providerModels[provider.id];
+        const modelCount = info?.models_count ?? (checkedModels?.length || undefined);
         const models = [...new Set([provider.model, ...(observed?.models ?? []), ...(providerModels[provider.id] ?? [])].filter(Boolean))];
         const tokens = usage?.reported_requests ? `${usage.prompt_tokens.toLocaleString("ru")} / ${usage.completion_tokens.toLocaleString("ru")}` : "—";
-        const quota = probeResult?.quota ? probeResult.quota.unlimited ? "Без лимита" : probeResult.quota.remaining.toLocaleString("ru") : "—";
-        const statistics = <><small>Запросы · {usage?.requests ?? 0}</small><small>Токены · {tokens}</small><small>Квота · {quota}</small>{probeResult?.quota?.account_remaining !== undefined && <small>Аккаунт · {probeResult.quota.account_remaining.toLocaleString("ru")}</small>}</>;
+        const quota = quotaText(observation?.quota);
+        const requests = usage?.requests.toLocaleString("ru") ?? "—";
+        const quotaDetails = <>{facts.map(fact => <small key={fact.label} title={fact.title}>{fact.label} · {fact.value}</small>)}{observation?.quota_checked_at && <small className="noderaQuotaTime" title="Время последней проверки квоты">Обновлено · {new Date(observation.quota_checked_at * 1000).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>}</>;
+        const statistics = <><small>Запросы · {requests}</small><small>Токены · {tokens}</small><small>Квота · {quota}</small>{quotaDetails}</>;
         return <tr key={provider.id} className={active ? "isDefaultProvider" : undefined}>
           <td className="noderaDefaultColumn"><input type="radio" name="nodera-default-provider" aria-label={`API по умолчанию: ${provider.name}`} checked={active} disabled={blocked} onChange={() => patch({ active_provider: provider.id })}/></td><th scope="row"><strong>{provider.name}</strong>
             <small>{provider.provider_url}</small><span className="noderaProviderCompact">{statistics}</span>
-            <small role="status" title={observed?.error}>{observed ? providerStatusText(observed) : probeResult ? "Проверено вручную" : "API ещё не проверен"}{observed?.checkedAt ? ` · ${new Date(observed.checkedAt).toLocaleTimeString("ru-RU")}` : ""}</small>
-            {probeResult?.text && <small className={probeResult.failed ? "mcpCheck error" : "mcpCheck"} role="status">{probeResult.text}</small>}
+            <small role="status" title={observed?.error}>{observed ? providerStatusText(observed) : probeResult?.checking ? "Проверка API…" : probeResult?.failed ? "Ошибка проверки API" : info ? "Каталог API доступен" : "API ещё не проверен"}{info?.checked_at ? ` · ${new Date(info.checked_at * 1000).toLocaleTimeString("ru-RU")}` : ""}</small>
+            {typeof info?.catalog_latency_ms === "number" && <small title="Длительность загрузки каталога на сервере">Каталог · {Math.round(info.catalog_latency_ms).toLocaleString("ru")} мс</small>}
+            {probeResult?.text && (probeResult.failed || !info) && <small className={probeResult.failed ? "mcpCheck error" : "mcpCheck"} role="status">{probeResult.text}</small>}
           </th>
           <td><div className="noderaProviderModel"><select aria-label={`Модель по умолчанию: ${provider.name}`} value={provider.model} disabled={blocked || provider.model_mode === "single"}
             onChange={event => patch({ providers: providers.map(item => item.id === provider.id ? { ...item, model: event.target.value } : item) })}>
             <option value="">Выберите модель</option>{models.map(model => <option key={model} value={model}>{model}</option>)}
           </select><button type="button" className="mcpIconButton" aria-label={`Загрузить модели: ${provider.name}`} title="Загрузить модели и проверить API" disabled={blocked || !!checkingProvider || !(provider.api_key ?? provider.api_key_configured)} onClick={() => void probe(provider)}><ChatIcon name="refresh"/></button></div>
-            <small>{provider.model_mode === "catalog" ? "Каталог API" : "Одна модель"}</small>
+            <small>{provider.model_mode === "catalog" ? "Каталог API" : "Одна модель"}{typeof modelCount === "number" ? ` · моделей ${modelCount}` : ""}</small>
           </td>
-          <td className="noderaProviderStat">{usage?.requests ?? 0}</td><td className="noderaProviderStat" title="Вход / выход">{tokens}</td><td className="noderaProviderStat">{quota}{probeResult?.quota?.account_remaining !== undefined && <small>Аккаунт · {probeResult.quota.account_remaining.toLocaleString("ru")}</small>}</td>
+          <td className="noderaProviderStat" title="Запросы, учтённые этой панелью">{requests}</td><td className="noderaProviderStat" title="Вход / выход, учтённые этой панелью">{tokens}</td><td className="noderaProviderStat" title="Единицы квоты провайдера">{quota}{quotaDetails}</td>
           <td><button type="button" className="mcpIconButton" aria-label={`Настроить ${provider.name}`} title="Настроить API" disabled={blocked} onClick={() => setProviderEdit(provider)}><ChatIcon name="gear"/></button></td>
         </tr>;
       })}</tbody>
     </table></div>}
+    {!!providers.length && <p className="mcpFieldHint">Квота — в единицах провайдера. Запросы и токены — учёт этой панели. Дополнительные поля показаны, когда API их предоставляет.</p>}
     {providerEdit && <SettingsDialog title="Подключение API" close={() => setProviderEdit(undefined)}
       submit={() => storeProvider({ ...providerEdit, name: providerEdit.name.trim() || new URL(providerEdit.provider_url).hostname })} blocked={blocked}>
       <label>Название<input value={providerEdit.name} maxLength={80} onChange={event => setProviderEdit({ ...providerEdit, name: event.target.value })}/></label>

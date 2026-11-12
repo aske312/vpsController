@@ -24,11 +24,22 @@ def execute_operation(api, name: str, perform, identity: str, unit: str) -> bool
         if stored.get("state") in operations.TERMINAL:
             return stored["state"] == "succeeded"
         started = stored["started_at"]
+        parts = name.split(':')
+        if parts[0] == 'service-action' and len(parts) == 3 and hasattr(api, 'managed_services'):
+            definition = api.managed_services().get(parts[1])
+            if definition:
+                try: stored['runtime_before'] = api.observe_service(definition['unit']).get('execution', {})
+                except Exception: stored['runtime_before'] = {}
+                stored['affected_components'] = [parts[1]]
+                operations.atomic_json(api.DATA_DIR / 'operations' / (identity + '.json'), stored)
         operations.write_status(api.DATA_DIR, api.ACTION_FILE, name, "running", 10,
                                 "Проверка условий выполнения", started, identity, unit)
         try:
             # Recheck ownership and the recovery path at execution time.
-            perform()
+            import diagnostic_context as tracing
+            context = tracing.current.set({**tracing.snapshot(), 'operation_id': identity})
+            try: perform()
+            finally: tracing.current.reset(context)
         except Exception as exc:
             message = "Операция не завершена успешно; проверьте диагностику и состояние перед повтором"
             if isinstance(exc, HTTPException) and 400 <= exc.status_code < 500 and isinstance(exc.detail, str) and exc.detail.strip():
@@ -40,11 +51,33 @@ def execute_operation(api, name: str, perform, identity: str, unit: str) -> bool
                 api.logger.exception("Managed service operation failed: %s", identity)
             operations.write_status(api.DATA_DIR, api.ACTION_FILE, name, "failed", 10,
                                     message,
-                                    started, identity, unit)
+                                    started, identity, unit, health_check=postcheck(api, name))
             return False
+        operations.write_status(api.DATA_DIR, api.ACTION_FILE, name, 'running', 95,
+                                'Проверка результата операции', started, identity, unit, stage='health_check')
+        health = postcheck(api, name)
+        if stored.get('affected_components'):
+            component = stored['affected_components'][0]
+            definition = api.managed_services().get(component)
+            try: after = api.observe_service(definition['unit']).get('execution', {}) if definition else {}
+            except Exception: after = {}
+            before = stored.get('runtime_before', {})
+            with operations.locked(api.DATA_DIR):
+                current = operations.read(api.DATA_DIR / 'operations' / (identity + '.json'))
+                current['runtime_after'] = after
+                if before != after: current['runtime_changed_components'] = [component]
+                operations.atomic_json(api.DATA_DIR / 'operations' / (identity + '.json'), current)
         operations.write_status(api.DATA_DIR, api.ACTION_FILE, name, "succeeded", 100,
-                                "Результат операции подтверждён", started, identity, unit)
+                                "Результат операции подтверждён", started, identity, unit, health_check=health)
         return True
+
+
+def postcheck(api, name):
+    try:
+        import diagnostic_checks
+        return diagnostic_checks.operation_health(api, name)
+    except Exception:
+        return {'state': 'unknown', 'checks': []}
 
 
 def apply_network_request(api, name: str, path: Path, digest: str, identity: str):

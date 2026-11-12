@@ -638,7 +638,10 @@ def system_boot_time() -> datetime | None:
 
 def run(*args: str, timeout: int = 8, check: bool = False) -> str:
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+        import operation_log
+        with operation_log.command(DATA_DIR, args) as completed:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+            completed(result.returncode)
     except FileNotFoundError:
         if check:
             observability.tracing.failure('command_missing')
@@ -4429,7 +4432,7 @@ def get_application_operation(operation_id: str, _: None = Depends(require_token
         raise HTTPException(status_code=409, detail="Не удалось прочитать операцию") from None
     if not value:
         raise HTTPException(status_code=404, detail="Операция не найдена")
-    return value
+    return application_operation.diagnostic_state(value)
 
 
 @app.post("/api/protocol-images/{image_id}/install", dependencies=[Depends(require_subscription_component), Depends(require_component_management)])

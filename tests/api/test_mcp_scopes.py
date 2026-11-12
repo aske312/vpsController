@@ -66,6 +66,14 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(self.tool('mihomo_api', 'vps-controller-mcp', path='/profiles').status_code, 403)
         self.assertEqual(self.tool('vps_overview', 'mihomo-mcp').status_code, 403)
 
+    def test_new_diagnostics_cannot_cross_scope_or_bypass_disabled_vps_connector(self):
+        names = ('application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'vps_terminal')
+        for name in names:
+            self.assertEqual(self.tool(name, 'mihomo-mcp').status_code, 403)
+        self.switches(vps=False)
+        for name in names:
+            self.assertEqual(self.tool(name, 'vps-controller-mcp').status_code, 403)
+
     def test_subscriber_has_only_mihomo_scope_and_still_cannot_read_other_profile(self):
         value = control.read(api)
         value['accounts'][0].update(role='user', products=['mihomo'], mihomo_profile_id='own', permission_overrides={})

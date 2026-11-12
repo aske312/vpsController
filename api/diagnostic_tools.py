@@ -55,34 +55,32 @@ def changes(api, query):
         observation(result, 'http:' + str(event['id']), 'request_history', {
             key: event.get(key) for key in ('request_id', 'trace_id', 'operation_id', 'service', 'route', 'method', 'status', 'changed_fields', 'target_profile_id')}, at=event['at'])
     seen = set()
-    for root, source in [(api.DATA_DIR, 'system'), (api.DATA_DIR / 'mihomo', 'mihomo'), (api.DATA_DIR / 'cdn', 'cdn')]:
-        try: records = operations.history(root, limit=200)
-        except (OSError, ValueError):
-            unknown(result, source + '_operations', 'operation_history_unavailable')
-            continue
-        for record in records:
-            identity = record.get('id')
-            if not tracing.valid(identity) or identity in seen: continue
-            at = epoch(record.get('updated_at') or record.get('started_at'))
-            if at is None or at < time.time() - query.minutes * 60: continue
-            if query.trace_id and record.get('trace_id') != query.trace_id: continue
-            if query.operation_id and identity != query.operation_id: continue
-            if query.profile_id and record.get('target_profile_id') != query.profile_id: continue
-            seen.add(identity)
-            action = str(record.get('action', '')).split(':', 1)[0]
-            if not re.fullmatch(r'[a-z][a-z0-9-]{0,79}', action): action = 'unknown'
-            state = record.get('state')
-            if state not in ('queued', 'running', 'succeeded', 'failed', 'unknown', 'cancelled'): state = 'unknown'
-            observation(result, 'operation:' + identity, 'operation_history', {
-                'operation_id': identity, 'action': action, 'state': state, 'source': source,
-                **{key: record[key] for key in ('trace_id', 'parent_request_id') if tracing.valid(record.get(key))},
-                'target_profile_id': record.get('target_profile_id') if isinstance(record.get('target_profile_id'), str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', record['target_profile_id']) else None,
-            }, at=at)
+    from application_diagnostics import records as operation_records
+    records, operation_coverage = operation_records(api)
+    for source, record in records:
+        identity = record.get('id')
+        if not tracing.valid(identity) or identity in seen: continue
+        at = epoch(record.get('updated_at') or record.get('started_at'))
+        if at is None or at < time.time() - query.minutes * 60: continue
+        if query.trace_id and record.get('trace_id') != query.trace_id: continue
+        if query.operation_id and identity != query.operation_id: continue
+        if query.profile_id and record.get('target_profile_id') != query.profile_id: continue
+        seen.add(identity)
+        action = str(record.get('action', '')).split(':', 1)[0]
+        if not re.fullmatch(r'[a-z][a-z0-9-]{0,79}', action): action = 'unknown'
+        state = record.get('state')
+        if state not in ('queued', 'running', 'succeeded', 'failed', 'unknown', 'cancelled'): state = 'unknown'
+        observation(result, 'operation:' + identity, 'operation_history', {
+            'operation_id': identity, 'action': action, 'state': state, 'source': source,
+            **{key: record[key] for key in ('trace_id', 'parent_request_id') if tracing.valid(record.get(key))},
+            'target_profile_id': record.get('target_profile_id') if isinstance(record.get('target_profile_id'), str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', record['target_profile_id']) else None,
+        }, at=at)
     result['observations'].sort(key=lambda item: item['checked_at'], reverse=True)
     total = len(result['observations'])
     result['observations'] = result['observations'][:query.limit]
     result['coverage'] = {'window_minutes': query.minutes, 'limit': query.limit, 'truncated': total > query.limit or len(history['events']) == query.limit,
                           'operation_scan_limit_per_source': 200, 'settings': history['settings'],
+                          'operation_sources': operation_coverage, 'storage': history['storage_coverage'],
                           'semantics': 'HTTP 202 is admission, not completion; changed_fields are requested field names, never values. Operation history owns final results.'}
     result['next_steps'] = [{'tool': 'vps_incident', 'arguments': {'minutes': query.minutes}, 'reason': 'correlate_changes_with_errors_without_assuming_causation'}]
     return result
@@ -114,7 +112,7 @@ def incident(api, query):
         if history['summary']['errors']:
             result['confirmed'].append({'claim': 'HTTP_errors_in_retained_window', 'evidence': ['http_events'],
                                         'count': history['summary']['errors'], 'affected_known_profiles': history['summary']['affected_profiles']})
-        result['coverage'].update(settings=history['settings'], events_truncated=history['summary']['requests'] > len(history['events']))
+        result['coverage'].update(settings=history['settings'], storage=history['storage_coverage'], events_truncated=history['summary']['requests'] > len(history['events']))
     except (OSError, sqlite3.Error): unknown(result, 'request_history', 'storage_unavailable')
     try:
         change_report = changes(api, ChangesQuery(minutes=query.minutes, limit=query.limit, trace_id=trace, operation_id=query.operation_id, profile_id=query.profile_id))
@@ -135,9 +133,10 @@ def incident(api, query):
             value = api.observe_service(definitions[key]['unit'])
             state = value.get('runtime', {}).get('state', 'unknown')
             if state not in ('running', 'stopped', 'error', 'unknown', 'applied', 'waiting', 'listening'): state = 'unknown'
-            observation(result, 'service:' + key, 'systemd', {'service': key, 'runtime_state': state, 'scope': 'current_runtime'},
+            observation(result, 'service:' + key, 'systemd', {'service': key, 'runtime_state': state, 'execution': value.get('execution'),
+                        'reason': value.get('reason'), 'service_type': value.get('service_type', 'unknown'), 'scope': 'current_runtime_and_latest_execution'},
                         'unknown' if state == 'unknown' else 'observed')
-            if state in ('error', 'stopped'):
+            if state in ('error', 'stopped') and value.get('execution', {}).get('state') != 'succeeded':
                 result['confirmed'].append({'claim': 'service_currently_' + state, 'evidence': ['service:' + key], 'scope': 'current_runtime_only'})
     if query.include_connections:
         value = observability_control.connections(api)
@@ -161,6 +160,39 @@ def incident(api, query):
     except (OSError, sqlite3.Error, ValueError): unknown(result, 'probe_history', 'storage_unavailable')
     result['next_steps'] += [{'tool': 'vps_probe', 'arguments': {'kind': 'mihomo_api'}, 'reason': 'test_manager_reachability'},
                              {'tool': 'vps_probe', 'arguments': {'kind': 'targets'}, 'reason': 'discover_configured_DNS_and_route_targets'}]
+    timeline = []
+    for event in (history or {}).get('events', []):
+        timeline.append({'at': event['at'], 'source': 'request_history', 'evidence': 'http_events', 'id': 'http:' + str(event['id']),
+                         'kind': event.get('kind'), 'request_id': event.get('request_id'), 'operation_id': event.get('operation_id'),
+                         'trace_id': event.get('trace_id'), 'status': event.get('status'), 'stage': event.get('stage')})
+    for item in result['observations']:
+        if item['id'] == 'changes':
+            for change in item['data']:
+                timeline.append({'at': change['checked_at'], 'source': change['source'], 'evidence': 'changes',
+                                 'id': change['id'], 'data': change['data']})
+        elif item['id'] == 'recent_probes':
+            for measurement in item['data']:
+                timeline.append({'at': measurement['at'], 'source': 'probe_history', 'evidence': 'recent_probes',
+                                 'id': 'probe:' + measurement['id'], 'relation': 'temporal_context_only'})
+        elif item['id'] == 'journal':
+            result['coverage']['journal'] = item['data'].get('coverage', {})
+            for record in item['data'].get('records', []):
+                matched = any(selected and record.get(key) == selected for key, selected in
+                              (('request_id', query.request_id), ('trace_id', trace), ('operation_id', query.operation_id)))
+                timeline.append({**record, 'evidence': 'journal', 'relation': 'explicit_ID_match' if matched else 'temporal_context_only'})
+    timeline.sort(key=lambda row: (row['at'], row['id']))
+    result['timeline'] = timeline[-query.limit:]
+    result['coverage']['timeline'] = {'truncated': len(timeline) > query.limit, 'ordering': 'recorded_wall_clock; clock_skew_not_measured',
+                                      'journald': 'structured_timestamp_and_explicit_ID_correlation; no_causation_inference', 'current_services': 'snapshot_not_historical_events'}
+    if query.operation_id:
+        from application_diagnostics import timeline as operation_timeline, TimelineQuery
+        operation_report = operation_timeline(api, TimelineQuery(operation_id=query.operation_id, limit=query.limit, include_journal=query.include_journal))
+        result['operation_timeline'] = operation_report['timeline']
+        merged = {row['id']: row for row in result['timeline']}
+        for row in operation_report['timeline']: merged.setdefault(row['id'], {**row, 'evidence': 'operation_timeline'})
+        result['timeline'] = sorted(merged.values(), key=lambda row: (row['at'], row['id']))[-query.limit:]
+        result['coverage']['operation'] = operation_report['coverage']
+        result['missing_data'] += operation_report['missing_data']
     return result
 
 

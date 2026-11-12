@@ -31,6 +31,18 @@ def operation_path(operation_id: str) -> Path:
 
 def write(operation: dict) -> None:
     path = operation_path(operation["id"])
+    previous = application_operation.read(path)
+    if 'configuration_before' in previous: operation.setdefault('configuration_before', previous['configuration_before'])
+    operation['diagnostics_version'] = 2
+    operation.setdefault('started_at', previous.get('started_at') or application_operation.timestamp())
+    operation['updated_at'] = application_operation.timestamp()
+    if operation.get('state') in application_operation.TERMINAL: operation['finished_at'] = operation['updated_at']
+    if operation.get('state') in application_operation.TERMINAL and 'health_check' not in operation:
+        from diagnostic_runtime import local_http
+        checks = [{'component': 'api', 'level': 'local_api', **local_http(8000, '/api/health', json_response=True)},
+                  {'component': 'web', 'level': 'local_api', **local_http(3000, '/')}]
+        operation['health_check'] = {'state': 'passed' if all(row['state'] == 'passed' for row in checks) else 'failed', 'checks': checks}
+    application_operation.enrich(DIRECTORY.parent, operation)
     application_operation.atomic_json(path, operation)
     from operation_log import append
     append(DIRECTORY.parent, operation, "cdn")

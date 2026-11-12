@@ -5,13 +5,13 @@ import assistant_control as control
 import assistant_roles as roles
 
 
-def sanitize(api, value):
+def sanitize(api, value, *, max_chars=9000, max_string=1200):
     settings = control.read(api)
     secrets = [settings.get('control_token'), settings.get('api_key'), settings.get('bot_token'),
                settings.get('telegram_api_hash'), getattr(api, 'ADMIN_PASSWORD', '')]
     secrets += [row.get('api_key') for row in settings.get('providers', [])]
     secrets += [row.get('session') for row in settings.get('accounts', [])]
-    remaining, nodes = 9000, 150
+    remaining, nodes = max_chars, 150
     safe_fields = {"admin_password_strong", "password_authentication", "secrets_protected", "secrets_mode"}
     def scrub(item, depth=0):
         nonlocal remaining, nodes
@@ -29,7 +29,7 @@ def sanitize(api, value):
             item = re.sub(r'bot[0-9]{5,}:[A-Za-z0-9_-]{20,}', 'bot[redacted]', item)
             item = re.sub(r'(?i)(?:https?|ss|vless|trojan|hysteria2|tuic)://[^\s<>"\x27]+', '[redacted-url]', item)
             item = re.sub(r'/(?:api/mihomo/subscriptions|s)/[^\s?"\x27]+', '/subscription/[redacted]', item)
-            text = item[:min(1200, max(0, remaining))]
+            text = item[:min(max_string, max(0, remaining))]
             remaining -= len(text)
             return text
         return item
@@ -69,7 +69,13 @@ def call(api, name, arguments, actor):
         check('security_updates', None if updates.get('security') is None else updates['security'] == 0, 'Ожидаются обновления безопасности ОС', 'Проверьте обновления ОС и отчёт безопасного обновления')
         # Diagnostic permission includes a version inventory, independently of server browsing.
         components = control.control_tool(api, 'vps_components', actor='panel')
-        return sanitize(api, {'scope': 'Пассивная диагностика приложения и конфигурации; не полный аудит CVE и не проверка эксплуатации',
+        legacy = sanitize(api, {'scope': 'Пассивная диагностика приложения и конфигурации; не полный аудит CVE и не проверка эксплуатации',
                              'findings': findings, **components, 'dependencies': api.application_dependency_versions(),
                              'logs': api.application_logs(40, None) if roles.allows(settings, actor, 'logs_read') else {'available': False, 'reason': 'Нет права на чтение логов'}, 'checked_at': control.operations.timestamp()})
+        import diagnostic_tools
+        result = diagnostic_tools.report('vps_diagnostics')
+        diagnostic_tools.observation(result, 'local_checks', 'application_security_and_local_inventory', legacy)
+        result['coverage'] = {'scope': legacy['scope'], 'functional_health': 'not_checked'}
+        result['missing_data'].append({'source': 'application_function', 'reason': 'not_checked'})
+        return {**legacy, **result}
     raise HTTPException(404, 'Диагностика не найдена')

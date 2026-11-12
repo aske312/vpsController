@@ -64,6 +64,30 @@ class ProviderCatalogTests(unittest.TestCase):
                 with self.assertRaises(ValueError): connection.connect()
                 connect.assert_not_called()
 
+    def test_optional_quota_preserves_known_zero_expiration_usage_and_model_limits_without_labels_or_credentials(self):
+        body = {'object': 'token_usage', 'total_available': 0, 'unlimited_quota': False,
+            'total_granted': 500, 'total_used': 500, 'expires_at': 0, 'model_limits_enabled': True,
+            'model_limits': {'allowed': True, 'disabled': False, 'private-key': True}, 'name': 'private-name', 'api_key': 'private-key'}
+        response = MagicMock(status=200, read=MagicMock(return_value=json.dumps({'data': body}).encode()))
+        with patch.object(provider, 'PublicHTTPSConnection') as factory:
+            factory.return_value.getresponse.return_value = response
+            result = provider.token_quota('https://provider.example/v1', 'private-key')
+        self.assertEqual(result['remaining'], 0)
+        self.assertEqual(result['used'], 500)
+        self.assertEqual(result['granted'], 500)
+        self.assertEqual(result['expires_at'], 0)
+        self.assertEqual(result['allowed_models'], ['allowed'])
+        self.assertNotIn('private', json.dumps(result))
+
+    def test_partial_quota_keeps_available_fields_without_fabricating_missing_values(self):
+        body = {'object': 'token_usage', 'total_used': 0, 'expires_at': 1800000000,
+                'total_available': 'unknown', 'total_granted': True, 'unlimited_quota': 'yes'}
+        response = MagicMock(status=200, read=MagicMock(return_value=json.dumps({'data': body}).encode()))
+        with patch.object(provider, 'PublicHTTPSConnection') as factory:
+            factory.return_value.getresponse.return_value = response
+            result = provider.token_quota('https://provider.example/v1', 'private-key')
+        self.assertEqual(result, {'used': 0, 'expires_at': 1800000000})
+
     def test_public_ip_is_pinned_and_original_hostname_is_used_for_tls(self):
         answers = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 443))]
         with patch.object(provider.socket, 'getaddrinfo', return_value=answers) as dns, patch.object(provider.socket, 'create_connection') as connect:

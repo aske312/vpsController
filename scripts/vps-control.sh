@@ -27,6 +27,34 @@ if [[ "${SCRIPT_DIR}" == "/usr/local/sbin" && -d "${INSTALL_DIR}" ]]; then
   PROJECT_DIR="${INSTALL_DIR}"
 fi
 
+# The journal receives executable class/unit/result only, never curl URLs, keys or bodies.
+diagnostic_shell_command() {
+  local kind="$1" phase="$2" span="$3" status="$4" unit="$5"
+  python3 "${INSTALL_DIR}/api/operation_log.py" shell "${DATA_DIR}" "${kind}" "${phase}" "${span}" "${status}" "${unit}" >/dev/null 2>&1 || true
+}
+
+if [[ "${VPS_CONTROL_OPERATION_ID:-}" =~ ^[0-9a-f]{32}$ && -f "${INSTALL_DIR}/api/operation_log.py" ]]; then
+  systemctl() {
+    local status=0 unit="" argument span
+    for argument in "$@"; do
+      [[ ! "$argument" =~ ^(vps-control-[a-zA-Z0-9@_.-]+|caddy|ssh|sshd|fail2ban|systemd-resolved)\.service$ ]] || unit="$argument"
+    done
+    printf -v span '%08x%04x%04x%016x' "${BASHPID}" "${RANDOM}" "${RANDOM}" "$(date +%s%N)"
+    diagnostic_shell_command systemctl start "$span" 0 "$unit"
+    command systemctl "$@" || status=$?
+    diagnostic_shell_command systemctl finish "$span" "$status" "$unit"
+    return "$status"
+  }
+  curl() {
+    local status=0 span
+    printf -v span '%08x%04x%04x%016x' "${BASHPID}" "${RANDOM}" "${RANDOM}" "$(date +%s%N)"
+    diagnostic_shell_command curl start "$span" 0 ""
+    command curl "$@" || status=$?
+    diagnostic_shell_command curl finish "$span" "$status" ""
+    return "$status"
+  }
+fi
+
 ACCESS_MODE="external"
 ADMIN_USER="admin"
 ADMIN_PASSWORD=""

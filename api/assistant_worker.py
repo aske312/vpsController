@@ -15,7 +15,10 @@ MARKER = '# Managed by vps-control: '
 
 
 def checked(command, *, timeout=60):
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+    import operation_log
+    with operation_log.command(Path(os.getenv('DATA_DIR', '/var/lib/vps-control')), command) as completed:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+        completed(result.returncode)
     if result.returncode:
         raise RuntimeError('Assistant installation or service command failed')
 
@@ -61,6 +64,9 @@ def install(api, component, *, start_bot=True):
     if component == 'nodera-bot' and api.observe_service(control.BOT_UNIT).get('active'):
         raise ValueError('Stop NoderaBot before updating its image')
     require_idle(component)
+    if component == 'ai-agent':
+        import terminal_observer
+        terminal_observer.provision(api)
     root = control.runtime_directory(component)
     root.mkdir(parents=True, exist_ok=True, mode=0o755); root.chmod(0o755)
     image = api.INSTALL_DIR / 'protocol-images' / component

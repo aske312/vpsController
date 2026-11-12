@@ -57,14 +57,23 @@ class Store:
             db.execute('CREATE INDEX IF NOT EXISTS events_request ON events(request_id)')
             columns = {row['name'] for row in db.execute('PRAGMA table_info(events)')}
             for name, kind in [('trace_id', 'TEXT'), ('parent_request_id', 'TEXT'), ('operation_id', 'TEXT'),
-                               ('error_code', 'TEXT'), ('stage', 'TEXT'), ('retryable', 'INTEGER'), ('changed_fields', 'TEXT'), ('target_profile_id', 'TEXT')]:
+                               ('error_code', 'TEXT'), ('stage', 'TEXT'), ('retryable', 'INTEGER'), ('changed_fields', 'TEXT'), ('target_profile_id', 'TEXT'),
+                               ('component', 'TEXT'), ('operation_type', 'TEXT')]:
                 if name not in columns:
                     try: db.execute(f'ALTER TABLE events ADD COLUMN {name} {kind}')
                     except sqlite3.OperationalError:
                         if name not in {row['name'] for row in db.execute('PRAGMA table_info(events)')}: raise
             db.execute('CREATE INDEX IF NOT EXISTS events_trace ON events(trace_id)')
             db.execute('CREATE INDEX IF NOT EXISTS events_operation ON events(operation_id)')
+            db.execute('CREATE INDEX IF NOT EXISTS events_component ON events(component)')
+            db.execute('CREATE INDEX IF NOT EXISTS events_error_code ON events(error_code)')
             db.execute('CREATE TABLE IF NOT EXISTS probes (id TEXT PRIMARY KEY, at REAL, trace_id TEXT, profile_id TEXT, payload TEXT)')
+            db.execute('CREATE TABLE IF NOT EXISTS retention (id INTEGER PRIMARY KEY CHECK(id=1), tracked_since REAL, expired INTEGER, capacity INTEGER, coverage_since REAL)')
+            if 'coverage_since' not in {row['name'] for row in db.execute('PRAGMA table_info(retention)')}:
+                db.execute('ALTER TABLE retention ADD COLUMN coverage_since REAL')
+            now = time.time()
+            db.execute('INSERT OR IGNORE INTO retention (id,tracked_since,expired,capacity,coverage_since) VALUES (1,?,0,0,?)', (now, now))
+            db.execute('UPDATE retention SET coverage_since=? WHERE coverage_since IS NULL', (now,))
             db.execute('CREATE INDEX IF NOT EXISTS probes_at ON probes(at)')
             db.commit()
             yield db
@@ -79,9 +88,10 @@ class Store:
         return result
 
     def trim(self, db, policy):
-        db.execute('DELETE FROM events WHERE at < ?', (time.time() - policy['retention_days'] * 86400,))
+        expired = db.execute('DELETE FROM events WHERE at < ?', (time.time() - policy['retention_days'] * 86400,)).rowcount
         cutoff = db.execute('SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?', (policy['max_events'],)).fetchone()
-        if cutoff: db.execute('DELETE FROM events WHERE id <= ?', (cutoff['id'],))
+        capacity = db.execute('DELETE FROM events WHERE id <= ?', (cutoff['id'],)).rowcount if cutoff else 0
+        db.execute('UPDATE retention SET expired=expired+?,capacity=capacity+? WHERE id=1', (expired, capacity))
 
     def configure(self, payload):
         with self.connect() as db:
@@ -91,6 +101,8 @@ class Store:
                 raise HTTPException(409, 'Настройки журналов изменились. Обновите данные.')
             db.execute('UPDATE settings SET enabled=?,retention_days=?,max_events=?,errors_only=?,revision=revision+1 WHERE id=1',
                        (payload.enabled, payload.retention_days, payload.max_events, payload.errors_only))
+            if current['enabled'] != payload.enabled or current['errors_only'] != payload.errors_only:
+                db.execute('UPDATE retention SET coverage_since=? WHERE id=1', (time.time(),))
             self.trim(db, payload.model_dump())
             self.trim_probes(db, payload.model_dump())
             return self.settings(db)
@@ -102,7 +114,7 @@ class Store:
             self.trim(db, policy)
             if policy['enabled'] and (event.get('kind') == 'change' or not policy['errors_only'] or event['status'] >= 400):
                 fields = ('at', 'request_id', 'service', 'route', 'method', 'status', 'duration_ms', 'reason', 'profile_id', 'kind',
-                          'trace_id', 'parent_request_id', 'operation_id', 'error_code', 'stage', 'retryable', 'changed_fields', 'target_profile_id')
+                          'trace_id', 'parent_request_id', 'operation_id', 'error_code', 'stage', 'retryable', 'changed_fields', 'target_profile_id', 'component', 'operation_type')
                 db.execute('INSERT INTO events (' + ','.join(fields) + ') VALUES (' + ','.join('?' for _ in fields) + ')', [event.get(key) for key in fields])
                 self.trim(db, policy)
 
@@ -110,6 +122,8 @@ class Store:
         with self.connect() as db:
             db.execute('DELETE FROM events')
             db.execute('DELETE FROM probes')
+            now = time.time()
+            db.execute('UPDATE retention SET tracked_since=?,coverage_since=?,expired=0,capacity=0 WHERE id=1', (now, now))
 
     def record_probe(self, result, profile_id=None):
         identity = uuid.uuid4().hex
@@ -135,12 +149,12 @@ class Store:
             rows = db.execute('SELECT * FROM probes WHERE ' + where + ' ORDER BY at DESC LIMIT ?', [*args, limit])
             return [{**dict(row), 'payload': json.loads(row['payload'])} for row in rows]
 
-    def read(self, minutes=60, identity=None, service=None, errors=False, limit=60, trace_id=None, operation_id=None, profile_id=None, changes=False):
+    def read(self, minutes=60, identity=None, service=None, errors=False, limit=60, trace_id=None, operation_id=None, profile_id=None, changes=False, error_code=None, stage=None, kind=None, component=None, operation_type=None):
         with self.connect() as db:
             policy = self.settings(db)
             self.trim(db, policy)
             clauses, args = ['at >= ?'], [time.time() - minutes * 60]
-            for field, value in [('request_id', identity), ('service', service), ('trace_id', trace_id), ('operation_id', operation_id)]:
+            for field, value in [('request_id', identity), ('service', service), ('trace_id', trace_id), ('operation_id', operation_id), ('error_code', error_code), ('stage', stage), ('kind', kind), ('component', component), ('operation_type', operation_type)]:
                 if value:
                     clauses.append(field + ' = ?')
                     args.append(value)
@@ -157,7 +171,14 @@ class Store:
             for row in rows:
                 row['changed_fields'] = json.loads(row['changed_fields']) if row.get('changed_fields') else None
                 if row['retryable'] is not None: row['retryable'] = bool(row['retryable'])
+            retention = dict(db.execute('SELECT * FROM retention WHERE id=1').fetchone())
+            retention.pop('id')
+            retained = dict(db.execute('SELECT MIN(at) AS first_at,MAX(at) AS last_at,COUNT(*) AS retained_count FROM events').fetchone())
             return {'available': True, 'settings': policy, 'window_minutes': minutes, 'summary': counts, 'subscriptions': subscriptions, 'groups': groups, 'events': rows,
+                    'storage_coverage': {**retention, **retained, 'requested_from': time.time() - minutes * 60,
+                        'requested_until': time.time(), 'truncated': counts['errors' if errors else 'requests'] > len(rows),
+                        'loss_scope': 'counters_since_tracking_or_last_clear; earlier_losses_and_failed_writes_unknown',
+                        'successful_requests_recorded': policy['enabled'] and not policy['errors_only']},
                     'coverage': 'retained_events_only', 'affected_scope': 'known_profiles_with_HTTP_errors',
                     'limitations': ['История ограничена сроком и количеством событий; режим только ошибок исключает успешные запросы.',
                                     'Выдача подписки означает HTTP-доставку конфигурации, а не подключение клиента.',
@@ -253,7 +274,9 @@ class RequestEvidence:
                          'status': status, 'duration_ms': round((time.monotonic() - started) * 1000, 2),
                          'reason': scope['state'].get('evidence_reason') if status >= 400 and scope['state'].get('evidence_reason') in
                          SUBSCRIPTION_REASONS else reason(status, failed),
-                         'profile_id': profile, 'kind': kind}
+                         'profile_id': profile, 'kind': kind,
+                         'component': component_for_route(route, self.service),
+                         'operation_type': 'catalog' if route == '/api/assistant/models' else 'chat' if route == '/api/assistant/chat' else 'mcp_tool' if route == '/api/assistant/control-tool' else 'mutation' if kind == 'change' else 'read' if scope.get('method') in ('GET', 'HEAD') else 'request'}
                 code = event['reason']
                 if status >= 400 and code not in SUBSCRIPTION_REASONS: code = trace.get('error_code', code)
                 event.update(trace_id=trace['trace_id'], parent_request_id=trace.get('parent_request_id'), operation_id=trace.get('operation_id'),
@@ -279,6 +302,15 @@ def is_change(route, method):
     return (method in ('POST', 'PUT', 'PATCH', 'DELETE') and
             any(part in route for part in ('/settings', '/profiles', '/modules', '/services', '/network', '/dns', '/application/action', '/routing')) and
             not any(part in route for part in ('/check', '/diagnostic', '/stats', '/subscriptions/{token}')))
+
+
+def component_for_route(route, service):
+    if service == 'mihomo': return 'mihomo'
+    for prefix, component in (('/api/assistant', 'nodera'), ('/api/mihomo', 'mihomo'),
+                              ('/api/network', 'network'), ('/api/dns', 'dns'), ('/api/security', 'security'),
+                              ('/api/application', 'application'), ('/api/services', 'services'), ('/api/protocol-images', 'components')):
+        if route == prefix or route.startswith(prefix + '/'): return component
+    return 'panel'
 
 
 if __name__ == '__main__':

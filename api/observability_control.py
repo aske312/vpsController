@@ -1,5 +1,7 @@
 """Bounded observability API and human-confirmed MCP settings changes."""
 import re
+import json
+from datetime import datetime, timezone
 import secrets
 import sqlite3
 import time
@@ -21,6 +23,11 @@ class EventQuery(BaseModel):
     trace_id: str | None = Field(default=None, pattern='^[0-9a-f]{32}$')
     operation_id: str | None = Field(default=None, pattern='^[0-9a-f]{32}$')
     profile_id: str | None = Field(default=None, pattern='^[a-zA-Z0-9_-]{1,80}$')
+    error_code: str | None = Field(default=None, pattern='^[a-zA-Z0-9_-]{1,80}$')
+    stage: str | None = Field(default=None, pattern='^[a-zA-Z0-9_-]{1,80}$')
+    kind: str | None = Field(default=None, pattern='^[a-zA-Z0-9_-]{1,80}$')
+    component: str | None = Field(default=None, pattern='^[a-zA-Z0-9_-]{1,80}$')
+    operation_type: str | None = Field(default=None, pattern='^[a-zA-Z0-9_-]{1,80}$')
 
 
 class JournalQuery(BaseModel):
@@ -29,11 +36,12 @@ class JournalQuery(BaseModel):
     minutes: int = Field(default=60, strict=True, ge=1, le=10080)
     priority: str = Field(default='info', pattern='^(err|warning|info|debug)$')
     limit: int = Field(default=60, strict=True, ge=1, le=120)
+    operation_id: str | None = Field(default=None, pattern='^[0-9a-f]{32}$')
 
 
-def evidence(api, minutes=60, request_id=None, service=None, errors=False, limit=60, trace_id=None, operation_id=None, profile_id=None):
+def evidence(api, minutes=60, request_id=None, service=None, errors=False, limit=60, trace_id=None, operation_id=None, profile_id=None, error_code=None, stage=None, kind=None, component=None, operation_type=None):
     try: EventQuery.model_validate(dict(minutes=minutes, request_id=request_id, service=service, errors=errors, limit=limit,
-                                        trace_id=trace_id, operation_id=operation_id, profile_id=profile_id))
+                                        trace_id=trace_id, operation_id=operation_id, profile_id=profile_id, error_code=error_code, stage=stage, kind=kind, component=component, operation_type=operation_type))
     except ValidationError: raise HTTPException(422, 'Некорректные фильтры событий') from None
     if type(minutes) is not int or not 1 <= minutes <= 129600 or type(limit) is not int or not 1 <= limit <= 120:
         raise HTTPException(422, 'Некорректное окно или лимит событий')
@@ -42,7 +50,7 @@ def evidence(api, minutes=60, request_id=None, service=None, errors=False, limit
     if service is not None and service not in ('panel', 'mihomo'):
         raise HTTPException(422, 'Выберите panel или mihomo')
     try:
-        return observability.Store(api.DATA_DIR).read(minutes, request_id, service, errors, limit, trace_id, operation_id, profile_id)
+        return observability.Store(api.DATA_DIR).read(minutes, request_id, service, errors, limit, trace_id, operation_id, profile_id, error_code=error_code, stage=stage, kind=kind, component=component, operation_type=operation_type)
     except (OSError, sqlite3.Error):
         raise HTTPException(503, 'Журнал наблюдаемости недоступен') from None
 
@@ -139,16 +147,52 @@ def confirm(api, actor, record):
     return text
 
 
-def journal(api, service='application', minutes=60, priority='info', limit=60):
+def journal(api, service='application', minutes=60, priority='info', limit=60, operation_id=None):
     if type(minutes) is not int or not 1 <= minutes <= 10080 or type(limit) is not int or not 1 <= limit <= 120 or priority not in ('err', 'warning', 'info', 'debug'):
         raise HTTPException(422, 'Некорректный фильтр журналов')
     units = {'application': ['vps-control-api.service', 'vps-control-web.service'],
              'system': [], 'dns': ['systemd-resolved.service'], 'gateway': ['caddy.service'],
              **{key: [value['unit']] for key, value in api.managed_services().items()}}
     if not isinstance(service, str) or service not in units: raise HTTPException(422, 'Выберите application, system, dns, gateway или ID из vps_services')
-    args = ['journalctl', '-r', '--since', f'{minutes} minutes ago', '-p', priority, '-n', str(limit), '--no-pager', '-o', 'short-iso']
-    for unit in units[service]: args += ['-u', unit]
+    selected_units = units[service]
+    operation_unit = False
+    if operation_id:
+        if not re.fullmatch(r'[0-9a-f]{32}', operation_id): raise HTTPException(422, 'Неверный ID операции')
+        import application_operation
+        record = application_operation.read(api.DATA_DIR / 'operations' / (operation_id + '.json'))
+        unit = record.get('unit', '')
+        if re.fullmatch(r'vps-control-(?:action-[0-9]+|cdn-security-[0-9a-f]{32})\.service', unit):
+            selected_units, operation_unit = [unit], True
+    args = ['journalctl', '-r', '--since', f'{minutes} minutes ago', '-p', priority, '-n', str(limit), '--no-pager', '-o', 'json',
+            '--output-fields=__REALTIME_TIMESTAMP,__CURSOR,_SYSTEMD_UNIT,PRIORITY,MESSAGE']
+    for unit in selected_units: args += ['-u', unit]
     output = api.run(*args, timeout=12, check=True)
     import assistant_diagnostics
-    return assistant_diagnostics.sanitize(api, {'service': service, 'window_minutes': minutes, 'priority': priority,
-                                               'lines': output.splitlines(), 'available': True})
+    records, legacy, unparsed, budget = [], [], 0, 9000
+    for index, line in enumerate(output.splitlines()[:limit]):
+        if budget <= 0: break
+        try:
+            row = json.loads(line)
+            at = int(row['__REALTIME_TIMESTAMP']) / 1000000
+            if at <= 0 or not isinstance(row.get('MESSAGE'), str): raise ValueError('invalid journal record')
+            message = row['MESSAGE']
+            ids = {}
+            for key in ('request_id', 'trace_id', 'operation_id'):
+                match = re.search(r'\b' + key + r'[=:]([0-9a-f]{32})\b', message)
+                if match: ids[key] = match.group(1)
+            safe = assistant_diagnostics.sanitize(api, message)[:budget]
+            budget -= len(safe)
+            records.append({'id': 'journal:' + str(at) + ':' + str(index) + ':' + str(row.get('_SYSTEMD_UNIT', 'unknown'))[:160], 'at': at, 'source': 'journald', 'message': safe,
+                            'unit': row.get('_SYSTEMD_UNIT') if re.fullmatch(r'[a-zA-Z0-9@_.-]{1,160}', str(row.get('_SYSTEMD_UNIT', ''))) else None,
+                            'priority': str(row.get('PRIORITY', ''))[:1], **ids})
+            legacy.append(datetime.fromtimestamp(at, timezone.utc).isoformat() + ' ' + safe)
+        except (ValueError, TypeError, KeyError, OverflowError, OSError):
+            unparsed += 1
+            safe = assistant_diagnostics.sanitize(api, line)[:budget]
+            budget -= len(safe)
+            legacy.append(safe)
+    return {'service': service, 'window_minutes': minutes, 'priority': priority, 'lines': legacy, 'records': records, 'available': True,
+            'coverage': {'requested_from': time.time() - minutes * 60, 'requested_until': time.time(), 'limit': limit,
+                         'possibly_truncated': len(output.splitlines()) >= limit or budget <= 0, 'unparsed_records': unparsed,
+                         'operation_unit_selected': operation_unit,
+                         'correlation': 'explicit_valid_IDs_only; other_events_are_temporal_context; rotation_and_prior_gaps_unknown'}}

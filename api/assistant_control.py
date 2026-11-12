@@ -318,7 +318,7 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare']
+    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal']
     service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
@@ -568,6 +568,7 @@ def bot_identity(api, token, username=None):
 
 def status(api):
     import component_checks, component_state
+    import assistant_provider_observations
     from datetime import datetime, timezone
     value = read(api)
     observations = {key: api.observe_service(AGENT_UNIT if key == 'ai-agent' else BOT_UNIT) for key in MODULES}
@@ -608,6 +609,7 @@ def status(api):
     return {'settings': public(value), 'health': component_state.health_state(component_checks.cached(api).get('nodera'), now=datetime.now(timezone.utc)), 'modules': modules, 'runtime_installed': installed['ai-agent'],
             'bot_username': bot_username,
             'provider_usage': {entry['id']: usage[entry['id']] for entry in providers(value) if entry['id'] in usage},
+            'provider_observations': assistant_provider_observations.read(api, value),
             'nodera_version': nodera_version, 'nodera_available_version': available_version,
             'nodera_management': combined,
             'chat_attachments': agent_version >= (1, 1, 0),
@@ -629,7 +631,8 @@ def status(api):
                           (['vps_user', 'mihomo_capabilities', 'mihomo_api'] if (1, 6, 0) <= agent_version < (1, 15, 0) else []) +
                           (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else []) + (['vps_access'] if agent_version >= (1, 11, 0) else []) +
                           (['vps_observability'] if agent_version >= (1, 13, 0) else []) +
-                          (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []),
+                          (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []) +
+                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []),
                       'mihomo-mcp': ['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] if agent_version >= (1, 15, 0) else []}}
 
 
@@ -768,18 +771,38 @@ def model_catalog(api, payload):
         raise HTTPException(422, 'Укажите API-ключ для загрузки каталога')
     if not _catalog_slots.acquire(blocking=False):
         raise HTTPException(429, 'Проверка каталога API уже выполняется; повторите немного позже')
+    import operation_log
+    configured = next((row['id'] for row in providers(value) if row['id'] == (payload.provider_id or active_provider(value)) and row['provider_url'] == payload.provider_url), None)
+    operation = operation_log.DiagnosticOperation(api.DATA_DIR, 'ai-catalog', 'ai-agent', integration_id='ai:' + configured if configured else None)
     try:
+        operation.stage('catalog', 'running')
+        started = time.monotonic()
         result = {'models': assistant_provider.catalog(payload.provider_url, key)}
+        result['provider_info'] = {'checked_at': time.time(), 'catalog_latency_ms': round((time.monotonic() - started) * 1000, 2),
+                                   'models_count': len(result['models']), 'catalog_http_status': 200}
+        operation.stage('catalog', 'passed')
         if payload.include_quota:
+            operation.stage('quota', 'running')
             result['quota'] = assistant_provider.token_quota(payload.provider_url, key)
+            result['quota_checked_at'] = time.time()
+            operation.stage('quota', 'passed' if result['quota'] is not None else 'unknown')
+        operation.stage('complete', 'passed')
+        result['operation_id'] = operation.identity
+        result['recording'] = {'stored': operation.stored}
+        result['health_check'] = {'scope': 'provider_catalog', 'state': 'passed', 'application_function': 'not_checked', 'changed_components': []}
+        if configured and any(row['id'] == configured and hmac.compare_digest(row.get('api_key', ''), key) for row in providers(value)):
+            import assistant_provider_observations
+            assistant_provider_observations.save(api, value, configured, result, quota_requested=payload.include_quota)
         return result
     except ValueError as exc:
+        operation.stage('complete', 'failed', error_code='provider_catalog_failed')
         # Forward only our own validation messages, never provider bodies/URLs.
         message = str(exc)
         if not message.startswith(('Каталог ', 'Адрес AI-', 'Провайдер вернул неверный')):
             message = 'Не удалось прочитать каталог моделей провайдера'
         raise HTTPException(502, message) from None
     except Exception:
+        operation.stage('complete', 'failed', error_code='provider_catalog_failed')
         raise HTTPException(502, 'Не удалось загрузить каталог моделей. Проверьте адрес, ключ и доступность провайдера') from None
     finally:
         _catalog_slots.release()
@@ -836,12 +859,12 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
     import assistant_commands
-    confirmation_tools = {'vps_service_action', 'mihomo_api', 'vps_access', 'vps_observability'} | {name for name, row in assistant_telegram.TOOLS.items() if row['profile'] == 'actions'}
+    confirmation_tools = {'vps_service_action', 'mihomo_api', 'vps_access', 'vps_observability', 'diagnostic_alert_rules', 'integration_probe', 'component_check'} | {name for name, row in assistant_telegram.TOOLS.items() if row['profile'] == 'actions'}
     if any(tool in confirmation_tools for tool in output['result'].get('tools_used', [])):
         pending = operations.read(assistant_commands.pending_path(api, actor))
         if pending and not pending.get('submitted') and pending.get('expires', 0) > time.time():
             output['pending_action'] = {key: pending[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
-            if pending.get('kind') in ('mihomo', 'roles', 'observability', 'telegram'):
+            if pending.get('kind') in ('mihomo', 'roles', 'observability', 'telegram', 'diagnostic_rules', 'diagnostic_probe'):
                 import assistant_mihomo
                 output['pending_action']['changes'] = assistant_mihomo.sanitize(pending['body'])
     try:
@@ -897,6 +920,22 @@ def bot_models(api, actor, model=None, page=1):
 
 
 def runtime_request(api, mode, body):
+    if mode != '--check' or body.get('module') == 'ai-agent' and read(api).get('model_mode') == 'catalog':
+        return _runtime_request(api, mode, body)
+    import operation_log
+    component = 'nodera-bot' if body.get('module') == 'nodera-bot' else 'ai-agent'
+    operation = operation_log.DiagnosticOperation(api.DATA_DIR, 'runtime-check', component, scope='explicit_runtime_or_dependency_check')
+    try:
+        operation.stage('runtime_check', 'running')
+        result = _runtime_request(api, mode, body)
+        operation.stage('complete', 'passed' if result.get('ok') else 'failed')
+        return {**result, 'operation_id': operation.identity}
+    except Exception:
+        operation.stage('complete', 'failed')
+        raise
+
+
+def _runtime_request(api, mode, body):
     component = 'nodera-bot' if mode == '--check' and body.get('module') == 'nodera-bot' else 'ai-agent'
     require_installed(api, component)
     if component == 'ai-agent' and not api.observe_service(AGENT_UNIT).get('active'):
@@ -942,9 +981,17 @@ def runtime_request(api, mode, body):
             while len(body['history']) > 12 or sum(len(row['content']) for row in body['history']) > 24000:
                 del body['history'][:2]
     selected_model = body.pop('model', None)
+    if mode == '--functional-check':
+        selected_provider = body.pop('provider_id', None)
+        entry = next((row for row in providers(value) if row['id'] == selected_provider), None)
+        if not entry: raise HTTPException(404, 'Настроенный провайдер не найден')
+        selected_model = selected_model or entry.get('model')
+        if not assistant_provider.model_id(selected_model): raise HTTPException(422, 'Выберите модель для функциональной проверки')
+        value = {**value, **{key: entry[key] for key in ('provider_url', 'api_key')}, 'model': selected_model,
+                 'mcp': {key: False for key in MCP_MODULES}, 'memory_enabled': False, 'web_enabled': False}
     if component == 'ai-agent' and mode == '--check' and body.get('module') == 'ai-agent' and value.get('model_mode') == 'catalog':
         result = model_catalog(api, Catalog(provider_url=value['provider_url']))
-        return {'ok': True, 'result': {'models_available': len(result['models'])}}
+        return {'ok': True, 'result': {'models_available': len(result['models'])}, 'operation_id': result['operation_id']}
     if mode == '--chat' and not selected_model:
         selected_model = value.get('model') or None
     if mode == '--chat' and value.get('model_mode') == 'catalog' and not selected_model:
@@ -1082,6 +1129,12 @@ def control_tool(api, name, arguments=None, actor='panel'):
         if not settings['mcp'].get('vps-controller-mcp'):
             result['next_steps'] = [{'tool': 'mihomo_api', 'arguments': {'method': 'GET', 'path': '/profiles'}, 'reason': 'review_available_profiles'}]
         return result
+    if name == 'vps_terminal':
+        import terminal_observer
+        return terminal_observer.call(api, arguments, actor)
+    if name in ('application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'):
+        import application_diagnostics
+        return application_diagnostics.call(api, name, arguments, actor)
     if name in ('vps_changes', 'vps_incident', 'vps_probe', 'vps_compare'):
         import diagnostic_tools
         return diagnostic_tools.call(api, name, arguments, actor)
@@ -1124,7 +1177,8 @@ def control_tool(api, name, arguments=None, actor='panel'):
         if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
             raise HTTPException(422, 'Укажите ID операции')
         value = api.get_application_operation(identity, None)
-        return {key: value.get(key) for key in ('id', 'action', 'state')}
+        return {key: value.get(key) for key in ('id', 'action', 'state', 'started_at', 'updated_at', 'finished_at')} | {
+            'next_steps': [{'tool': 'operation_timeline', 'arguments': {'operation_id': identity}}]}
     if name == 'vps_api':
         endpoints = {'/overview': 'vps_overview', '/services': 'vps_services', '/components': 'vps_components',
                      '/metrics': 'vps_metrics', '/application': 'vps_panel', '/logs': 'vps_logs', '/network': 'vps_network', '/security': 'vps_security', '/diagnostics': 'vps_diagnostics'}
@@ -1137,8 +1191,11 @@ def control_tool(api, name, arguments=None, actor='panel'):
         result = api.overview(None)
         return {'server': result['server'], 'resources': result['resources']}
     if name == 'vps_services':
-        return {'services': [{'id': key, 'name': definition['name'], 'controls': assistant_commands.controls(key, definition), **{
-            field: observation.get(field) for field in ('state', 'substate', 'active', 'enabled', 'runtime', 'service_type')
+        import diagnostic_history
+        history = diagnostic_history.service_history(api)
+        return {'services': [{'id': key, 'name': definition['name'], 'controls': assistant_commands.controls(key, definition),
+                             'execution_history': history.get(key, {'available': False, 'reason': 'no_retained_observation'}), **{
+            field: observation.get(field) for field in ('state', 'reason', 'substate', 'active', 'enabled', 'runtime', 'service_type', 'execution')
         }} for key, definition in api.managed_services().items()
             for observation in [api.observe_service(definition['unit'])]]}
     if name == 'vps_components':

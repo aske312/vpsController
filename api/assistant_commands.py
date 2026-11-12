@@ -149,6 +149,9 @@ def execute(api, actor, prompt):
             if command == '/cancel':
                 if record.get('submitted'):
                     operation = control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'))
+                    if record.get('kind') == 'diagnostic_probe' and control.operations.diagnostic_state(operation).get('state') == 'unknown':
+                        path.unlink()
+                        return 'Ожидание проверки снято. Результат запроса неизвестен; автоматический повтор не выполнялся.'
                     if record.get('kind') == 'telegram' and operation.get('state') == 'unknown':
                         path.unlink()
                         return 'Ожидание результата снято. Действие Telegram не отменено: его результат неизвестен. Проверьте чат перед повтором.'
@@ -167,7 +170,7 @@ def execute(api, actor, prompt):
             if not existing and (time.time() > record['expires'] or control._read(api)['revision'] != record['revision']):
                 path.unlink()
                 raise HTTPException(409, 'Подтверждение истекло или права изменились. Отправьте /service заново')
-            if not existing and record.get('kind') not in ('mihomo', 'roles', 'observability', 'telegram'):
+            if not existing and record.get('kind') not in ('mihomo', 'roles', 'observability', 'telegram', 'diagnostic_rules', 'diagnostic_probe'):
                 definition = api.managed_services().get(record['service'], {})
                 if record['action'] not in controls(record['service'], definition):
                     path.unlink()
@@ -183,6 +186,12 @@ def execute(api, actor, prompt):
             if record.get('kind') == 'observability':
                 import observability_control
                 return observability_control.confirm(api, actor, record)
+            if record.get('kind') == 'diagnostic_rules':
+                import diagnostic_rules
+                return diagnostic_rules.confirm(api, actor, record)
+            if record.get('kind') == 'diagnostic_probe':
+                import diagnostic_execution
+                return diagnostic_execution.confirm(api, actor, record)
             if record.get('kind') == 'roles':
                 import assistant_role_actions
                 return assistant_role_actions.confirm(api, actor, record)

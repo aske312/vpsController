@@ -135,8 +135,10 @@ def probe(api, query, actor='panel'):
             elif query.kind == 'service':
                 raw = api.observe_service(definitions[query.service]['unit'])
                 runtime = raw.get('runtime', {}).get('state', 'unknown')
-                data = {'service': query.service, 'runtime_state': runtime, 'scope': 'systemd_runtime_only'}
-                state = 'failed' if runtime in ('error', 'stopped') else 'passed' if runtime in ('running', 'applied', 'listening', 'waiting') else 'unknown'
+                execution = raw.get('execution', {}).get('state', runtime)
+                data = {'service': query.service, 'runtime_state': runtime, 'execution': raw.get('execution'),
+                        'service_type': raw.get('service_type', 'unknown'), 'scope': 'systemd_runtime_or_latest_oneshot_execution_only'}
+                state = 'failed' if execution in ('error', 'stopped') else 'passed' if execution in ('running', 'applied', 'succeeded', 'listening', 'waiting') else 'unknown'
             else:
                 # Reuse the application's nonce round-trip, without saving readiness
                 # or changing live routing. Mutation admission keeps credentials stable.

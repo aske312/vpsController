@@ -5,7 +5,7 @@ export const roleNames = { owner: "Владелец", administrator: "Админ
 export type Role = keyof typeof roleNames;
 export const permissionNames = {
   chat: "Общение с AI", model_select: "Выбор модели AI", web: "Поиск в интернете", memory: "Личная память", telegram_read: "Чтение своего Telegram",
-  server_read: "Просмотр сервера и служб", server_manage: "Управление службами", diagnostics: "Диагностика приложения", logs_read: "Чтение логов", network_read: "Просмотр сети", security_read: "Просмотр безопасности",
+  server_read: "Просмотр сервера и служб", server_manage: "Управление службами", diagnostics: "Диагностика приложения", logs_read: "Чтение логов", network_read: "Просмотр сети", security_read: "Просмотр безопасности", terminal_read: "Терминал: только чтение",
   subscription_read: "Получение своей подписки", subscription_manage: "Редактирование своей подписки", subscription_name: "Название своей подписки", subscription_connections: "Подключения своей подписки", subscription_devices: "Устройства своей подписки", subscription_routing: "Маршрутизация своей подписки",
   subscription_quota: "Изменение квоты трафика", subscription_speed: "Изменение скорости", subscription_expiry: "Изменение срока действия", subscriptions_admin: "Доступ ко всем подпискам", subscriptions_create: "Создание подписок", subscriptions_delete: "Удаление подписок", modules_manage: "Управление модулями Mihomo", routing_manage: "Глобальная маршрутизация Mihomo", dns_manage: "Глобальные настройки DNS", recovery: "Восстановление Mihomo", roles_manage: "Управление ролями и правами",
 } as const;
@@ -21,7 +21,7 @@ export const roleDefaults: Record<Role, Permission[]> = {
 export const permissionGroups: {title: string; items: Permission[]}[] = [
   {title: "AI и общение", items: ["chat", "model_select", "web", "memory", "telegram_read"]},
   {title: "Своя подписка", items: ["subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing"]},
-  {title: "Сервис и диагностика", items: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read"]},
+  {title: "Сервис и диагностика", items: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read", "terminal_read"]},
   {title: "Администрирование Mihomo", items: ["subscription_quota", "subscription_speed", "subscription_expiry", "subscriptions_admin", "subscriptions_create", "subscriptions_delete", "modules_manage", "routing_manage", "dns_manage", "recovery"]},
   {title: "Владение", items: ["roles_manage"]},
 ];
@@ -88,6 +88,7 @@ export type Draft = Omit<Settings, "revision" | "accounts" | "providers"> & {
 };
 export type Observation = { active?: boolean; unit_present?: boolean | null; state?: string; runtime?: { state: string; reason?: string } };
 export type McpStatus = {
+  provider_observations?: Record<string, import("./provider-details").ProviderObservation>;
   chat_attachments?: boolean;
   web_tools?: boolean; context_tools?: boolean;
   chat_persona?: boolean; agent_version?: string; nodera_version?: string; nodera_available_version?: string;

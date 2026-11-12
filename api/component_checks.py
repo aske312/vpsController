@@ -30,9 +30,11 @@ def visible(api):
 
 
 
-def inspect(api, identity, image):
+def inspect(api, identity, image, *, read_only=False):
     checks = []
-    def check(name, ok, reason): checks.append({'name': name, 'ok': ok, 'reason': reason})
+    def check(name, ok, reason):
+        level = 'process' if name.endswith('service') or name == 'service' else 'local_api' if name == 'manager_api' else 'configuration' if 'configuration' in name else 'local_runtime'
+        checks.append({'name': name, 'ok': ok, 'state': 'passed' if ok else 'failed', 'level': level, 'reason': reason})
     observed = api.observe_service(image['service'])
     check('service', observed.get('runtime', {}).get('state') == 'running', observed.get('runtime', {}).get('reason', 'Нет наблюдения службы'))
     if identity == 'nodera':
@@ -57,8 +59,9 @@ def inspect(api, identity, image):
             # The idle oneshot is allowed to be stopped when AI is disabled.
             checks = [item for item in checks if item['name'] != 'service']
         import assistant_memory, assistant_personalization
-        with operations.locked(api.DATA_DIR):
-            assistant_memory._prune(api, settings)
+        if not read_only:
+            with operations.locked(api.DATA_DIR):
+                assistant_memory._prune(api, settings)
         check('cache_budget', assistant_personalization.usage(api)['used_bytes'] <= assistant_memory.MAX_BYTES, 'Общий кеш персонализации не превышает 5 ГБ')
     else:
         import assistant_mihomo
@@ -70,6 +73,8 @@ def inspect(api, identity, image):
         check('profiles', not status.get('recovery_required', False), 'Нет незавершённого восстановления профилей')
     failed = [item for item in checks if not item['ok']]
     return {'status': 'critical' if failed else 'healthy', 'checked_at': operations.timestamp(), 'checks': checks,
+            'coverage': {'scope': 'local_checks_only', 'dependency': 'not_checked', 'functional_operation': 'not_checked',
+                         'settings_mode': 'no_configuration_changes', 'cache_maintenance': 'personalization_pruning_may_run'},
             'reason': '; '.join(item['reason'] for item in failed) if failed else 'Локальные проверки пройдены; проверка из сети пользователя выполняется отдельно'}
 
 
@@ -92,4 +97,8 @@ async def monitor(api):
     while True:
         try: await asyncio.to_thread(refresh, api)
         except Exception: api.logger.warning('Automatic component health refresh unavailable')
+        try:
+            import diagnostic_history
+            await asyncio.to_thread(diagnostic_history.observe, api)
+        except Exception: api.logger.warning('Diagnostic baseline/alert sample unavailable')
         await asyncio.sleep(60)

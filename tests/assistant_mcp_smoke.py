@@ -62,7 +62,7 @@ async def main():
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     names = {tool.name for tool in (await session.list_tools()).tools}
-                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe'}, names
+                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal'}, names
                     vps_names = names
                     assert (await session.call_tool('mihomo_api', {'method': 'GET', 'path': '/profiles'})).isError
                     result = await session.call_tool('vps_overview', {})
@@ -71,13 +71,15 @@ async def main():
                     observed = await session.call_tool('vps_observability', {'path': '/events', 'body': {'minutes': 15, 'errors': True}})
                     assert not observed.isError, observed
                     for name, arguments in [('vps_changes', {'minutes': 15}), ('vps_incident', {'include_connections': False}),
+                                            ('application_diagnostics', {}), ('operation_timeline', {'operation_id': 'a' * 32}), ('diagnostic_baseline', {}), ('diagnostic_alerts', {}), ('diagnostic_alert_rules', {}), ('component_check', {'component': 'api'}), ('vps_terminal', {'command': 'help'}),
+                                            ('integration_probe', {'integration_id': 'ai:' + 'b' * 32, 'mode': 'tls'}),
                                             ('vps_probe', {'kind': 'service', 'service': 'api'})]:
                         result = await session.call_tool(name, arguments)
                         assert not result.isError, result
                     rejected = await session.call_tool('shell', {'cmd': 'whoami'})
                     assert rejected.isError
             assert Endpoint.seen[:2] == [{'name': 'vps_overview'}, {'name': 'vps_observability', 'method': 'GET', 'path': '/events', 'body': {'minutes': 15, 'errors': True}}]
-            assert [item['name'] for item in Endpoint.seen[2:]] == ['vps_changes', 'vps_incident', 'vps_probe']
+            assert [item['name'] for item in Endpoint.seen[2:]] == ['vps_changes', 'vps_incident', 'application_diagnostics', 'operation_timeline', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'integration_probe', 'vps_probe']
             assert Endpoint.seen[-1]['body']['service'] == 'api'
             print('stdio SDK handshake, scoped HTTP tool call and unknown-tool rejection: passed')
             settings['mcp']['vps-controller-mcp'] = False

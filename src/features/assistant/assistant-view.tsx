@@ -14,6 +14,7 @@ import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
 import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId, type ProviderUsage } from "./assistant-state";
 import { ProviderMonitor, initialProviderConnection, providerStatusText, type ProviderConnection } from "./provider-connection";
+import { queueProviderCatalog } from "./provider-details";
 import { NoderaSettings, SettingsDialog, panels, type Panel } from "./nodera-settings";
 
 type Client = ReturnType<typeof createApiClient>;
@@ -126,8 +127,8 @@ export function AssistantView({ request, refreshKey, busy, onDirtyChange, confir
     const monitor = new ProviderMonitor({
       automatic: typeof window !== "undefined",
       canPoll: () => !writing.current && (typeof document === "undefined" || document.visibilityState !== "hidden"),
-      fetch: signal => request<{ models: string[] }>("/assistant/models", { method: "POST", signal,
-        body: JSON.stringify({ provider_url: savedProviderUrl, provider_id: savedProviderId, api_key: null }) }),
+      fetch: signal => queueProviderCatalog(`${catalogRevision}:${savedProviderId}`, () => request<import("./provider-details").ProviderCatalog>("/assistant/models", { method: "POST", signal,
+        body: JSON.stringify({ provider_url: savedProviderUrl, provider_id: savedProviderId, api_key: null, include_quota: true }) }), signal),
       publish: value => { setApiConnection(value); setCatalog(value.models); setCatalogError(value.error); setCatalogLoading(value.state === "checking"); },
     });
     apiMonitor.current = monitor;

@@ -187,6 +187,7 @@ def short_mutation(data_dir: Path):
 def save(data_dir: Path, action_file: Path, value: dict) -> None:
     # History is authoritative for reconciling a lost response. Keep the legacy
     # pointer for the existing UI and shell readers.
+    enrich(data_dir, value)
     if value.get("id"):
         atomic_json(data_dir / "operations" / f"{operation_id(value['id'])}.json", value)
     atomic_json(action_file, value)
@@ -195,6 +196,37 @@ def save(data_dir: Path, action_file: Path, value: dict) -> None:
         append(data_dir, value)
     if value.get("state") in TERMINAL:
         prune(data_dir, value.get("id"))
+
+
+def enrich(data_dir, value):
+    if value.get('id'):
+        import diagnostic_configuration
+        from types import SimpleNamespace
+        try:
+            if 'configuration_before' not in value or value.get('state') in TERMINAL | {'done'}:
+                inventory = diagnostic_configuration.inventory(SimpleNamespace(DATA_DIR=operation_policy_root(data_dir)))
+                revisions = {key: row['revision'] for key, row in inventory.items()}
+                value.setdefault('configuration_before', revisions)
+                if value.get('state') in TERMINAL | {'done'}:
+                    value['configuration_after'] = revisions
+                    value['changed_components'] = [key for key, revision in revisions.items() if revision != value['configuration_before'].get(key)]
+                    value.setdefault('health_check', {'state': 'not_checked', 'checks': []})
+        except (OSError, ValueError): value['configuration_evidence'] = 'unavailable'
+
+
+def operation_policy_root(data_dir):
+    import operation_policy
+    return operation_policy.root_for(data_dir)
+
+
+def diagnostic_state(value):
+    """An abandoned bounded diagnostic has an unknown result, never an implicit retry."""
+    if value.get('action') == 'integration-functional-probe' and value.get('state') == 'running':
+        from datetime import datetime
+        try: age = time.time() - datetime.fromisoformat(value['started_at'].replace('Z', '+00:00')).timestamp()
+        except (KeyError, ValueError, TypeError): age = 181
+        if age > 180: return {**value, 'state': 'unknown', 'reason': 'diagnostic_result_not_confirmed; do_not_replay'}
+    return value
 
 
 def start(data_dir: Path, action_file: Path, action: str, command: list[str], launch,
@@ -206,6 +238,8 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
         if existing:
             if existing.get("request_hash") != request_hash:
                 raise OperationConflict("Идентификатор уже использован для другой команды")
+            import operation_log
+            operation_log.append(data_dir, {**existing, 'stage': 'admission_replay', 'result': 'existing_result', 'span_id': uuid.uuid4().hex})
             if observe and read(action_file).get("id") == identity:
                 return reconcile(data_dir, action_file, existing, observe)
             return existing
@@ -218,7 +252,7 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
                 raise OperationConflict("Предыдущая операция ещё не завершена или её результат неизвестен")
             unit = f"vps-control-action-{time.time_ns()}"
             value = {"id": identity, "request_hash": request_hash, "unit": f"{unit}.service", "action": action,
-                     "state": "queued", "progress": 0, "message": message, "started_at": timestamp(), "updated_at": timestamp(), "boot_id": boot_id()}
+                     "state": "queued", "progress": 0, "message": message, "started_at": timestamp(), "updated_at": timestamp(), "boot_id": boot_id(), 'diagnostics_version': 2}
             value.update(tracing.snapshot())
             value.setdefault('trace_id', uuid.uuid4().hex)
             tracing.operation(identity)
@@ -258,7 +292,7 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
 
 
 def write_status(data_dir: Path, action_file: Path, action: str, state: str, progress: int, message: str,
-                 started_at: str, identity: str, unit: str = "") -> dict:
+                 started_at: str, identity: str, unit: str = "", *, stage=None, result=None, health_check=None) -> dict:
     identity = operation_id(identity)
     with locked(data_dir):
         previous = read(action_file)
@@ -269,13 +303,28 @@ def write_status(data_dir: Path, action_file: Path, action: str, state: str, pro
             return stored
         value = {**stored, "id": identity, "action": action, "state": state, "progress": progress,
                  "message": message, "started_at": stored.get("started_at", started_at), "updated_at": timestamp(), "boot_id": stored.get("boot_id", boot_id())}
+        import operation_log
+        lifecycle = operation_log.phase(value)
+        value.update(stage=lifecycle['stage'], component=lifecycle['component'], stage_result=lifecycle['result'])
+        if stage is not None: value['stage'] = stage
+        if result is not None: value['stage_result'] = result
+        if health_check is not None: value['health_check'] = operation_log.safe_health(health_check)
+        elif state in TERMINAL and os.getenv('VPS_CONTROL_OPERATION_ID') == identity:
+            from diagnostic_runtime import local_http
+            checks = [] if action in ('reboot', 'poweroff', 'shutdown') else [
+                {'component': 'api', 'level': 'local_api', **local_http(8000, '/api/health', json_response=True)},
+                {'component': 'web', 'level': 'local_api', **local_http(3000, '/')}]
+            value['health_check'] = operation_log.safe_health({'state': 'passed' if checks and all(row['state'] == 'passed' for row in checks) else 'failed' if checks else 'skipped', 'checks': checks})
+        if state in TERMINAL: value['finished_at'] = timestamp()
         if unit or stored.get("unit"):
             value["unit"] = unit or stored["unit"]
         pid = os.getenv("VPS_CONTROL_WORKER_PID", "")
         if pid.isdigit():
             value.update(worker_pid=int(pid), worker_start=stored.get("worker_start") or process_start(int(pid)))
         if previous.get("id") and previous["id"] != identity and stored:
+            enrich(data_dir, value)
             atomic_json(data_dir / "operations" / f"{identity}.json", value)
+            operation_log.append(data_dir, value)
         else:
             save(data_dir, action_file, value)
         return value

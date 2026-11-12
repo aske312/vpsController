@@ -75,3 +75,13 @@ test('hidden or busy views postpone checks without claiming the provider is down
   active = true; await state.tick(15000); assert.equal(requests, 1);
   state.monitor.stop();
 });
+
+test('connection observations retain optional provider data without converting missing quota to zero', async () => {
+  const state = setup(async () => ({ models: ['model'], quota: { used: 0, expires_at: 0 }, quota_checked_at: 100,
+    provider_info: { checked_at: 99, models_count: 1, catalog_latency_ms: 12 } }));
+  await state.monitor.refresh();
+  assert.equal(state.monitor.snapshot.observation.quota.used, 0);
+  assert.equal(state.monitor.snapshot.observation.quota.remaining, undefined);
+  assert.equal(state.monitor.snapshot.observation.quota_checked_at, 100);
+  state.monitor.stop();
+});

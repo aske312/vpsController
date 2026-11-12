@@ -16,6 +16,7 @@ ERRORS = {
     'access_denied': ('authorization', False), 'not_found': ('lookup', False),
     'conflict': ('admission', False), 'rate_limited': ('admission', True),
     'server_error': ('handling', None), 'unhandled_exception': ('handling', None),
+    'provider_catalog_failed': ('upstream_catalog', True),
     'subscription_expired': ('subscription_limits', False), 'subscription_exhausted': ('subscription_limits', False),
     'subscription_signer_unavailable': ('subscription_signing', True),
     'subscription_invalid_nonce': ('subscription_validation', False),

@@ -73,16 +73,29 @@ def token_quota(url, key):
         if len(raw) > 64 * 1024:
             return None
         data = json.loads(raw).get('data', {})
-        if data.get('object') != 'token_usage' or type(data.get('unlimited_quota')) is not bool:
+        if data.get('object') != 'token_usage':
             return None
         remaining = data.get('total_available')
-        if type(remaining) is not int or abs(remaining) > 10**15:
-            return None
-        result = {'unlimited': data['unlimited_quota'], 'remaining': remaining}
+        result = {}
+        if type(data.get('unlimited_quota')) is bool: result['unlimited'] = data['unlimited_quota']
+        if type(remaining) is int and abs(remaining) <= 10**15: result['remaining'] = remaining
+        for source, target in (('total_granted', 'granted'), ('total_used', 'used')):
+            value = data.get(source)
+            if type(value) is int and 0 <= value <= 10**15: result[target] = value
+        expires = data.get('expires_at')
+        if type(expires) is int and 0 <= expires <= 253402300799: result['expires_at'] = expires
+        if type(data.get('model_limits_enabled')) is bool:
+            result['model_limits_enabled'] = data['model_limits_enabled']
+            limits = data.get('model_limits')
+            if isinstance(limits, dict) and all(type(enabled) is bool for enabled in limits.values()):
+                allowed = sorted(name for name, enabled in limits.items() if enabled is True and model_id(name) and key not in name)
+                result['allowed_models'] = allowed[:100]
+                result['allowed_models_count'] = len(allowed)
+                result['allowed_models_truncated'] = len(allowed) > 100
         account = data.get('user_quota')
         if isinstance(account, dict) and type(account.get('total_available')) is int and abs(account['total_available']) <= 10**15:
             result['account_remaining'] = account['total_available']
-        return result
+        return result or None
     except (AttributeError, ValueError, OSError, http.client.HTTPException):
         return None
     finally:
