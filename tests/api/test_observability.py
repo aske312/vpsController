@@ -121,12 +121,17 @@ class ObservabilityTests(unittest.TestCase):
              patch.object(manager, 'subscription_mutation_access', return_value=False), \
              patch.object(manager.subscription_signing, 'server_signer', return_value=object()), \
              patch.object(manager, 'profiles', return_value=[{'id': 'known-profile', 'subscription_token': 'private-token'}]), \
-             patch.object(manager.subscription_limits, 'status', return_value={'state': 'expired'}):
+             patch.object(manager.subscription_limits, 'status', return_value={'state': 'expired'}), \
+             patch.object(manager.subscription_limits, 'ensure_runtime', side_effect=AssertionError('HTTP test initialized system runtime')) as runtime, \
+             patch.object(manager, 'transition_worker') as transitions, \
+             patch.object(manager, 'maintain_mrs') as mrs, \
+             patch.object(manager, 'traffic_worker') as traffic:
             manager.app.dependency_overrides[manager.subscription_mutation_access] = lambda: False
             try:
-                with TestClient(manager.app) as client:
-                    response = client.get('/api/mihomo/subscriptions/private-token')
+                # HTTP middleware and the subscription route need no service startup.
+                response = TestClient(manager.app).get('/api/mihomo/subscriptions/private-token')
             finally: manager.app.dependency_overrides.clear()
+            for startup in (runtime, transitions, mrs, traffic): startup.assert_not_called()
         self.assertEqual(response.status_code, 403)
         result = self.store.read()
         self.assertEqual(result['summary']['affected_profiles'], 1)
