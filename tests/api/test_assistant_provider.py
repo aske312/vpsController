@@ -49,11 +49,28 @@ class ProviderCatalogTests(unittest.TestCase):
             factory.assert_not_called()
             self.assertEqual(provider.token_quota('https://provider.example/v1', 'private-key'),
                              {'remaining': 0, 'unlimited': False, 'account_remaining': 321})
-            connection.request.assert_called_once_with('GET', '/api/usage/token/', headers={
+            connection.request.assert_any_call('GET', '/api/usage/token/', headers={
                 'Authorization': 'Bearer private-key', 'Accept': 'application/json'})
+            connection.request.assert_any_call('GET', '/api/status', headers={'Accept': 'application/json'})
             response.status = 302
             self.assertIsNone(provider.token_quota('https://provider.example/v1', 'private-key'))
-            self.assertEqual(connection.request.call_count, 2)
+            self.assertEqual(connection.request.call_count, 3)
+
+    def test_dollar_balance_requires_explicit_valid_USD_metadata_and_keeps_key_quota_separate(self):
+        quota = {'remaining': 250000, 'account_remaining': 1000000}
+        for metadata, expected in [({'quota_per_unit': 500000, 'quota_display_type': 'USD'}, True),
+                                   ({'quota_per_unit': 500000, 'quota_display_type': 'TOKENS'}, False),
+                                   ({'quota_per_unit': True, 'quota_display_type': 'USD'}, False),
+                                   ({'quota_per_unit': 0, 'quota_display_type': 'USD'}, False),
+                                   ({'quota_per_unit': float('nan'), 'quota_display_type': 'USD'}, False)]:
+            with self.subTest(metadata=metadata), patch.object(provider, 'PublicHTTPSConnection') as factory:
+                factory.return_value.getresponse.return_value = MagicMock(status=200, read=MagicMock(return_value=json.dumps({'data': metadata}).encode()))
+                result = provider.dollar_balance('provider.example', quota)
+                self.assertEqual('balance_usd' in result, expected)
+                if expected:
+                    self.assertEqual(result['balance_usd'], 2)
+                    self.assertEqual(result['remaining_usd'], .5)
+                factory.return_value.request.assert_called_once_with('GET', '/api/status', headers={'Accept': 'application/json'})
 
     def test_private_or_mixed_dns_answers_are_rejected_before_opening_socket(self):
         public = (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 443))

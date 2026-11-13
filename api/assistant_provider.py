@@ -2,6 +2,7 @@
 import http.client
 import ipaddress
 import json
+import math
 import socket
 import ssl
 import urllib.parse
@@ -95,8 +96,30 @@ def token_quota(url, key):
         account = data.get('user_quota')
         if isinstance(account, dict) and type(account.get('total_available')) is int and abs(account['total_available']) <= 10**15:
             result['account_remaining'] = account['total_available']
-        return result or None
+        return dollar_balance(parsed.hostname, result) if result else None
     except (AttributeError, ValueError, OSError, http.client.HTTPException):
         return None
+    finally:
+        connection.close()
+
+
+def dollar_balance(host, quota):
+    """New API publishes its quota conversion on the same-origin public status."""
+    connection = PublicHTTPSConnection(host, timeout=5, context=ssl.create_default_context())
+    try:
+        connection.request('GET', '/api/status', headers={'Accept': 'application/json'})
+        response = connection.getresponse()
+        if response.status != 200: return quota
+        raw = response.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024: return quota
+        data = json.loads(raw).get('data', {})
+        scale = data.get('quota_per_unit')
+        if data.get('quota_display_type') != 'USD' or type(scale) not in (int, float) or not 0 < scale <= 10**12 or not math.isfinite(scale): return quota
+        result = {**quota, 'quota_per_usd': scale}
+        if type(quota.get('account_remaining')) is int: result['balance_usd'] = quota['account_remaining'] / scale
+        if type(quota.get('remaining')) is int and not quota.get('unlimited'): result['remaining_usd'] = quota['remaining'] / scale
+        return result
+    except (AttributeError, ValueError, OSError, http.client.HTTPException):
+        return quota
     finally:
         connection.close()

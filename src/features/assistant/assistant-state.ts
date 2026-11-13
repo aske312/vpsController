@@ -70,6 +70,7 @@ export type Provider = {
 export type ProviderDraft = Provider & { api_key: string | null };
 export type ProviderUsage = { requests: number; prompt_tokens: number; completion_tokens: number; reported_requests: number };
 export type Settings = {
+  web_extract_enabled?: boolean; web_max_sources?: number; web_read_chars?: number;
   telegram_tool_catalog?: {name: string; title: string; profile: "read" | "actions"}[];
   role_policy_version?: 2; role_permissions?: Partial<Record<Role, Permission[]>>;
   revision: string; modules: Record<AppModuleId, boolean>; mcp: Record<McpId, boolean>; provider_url: string; model: string;
@@ -90,7 +91,7 @@ export type Observation = { active?: boolean; unit_present?: boolean | null; sta
 export type McpStatus = {
   provider_observations?: Record<string, import("./provider-details").ProviderObservation>;
   chat_attachments?: boolean;
-  web_tools?: boolean; context_tools?: boolean;
+  web_tools?: boolean; web_extract_tools?: boolean; context_tools?: boolean;
   chat_persona?: boolean; agent_version?: string; nodera_version?: string; nodera_available_version?: string;
   nodera_management?: { state: string; retained?: boolean };
   provider_usage?: Record<string, ProviderUsage>;
@@ -107,14 +108,14 @@ export function makeDraft(settings: Settings): Draft {
   const mcp = { ...settings.mcp, "mihomo-mcp": settings.mcp["mihomo-mcp"] ?? settings.mcp["vps-controller-mcp"] };
   const installed = settings.mcp_installed ?? Object.keys(mcp) as McpId[];
   const mcpInstalled = legacy && installed.includes("vps-controller-mcp") ? [...new Set([...installed, "mihomo-mcp" as const])] : installed;
-  return { ...rest, mcp, assistant_style: settings.assistant_style ?? 'balanced', assistant_character: settings.assistant_character ?? '', assistant_instructions: settings.assistant_instructions ?? '', personalization_enabled: settings.personalization_enabled ?? true, web_domains: settings.web_domains ?? [], web_enabled: settings.web_enabled ?? true, memory_enabled: settings.memory_enabled ?? true, memory_days: settings.memory_days ?? 30, mcp_installed: mcpInstalled, model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
+  return { ...rest, mcp, assistant_style: settings.assistant_style ?? 'balanced', assistant_character: settings.assistant_character ?? '', assistant_instructions: settings.assistant_instructions ?? '', personalization_enabled: settings.personalization_enabled ?? true, web_extract_enabled: settings.web_extract_enabled ?? true, web_max_sources: settings.web_max_sources ?? 3, web_read_chars: settings.web_read_chars ?? 14000, web_domains: settings.web_domains ?? [], web_enabled: settings.web_enabled ?? true, memory_enabled: settings.memory_enabled ?? true, memory_days: settings.memory_days ?? 30, mcp_installed: mcpInstalled, model_mode: settings.model_mode ?? "single", expected_revision: revision, api_key: null, bot_token: null, telegram_api_hash: null,
     providers: providers?.map(provider => ({ ...provider, api_key: null })),
     accounts: accounts.map(account => ({ ...account, session: null, excluded_dialogs_text: account.excluded_dialogs.join(", "), telegram_action_targets_text: (account.telegram_action_targets ?? []).join(", ") })) };
 }
 export function settingsPayload(draft: Draft) {
   return {
     role_policy_version: 2, role_permissions: draft.role_permissions, expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
-    assistant_style: draft.assistant_style, assistant_character: draft.assistant_character, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
+    assistant_style: draft.assistant_style, assistant_character: draft.assistant_character, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_extract_enabled: draft.web_extract_enabled ?? true, web_max_sources: draft.web_max_sources ?? 3, web_read_chars: draft.web_read_chars ?? 14000, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
     provider_url: draft.provider_url, model: draft.model, model_mode: draft.model_mode ?? "single", api_key: draft.api_key,
     providers: draft.providers?.map(({ id, name, provider_url, model, model_mode, api_key }) => ({ id, name, provider_url, model, model_mode, api_key })),
     active_provider: draft.active_provider,

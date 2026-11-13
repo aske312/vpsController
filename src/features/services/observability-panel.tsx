@@ -31,6 +31,9 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
   const [service, setService] = useState("");
   const [identity, setIdentity] = useState("");
   const [errors, setErrors] = useState(false);
+  const [limit, setLimit] = useState(50);
+  const [eventsShown, setEventsShown] = useState(false);
+  const eventConsole = useRef<HTMLDetailsElement>(null);
   const [journalService, setJournalService] = useState("application");
   const [priority, setPriority] = useState("warning");
   const [journal, setJournal] = useState<string[]>();
@@ -40,24 +43,27 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
     setWorking(true);
     setError("");
     try {
-      const query = new URLSearchParams({ minutes: String(minutes), errors: String(errors), limit: "60" });
+      const query = new URLSearchParams({ minutes: String(minutes), errors: String(errors), limit: String(limit) });
       if (service) query.set("service", service);
       if (identity.trim()) query.set("request_id", identity.trim());
       const result = await request<Evidence>(`/observability/events?${query}`);
       if (current !== generation.current) return;
       setData(result);
+      setEventsShown(true);
+      if (eventConsole.current) eventConsole.current.open = true;
       setDraft(previous => previous ?? result.settings);
     } catch (cause) {
       if (current === generation.current) setError(cause instanceof Error ? cause.message : "Журнал недоступен");
     } finally { if (current === generation.current) setWorking(false); }
-  }, [request, minutes, service, identity, errors]);
+  }, [request, minutes, service, identity, errors, limit]);
   // Apply filters explicitly, so typing an ID does not send partial searches.
-  const initialLoad = useRef(load);
   useEffect(() => {
+    let current = true;
+    void request<Policy>("/observability/settings").then(value => { if (current) setDraft(previous => previous ?? value); })
+      .catch(cause => { if (current) setError(cause instanceof Error ? cause.message : "Настройки недоступны"); });
     const counter = generation;
-    void initialLoad.current();
-    return () => { counter.current++; };
-  }, []);
+    return () => { current = false; counter.current++; };
+  }, [request]);
   const save = async () => {
     if (!draft) return;
     setWorking(true);
@@ -98,18 +104,19 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
         <label className="opsField">Слой<select value={service} disabled={blocked} onChange={event => setService(event.target.value)}><option value="">Все</option><option value="panel">Панель</option><option value="mihomo">Mihomo</option></select></label>
         <label className="opsField">ID запроса<input value={identity} maxLength={32} placeholder="X-Request-ID" disabled={blocked} onChange={event => setIdentity(event.target.value)} /></label>
         <LogSwitch label="Только ошибки в списке" checked={errors} disabled={blocked} onChange={setErrors}/>
-        <button type="button" className="ghostButton" disabled={blocked} onClick={() => void load()}>Обновить</button>
+        <label className="opsField">Строк<select aria-label="Количество событий" value={limit} disabled={blocked} onChange={event => setLimit(Number(event.target.value))}>{[10, 50, 100].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+        <button type="button" className="ghostButton" disabled={blocked} onClick={() => void load()}>Показать</button>
       </div>
       {data && <>
         <dl className="observabilityStats"><div><dt>Запросы</dt><dd>{data.summary.requests}</dd></div><div><dt>Ошибки</dt><dd>{data.summary.errors}</dd></div><div><dt>Затронутые профили</dt><dd>{data.summary.affected_profiles}</dd></div><div><dt>Выдано конфигураций</dt><dd>{data.subscriptions.succeeded}</dd></div></dl>
         <p>Выдача конфигураций: успешно {data.subscriptions.succeeded}, ошибок {data.subscriptions.failed}. Первая ошибка: {at(data.summary.first_error_at)}; последняя: {at(data.summary.last_error_at)}.</p>
-        <div className="observabilityTerminalHead"><strong>Последние события · {data.events.length}</strong><button type="button" className="ghostButton" disabled={!data.events.length} onClick={() => downloadLog(eventLines.join("\n"), "request-events.log")}>Скачать .log</button></div>
-        <div className="observabilityTerminal" role="region" aria-label="Последние события" tabIndex={0}>{data.events.length ? data.events.map((event, index) => <div className={event.status >= 400 ? "isError" : ""} key={event.id}>{eventLines[index]}</div>) : <span className="observabilityEmpty">Событий в выбранном окне нет.</span>}</div>
+        {eventsShown && <details ref={eventConsole} className="observabilityConsole" open><summary>Последние события · {data.events.length}</summary><div className="observabilityTerminalHead"><small>Результат последнего показа</small><button type="button" className="ghostButton" disabled={!data.events.length} onClick={() => downloadLog(eventLines.join("\n"), "request-events.log")}>Скачать .log</button></div>
+        <div className="observabilityTerminal" role="region" aria-label="Последние события" tabIndex={0}>{data.events.length ? data.events.map((event, index) => <div className={event.status >= 400 ? "isError" : ""} key={event.id}>{eventLines[index]}</div>) : <span className="observabilityEmpty">Событий в выбранном окне нет.</span>}</div></details>}
       </>}
       <p>Статистика ограничена сроком хранения и лимитом записей. Выдача подписки не подтверждает подключение клиента. HTTP-ошибка сама по себе не определяет сбой DNS, outbound или сети клиента.</p>
       <button type="button" className="ghostButton" disabled={blocked} onClick={() => void observeConnections()}>Проверить соединения</button>
       {connections && <p>{connections.available ? `Активных каналов: ${connections.observed_active_channels}. Установленных соединений: ${connections.established_connections ?? "полный счётчик недоступен"}; подтверждено доступными счётчиками: ${connections.known_established_connections}. Каналов без счётчика: ${connections.channels_without_connection_count}.` : "Наблюдения транспорта Mihomo недоступны."}</p>}
-      <details className="observabilityJournal"><summary>Журналы сервисов и системы</summary>
+      <details className="observabilityJournal"><summary><strong>Журналы сервисов и системы</strong><small>Источник, уровень и период</small></summary>
         <div className="servicesLogControls">
           <label className="opsField">Источник<select value={journalService} disabled={blocked} onChange={event => { setJournalService(event.target.value); setJournal(undefined); }}>
             <option value="application">Приложение</option><option value="system">Система</option><option value="dns">DNS · systemd-resolved</option><option value="gateway">Gateway · Caddy</option>

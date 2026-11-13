@@ -1,5 +1,6 @@
 """Bounded non-secret connection observations, bound to saved configuration revision."""
 import re
+import math
 
 import application_operation as operations
 
@@ -12,6 +13,9 @@ def clean_quota(value):
     for key in ('remaining', 'account_remaining', 'used', 'granted', 'expires_at', 'allowed_models_count'):
         item = value.get(key)
         if type(item) is int and abs(item) <= 10**15 and (key in ('remaining', 'account_remaining') or item >= 0): result[key] = item
+    for key in ('balance_usd', 'remaining_usd', 'quota_per_usd'):
+        item = value.get(key)
+        if type(item) in (int, float) and abs(item) <= 10**15 and math.isfinite(item) and (key != 'quota_per_usd' or item > 0): result[key] = item
     models = value.get('allowed_models')
     if isinstance(models, list): result['allowed_models'] = [item for item in models[:100] if isinstance(item, str) and re.fullmatch(r'[^\s]{1,128}', item)]
     return result or None

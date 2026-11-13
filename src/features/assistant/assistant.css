@@ -173,6 +173,15 @@
 .noderaProviderTable tbody th { font-weight:600; min-width:160px; }
 .noderaProviderTable tbody .mcpBadge { display:inline-block; margin-left:5px; padding:2px 6px; }
 .noderaProviderTable small { display:block; font-weight:400; }
+.noderaProviderTable .mcpConnectionDot { display:inline-block; }
+.noderaProviderTable .noderaMetric { white-space:nowrap; font:11px var(--font-mono); }
+.noderaProviderTable tbody th { min-width:90px; max-width:180px; }
+.noderaProviderTable .noderaProviderModel select { max-width:220px; }
+.noderaProviderTable { min-width:900px; font-size:11px; }
+.noderaProviderTable :is(th,td) { padding:8px 6px; }
+.noderaProviderTable .checking { background:#f5cf75; }
+.noderaProviderDetails p { padding-block:4px; }
+.noderaSettings .noderaProviderTable { min-width:900px; }
 .noderaProviderCompact { display:none; }
 .noderaTableActions { display:flex; align-items:center; justify-content:flex-end; gap:5px; }
 .noderaTelegram { display:grid; gap:10px; }
@@ -366,5 +375,26 @@ button.noderaTag { cursor:pointer; }
 
 .noderaProducts,.noderaPermissionGroup { display:grid; gap:12px; min-width:0; }
 .noderaProducts { padding:12px; border:1px solid var(--line); border-radius:8px; }
+.noderaRoleEditor { display:grid; grid-template-columns:190px minmax(0,1fr); gap:20px; min-height:340px; }
+.noderaRoleEditor > nav { display:flex; flex-direction:column; align-self:start; position:sticky; top:0; gap:5px; }
+.noderaRoleEditor > nav button { display:flex; justify-content:space-between; gap:8px; padding:10px; border-radius:8px; color:var(--muted); text-align:left; background:var(--panel-inset); }
+.noderaRoleEditor > nav button[aria-pressed=true] { color:var(--cyan); background:rgba(97,207,216,.12); }
+.noderaRoleEditor .noderaPermissionGrid { grid-template-columns:minmax(0,1fr); }
+.noderaDialogFields .noderaPermissionSwitch { display:flex; align-items:center; justify-content:space-between; gap:12px; position:relative; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+.noderaPermissionSwitch > span { flex:1; min-width:0; }
+.noderaPermissionSwitch small { display:block; margin-top:4px; }
+.noderaPermissionSwitch > input { position:absolute; opacity:0; width:1px; height:1px; }
+.noderaPermissionSwitch > i { flex-shrink:0; position:relative; width:32px; height:18px; border-radius:12px; background:#354a59; transition:background .15s; }
+.noderaPermissionSwitch > i::after { content:""; position:absolute; width:12px; height:12px; border-radius:50%; top:3px; left:3px; background:#aebfcb; transition:transform .15s; }
+.noderaPermissionSwitch > input:checked + i { background:#267b67; }
+.noderaPermissionSwitch > input:checked + i::after { transform:translateX(14px); background:#a1efd6; }
+.noderaPermissionSwitch > input:disabled + i { opacity:.4; }
+.noderaPermissionSwitch > input:focus-visible + i { outline:2px solid var(--cyan); outline-offset:3px; }
+.noderaOverrideRow { display:flex; align-items:center; gap:8px; min-width:0; }
+.noderaOverrideRow > label { flex:1; }
+.noderaUserSection { display:grid; gap:12px; min-width:0; }
+.noderaUserTabs { position:sticky; top:-16px; z-index:2; padding:8px 0; background:var(--panel); }
+.noderaPermissionSearch { max-width:460px; }
+@media(max-width:640px) { .noderaRoleEditor { grid-template-columns:minmax(0,1fr); gap:12px; } .noderaRoleEditor > nav { position:static; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .noderaUserTabs { top:-12px; } }
 .noderaPermissionGroup h3 { margin:8px 0 0; font-size:13px; }
 .noderaPermissionGroup input:disabled + span { color:var(--muted); }

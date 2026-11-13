@@ -1,4 +1,5 @@
 import asyncio
+import json
 import socket
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -35,6 +36,39 @@ def dns(address):
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):
+    async def test_structured_extraction_resolves_links_and_ignores_executable_content(self):
+        html = b'<title>Docs</title><meta name="description" content="About docs"><h1>Heading</h1><script><h2>hidden</h2></script><a href="/guide">Guide</a><a href="javascript:alert(1)">bad</a><table><tr><th>Name</th><td>Value</td></tr></table>'
+        with patch.object(runner, 'web_get', new=AsyncMock(return_value=('https://example.com/docs', 'text/html', html, 'utf-8'))):
+            headings = await runner.internet_extract('https://example.com/docs')
+            links = await runner.internet_extract('https://example.com/docs', 'links')
+            tables = await runner.internet_extract('https://example.com/docs', 'tables')
+        self.assertEqual(headings['items'], [{'level': 1, 'text': 'Heading '}])
+        self.assertEqual(links['items'], [{'url': 'https://example.com/guide', 'text': 'Guide '}])
+        self.assertEqual(tables['items'], [[['Name ', 'Value ']]])
+        self.assertTrue(tables['untrusted_source'])
+        with self.assertRaises(ValueError): await runner.internet_extract('https://example.com', 'shell')
+
+    async def test_extract_permission_and_read_limits_apply_to_actual_tool_calls(self):
+        settings = {'accounts': [], 'mcp': {}, 'web_enabled': True, 'web_extract_enabled': False, 'web_read_chars': 2000}
+        tools = runner.native_connections(settings, 'panel')
+        self.assertNotIn('web_extract', tools)
+        with self.assertRaises(PermissionError): await runner.NativeTools(settings, 'panel').call_tool('web_extract', {'url': 'https://example.com'})
+        with patch.object(runner, 'internet_read', new=AsyncMock(return_value={})) as read:
+            await runner.NativeTools(settings, 'panel').call_tool('web_read', {'url':'https://example.com','focus':'topic'})
+            read.assert_awaited_once_with('https://example.com', 'topic', 2000)
+
+    async def test_research_obeys_source_limit_and_extraction_discloses_truncation(self):
+        hits = {'results': [{'url':'https://example.com/' + str(index)} for index in range(5)]}
+        with patch.object(runner, 'internet_search', new=AsyncMock(return_value=hits)), patch.object(runner, 'internet_read', new=AsyncMock(return_value={'url':'https://example.com','text':'source','truncated':False})) as read:
+            result = await runner.internet_research('topic', max_sources=2, max_chars=2000)
+        self.assertEqual(len(result['sources']), 2)
+        self.assertEqual(read.await_count, 2)
+        html = ('<h1>' + 'x' * 300 + '</h1>') * 60
+        with patch.object(runner, 'web_get', new=AsyncMock(return_value=('https://example.com', 'text/html', html.encode(), 'utf-8'))):
+            result = await runner.internet_extract('https://example.com', max_chars=2000)
+        self.assertTrue(result['truncated'])
+        self.assertLess(len(json.dumps(result['items'], ensure_ascii=False)), 2001)
+
     async def test_private_mixed_dns_and_non_https_targets_are_blocked_before_http(self):
         for url in ('http://example.com', 'https://user:password@example.com', 'https://example.com:8000', 'https://localhost', 'file:///etc/passwd'):
             with self.assertRaises(ValueError): await runner.web_get(url)

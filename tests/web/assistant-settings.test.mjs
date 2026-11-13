@@ -37,7 +37,7 @@ function mount(status, catalog = [], overrides = {}) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {};
   const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
-    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
   const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
@@ -93,9 +93,11 @@ test('saved connection data is visible in AI settings before a manual check and 
   tree = view.render();
   const text = JSON.stringify(tree);
   assert.match(text, /Без лимита/);
-  assert.match(text, /Без срока/);
-  assert.match(text, /Использовано/);
-  assert.match(text, /моделей 43/);
+  assert.match(text, /Моделей: /);
+  nodes(tree, n => n.props['aria-label'] === 'Настроить Fixture API')[0].node.props.onClick();
+  tree = view.render();
+  assert.match(JSON.stringify(tree), /Без срока/);
+  assert.match(JSON.stringify(tree), /Использовано/);
   assert.doesNotMatch(text, /Аккаунт ·/);
 });
 
@@ -144,6 +146,7 @@ test('pending turn survives inactive page and answer notification opens chat wit
   notice.action.run();
   assert.equal(opened, 1);
   view.setActive(true); tree = view.render();
+  assert.equal(view.notifications.filter(item => item.id?.startsWith('nodera-answer:')).length, 0);
   assert.match(JSON.stringify(tree), /completed answer/);
 });
 
@@ -445,6 +448,38 @@ test('new catalog chats use the saved default and copy actions sit outside the a
   tree = view.render();
   const selection = nodes(tree, n => n.props['aria-label'] === 'Модель для запроса')[0].node;
   assert.equal(selection.props.children[0].props.children, 'default-model');
+});
+
+test('user permission switch can override and restore role inheritance while sections keep account data', async () => {
+  const status=fixture();
+  status.settings.accounts=[{telegram_id:11,name:'Member',role:'user',products:['assistant'],excluded_dialogs:[],permission_overrides:{},session_configured:false}];
+  const view=mount(status);view.render();await Promise.resolve();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  let tree=view.render();
+  nodes(tree,n=>n.props['aria-label']==='Настроить пользователя Member')[0].node.props.onClick();
+  tree=view.render();
+  nodes(tree,n=>n.type==='input'&&n.props.value==='Member')[0].node.props.onChange({target:{value:'Member updated'}});
+  tree=view.render();
+  nodes(tree,n=>n.type==='button'&&n.props.children==='Продукты и права')[0].node.props.onClick();
+  tree=view.render();
+  const permission=nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0];
+  assert.equal(permission.node.props.checked,true);
+  permission.node.props.onChange({target:{checked:false}});
+  tree=view.render();
+  assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0].node.props.checked,false);
+  nodes(tree,n=>n.props['aria-label']==='По роли: Поиск в интернете')[0].node.props.onClick();
+  tree=view.render();
+  assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0].node.props.checked,true);
+  assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Управление ролями и правами')[0].disabled,true);
+  nodes(tree,n=>n.type==='button'&&n.props.children==='Telegram')[0].node.props.onClick();
+  tree=view.render();
+  const dialog=nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node;
+  dialog.props.submit();
+  tree=view.render();
+  nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить')[0].node.props.onClick();
+  await Promise.resolve();
+  assert.deepEqual(view.writes.at(-1).accounts[0].permission_overrides,{});
+  assert.equal(view.writes.at(-1).accounts[0].telegram_id,11);
 });
 
 test('tools use switches and gears; model and tool count are separate header facts', async () => {

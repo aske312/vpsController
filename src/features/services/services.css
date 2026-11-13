@@ -180,6 +180,12 @@
 .observabilitySwitch { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:32px; font-size:11px; }
 .observabilitySwitch .serviceToggle { flex-shrink:0; }
 .observabilityJournal,.observabilityPolicy { border-top:1px solid rgba(121,151,174,.16); padding-top:12px; }
+.observabilityConsole,.observabilityJournal { border:1px solid rgba(121,151,174,.2); border-radius:9px; background:rgba(8,21,31,.4); padding:12px; }
+.observabilityConsole > summary,.observabilityJournal > summary { padding:3px 0; color:#c8d8e3; font-size:12px; }
+.observabilityJournal > summary small { display:inline-block; color:var(--muted); margin-left:12px; font-size:10px; }
+.observabilityConsole .observabilityTerminal { min-height:280px; max-height:65vh; }
+.observabilityJournal .servicesLogControls { border-top:1px solid rgba(121,151,174,.14); padding-top:12px; }
+.observabilityJournal .observabilityTerminal { min-height:220px; }
 .servicesObservability .operationsBody > p,.observabilityPolicy > p { color:var(--muted); font-size:11px; line-height:1.6; }
 .servicesObservability .opsField input { box-sizing:border-box; border:1px solid rgba(121,151,174,.22); border-radius:5px; background:rgba(6,16,24,.4); color:inherit; padding:6px 8px; }
 .servicesLogActions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; margin-top:0; padding-top:6px; border-top:1px solid rgba(91,116,141,.12); }

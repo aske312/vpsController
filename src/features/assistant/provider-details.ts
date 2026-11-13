@@ -1,4 +1,5 @@
 export type ProviderQuota = {
+  balance_usd?: number; remaining_usd?: number; quota_per_usd?: number;
   unlimited?: boolean; remaining?: number; account_remaining?: number; used?: number; granted?: number;
   expires_at?: number; model_limits_enabled?: boolean; allowed_models?: string[];
   allowed_models_count?: number; allowed_models_truncated?: boolean;
@@ -31,8 +32,9 @@ export function queueProviderCatalog(key: string, fetch: () => Promise<ProviderC
 }
 
 const number = (value: number) => value.toLocaleString("ru-RU");
+export const dollars = (value?: number) => typeof value === "number" && Number.isFinite(value) ? new Intl.NumberFormat("en-US", {style:"currency",currency:"USD",maximumFractionDigits:4}).format(value) : "—";
 export function quotaText(quota?: ProviderQuota | null) {
-  return quota?.unlimited === true ? "Без лимита" : typeof quota?.remaining === "number" ? number(quota.remaining) : "—";
+  return quota?.unlimited === true ? "Без лимита" : typeof quota?.remaining_usd === "number" ? dollars(quota.remaining_usd) : typeof quota?.remaining === "number" ? number(quota.remaining) : "—";
 }
 export function quotaFacts(observation?: ProviderObservation, now = Date.now()) {
   const quota = observation?.quota;

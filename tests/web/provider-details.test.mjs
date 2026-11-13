@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { latestObservation, quotaFacts, quotaText, queueProviderCatalog } from '../../src/features/assistant/provider-details.ts';
+import { dollars, latestObservation, quotaFacts, quotaText, queueProviderCatalog } from '../../src/features/assistant/provider-details.ts';
+
+test('USD is shown only for explicit dollar observations, preserving unknown balance and unlimited keys', () => {
+  assert.equal(dollars(undefined), '—');
+  assert.equal(dollars(0), '$0.00');
+  assert.equal(quotaText({remaining:500000}), '500 000');
+  assert.equal(quotaText({remaining:500000,remaining_usd:1}), '$1.00');
+  assert.equal(quotaText({unlimited:true,remaining_usd:1}), 'Без лимита');
+});
 
 test('unavailable fields stay unknown while confirmed zeros and unlimited values retain their meaning', () => {
   assert.equal(quotaText(undefined), '—');

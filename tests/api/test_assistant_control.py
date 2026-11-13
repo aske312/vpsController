@@ -63,6 +63,22 @@ class AssistantTests(unittest.TestCase):
                 'accounts': [{'telegram_id': 11, 'bot_access': True, 'telegram_access': True, 'vps_access': False,
                               'session': '1' + 'a' * 352, 'excluded_dialogs': [-1001]}]}
 
+    def test_web_options_persist_and_legacy_updates_preserve_them(self):
+        payload = self.payload()
+        payload.update(web_extract_enabled=False, web_max_sources=5, web_read_chars=2000)
+        saved = self.save(payload)['settings']
+        self.assertFalse(saved['web_extract_enabled'])
+        self.assertEqual(control.read(api)['web_max_sources'], 5)
+        self.assertEqual(control.read(api)['web_read_chars'], 2000)
+        legacy = self.payload()
+        legacy['expected_revision'] = saved['revision']
+        self.save(legacy)
+        self.assertFalse(control.read(api)['web_extract_enabled'])
+        self.assertEqual(control.read(api)['web_read_chars'], 2000)
+        for field, value in [('web_max_sources', 6), ('web_read_chars', 20001), ('web_extract_enabled', 'yes')]:
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                control.Settings.model_validate({**payload, field: value})
+
     def test_saved_fixed_roles_before_terminal_permission_remain_readable(self):
         import assistant_roles as roles
         payload = self.payload()

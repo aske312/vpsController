@@ -50,6 +50,15 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const openChat = useRef(onOpenChat);
   useEffect(() => { openChat.current = onOpenChat; }, [onOpenChat]);
   useEffect(() => { visible.current = active; if (active) setPanel('chat'); }, [active]);
+  useEffect(() => {
+    const markRead = () => {
+      if (!active || panel !== "chat" || typeof document !== "undefined" && document.hidden) return;
+      for (const item of notifications.getSnapshot()) if (item.id.startsWith("nodera-answer:")) notifications.resolve(item.id);
+    };
+    markRead();
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", markRead);
+    return () => { if (typeof document !== "undefined") document.removeEventListener("visibilitychange", markRead); };
+  }, [active, panel, notifications]);
   const setError = (text: string) => { if (text) notify.error(text); };
   const setMessage = (text: string) => { if (text) notify.success(text); };
   const [working, setWorking] = useState("");
@@ -411,8 +420,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     {needsUpdate && <div className="mcpRuntimeUpdate" role="status"><span>{status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"}</span><button type="button" className="ghostButton" disabled={blocked || dirty || !canUpdate} onClick={() => void updateAgent()}>Обновить Nodera</button></div>}
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!composerBlocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
       <div className="mcpChatHead">
-        <div className="noderaChatScope"><strong>Nodera</strong><small title={actorName}>{actorName}</small></div>
         <span className={`mcpConnectionDot ${chatConnection === "failed" || apiConnection.state === "error" ? "failed" : apiConnection.state === "available" ? "available" : "unknown"}`} role="img" aria-label={connectionLabel} title={apiConnection.error || connectionLabel}/>
+        <div className="noderaChatScope"><strong>Nodera</strong><small title={actorName}>{actorName}</small></div>
         {!selectedComponent?.configured && <button type="button" className="ghostButton" onClick={() => selectPanel("settings")}>Подключить AI</button>}
         <div className="mcpChatActions">
           <button type="button" className="mcpIconButton" aria-label="Новый чат" title="Новый чат" disabled={blocked || !turns.length} onClick={newChat}><ChatIcon name="new"/></button>
