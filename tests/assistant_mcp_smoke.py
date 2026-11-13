@@ -138,10 +138,14 @@ async def main():
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
-                    names = {tool.name for tool in (await session.list_tools()).tools}
-                    assert names == {'web_search', 'web_read'}, names
+                    tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+                    assert set(tools) == {'web_search', 'web_read', 'web_research', 'web_extract'}, set(tools)
+                    assert set(tools['web_extract'].inputSchema['properties']) == {'url', 'mode'}
+                    assert 'focus' in tools['web_read'].inputSchema['properties']
                     assert (await session.call_tool('web_read', {'url': 'https://localhost/'})).isError
-            print('Web stdio discovery and private target rejection: passed')
+                    assert (await session.call_tool('web_extract', {'url': 'https://localhost/', 'mode': 'links'})).isError
+                    assert (await session.call_tool('web_extract', {'url': 'https://example.com', 'mode': 'shell'})).isError
+            print('Web stdio discovery, parsing schemas and private target rejection: passed')
         finally:
             server.shutdown(); server.server_close(); thread.join()
 
