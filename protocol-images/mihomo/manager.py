@@ -67,6 +67,7 @@ from version_comparison import newer_release
 import subscription_limits
 import subscription_access
 import client_channels
+import client_reports
 import subscription_signing
 from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
@@ -5654,6 +5655,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
             "Content-Disposition": f'inline; filename="{Path(profile_export_filename(selected_profile)).stem}.{extension}"',
             "Profile-Update-Interval": "24",
             "X-Subscription-Source": "pro",
+            "X-Nodera-Reports-Version": "1",
             **subscription_signing.proof_headers(signer, config.encode('utf-8'), str(request.url), nonce),
             "Subscription-Userinfo": subscription_limits.userinfo(selected_profile, DATA_ROOT / "subscription-limits"),
             "X-Nodera-Selection-State": client_channels.state(application_operation.read(
@@ -5791,6 +5793,23 @@ def registered_command_device(token: str, request: Request):
             raise HTTPException(403, "HWID не зарегистрирован для этой подписки и приложения")
         return profile, str(device["id"])
     raise HTTPException(404, "Subscription not found")
+
+
+@app.post('/s/{token}/reports')
+@app.post('/api/mihomo/subscriptions/{token}/reports')
+def receive_client_report(token: str, request: Request, payload: client_reports.Report,
+                          allow_changes: bool = Depends(subscription_mutation_access)):
+    if allow_changes is not True:
+        raise HTTPException(409, 'Приём статистики временно недоступен')
+    with profile_mutation_lock:
+        profile, device_id = registered_command_device(token, request)
+        try:
+            result = client_reports.accept(DATA_ROOT, str(profile['id']), device_id, payload)
+        except client_reports.TooFrequent:
+            raise HTTPException(429, 'Отчёт можно отправлять раз в 15 секунд', headers={'Retry-After': '15'}) from None
+        except (OSError, client_reports.sqlite3.Error):
+            raise HTTPException(503, 'Хранилище статистики временно недоступно') from None
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
 @app.post("/s/{token}/commands/select-channels")

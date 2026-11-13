@@ -168,6 +168,20 @@
 .servicesObservability th,.servicesObservability td { padding:8px; text-align:left; vertical-align:top; border-bottom:1px solid rgba(121,151,174,.16); }
 .servicesObservability details { margin-block:12px; }
 .servicesObservability summary { cursor:pointer; }
+.observabilityStats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin:12px 0; }
+.observabilityStats > div { padding:10px 12px; border:1px solid rgba(121,151,174,.16); border-radius:8px; }
+.observabilityStats dt { color:var(--muted); font-size:11px; }
+.observabilityStats dd { margin:6px 0 0; font:600 20px var(--font-mono); }
+.observabilityTerminalHead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; margin:12px 0 6px; }
+.observabilityTerminal { max-height:26rem; min-width:0; overflow:auto; padding:12px; margin:0; border:1px solid rgba(121,151,174,.22); border-radius:8px; background:#09131d; color:#bdcdda; font:11px/1.9 var(--font-mono),monospace; white-space:pre-wrap; overflow-wrap:anywhere; tab-size:2; }
+.observabilityTerminal > div { padding:4px 0; border-bottom:1px solid rgba(121,151,174,.1); }
+.observabilityTerminal .isError { color:#ffac9c; }
+.observabilityEmpty { color:#8195a7; }
+.observabilitySwitch { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:32px; font-size:11px; }
+.observabilitySwitch .serviceToggle { flex-shrink:0; }
+.observabilityJournal,.observabilityPolicy { border-top:1px solid rgba(121,151,174,.16); padding-top:12px; }
+.servicesObservability .operationsBody > p,.observabilityPolicy > p { color:var(--muted); font-size:11px; line-height:1.6; }
+.servicesObservability .opsField input { box-sizing:border-box; border:1px solid rgba(121,151,174,.22); border-radius:5px; background:rgba(6,16,24,.4); color:inherit; padding:6px 8px; }
 .servicesLogActions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; margin-top:0; padding-top:6px; border-top:1px solid rgba(91,116,141,.12); }
 .servicesLogActions button,.servicesMaintenanceHead button { min-height:27px; padding:4px 8px; font-size:10px; }
 .serviceToggle input:focus-visible + span { outline:2px solid var(--cyan); outline-offset:3px; }

@@ -61,6 +61,8 @@ type SshAuthorizedKey = { fingerprint: string; type: string; comment?: string; m
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back" | "open"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean; keys?: SshAuthorizedKey[] };
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [noderaVisited, setNoderaVisited] = useState(false);
+  useEffect(() => { if (tab === "nodera") setNoderaVisited(true); }, [tab]);
   const [sectionDirty, setSectionDirty] = useState(false);
   const mihomoLeaveGuard = useRef<SectionLeaveGuard | null>(null);
   const registerMihomoLeaveGuard = useCallback((guard: SectionLeaveGuard | null) => { mihomoLeaveGuard.current = guard; }, []);
@@ -248,6 +250,7 @@ export function ControlPanel() {
 
   async function navigateTo(next: Tab) {
     if (next === tab || !await canLeaveSection()) return;
+    setSectionDirty(false);
     setTab(next);
   }
 
@@ -1461,7 +1464,7 @@ export function ControlPanel() {
 
       {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} cloudflare={{ change: cdnCommand.change, pending: cdnCommand.pending, blocked: busy || application?.recovery?.application_required === true }} />}
 
-      {tab === "nodera" && <AssistantView request={request} refreshKey={mcpRefreshKey} busy={busy || actionNeedsPolling} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} />}
+      {(tab === "nodera" || noderaVisited) && <AssistantView active={tab === "nodera"} onOpenChat={() => { void navigateTo("nodera"); }} request={request} refreshKey={mcpRefreshKey} busy={busy || actionNeedsPolling} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}

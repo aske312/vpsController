@@ -12,6 +12,14 @@ type Evidence = {
 };
 type Connections = { available: boolean; observed_active_channels?: number; known_established_connections?: number; established_connections: number | null; channels_without_connection_count?: number };
 const at = (value: number | null) => value === null ? "—" : new Date(value * 1000).toLocaleString("ru-RU");
+function downloadLog(text: string, name: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  const link = document.createElement("a"); link.href = url; link.download = name; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function LogSwitch({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled: boolean; onChange: (value: boolean) => void }) {
+  return <label className="observabilitySwitch"><span>{label}</span><span className="serviceToggle compact"><input type="checkbox" role="switch" aria-label={label} checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)}/><span/><em>{checked ? "ON" : "OFF"}</em></span></label>;
+}
 
 export function ObservabilityPanel({ request, busy, services = [] }: { request: ReturnType<typeof createApiClient>; busy: boolean; services?: { id: string; name: string }[] }) {
   const [data, setData] = useState<Evidence>();
@@ -80,40 +88,42 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Системный журнал недоступен"); }
     finally { setWorking(false); }
   };
+  const eventLines = data?.events.map(event => `${at(event.at)}  ${event.service}  ${event.method} ${event.route}  ${event.status}  ${event.duration_ms}ms  ${event.reason || "—"}  request=${event.request_id || "—"}  profile=${event.profile_id || "—"}`) ?? [];
   return <section className="servicesLog servicesObservability">
     <div className="operationsTitle"><p className="eyebrow">OBSERVABILITY</p><h3>Запросы и ошибки</h3></div>
     <div className="operationsBody">
       {error && <p role="alert">{error}</p>}
       <div className="servicesLogControls">
-        <label className="opsField">Период<select value={minutes} disabled={blocked} onChange={event => setMinutes(Number(event.target.value))}><option value={60}>Час</option><option value={1440}>Сутки</option><option value={10080}>Неделя</option></select></label>
+        <label className="opsField">Период<select value={minutes} disabled={blocked} onChange={event => { setMinutes(Number(event.target.value)); setJournal(undefined); }}><option value={60}>Час</option><option value={1440}>Сутки</option><option value={10080}>Неделя</option></select></label>
         <label className="opsField">Слой<select value={service} disabled={blocked} onChange={event => setService(event.target.value)}><option value="">Все</option><option value="panel">Панель</option><option value="mihomo">Mihomo</option></select></label>
         <label className="opsField">ID запроса<input value={identity} maxLength={32} placeholder="X-Request-ID" disabled={blocked} onChange={event => setIdentity(event.target.value)} /></label>
-        <label><input type="checkbox" checked={errors} disabled={blocked} onChange={event => setErrors(event.target.checked)} /> Только ошибки в списке</label>
+        <LogSwitch label="Только ошибки в списке" checked={errors} disabled={blocked} onChange={setErrors}/>
         <button type="button" className="ghostButton" disabled={blocked} onClick={() => void load()}>Обновить</button>
       </div>
       {data && <>
-        <p>В сохранённом окне: запросов {data.summary.requests}, ошибок {data.summary.errors}, затронутых известных профилей {data.summary.affected_profiles}.</p>
+        <dl className="observabilityStats"><div><dt>Запросы</dt><dd>{data.summary.requests}</dd></div><div><dt>Ошибки</dt><dd>{data.summary.errors}</dd></div><div><dt>Затронутые профили</dt><dd>{data.summary.affected_profiles}</dd></div><div><dt>Выдано конфигураций</dt><dd>{data.subscriptions.succeeded}</dd></div></dl>
         <p>Выдача конфигураций: успешно {data.subscriptions.succeeded}, ошибок {data.subscriptions.failed}. Первая ошибка: {at(data.summary.first_error_at)}; последняя: {at(data.summary.last_error_at)}.</p>
-        <details><summary>Последние события · {data.events.length}</summary><div style={{ overflowX: "auto" }}><table><thead><tr><th>Время</th><th>Слой / запрос</th><th>Результат</th><th>ID запроса / профиль</th></tr></thead><tbody>{data.events.map(event => <tr key={event.id}><td>{at(event.at)}</td><td>{event.service}<br />{event.method} {event.route}</td><td>{event.status} · {event.duration_ms} мс<br />{event.reason}</td><td><code>{event.request_id}</code><br />{event.profile_id || "—"}</td></tr>)}</tbody></table></div>{!data.events.length && <p>Событий в выбранном окне нет.</p>}</details>
+        <div className="observabilityTerminalHead"><strong>Последние события · {data.events.length}</strong><button type="button" className="ghostButton" disabled={!data.events.length} onClick={() => downloadLog(eventLines.join("\n"), "request-events.log")}>Скачать .log</button></div>
+        <div className="observabilityTerminal" role="region" aria-label="Последние события" tabIndex={0}>{data.events.length ? data.events.map((event, index) => <div className={event.status >= 400 ? "isError" : ""} key={event.id}>{eventLines[index]}</div>) : <span className="observabilityEmpty">Событий в выбранном окне нет.</span>}</div>
       </>}
       <p>Статистика ограничена сроком хранения и лимитом записей. Выдача подписки не подтверждает подключение клиента. HTTP-ошибка сама по себе не определяет сбой DNS, outbound или сети клиента.</p>
       <button type="button" className="ghostButton" disabled={blocked} onClick={() => void observeConnections()}>Проверить соединения</button>
       {connections && <p>{connections.available ? `Активных каналов: ${connections.observed_active_channels}. Установленных соединений: ${connections.established_connections ?? "полный счётчик недоступен"}; подтверждено доступными счётчиками: ${connections.known_established_connections}. Каналов без счётчика: ${connections.channels_without_connection_count}.` : "Наблюдения транспорта Mihomo недоступны."}</p>}
-      <details><summary>Журналы сервисов и системы</summary>
+      <details className="observabilityJournal"><summary>Журналы сервисов и системы</summary>
         <div className="servicesLogControls">
           <label className="opsField">Источник<select value={journalService} disabled={blocked} onChange={event => { setJournalService(event.target.value); setJournal(undefined); }}>
             <option value="application">Приложение</option><option value="system">Система</option><option value="dns">DNS · systemd-resolved</option><option value="gateway">Gateway · Caddy</option>
             {services.filter(item => !["application", "system", "dns", "gateway"].includes(item.id)).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
           </select></label>
           <label className="opsField">Уровень и выше<select value={priority} disabled={blocked} onChange={event => { setPriority(event.target.value); setJournal(undefined); }}><option value="err">Ошибки</option><option value="warning">Предупреждения</option><option value="info">Информация</option><option value="debug">Отладка</option></select></label>
-          <button type="button" className="ghostButton" disabled={blocked} onClick={() => void readJournal()}>Прочитать за выбранный период</button>
+          <button type="button" className="ghostButton" disabled={blocked} onClick={() => void readJournal()}>Показать журнал</button>
         </div>
-        {journal && (journal.length ? <pre style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{journal.join("\n")}</pre> : <p>Записей по выбранным фильтрам нет.</p>)}
+        {journal && <><div className="observabilityTerminalHead"><small>Показано строк: {journal.length} · максимум 120</small><button type="button" className="ghostButton" disabled={!journal.length} onClick={() => downloadLog(journal.join("\n"), "service-journal.log")}>Скачать показанные строки</button></div><pre className="observabilityTerminal" tabIndex={0} aria-label="Журнал службы">{journal.length ? journal.join("\n") : "Записей по выбранным фильтрам нет."}</pre></>}
       </details>
-      {draft && <form onSubmit={event => { event.preventDefault(); void save(); }}>
+      {draft && <form className="observabilityPolicy" onSubmit={event => { event.preventDefault(); void save(); }}>
         <div className="servicesLogControls">
-          <label><input type="checkbox" checked={draft.enabled} disabled={blocked} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /> Собирать события</label>
-          <label><input type="checkbox" checked={draft.errors_only} disabled={blocked} onChange={event => setDraft({ ...draft, errors_only: event.target.checked })} /> Сохранять только ошибки</label>
+          <LogSwitch label="Собирать события" checked={draft.enabled} disabled={blocked} onChange={enabled => setDraft({ ...draft, enabled })}/>
+          <LogSwitch label="Сохранять только ошибки" checked={draft.errors_only} disabled={blocked} onChange={errors_only => setDraft({ ...draft, errors_only })}/>
           <label className="opsField">Хранить дней<input type="number" min={1} max={90} required value={draft.retention_days} disabled={blocked} onChange={event => setDraft({ ...draft, retention_days: Number(event.target.value) })} /></label>
           <label className="opsField">Лимит событий<input type="number" min={100} max={100000} required value={draft.max_events} disabled={blocked} onChange={event => setDraft({ ...draft, max_events: Number(event.target.value) })} /></label>
         </div>

@@ -115,6 +115,7 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
       <div className="gateOperationText"><strong>{item.title}{item.count > 1 ? ` ×${item.count}` : ""}</strong><small title={presentation.summary}>{presentation.summary}</small></div>
       {item.kind === "operation" && item.state === "running" && <b className="gateOperationPercent" title={progress === undefined ? "Сервер не передал процент" : "Прогресс выполнения"}>{progress === undefined ? "—" : `${progress}%`}</b>}
       {item.state === "unknown" && item.action && <button type="button" className="gateNotificationMore" disabled={checking} aria-label={item.action.label} title={item.action.label} onClick={() => void runAction()}>↻</button>}
+      {item.kind === "message" && item.action && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction()}>{item.action.label}</button>}
       <button type="button" className="gateNotificationMore" aria-expanded={detailsOpen} aria-label={`Подробности: ${item.title}`} title="Подробности и действия" onClick={() => setDetailsOpen(value => !value)}>···</button>
       {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
     </div>

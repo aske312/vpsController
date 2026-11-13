@@ -37,7 +37,7 @@ function mount(status, catalog = [], overrides = {}) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {};
   const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
-    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
   const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
@@ -51,8 +51,8 @@ function mount(status, catalog = [], overrides = {}) {
     if (path === '/assistant/chat') return overrides.chat ? overrides.chat(options) : { result: { answer: 'OK', tools_used: [] } };
     return status;
   };
-  const props = { request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
-  return { writes, notifications, render() {
+  const props = { active: true, onOpenChat: overrides.onOpenChat || (() => {}), request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
+  return { writes, notifications, setActive(value) { props.active = value; }, render() {
     cursor = 0;
     const tree = exported.AssistantView(props);
     const expand = node => {
@@ -111,12 +111,126 @@ test('a pending chat shows queue position and submits the question only once', a
   tree = view.render();
   nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
   view.render(); await Promise.resolve(); tree = view.render();
-  assert.equal(nodes(tree, n => n.props.role === 'status' && n.props.children === 'Запрос в очереди AI · позиция 2').length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('2')).length, 1);
   assert.match(view.writes[0].request_id, /^[0-9a-f]{32}$/);
   resolve({result:{answer:'finished', tools_used:[]}});
   await new Promise(setImmediate); tree = view.render();
   assert.equal(view.writes.length, 1);
-  assert.equal(nodes(tree, n => n.props.role === 'status' && n.props.children === 'Запрос в очереди AI · позиция 2').length, 0);
+  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('2')).length, 0);
+});
+
+test('pending turn survives inactive page and answer notification opens chat without another POST', async () => {
+  const status = fixture();
+  Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true, configured:true});
+  let resolve, opened = 0;
+  const view = mount(status, [], {chat: () => new Promise(done => resolve = done), onOpenChat: () => opened++});
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:'pending question',style:{},scrollHeight:48}});
+  tree = view.render();
+  nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
+  view.setActive(false); tree = view.render();
+  assert.match(JSON.stringify(tree), /pending question/);
+  assert.equal(nodes(tree, n => n.type === 'textarea')[0].disabled, false);
+  view.setActive(true); tree = view.render();
+  assert.match(JSON.stringify(tree), /pending question/);
+  view.setActive(false); view.render();
+  resolve({result:{answer:'completed answer', tools_used:[]}});
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length, 1);
+  const notice = view.notifications.find(item => item.action);
+  assert.ok(notice);
+  notice.action.run();
+  assert.equal(opened, 1);
+  view.setActive(true); tree = view.render();
+  assert.match(JSON.stringify(tree), /completed answer/);
+});
+
+test('follow-ups are serialized with preceding answers and conversation ID, and queued messages can be removed', async () => {
+  const status = fixture();
+  status.chat_attachments = true;
+  Object.assign(status.settings, {model:'fixture-model', memory_enabled:false, modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true, configured:true});
+  const replies = [];
+  const view = mount(status, [], {chat: () => new Promise(resolve => replies.push(resolve))});
+  view.render(); await Promise.resolve();
+  function submit(question) {
+    let tree = view.render();
+    nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:question,style:{},scrollHeight:48}});
+    tree = view.render();
+    const send = nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0];
+    assert.equal(send.disabled, false);
+    send.node.props.onClick();
+  }
+  submit('first'); submit('second'); submit('remove me'); submit('third');
+  assert.equal(view.writes.length, 1);
+  let tree = view.render();
+  const removals = nodes(tree, n => n.type === 'button' && n.props.children === 'Убрать из очереди');
+  assert.equal(removals.length, 3);
+  removals[1].node.props.onClick();
+  assert.doesNotMatch(JSON.stringify(view.render()), /remove me/);
+  view.setActive(false); view.render();
+  replies[0]({result:{answer:'first answer',tools_used:[]},conversation_id:'conversation-one'});
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length, 2);
+  assert.equal(view.writes[1].prompt, 'second');
+  assert.equal(view.writes[1].conversation_id, 'conversation-one');
+  assert.deepEqual(view.writes[1].history.map(item => item.content), ['first','first answer']);
+  replies[1]({result:{answer:'second answer',tools_used:[]},conversation_id:'conversation-one'});
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length, 3);
+  assert.equal(view.writes[2].prompt, 'third');
+  assert.deepEqual(view.writes[2].history.map(item => item.content), ['first','first answer','second','second answer']);
+  assert.equal(new Set(view.writes.map(item => item.request_id)).size, 3);
+  replies[2]({result:{answer:'third answer',tools_used:[]}});
+  await new Promise(setImmediate);
+  view.setActive(true); tree = view.render();
+  assert.match(JSON.stringify(tree), /third answer/);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Убрать из очереди').length, 0);
+});
+
+test('confirmation pauses follow-ups so another request cannot replace an unconfirmed action', async () => {
+  const status = fixture();
+  Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true, configured:true});
+  let resolve;
+  const view = mount(status, [], {chat: () => new Promise(done => resolve = done)});
+  view.render(); await Promise.resolve();
+  for (const question of ['action','follow-up']) {
+    let tree = view.render();
+    nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:question,style:{},scrollHeight:48}});
+    tree = view.render();
+    nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
+  }
+  resolve({result:{answer:'confirmation needed',tools_used:[]},pending_action:{service:'ssh',action:'restart',code:'pending',expires:9999999999}});
+  await new Promise(setImmediate);
+  const tree = view.render();
+  assert.equal(view.writes.length, 1);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Подтвердить действие').length, 1);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 1);
+});
+
+test('failed chat stops queued follow-ups without repeating any POST and keeps unsent questions', async () => {
+  const status = fixture();
+  Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true, configured:true});
+  let reject;
+  const view = mount(status, [], {chat: () => new Promise((_, fail) => reject = fail)});
+  view.render(); await Promise.resolve();
+  for (const question of ['first','follow-up']) {
+    let tree = view.render();
+    nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:question,style:{},scrollHeight:48}});
+    tree = view.render();
+    nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
+  }
+  reject(new Error('connection lost'));
+  await new Promise(setImmediate);
+  const tree = view.render();
+  assert.equal(view.writes.length, 1);
+  assert.match(JSON.stringify(tree), /follow-up/);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 2);
+  assert.equal(nodes(tree, n => n.type === 'textarea')[0].disabled, false);
 });
 
 test('all MCP cards show their actual tool counts', async () => {
@@ -151,7 +265,7 @@ test('catalog failure is visible and keeps chat available with the saved model; 
   assert.equal(nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].disabled, false);
   nodes(tree, n => n.type === 'button' && n.props.children === 'Проверить API сейчас')[0].node.props.onClick();
   await new Promise(setImmediate); tree = view.render();
-  assert.equal(nodes(tree, n => n.type === 'span' && n.props.children === 'Каталог API доступен').length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'img' && n.props['aria-label'] === 'Каталог API доступен').length, 1);
   assert.equal(nodes(tree, n => n.props.role === 'alert' && n.props.children === 'temporary outage').length, 0);
 });
 
