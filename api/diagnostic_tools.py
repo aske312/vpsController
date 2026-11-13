@@ -159,6 +159,7 @@ def incident(api, query):
         result['coverage']['probe_history'] = 'up_to_5_recent_measurements; temporal_context_not_automatic_trace_or_cause_match'
     except (OSError, sqlite3.Error, ValueError): unknown(result, 'probe_history', 'storage_unavailable')
     result['next_steps'] += [{'tool': 'vps_probe', 'arguments': {'kind': 'mihomo_api'}, 'reason': 'test_manager_reachability'},
+                             {'tool': 'vps_observability', 'arguments': {'path': '/restarts', 'body': {'minutes': max(1440, min(query.minutes, 10080))}}, 'reason': 'distinguish_host_reboot_from_service_restart_and_inspect_OS_update_timers'},
                              {'tool': 'vps_probe', 'arguments': {'kind': 'targets'}, 'reason': 'discover_configured_DNS_and_route_targets'}]
     timeline = []
     for event in (history or {}).get('events', []):

@@ -93,6 +93,12 @@ def call(api, arguments, actor):
     path = arguments.get('path') or '/events'
     body = arguments.get('body') or {}
     if method == 'GET':
+        if path == '/restarts':
+            roles.require(settings, actor, 'server_read')
+            import restart_diagnostics
+            try: query = restart_diagnostics.Query.model_validate(body)
+            except ValidationError: raise HTTPException(422, 'Некорректные фильтры истории перезагрузок') from None
+            return restart_diagnostics.collect(api, query)
         if path == '/journal':
             try: query = JournalQuery.model_validate(body)
             except ValidationError: raise HTTPException(422, 'Некорректные фильтры журналов') from None
@@ -100,7 +106,7 @@ def call(api, arguments, actor):
         if path == '/connections':
             roles.require(settings, actor, 'server_read')
             return connections(api)
-        if path not in ('/events', '/settings'): raise HTTPException(422, 'Путь: /events, /settings, /connections')
+        if path not in ('/events', '/settings'): raise HTTPException(422, 'Путь: /events, /settings, /connections, /journal, /restarts')
         try: query = EventQuery.model_validate(body)
         except ValidationError: raise HTTPException(422, 'Некорректные фильтры событий') from None
         result = evidence(api, **query.model_dump())

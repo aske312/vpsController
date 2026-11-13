@@ -25,6 +25,9 @@ FILES = (
 UNITS = ('ssh.service', 'fail2ban.service', 'auditd.service', 'apparmor.service',
          'apt-daily-upgrade.timer', 'ufw.service', 'vps-control-api.service',
          'vps-control-web.service', 'caddy.service', 'vps-control-mihomo-manager.service')
+LEGACY_FILES, LEGACY_UNITS = FILES, UNITS
+FILES += ('/etc/systemd/system/vps-control-auto-update.service', '/etc/systemd/system/vps-control-auto-update.timer')
+UNITS += ('vps-control-auto-update.timer',)
 SYSCTLS = ('net.ipv4.ip_forward', 'net.ipv4.tcp_syncookies',
            'net.ipv4.conf.all.accept_redirects', 'net.ipv4.conf.default.accept_redirects',
            'net.ipv4.conf.all.send_redirects', 'net.ipv4.conf.default.send_redirects',
@@ -89,7 +92,8 @@ def snapshot(*, root=Path('/'), run=subprocess.run):
 def validate(value):
     if not isinstance(value, dict) or value.get('schema') != 1 or type(value.get('ufw_active')) is not bool:
         raise ValueError('Неверный снимок защиты')
-    for key, names in (('files', FILES), ('services', UNITS), ('sysctl', SYSCTLS)):
+    legacy = isinstance(value.get('files'), dict) and isinstance(value.get('services'), dict) and set(value['files']) == set(LEGACY_FILES) and set(value['services']) == set(LEGACY_UNITS)
+    for key, names in (('files', LEGACY_FILES if legacy else FILES), ('services', LEGACY_UNITS if legacy else UNITS), ('sysctl', SYSCTLS)):
         if not isinstance(value.get(key), dict) or set(value[key]) != set(names):
             raise ValueError('Неполный снимок защиты')
     for item in value['files'].values():
@@ -165,7 +169,7 @@ def restore(value, *, root=Path('/'), run=subprocess.run):
             if name == 'ssh.service':
                 command(run, 'sshd', '-t')
                 command(run, 'systemctl', 'reload' if current['active'] else 'start', name)
-            elif name in {'auditd.service', 'apparmor.service', 'apt-daily-upgrade.timer', 'ufw.service'}:
+            elif name in {'auditd.service', 'apparmor.service', 'apt-daily-upgrade.timer', 'vps-control-auto-update.timer', 'ufw.service'}:
                 if not current['active']:
                     command(run, 'systemctl', 'start', name)
             else:

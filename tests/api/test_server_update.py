@@ -4,6 +4,8 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
+import json
 import tempfile
 import unittest
 
@@ -31,13 +33,16 @@ class ServerUpdateTests(unittest.TestCase):
     def function(self, name):
         return re.search(r"(?ms)^" + name + r"\(\) \{.*?^\}", self.source).group()
 
-    def invoke(self, action="safe-update", failure="", real_backup=False):
+    def invoke(self, action="safe-update", failure="", real_backup=False, automatic=True):
+        (self.root / 'automation.json').write_text(json.dumps({'update': {'enabled': automatic}}), encoding='utf-8')
         functions = "\n".join(self.function(name) for name in (
-            "safe_update_server", "auto_safe_update_server", "update_kernel", "finish_operation"))
+            "safe_update_server", "automatic_update_enabled", "auto_safe_update_server", "update_kernel", "finish_operation"))
         if real_backup:
             functions += "\n" + self.function("create_recovery_point")
         script = r'''set -Eeuo pipefail
 DATA_DIR=$TEST_ROOT
+AUTOMATION_FILE=$TEST_ROOT/automation.json
+python3() { "$TEST_PYTHON" "$@"; }
 INSTALL_DIR=$TEST_ROOT/app
 CONFIG_DIR=$TEST_ROOT/config
 INSTALL_CONFIG=$TEST_ROOT/install.conf
@@ -93,7 +98,7 @@ case "$TEST_ACTION" in
 esac
 '''
         result = subprocess.run([BASH, "-s"], env={**os.environ,
-            "TEST_ROOT": bash_path(self.root), "TEST_FAIL": failure, "TEST_ACTION": action},
+            "TEST_ROOT": bash_path(self.root), "TEST_FAIL": failure, "TEST_ACTION": action, "TEST_PYTHON": bash_path(Path(sys.executable))},
             input=script, capture_output=True, text=True, encoding="utf-8", timeout=30)
         events = self.events.read_text().splitlines() if self.events.exists() else []
         return result, events
@@ -140,16 +145,41 @@ esac
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(events[-3:], ["STATUS:rebooting", "SERVICE:--no-block --no-wall reboot", "STATUS:failed"])
 
-    def test_native_auto_update_uses_shared_worker_without_changing_timer_schedule(self):
-        script = 'set -eu\nCOMMAND_PATH=/usr/local/sbin/vps-control\n'
-        script += 'install() { mkdir -p -- "${@: -1}"; }\nchmod() { :; }\n'
-        script += 'systemctl() { printf "%s\\n" "$*"; }\n'
-        script += self.function("configure_os_update_policy")
-        script += '\nconfigure_os_update_policy "$TEST_ROOT/units"\n'
-        result = subprocess.run([BASH, "-c", script], env={**os.environ, "TEST_ROOT": bash_path(self.root)},
-                                capture_output=True, text=True, encoding="utf-8", timeout=10)
+    def test_disabled_auto_update_never_runs_packages_or_reboot_but_manual_update_still_works(self):
+        result, events = self.invoke('auto-safe-update', automatic=False)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(events, ['STATUS:succeeded'])
+        self.events.unlink()
+        result, events = self.invoke('safe-update', automatic=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('STATUS:rebooting', events)
+
+    def test_invalid_automatic_policy_cannot_be_treated_as_enabled(self):
+        result, events = self.invoke('auto-safe-update', automatic='yes')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(row.startswith(('APT:', 'SERVICE:')) for row in events))
+        self.assertEqual(events[-1], 'STATUS:failed')
+
+    def test_setup_disables_distro_timer_and_preserves_the_UI_schedule(self):
+        script = 'set -eu\nCOMMAND_PATH=/usr/local/sbin/vps-control\n'
+        script += 'AUTOMATION_FILE=$TEST_ROOT/automation.json\npython3() { "$TEST_PYTHON" "$@"; }\n'
+        script += 'install() { mkdir -p -- "${@: -1}"; }\nchmod() { :; }\n'
+        script += 'systemctl() { printf "%s\\n" "$*" >> "$TEST_ROOT/events"; }\n'
+        script += '\n'.join(self.function(name) for name in ('automation_calendar', 'install_automation_timer', 'apply_update_schedule', 'disable_native_update_timer', 'configure_os_update_policy'))
+        script += '\nconfigure_os_update_policy "$TEST_ROOT/units"\n'
+        for enabled in (False, True, False):
+            with self.subTest(enabled=enabled):
+                (self.root / 'automation.json').write_text(json.dumps({'update': {'enabled': enabled, 'cadence': 'daily', 'hour': 17, 'minute': 13}}), encoding='utf-8')
+                self.events.unlink(missing_ok=True)
+                result = subprocess.run([BASH, "-c", script], env={**os.environ, "TEST_ROOT": bash_path(self.root), "TEST_PYTHON": bash_path(Path(sys.executable))},
+                                        capture_output=True, text=True, encoding="utf-8", timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                events = self.events.read_text().splitlines()
+                self.assertIn('disable --now apt-daily-upgrade.timer', events)
+                self.assertNotIn('enable --now apt-daily-upgrade.timer', events)
+                self.assertEqual('enable --now vps-control-auto-update.timer' in events, enabled)
+                timer = (self.root / 'units/vps-control-auto-update.timer').read_text()
+                self.assertIn('OnCalendar=*-*-* 17:13:00', timer)
         policy = (self.root / "units/apt-daily-upgrade.service.d/vps-control.conf").read_text()
         self.assertIn("ExecStart=\nExecStart=/usr/local/sbin/vps-control auto-safe-update\n", policy)
         self.assertIn("TimeoutStartSec=60min", policy)
-        self.assertEqual(result.stdout.strip(), "daemon-reload")

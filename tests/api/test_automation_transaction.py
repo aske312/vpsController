@@ -21,6 +21,7 @@ class AutomationTransactionTests(unittest.TestCase):
         self.enabled = dict(self.active)
         self.fail_apply = False
         self.calls = []
+        self.legacy_active = self.legacy_enabled = True
         for kind in KINDS:
             for suffix in ("timer", "service"):
                 (self.units / f"vps-control-auto-{kind}.{suffix}").write_text("original", encoding="utf-8")
@@ -37,21 +38,29 @@ class AutomationTransactionTests(unittest.TestCase):
             for key in KINDS:
                 self.active[key] = self.enabled[key] = True
                 (self.units / f"vps-control-auto-{key}.timer").write_text("changed")
+            self.legacy_active = self.legacy_enabled = False
             code = 1 if self.fail_apply else 0
         elif args[1] == "show":
-            output = f"LoadState=loaded\nActiveState={'active' if self.active[kind] else 'inactive'}\nUnitFileState={'enabled' if self.enabled[kind] else 'disabled'}\n"
+            active = self.active[kind] if kind else self.legacy_active
+            enabled = self.enabled[kind] if kind else self.legacy_enabled
+            output = f"LoadState=loaded\nActiveState={'active' if active else 'inactive'}\nUnitFileState={'enabled' if enabled else 'disabled'}\n"
         elif args[1] == "disable":
-            self.active[kind] = self.enabled[kind] = False
+            if kind: self.active[kind] = self.enabled[kind] = False
+            else: self.legacy_active = self.legacy_enabled = False
         elif args[1] == "enable":
-            self.enabled[kind] = True
+            if kind: self.enabled[kind] = True
+            else: self.legacy_enabled = True
         elif args[1] == "start":
-            self.active[kind] = True
+            if kind: self.active[kind] = True
+            else: self.legacy_active = True
         return SimpleNamespace(returncode=code, stdout=output)
 
     def test_only_confirmed_timer_application_commits_settings(self):
         configure(self.settings, self.settings_file, ["control"], unit_dir=self.units, run=self.fake_command)
         self.assertEqual(json.loads(self.settings_file.read_text()), self.settings)
         self.assertTrue(all(self.active.values()))
+        self.assertFalse(self.legacy_active)
+        self.assertFalse(self.legacy_enabled)
 
     def test_failed_application_restores_timer_files_and_runtime(self):
         self.fail_apply = True
@@ -60,6 +69,8 @@ class AutomationTransactionTests(unittest.TestCase):
             configure(self.settings, self.settings_file, ["control"], unit_dir=self.units, run=self.fake_command)
         self.assertEqual(json.loads(self.settings_file.read_text()), self.before)
         self.assertEqual(self.active, {"reboot": False, "cleanup": True, "update": False})
+        self.assertTrue(self.legacy_active)
+        self.assertTrue(self.legacy_enabled)
         for path in self.units.iterdir():
             self.assertEqual(path.read_text(), "original")
 
@@ -92,8 +103,8 @@ class AutomationTransactionTests(unittest.TestCase):
         def ineffective_stop(args, **kwargs):
             result = self.fake_command(args, **kwargs)
             if args[:2] == ["systemctl", "disable"]:
-                kind = next(key for key in KINDS if f"vps-control-auto-{key}.timer" in args)
-                self.active[kind] = True
+                kind = next((key for key in KINDS if f"vps-control-auto-{key}.timer" in args), None)
+                if kind: self.active[kind] = True
             return result
         with self.assertRaisesRegex(RuntimeError, "требуется проверка"):
             configure(self.settings, self.settings_file, ["control"], unit_dir=self.units, run=ineffective_stop)
@@ -133,3 +144,26 @@ class AutomationTransactionTests(unittest.TestCase):
             recover(self.settings_file, unit_dir=self.units, run=self.fake_command)
         self.assertTrue(path.exists())
         self.assertEqual(self.calls, [])
+
+    def test_legacy_timer_must_actually_be_disabled_before_committing(self):
+        def legacy_still_active(args, **kwargs):
+            result = self.fake_command(args, **kwargs)
+            if args[0] == 'control': self.legacy_active = self.legacy_enabled = True
+            return result
+        with self.assertRaisesRegex(RuntimeError, 'восстановлены'):
+            configure(self.settings, self.settings_file, ['control'], unit_dir=self.units, run=legacy_still_active)
+        self.assertEqual(json.loads(self.settings_file.read_text()), self.before)
+
+    def test_previous_recovery_schema_remains_supported(self):
+        def killed(args, **kwargs):
+            result = self.fake_command(args, **kwargs)
+            if args[0] == 'control': raise KeyboardInterrupt()
+            return result
+        with self.assertRaises(KeyboardInterrupt):
+            configure(self.settings, self.settings_file, ['control'], unit_dir=self.units, run=killed)
+        path = self.settings_file.with_name('automation-recovery.json')
+        snapshot = json.loads(path.read_text())
+        snapshot['states'].pop('apt-daily-upgrade.timer')
+        path.write_text(json.dumps(snapshot), encoding='utf-8')
+        recover(self.settings_file, unit_dir=self.units, run=self.fake_command)
+        self.assertEqual(json.loads(self.settings_file.read_text()), self.before)

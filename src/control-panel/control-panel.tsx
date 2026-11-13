@@ -704,6 +704,12 @@ export function ControlPanel() {
         message: "Все SSH-соединения будут разорваны. Восстановление возможно через эту панель или после перезагрузки сервера.",
         confirmLabel: "Остановить SSH", phrase: "ОТКЛЮЧИТЬ SSH", danger: true,
       })) return;
+    } else if (action === "stop" && serviceId === "updates") {
+      if (!await askConfirmation({
+        title: "Отключить автообновление и перезагрузку?",
+        message: "Автоматическое обновление ОС по расписанию будет отключено. Выбор сохранится после перезагрузки сервера. Ручное обновление останется доступно.",
+        confirmLabel: "Отключить", danger: true,
+      })) return;
     } else if (action === "stop") {
       if (!await askConfirmation({
         title: `Остановить «${serviceName}»?`,
@@ -711,9 +717,9 @@ export function ControlPanel() {
         confirmLabel: "Остановить", danger: true,
       })) return;
     } else if (action === "restart" && !await askConfirmation({
-      title: `Перезапустить «${serviceName}»?`,
-      message: "Во время перезапуска возможен кратковременный перерыв в работе.",
-      confirmLabel: "Перезапустить",
+      title: serviceId === "updates" ? "Применить расписание автообновления?" : `Перезапустить «${serviceName}»?`,
+      message: serviceId === "updates" ? "Автообновление останется включённым с сохранёнными временем и периодичностью." : "Во время перезапуска возможен кратковременный перерыв в работе.",
+      confirmLabel: serviceId === "updates" ? "Применить" : "Перезапустить",
     })) return;
     setBusy(true);
     try {

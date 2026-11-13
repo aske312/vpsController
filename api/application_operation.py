@@ -291,6 +291,19 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
 
 
 
+def worker_origin():
+    """Capture the actual worker's systemd context before a reboot loses it."""
+    result = {}
+    invocation = os.getenv('INVOCATION_ID', '')
+    if re.fullmatch(r'[0-9a-f]{32}', invocation): result['systemd_invocation_id'] = invocation
+    try:
+        for line in Path('/proc/self/cgroup').read_text().splitlines():
+            for part in line.split(':', 2)[-1].split('/'):
+                if re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9@_.-]{0,150}\.service', part): result['origin_unit'] = part
+    except OSError: pass
+    return result
+
+
 def write_status(data_dir: Path, action_file: Path, action: str, state: str, progress: int, message: str,
                  started_at: str, identity: str, unit: str = "", *, stage=None, result=None, health_check=None) -> dict:
     identity = operation_id(identity)
@@ -303,6 +316,8 @@ def write_status(data_dir: Path, action_file: Path, action: str, state: str, pro
             return stored
         value = {**stored, "id": identity, "action": action, "state": state, "progress": progress,
                  "message": message, "started_at": stored.get("started_at", started_at), "updated_at": timestamp(), "boot_id": stored.get("boot_id", boot_id())}
+        if os.getenv('VPS_CONTROL_OPERATION_ID') == identity:
+            for key, item in worker_origin().items(): value.setdefault(key, item)
         import operation_log
         lifecycle = operation_log.phase(value)
         value.update(stage=lifecycle['stage'], component=lifecycle['component'], stage_result=lifecycle['result'])

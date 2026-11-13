@@ -11,6 +11,14 @@ from pathlib import Path
 from application_operation import atomic_json
 
 KINDS = ("reboot", "cleanup", "update")
+LEGACY_UPDATE_TIMER = 'apt-daily-upgrade.timer'
+
+
+def valid_state(unit, state):
+    allowed = {'enabled', 'disabled'} | ({'masked', 'static'} if unit == LEGACY_UPDATE_TIMER else set())
+    loads = {'loaded', 'not-found'} | ({'masked'} if unit == LEGACY_UPDATE_TIMER else set())
+    return isinstance(state, dict) and state.get('LoadState') in loads and (
+        state['LoadState'] == 'not-found' or state.get('ActiveState') in {'active', 'inactive'} and state.get('UnitFileState') in allowed)
 
 
 def configure(settings: dict, settings_file: Path, control: list[str], *,
@@ -24,16 +32,16 @@ def configure(settings: dict, settings_file: Path, control: list[str], *,
 
     states = {}
     snapshots = {}
-    for kind in KINDS:
-        unit = f"vps-control-auto-{kind}.timer"
+    for unit in [f"vps-control-auto-{kind}.timer" for kind in KINDS] + [LEGACY_UPDATE_TIMER]:
         observation = command("systemctl", "show", unit, "--property=LoadState,ActiveState,UnitFileState")
         values = dict(line.split("=", 1) for line in observation.stdout.splitlines() if "=" in line)
-        if observation.returncode not in (0, 4) or values.get("LoadState") not in ("loaded", "not-found"):
+        if observation.returncode not in (0, 4):
             raise RuntimeError("Не удалось проверить текущее состояние расписаний")
-        if values.get("LoadState") == "loaded" and (values.get("ActiveState") not in ("active", "inactive") or
-                values.get("UnitFileState") not in ("enabled", "disabled")):
+        if not valid_state(unit, values):
             raise RuntimeError("Расписание меняет состояние или настроено нестандартно; сначала проверьте службу")
         states[unit] = values
+        if unit == LEGACY_UPDATE_TIMER: continue
+        kind = unit.removeprefix('vps-control-auto-').removesuffix('.timer')
         for suffix in ("service", "timer"):
             path = unit_dir / f"vps-control-auto-{kind}.{suffix}"
             if path.is_symlink():
@@ -66,6 +74,11 @@ def configure(settings: dict, settings_file: Path, control: list[str], *,
                 enabled = settings[kind]["enabled"]
                 if values.returncode or observed.get("ActiveState") != ("active" if enabled else "inactive") or observed.get("UnitFileState") != ("enabled" if enabled else "disabled"):
                     raise RuntimeError("Состояние таймеров не подтверждено")
+            legacy = command('systemctl', 'show', LEGACY_UPDATE_TIMER, '--property=LoadState,ActiveState,UnitFileState')
+            observed = dict(line.split('=', 1) for line in legacy.stdout.splitlines() if '=' in line)
+            if legacy.returncode not in (0, 4) or not valid_state(LEGACY_UPDATE_TIMER, observed) or (
+                    observed['LoadState'] != 'not-found' and (observed.get('ActiveState') != 'inactive' or observed.get('UnitFileState') not in ('disabled', 'masked', 'static'))):
+                raise RuntimeError('Независимый системный таймер автообновления не отключён')
             atomic_json(settings_file, settings)
             recovery_file.unlink()
         except Exception as cause:
@@ -88,7 +101,7 @@ def recover(settings_file: Path, *, unit_dir=Path("/etc/systemd/system"), run=su
     value = json.loads(recovery_file.read_text(encoding="utf-8"))
     expected_units = {f"vps-control-auto-{kind}.timer" for kind in KINDS}
     expected_paths = {str(unit_dir / f"vps-control-auto-{kind}.{suffix}") for kind in KINDS for suffix in ("service", "timer")}
-    if not isinstance(value, dict) or not isinstance(value.get("states"), dict) or set(value["states"]) != expected_units or not isinstance(value.get("files"), dict) or set(value["files"]) != expected_paths:
+    if not isinstance(value, dict) or not isinstance(value.get("states"), dict) or set(value["states"]) not in (expected_units, expected_units | {LEGACY_UPDATE_TIMER}) or not isinstance(value.get("files"), dict) or set(value["files"]) != expected_paths:
         raise ValueError("Неверный снимок восстановления расписаний")
     files = {}
     for name, snapshot in value["files"].items():
@@ -101,10 +114,8 @@ def recover(settings_file: Path, *, unit_dir=Path("/etc/systemd/system"), run=su
             if not isinstance(snapshot, dict) or type(snapshot.get("mode")) is not int or not 0 <= snapshot["mode"] <= 0o777:
                 raise ValueError("Неверные права в снимке расписаний")
             files[path] = (base64.b64decode(snapshot["content"], validate=True), snapshot["mode"])
-    for state in value["states"].values():
-        if not isinstance(state, dict) or state.get("LoadState") not in {"loaded", "not-found"}:
-            raise ValueError("Неверное состояние службы в снимке")
-        if state["LoadState"] == "loaded" and (state.get("ActiveState") not in {"active", "inactive"} or state.get("UnitFileState") not in {"enabled", "disabled"}):
+    for unit, state in value["states"].items():
+        if not valid_state(unit, state):
             raise ValueError("Неподдерживаемое состояние службы в снимке")
     previous = base64.b64decode(value["settings"], validate=True) if value["settings"] is not None else None
     if settings_file.is_symlink():
@@ -137,7 +148,7 @@ def recover(settings_file: Path, *, unit_dir=Path("/etc/systemd/system"), run=su
             temporary.unlink(missing_ok=True)
 
     # Missing timers may reject disable; readback below is the authority.
-    for unit in expected_units:
+    for unit in value['states']:
         attempt(lambda unit=unit: command("systemctl", "disable", "--now", unit))
     for path, snapshot in files.items():
         attempt(lambda path=path, snapshot=snapshot: restore(path, snapshot))
@@ -157,7 +168,7 @@ def recover(settings_file: Path, *, unit_dir=Path("/etc/systemd/system"), run=su
             observed = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
             if result.returncode not in (0, 4) or observed.get("LoadState") != expected["LoadState"]:
                 raise RuntimeError("Не подтверждена установка таймера")
-            if expected["LoadState"] == "loaded" and any(observed.get(key) != expected[key] for key in ("ActiveState", "UnitFileState")):
+            if expected["LoadState"] != "not-found" and any(observed.get(key) != expected[key] for key in ("ActiveState", "UnitFileState")):
                 raise RuntimeError("Не подтверждено восстановление таймера")
         attempt(verify)
     if failed:

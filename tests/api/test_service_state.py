@@ -1,5 +1,8 @@
 import subprocess
 import unittest
+import tempfile
+from pathlib import Path
+import json
 from unittest.mock import patch
 
 from tests.api.support import api
@@ -166,3 +169,24 @@ class ServiceObservationTests(unittest.TestCase):
                         with self.assertRaises(api.HTTPException) as denied:
                             api.perform_service_action("fixture", api.ServiceAction(action=action))
                         self.assertEqual(denied.exception.status_code, 409)
+
+    def test_update_service_changes_the_same_persisted_schedule_without_starting_the_update(self):
+        original = api.default_automation()
+        original['update'].update(cadence='daily', hour=17, minute=13)
+        with tempfile.TemporaryDirectory() as folder:
+            settings_file = Path(folder) / 'automation.json'
+            settings_file.write_text(json.dumps(original), encoding='utf-8')
+            with patch.object(api, 'AUTOMATION_FILE', settings_file), patch.object(api, 'run') as command, \
+                 patch('automation_transaction.configure') as configure:
+                for action in ('start', 'stop', 'restart'):
+                    with self.subTest(action=action), patch.object(api, 'service_details', return_value={'runtime': {'state': 'stopped' if action == 'stop' else 'running'}}):
+                        api.perform_service_action('updates', api.ServiceAction(action=action))
+                        settings, path, _ = configure.call_args.args
+                        self.assertEqual(settings['update'], {**original['update'], 'enabled': action != 'stop'})
+                        self.assertEqual(settings['reboot'], original['reboot'])
+                        self.assertEqual(path, settings_file)
+                command.assert_not_called()
+                settings_file.write_text('{broken', encoding='utf-8')
+                configure.reset_mock()
+                with self.assertRaises(api.HTTPException): api.perform_service_action('updates', api.ServiceAction(action='stop'))
+                configure.assert_not_called()

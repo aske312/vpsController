@@ -292,6 +292,10 @@ finish_operation() {
       reboot) write_action_status "rebooting" 100 "Сервер перезагружается" ;;
       poweroff) write_action_status "powering-off" 100 "Сервер выключается" ;;
       safe-update|auto-safe-update|kernel-update)
+        if [[ "${CURRENT_ACTION}" == "auto-safe-update" && "${AUTO_UPDATE_SKIPPED:-no}" == "yes" ]]; then
+          write_action_status "succeeded" 100 "Автообновление отключено; запуск пропущен без обновления и перезагрузки"
+          return 0
+        fi
         write_action_status "rebooting" 100 "Системные обновления установлены и проверены; точка восстановления сохранена, сервер перезагружается"
         if ! systemctl --no-block --no-wall reboot; then
           write_action_status "failed" 100 "Обновления установлены, но автоматическая перезагрузка не запущена; точка восстановления сохранена"
@@ -365,14 +369,69 @@ restore_recovery_point() {
 }
 
 auto_safe_update_server() {
+  local enabled
+  AUTO_UPDATE_SKIPPED=no
+  enabled="$(automatic_update_enabled)" || die "Не удалось прочитать настройку автообновления; автоматический запуск запрещён."
+  if [[ "${enabled}" != "yes" ]]; then
+    AUTO_UPDATE_SKIPPED=yes
+    info "Автообновление отключено в расписании; запуск пропущен"
+    return 0
+  fi
   safe_update_server
+}
+
+automatic_update_enabled() {
+  python3 - "${AUTOMATION_FILE}" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+try:
+    if not os.path.exists(path):
+        print('no')
+    else:
+        with open(path, encoding='utf-8') as stream: data = json.load(stream)
+        value = data.get('update', {}).get('enabled', False)
+        if type(value) is not bool: raise ValueError('Invalid update policy')
+        print('yes' if value else 'no')
+except (OSError, ValueError, TypeError, AttributeError):
+    raise SystemExit(2)
+PY
+}
+
+disable_native_update_timer() {
+  # The distro scheduler must not bypass the one schedule owned by the UI.
+  systemctl disable --now apt-daily-upgrade.timer || {
+    [[ "$(systemctl show apt-daily-upgrade.timer --property=LoadState --value)" == "not-found" ]] || return 1
+  }
+}
+
+apply_update_schedule() {
+  local unit_dir="${1:-/etc/systemd/system}" values enabled cadence weekday hour minute calendar
+  values="$(python3 - "${AUTOMATION_FILE}" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding='utf-8') as stream: data = json.load(stream)
+except FileNotFoundError:
+    data = {}
+item = data.get('update', {})
+enabled = item.get('enabled', False)
+cadence, weekday = item.get('cadence', 'weekly'), item.get('weekday', 'Sun')
+hour, minute = item.get('hour', 2), item.get('minute', 30)
+if type(enabled) is not bool or cadence not in ('daily', 'weekly', 'monthly') or weekday not in ('Mon','Tue','Wed','Thu','Fri','Sat','Sun') or type(hour) is not int or not 0 <= hour <= 23 or type(minute) is not int or not 0 <= minute <= 59:
+    raise SystemExit('Invalid automatic update schedule')
+print('yes' if enabled else 'no', cadence, weekday, hour, minute)
+PY
+)" || return 1
+  read -r enabled cadence weekday hour minute <<<"${values}"
+  calendar="$(automation_calendar "${cadence}" "${weekday}" "${hour}" "${minute}")" || return 1
+  install_automation_timer "update" "Scheduled full server update and reboot by 312node.net" "auto-safe-update" "${enabled}" "${calendar}" "${unit_dir}"
 }
 
 configure_os_update_policy() {
   local unit_dir="${1:-/etc/systemd/system}"
   install -d -m 0755 "${unit_dir}/apt-daily-upgrade.service.d" || return 1
-  # Keep the distro timer's schedule, but never let it install packages outside
-  # the application's recovery, worker lock, checks and reboot lifecycle.
+  # Retain the guarded worker for compatibility with explicit systemd starts.
+  # Only the application schedule is allowed to launch automatic updates.
   cat >"${unit_dir}/apt-daily-upgrade.service.d/vps-control.conf" <<EOF || return 1
 [Service]
 ExecStart=
@@ -380,7 +439,9 @@ ExecStart=${COMMAND_PATH} auto-safe-update
 TimeoutStartSec=60min
 EOF
   chmod 0644 "${unit_dir}/apt-daily-upgrade.service.d/vps-control.conf" || return 1
-  systemctl daemon-reload
+  systemctl daemon-reload || return 1
+  disable_native_update_timer || return 1
+  apply_update_schedule "${unit_dir}"
 }
 
 safe_update_server() {
@@ -1582,7 +1643,6 @@ secure_server() {
     apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
     configure_fail2ban
     configure_os_update_policy
-    systemctl enable --now apt-daily-upgrade.timer
     systemctl enable --now auditd
     systemctl enable --now apparmor.service >/dev/null 2>&1
     install -d -m 0755 /etc/sysctl.d /etc/ssh/sshd_config.d
@@ -3309,6 +3369,56 @@ clear_managed_logs() {
   ok "управляемые журналы очищены."
 }
 
+automation_calendar() {
+  local cadence="$1" weekday="$2" hour="$3" minute="$4"
+  [[ "${hour}" =~ ^([0-9]|1[0-9]|2[0-3])$ && "${minute}" =~ ^([0-9]|[1-5][0-9])$ ]] \
+    || die "некорректное время автоматизации."
+  case "${cadence}" in
+    daily) printf '*-*-* %02d:%02d:00' "${hour}" "${minute}" ;;
+    weekly)
+      [[ "${weekday}" =~ ^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$ ]] || die "некорректный день недели."
+      printf '%s *-*-* %02d:%02d:00' "${weekday}" "${hour}" "${minute}"
+      ;;
+    monthly) printf '*-*-01 %02d:%02d:00' "${hour}" "${minute}" ;;
+    *) die "неподдерживаемая периодичность ${cadence}." ;;
+  esac
+}
+
+install_automation_timer() {
+  local id="$1" description="$2" command="$3" enabled="$4" calendar="$5" unit_dir="${6:-/etc/systemd/system}"
+  [[ ! -L "${unit_dir}/vps-control-auto-${id}.service" && ! -L "${unit_dir}/vps-control-auto-${id}.timer" ]] || return 1
+  install -d -m 0755 "${unit_dir}" || return 1
+  cat >"${unit_dir}/vps-control-auto-${id}.service" <<EOF || return 1
+[Unit]
+Description=${description}
+After=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=60min
+ExecStart=${COMMAND_PATH} ${command}
+EOF
+  cat >"${unit_dir}/vps-control-auto-${id}.timer" <<EOF || return 1
+[Unit]
+Description=${description}
+
+[Timer]
+OnCalendar=${calendar}
+Persistent=true
+RandomizedDelaySec=120
+Unit=vps-control-auto-${id}.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload || return 1
+  systemctl disable --now "vps-control-auto-${id}.timer" >/dev/null 2>&1 || return 1
+  if [[ "${enabled}" == "yes" ]]; then
+    systemctl enable --now "vps-control-auto-${id}.timer" || return 1
+  fi
+}
+
+
 apply_automation() {
   info "Применение расписаний обслуживания"
   local settings_file="${1:-${AUTOMATION_FILE}}"
@@ -3337,60 +3447,14 @@ PY
   read -r reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute <<<"$(sed -n '1p' <<<"${values}")"
   read -r cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute <<<"$(sed -n '2p' <<<"${values}")"
   read -r update_enabled update_cadence update_weekday update_hour update_minute <<<"$(sed -n '3p' <<<"${values}")"
-  automation_calendar() {
-    local cadence="$1" weekday="$2" hour="$3" minute="$4"
-    [[ "${hour}" =~ ^([0-9]|1[0-9]|2[0-3])$ && "${minute}" =~ ^([0-9]|[1-5][0-9])$ ]] \
-      || die "некорректное время автоматизации."
-    case "${cadence}" in
-      daily) printf '*-*-* %02d:%02d:00' "${hour}" "${minute}" ;;
-      weekly)
-        [[ "${weekday}" =~ ^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$ ]] || die "некорректный день недели."
-        printf '%s *-*-* %02d:%02d:00' "${weekday}" "${hour}" "${minute}"
-        ;;
-      monthly) printf '*-*-01 %02d:%02d:00' "${hour}" "${minute}" ;;
-      *) die "неподдерживаемая периодичность ${cadence}." ;;
-    esac
-  }
-
-  install_automation_timer() {
-    local id="$1" description="$2" command="$3" enabled="$4" calendar="$5"
-    cat >"/etc/systemd/system/vps-control-auto-${id}.service" <<EOF
-[Unit]
-Description=${description}
-After=network-online.target
-
-[Service]
-Type=oneshot
-TimeoutStartSec=60min
-ExecStart=${COMMAND_PATH} ${command}
-EOF
-    cat >"/etc/systemd/system/vps-control-auto-${id}.timer" <<EOF
-[Unit]
-Description=${description}
-
-[Timer]
-OnCalendar=${calendar}
-Persistent=true
-RandomizedDelaySec=120
-Unit=vps-control-auto-${id}.service
-
-[Install]
-WantedBy=timers.target
-EOF
-    systemctl daemon-reload
-    systemctl disable --now "vps-control-auto-${id}.timer" >/dev/null 2>&1 || true
-    if [[ "${enabled}" == "yes" ]]; then
-      systemctl enable --now "vps-control-auto-${id}.timer"
-    fi
-  }
-
   local reboot_calendar cleanup_calendar update_calendar
   reboot_calendar="$(automation_calendar "${reboot_cadence}" "${reboot_weekday}" "${reboot_hour}" "${reboot_minute}")"
   cleanup_calendar="$(automation_calendar "${cleanup_cadence}" "${cleanup_weekday}" "${cleanup_hour}" "${cleanup_minute}")"
   update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
-  install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
-  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "update" "Scheduled full server update and reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}"
+  install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" || return 1
+  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" || return 1
+  install_automation_timer "update" "Scheduled full server update and reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}" || return 1
+  disable_native_update_timer || return 1
   ok "расписания обслуживания применены."
 }
 

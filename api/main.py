@@ -4780,7 +4780,7 @@ def managed_services() -> dict[str, dict]:
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
-            "name": "Автоматические обновления ОС", "unit": "apt-daily-upgrade.timer",
+            "name": "Автообновление и перезагрузка", "unit": "vps-control-auto-update.timer",
             "controls": ["start", "stop", "restart"],
         },
         "ssh": {
@@ -5189,7 +5189,20 @@ def service_action_definition(service_id: str, payload: ServiceAction) -> dict:
 
 def perform_service_action(service_id: str, payload: ServiceAction) -> dict:
     definition = service_action_definition(service_id, payload)
-    if service_id == "ssh":
+    if service_id == 'updates':
+        import automation_transaction
+        if AUTOMATION_FILE.is_symlink(): raise HTTPException(409, 'Файл расписаний заменён ссылкой')
+        if AUTOMATION_FILE.exists():
+            try:
+                value = json.loads(AUTOMATION_FILE.read_text(encoding='utf-8'))
+                AutomationSettings.model_validate(value)
+            except (OSError, ValueError): raise HTTPException(409, 'Сохранённые расписания повреждены; сначала восстановите настройки') from None
+        settings = AutomationSettings.model_validate(read_automation()).model_dump()
+        settings['update']['enabled'] = payload.action != 'stop'
+        script = INSTALL_DIR / 'scripts' / 'vps-control.sh'
+        command = ['/bin/bash', str(script)] if script.exists() else [CONTROL_COMMAND]
+        automation_transaction.configure(settings, AUTOMATION_FILE, command)
+    elif service_id == "ssh":
         manage_ssh_units(payload.action)
     else:
         run("systemctl", payload.action, definition["unit"], timeout=30, check=True)

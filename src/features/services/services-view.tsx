@@ -229,6 +229,7 @@ export function ServicesDashboard({
           </header>
           <div className="operationsBody">
           {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
+          <p>Плановое обновление ОС с перезагрузкой выполняется только по включённому расписанию. Отключение сохраняется после перезагрузки сервера.</p>
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={serviceBusy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
@@ -271,8 +272,8 @@ function ServiceRow({ service, groupId, busy, onAction }: { service: ServiceItem
         <small>{runtimeSummary(service)}</small>
       </div>
       <div className="serviceActions">
-        {canPrimary && <button type="button" className="serviceActionPrimary" onClick={() => onAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy || stateUnknown}>{service.active ? "Перезапуск" : "Запуск"}</button>}
-        {canStop && <button type="button" className={`serviceActionSecondary ${stopDisabled ? "protected" : "danger"}`} onClick={() => onAction(service.id, service.name, "stop")} disabled={busy || stopDisabled || stateUnknown} title={stopDisabled ? "Остановка этой службы отключит панель или путь восстановления" : undefined}>{stopDisabled ? "Защищено" : "Стоп"}</button>}
+        {canPrimary && <button type="button" className="serviceActionPrimary" onClick={() => onAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy || stateUnknown}>{service.id === "updates" ? (service.active ? "Применить расписание" : "Включить") : (service.active ? "Перезапуск" : "Запуск")}</button>}
+        {canStop && <button type="button" className={`serviceActionSecondary ${stopDisabled ? "protected" : "danger"}`} onClick={() => onAction(service.id, service.name, "stop")} disabled={busy || stopDisabled || stateUnknown} title={stopDisabled ? "Остановка этой службы отключит панель или путь восстановления" : undefined}>{stopDisabled ? "Защищено" : service.id === "updates" ? "Выключить" : "Стоп"}</button>}
       </div>
     </div>
   );

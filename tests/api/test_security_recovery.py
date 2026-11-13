@@ -86,6 +86,22 @@ class SecurityRecoveryTests(unittest.TestCase):
         if os.name != 'nt':
             self.assertEqual(self.file.stat().st_mode & 0o777, 0o640)
 
+    def test_update_timer_files_and_disabled_state_are_restored_and_old_snapshots_still_validate(self):
+        self.units['vps-control-auto-update.timer'].update(active=False, enabled='disabled')
+        state = recovery.snapshot(root=self.root, run=self.fake_run)
+        path = self.root / 'etc/systemd/system/vps-control-auto-update.timer'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('new timer', encoding='utf-8')
+        self.units['vps-control-auto-update.timer'].update(active=True, enabled='enabled')
+        recovery.restore(state, root=self.root, run=self.fake_run)
+        self.assertFalse(path.exists())
+        self.assertFalse(self.units['vps-control-auto-update.timer']['active'])
+        self.assertEqual(self.units['vps-control-auto-update.timer']['enabled'], 'disabled')
+        legacy = copy.deepcopy(state)
+        legacy['files'] = {key: value for key, value in legacy['files'].items() if key in recovery.LEGACY_FILES}
+        legacy['services'] = {key: value for key, value in legacy['services'].items() if key in recovery.LEGACY_UNITS}
+        recovery.validate(legacy)
+
     def test_entire_snapshot_is_validated_before_any_restore_effect(self):
         state = recovery.snapshot(root=self.root, run=self.fake_run)
         state['files']['/unowned/path'] = {'kind': 'absent'}

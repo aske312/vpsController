@@ -98,6 +98,8 @@ def records(api):
 def safe_record(value, source):
     value = operations.diagnostic_state(value)
     return {'operation_id': value.get('id'), 'source': source,
+            'origin_unit': value.get('origin_unit') if isinstance(value.get('origin_unit'), str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9@_.-]{0,150}\.service', value['origin_unit']) else None,
+            'systemd_invocation_id': value.get('systemd_invocation_id') if isinstance(value.get('systemd_invocation_id'), str) and re.fullmatch(r'[0-9a-f]{32}', value['systemd_invocation_id']) else None,
             'integration_id': value.get('integration_id') if isinstance(value.get('integration_id'), str) and re.fullmatch(r'ai:[0-9a-f]{32}', value['integration_id']) else None,
             **{key: operation_log.public_text(value.get(key)) for key in
                ('action', 'state', 'started_at', 'updated_at', 'finished_at')},
