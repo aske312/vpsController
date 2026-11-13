@@ -322,7 +322,7 @@ def summary(api, query):
         result['coverage']['http_policy_revision'] = history['settings']['revision']
     except (OSError, sqlite3.Error): reports.unknown(result, 'errors', 'storage_unavailable')
     operation_records, operation_coverage = records(api)
-    pending = [safe_record(value, source) for source, value in operation_records if value.get('state') not in operations.TERMINAL | {'done'}
+    pending = [safe_record(value, source, api) for source, value in operation_records if value.get('state') not in operations.TERMINAL | {'done'}
                and not (value.get('action') == 'integration-functional-probe' and value.get('state') == 'unknown')]
     reports.observation(result, 'pending_operations', 'operation_history', pending[:10])
     recent_functional = []
