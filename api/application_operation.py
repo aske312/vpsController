@@ -221,7 +221,7 @@ def operation_policy_root(data_dir):
 
 def diagnostic_state(value):
     """An abandoned bounded diagnostic has an unknown result, never an implicit retry."""
-    if value.get('action') == 'integration-functional-probe' and value.get('state') == 'running':
+    if value.get('action') in ('integration-functional-probe', 'ai-catalog', 'runtime-check') and value.get('state') == 'running':
         from datetime import datetime
         try: age = time.time() - datetime.fromisoformat(value['started_at'].replace('Z', '+00:00')).timestamp()
         except (KeyError, ValueError, TypeError): age = 181

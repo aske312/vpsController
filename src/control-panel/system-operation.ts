@@ -1,4 +1,5 @@
 import type { NotificationInput } from "../shared/notifications/store";
+import { operationOutcome } from "../shared/lib/operation-outcome.mjs";
 
 import type { SystemAction } from "../shared/types/control-plane";
 export type { SystemAction } from "../shared/types/control-plane";
@@ -31,7 +32,7 @@ export function systemAdmissionSnapshot(value: unknown, id: string, previous?: S
   const action = systemActionSnapshot(value);
   if (action.id !== id || !["queued", "active", "activating", "running", "unknown", "rebooting", "powering-off", "succeeded", "finished", "failed", "cancelled"].includes(action.state || "")
     || (previous?.unit && action.unit !== previous.unit) || (previous?.action && action.action !== previous.action)) throw new SystemOperationUnknown(id);
-  return action.state === "succeeded" && action.result === "unknown" ? { ...action, state: "unknown" } : action;
+  return ["succeeded", "finished", "done"].includes(action.state || "") && operationOutcome(action) === "unknown" ? { ...action, state: "unknown" } : action;
 }
 
 const PENDING_ADMISSION_KEY = "system-pending-admission:v1";
@@ -78,12 +79,12 @@ export async function submitSystemOperation(request: (path: string, options?: Re
 }
 
 export function systemActionSucceeded(action: SystemAction) {
-  return ["succeeded", "finished"].includes(action.state || "") && (!action.result || action.result === "success");
+  return operationOutcome(action) === "success";
 }
 
 export function protocolOperationOutcome(started: SystemAction, current: SystemAction | undefined, moduleReady: boolean) {
   if (!started.unit || current?.unit !== started.unit) return "pending";
-  if (["failed", "cancelled"].includes(current.state || "") || (current.result && !["success", "unknown"].includes(current.result))) return "failed";
+  if (["error", "cancelled"].includes(operationOutcome(current))) return "failed";
   return systemActionSucceeded(current) && moduleReady ? "success" : "pending";
 }
 
@@ -93,18 +94,20 @@ export function systemOperationId(action: SystemAction) {
 }
 
 export function systemOperationNotification(action: SystemAction, title: string, active: boolean, onCancel?: () => void | Promise<void>, onRecheck?: () => void | Promise<void>): NotificationInput {
-  const failed = action.state === "failed" || Boolean(action.result && !["success", "unknown"].includes(action.result));
+  const outcome = operationOutcome(action);
+  const failed = outcome === "error";
   const done = systemActionSucceeded(action);
-  const unconfirmed = action.state === "unknown" || ["succeeded", "finished"].includes(action.state || "") && action.result === "unknown";
+  // Legacy admission can supply a worker unit and progress before its first state.
+  const unconfirmed = outcome === "unknown" && Boolean(action.state || action.result || !active);
   const cancelled = action.state === "cancelled";
   return {
     id: systemOperationId(action), source: "system", title, kind: "operation",
-    state: cancelled ? "cancelled" : failed ? "error" : done ? "success" : unconfirmed ? "unknown" : active ? "running" : "unknown",
+    state: cancelled ? "cancelled" : failed ? "error" : done ? "success" : outcome === "skipped" ? "info" : unconfirmed ? "unknown" : active ? "running" : "unknown",
     progress: active && !unconfirmed && !cancelled ? action.progress : undefined,
     startedAt: action.started_at && Number.isFinite(Date.parse(action.started_at)) ? Date.parse(action.started_at) : undefined,
-    onCancel: active && !unconfirmed && !cancelled && action.cancel_requested !== true && /^[a-f0-9]{32}$/.test(action.id || "") && /^vps-control-action-[0-9]+\.service$/.test(action.unit || "") && rollbackableActions.has(action.action || "") ? onCancel : undefined,
+    onCancel: outcome === "active" && active && action.cancel_requested !== true && /^[a-f0-9]{32}$/.test(action.id || "") && /^vps-control-action-[0-9]+\.service$/.test(action.unit || "") && rollbackableActions.has(action.action || "") ? onCancel : undefined,
     action: unconfirmed && onRecheck ? { label: "Проверить результат", run: onRecheck } : undefined,
-    message: action.message?.trim() || (failed ? "Команда завершилась с ошибкой." : cancelled ? "Команда отменена." : ""),
+    message: action.message?.trim() || (failed ? "Команда завершилась с ошибкой." : cancelled ? "Команда отменена." : outcome === "skipped" ? "Операция пропущена." : ""),
   };
 }
 
@@ -115,7 +118,7 @@ export function createSystemActionCompletionTracker() {
     if (!action?.unit) return;
     const id = systemOperationId(action);
     const active = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(action.state || "");
-    const terminal = systemActionSucceeded(action) || ["failed", "cancelled"].includes(action.state || "");
+    const terminal = ["success", "error", "cancelled", "skipped"].includes(operationOutcome(action));
     const wasActive = tracked.get(id) === false;
     if (terminal || (active && !tracked.has(id))) tracked.set(id, terminal);
     if (tracked.size > 200) tracked.delete(tracked.keys().next().value!);
@@ -132,5 +135,5 @@ export function systemActionNeedsReload(action: SystemAction) {
 
 export function systemActionNeedsPolling(action?: SystemAction | null) {
   return Boolean(action && (["queued", "active", "activating", "running", "unknown", "rebooting", "powering-off"].includes(action.state || "")
-    || ["succeeded", "finished"].includes(action.state || "") && action.result === "unknown"));
+    || ["succeeded", "finished", "done"].includes(action.state || "") && operationOutcome(action) === "unknown"));
 }

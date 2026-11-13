@@ -21,7 +21,10 @@ import diagnostic_context as tracing
 import diagnostic_tools as reports
 import observability
 import operation_log
+import operation_outcome
 from service_state import observation_scope, prime_services
+
+MAX_OPERATION_SCAN_BYTES = 8 * 1024 * 1024
 
 
 class SummaryQuery(BaseModel):
@@ -35,6 +38,17 @@ class TimelineQuery(BaseModel):
     operation_id: str = Field(pattern='^[0-9a-f]{32}$')
     limit: int = Field(default=60, strict=True, ge=1, le=120)
     include_journal: bool = False
+
+
+class OperationsQuery(BaseModel):
+    model_config = {'extra': 'forbid'}
+    action: str | None = Field(default=None, max_length=100, pattern='^[a-zA-Z0-9_:-]+$')
+    source: Literal['system', 'mihomo', 'cdn'] | None = None
+    outcome: Literal['active', 'success', 'error', 'unknown', 'cancelled', 'skipped'] | None = None
+    minutes: int = Field(default=1440, strict=True, ge=1, le=129600)
+    include_checks: bool = False
+    offset: int = Field(default=0, strict=True, ge=0, le=6000)
+    limit: int = Field(default=20, strict=True, ge=1, le=50)
 
 
 class IntegrationQuery(BaseModel):
@@ -72,8 +86,9 @@ def versions(api):
     return result
 
 
-def records(api):
+def records(api, scan_limit=200):
     rows, coverage = [], {}
+    budget = MAX_OPERATION_SCAN_BYTES
     roots = [('system', api.DATA_DIR / 'operations'), ('mihomo', api.DATA_DIR / 'mihomo/operations'),
              ('cdn', api.DATA_DIR / 'cdn-operations')]
     for source, root in roots:
@@ -81,35 +96,51 @@ def records(api):
         except OSError:
             coverage[source] = {'available': False}
             continue
-        coverage[source] = {'available': True, 'scan_truncated': len(paths) > 200, 'unreadable': 0}
-        for path in paths[:200]:
+        coverage[source] = {'available': True, 'scan_truncated': len(paths) > scan_limit, 'unreadable': 0}
+        for path in paths[:scan_limit]:
             if not tracing.valid(path.stem): continue
             try:
-                if path.is_symlink(): raise ValueError('unsafe record')
+                size = path.stat().st_size
+                if path.is_symlink() or size > 128 * 1024: raise ValueError('unsafe record')
+                if size > budget:
+                    coverage[source].update(scan_truncated=True, byte_limit_reached=True)
+                    break
+                budget -= size
                 value = operations.read(path)
                 if value.get('id') != path.stem: raise ValueError('identity mismatch')
                 rows.append((source, operations.diagnostic_state(value)))
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 coverage[source]['unreadable'] += 1
                 rows.append((source, {'id': path.stem, 'state': 'unknown'}))
     return rows, coverage
 
 
-def safe_record(value, source):
+def safe_record(value, source, api=None):
     value = operations.diagnostic_state(value)
-    return {'operation_id': value.get('id'), 'source': source,
+    def component_list(name):
+        rows = value.get(name)
+        return [key for key in (rows if isinstance(rows, list) else [])[:32] if isinstance(key, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', key)]
+    def revisions(name):
+        rows = value.get(name)
+        return {key: entry for key, entry in (rows.items() if isinstance(rows, dict) else []) if isinstance(entry, str) and re.fullmatch('[0-9a-f]{64}', entry)}
+    result = {'operation_id': value.get('id'), 'source': source,
+            'context': operation_outcome.context(value),
             'origin_unit': value.get('origin_unit') if isinstance(value.get('origin_unit'), str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9@_.-]{0,150}\.service', value['origin_unit']) else None,
             'systemd_invocation_id': value.get('systemd_invocation_id') if isinstance(value.get('systemd_invocation_id'), str) and re.fullmatch(r'[0-9a-f]{32}', value['systemd_invocation_id']) else None,
             'integration_id': value.get('integration_id') if isinstance(value.get('integration_id'), str) and re.fullmatch(r'ai:[0-9a-f]{32}', value['integration_id']) else None,
-            **{key: operation_log.public_text(value.get(key)) for key in
-               ('action', 'state', 'started_at', 'updated_at', 'finished_at')},
+            **{key: operation_log.public_text(value.get(key)) if isinstance(value.get(key), str) else '' for key in
+               ('action', 'state', 'result', 'stage', 'stage_result', 'error_code', 'message', 'unit', 'reason', 'started_at', 'updated_at', 'finished_at')},
             'health_check': operation_log.safe_health(value['health_check']) if isinstance(value.get('health_check'), dict) else None,
-            'changed_components': [key for key in value.get('changed_components', [])[:32] if isinstance(key, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', key)],
-            'runtime_changed_components': [key for key in value.get('runtime_changed_components', [])[:32] if isinstance(key, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', key)],
-            'affected_components': [key for key in value.get('affected_components', [])[:32] if isinstance(key, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', key)],
-            'configuration_before': {key: entry for key, entry in value.get('configuration_before', {}).items() if isinstance(entry, str) and re.fullmatch('[0-9a-f]{64}', entry)},
-            'configuration_after': {key: entry for key, entry in value.get('configuration_after', {}).items() if isinstance(entry, str) and re.fullmatch('[0-9a-f]{64}', entry)},
+            'changed_components': component_list('changed_components'),
+            'runtime_changed_components': component_list('runtime_changed_components'),
+            'affected_components': component_list('affected_components'),
+            'configuration_before': revisions('configuration_before'),
+            'configuration_after': revisions('configuration_after'),
             **{key: value[key] for key in ('trace_id', 'parent_request_id') if tracing.valid(value.get(key))}}
+    if api is not None:
+        import assistant_diagnostics
+        return assistant_diagnostics.sanitize(api, result, max_chars=5000, max_string=1200)
+    return result
 
 
 def timeline(api, query):
@@ -117,6 +148,8 @@ def timeline(api, query):
     found = False
     events = []
     legacy = False
+    authoritative = None
+    parent_unavailable = False
     for source, directory in [('system', api.DATA_DIR / 'operations'), ('mihomo', api.DATA_DIR / 'mihomo/operations'),
                               ('cdn', api.DATA_DIR / 'cdn-operations')]:
         path = directory / (query.operation_id + '.json')
@@ -126,7 +159,8 @@ def timeline(api, query):
             if record:
                 if record.get('id') != query.operation_id: raise ValueError('identity mismatch')
                 found = True
-                reports.observation(result, 'operation:' + source, source + '_operation_history', safe_record(record, source))
+                if authoritative is None: authoritative = (source, record)
+                reports.observation(result, 'operation:' + source, source + '_operation_history', safe_record(record, source, api))
                 if record.get('action') == 'integration-functional-probe' and isinstance(record.get('diagnostic_report'), dict):
                     reports.observation(result, 'functional_report', 'confirmed_diagnostic_execution', record['diagnostic_report'])
             journal_path = operation_log.location(api.DATA_DIR, source, query.operation_id)
@@ -153,7 +187,9 @@ def timeline(api, query):
                 if dropped: result['missing_data'].append({'source': source + '_stage_journal', 'reason': 'older_stages_dropped'})
             elif record:
                 result['missing_data'].append({'source': source + '_stage_journal', 'reason': 'not_recorded_or_expired'})
-        except (OSError, ValueError, TypeError): reports.unknown(result, source + '_operation_history', 'record_unavailable')
+        except (OSError, ValueError, TypeError):
+            if source == 'system' and (path.exists() or path.is_symlink()): parent_unavailable = True
+            reports.unknown(result, source + '_operation_history', 'record_unavailable')
     try:
         history = observability.Store(api.DATA_DIR).read(minutes=129600, operation_id=query.operation_id, limit=query.limit)
         result['coverage']['http'] = history['storage_coverage']
@@ -190,6 +226,64 @@ def timeline(api, query):
                               semantics='parent system operation owns final result; timestamps alone do not establish causation')
     if not found: result['missing_data'].append({'source': 'operation', 'reason': 'not_found_or_expired'})
     if legacy: result['missing_data'].append({'source': 'unrecorded_stages', 'reason': 'legacy_journal_has_no_structured_stage_contract'})
+    result['conflicts'] = [{'request_id': row['data'].get('request_id'), 'trace_id': row['data'].get('trace_id'),
+        'error_code': row['data'].get('error_code'), 'at': row['at']} for row in events if row.get('data', {}).get('status') == 409]
+    result['current_admission'] = admission_context(api)
+    if parent_unavailable:
+        result['authoritative_result'] = {'operation_id': query.operation_id, 'source': 'system', 'state': 'unknown',
+            'reason': 'parent_record_unavailable; child_result_does_not_confirm_parent_completion'}
+    elif authoritative:
+        source, value = authoritative
+        result['authoritative_result'] = safe_record(value, source, api)
+        if isinstance(value.get('unit'), str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9@_.-]{0,150}\.service', value['unit']):
+            try:
+                worker = operations.worker_observation(value, api.observe_service)
+                reports.observation(result, 'current_worker', 'systemd_current_state', {key: worker.get(key) for key in ('unit_present', 'active', 'state', 'substate', 'result')})
+                result['coverage']['worker_scope'] = 'current_observation; collected_units_and_previous_boots_do_not_prove_historical_success_or_failure'
+            except (OSError, ValueError, AttributeError): reports.unknown(result, 'current_worker', 'worker_observation_unavailable')
+    return result
+
+
+def admission_context(api):
+    markers = ('relay/pending.json', 'dns-recovery.json', 'automation-recovery.json', 'mihomo/profile-recovery/manifest.json', 'recovery/security-recovery.txt', 'recovery/application-update')
+    result = {'recovery_markers': [name for name in markers if (api.DATA_DIR / name).exists() or (api.DATA_DIR / name).is_symlink()],
+              'lock_owner': 'not_observed; process_or_recovery_presence_is_not_proof_of_lock_ownership'}
+    path = api.DATA_DIR / 'application-action.json'
+    try:
+        if path.is_symlink() or path.exists() and path.stat().st_size > 128 * 1024: raise ValueError()
+        value = operations.diagnostic_state(operations.read(path))
+        if tracing.valid(value.get('id')): result['current_operation'] = safe_record(value, 'system', api)
+    except (OSError, ValueError, TypeError): result['current_operation'] = {'state': 'unknown'}
+    return result
+
+
+def operation_inventory(api, query):
+    result = reports.report('operation_inventory')
+    rows, coverage = records(api, scan_limit=2000)
+    selected, seen = [], set()
+    for source, value in rows:
+        identity = value.get('id')
+        if query.source and source != query.source: continue
+        if not tracing.valid(identity) or identity in seen: continue
+        seen.add(identity)
+        action = value.get('action') if isinstance(value.get('action'), str) else ''
+        if not query.include_checks and not query.action and action in operation_outcome.CHECKS: continue
+        if query.action and query.action not in str(action): continue
+        at = reports.epoch(value.get('started_at') or value.get('updated_at'))
+        if at is not None and at < time.time() - query.minutes * 60: continue
+        if query.outcome and operation_outcome.outcome(value) != query.outcome: continue
+        item = safe_record(value, source, api)
+        item['next_step'] = {'tool': 'operation_timeline', 'arguments': {'operation_id': identity}}
+        selected.append((at or 0, item))
+    selected.sort(key=lambda row: row[0], reverse=True)
+    result['items'] = [row[1] for row in selected[query.offset:query.offset + query.limit]]
+    more = len(selected) > query.offset + query.limit
+    result['next_offset'] = query.offset + query.limit if more else None
+    result['current_admission'] = admission_context(api)
+    result['coverage'] = {'sources': coverage, 'scan_limit_per_source': 2000, 'matches_in_scan': len(selected),
+                          'window_minutes': query.minutes,
+                          'more_matching_records': more, 'include_checks': query.include_checks or bool(query.action),
+                          'scope': 'retained_operation_records; successful_catalog_check_is_not_a_chat_test; parent_system_record_owns_final_result'}
     return result
 
 
@@ -261,6 +355,7 @@ def summary(api, query):
                               component_filter_scope='services_and_cached_health_only')
     result['missing_data'].append({'source': 'functional_health', 'reason': 'not_checked; process_or_local_health_does_not_prove_external_function'})
     result['next_steps'] = [{'tool': 'vps_incident', 'arguments': {'minutes': query.minutes}, 'reason': 'investigate_retained_errors'}]
+    result['next_steps'].append({'tool': 'operation_inventory', 'arguments': {'minutes': query.minutes}, 'reason': 'discover_operation_IDs_results_and_recovery_context_before_timeline'})
     result['next_steps'] += [{'tool': 'operation_timeline', 'arguments': {'operation_id': row['operation_id']},
                              'reason': 'inspect_pending_operation'} for row in pending[:3]]
     return result
@@ -424,7 +519,7 @@ def call(api, name, arguments, actor):
         roles.require(settings, actor, permission)
     if name == 'integration_probe': roles.require(settings, actor, 'network_read')
     if arguments.get('method', 'GET') != 'GET': raise HTTPException(422, 'Диагностика не изменяет настройки')
-    models = {'application_diagnostics': SummaryQuery, 'operation_timeline': TimelineQuery,
+    models = {'application_diagnostics': SummaryQuery, 'operation_timeline': TimelineQuery, 'operation_inventory': OperationsQuery,
               'integration_probe': IntegrationQuery, 'diagnostic_baseline': diagnostic_history.BaselineQuery,
               'diagnostic_alerts': diagnostic_history.HistoryQuery, 'component_check': diagnostic_checks.CheckQuery}
     try: query = models[name].model_validate(arguments.get('body') or {})
@@ -449,4 +544,5 @@ def call(api, name, arguments, actor):
             value['recording'] = {'stored': identity is not None, 'probe_id': identity}
         except (OSError, ValueError, sqlite3.Error): value['recording'] = {'stored': False, 'reason': 'probe_storage_unavailable'}
         return value
+    if name == 'operation_inventory': return operation_inventory(api, query)
     return summary(api, query) if name == 'application_diagnostics' else timeline(api, query)

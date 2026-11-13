@@ -62,7 +62,7 @@ async def main():
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     names = {tool.name for tool in (await session.list_tools()).tools}
-                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal'}, names
+                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect'}, names
                     vps_names = names
                     assert (await session.call_tool('mihomo_api', {'method': 'GET', 'path': '/profiles'})).isError
                     result = await session.call_tool('vps_overview', {})

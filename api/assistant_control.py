@@ -321,7 +321,7 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal']
+    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect']
     service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
@@ -636,7 +636,7 @@ def status(api):
                           (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else []) + (['vps_access'] if agent_version >= (1, 11, 0) else []) +
                           (['vps_observability'] if agent_version >= (1, 13, 0) else []) +
                           (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []) +
-                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []),
+                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []),
                       'mihomo-mcp': ['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] if agent_version >= (1, 15, 0) else []}}
 
 
@@ -1133,10 +1133,13 @@ def control_tool(api, name, arguments=None, actor='panel'):
         if not settings['mcp'].get('vps-controller-mcp'):
             result['next_steps'] = [{'tool': 'mihomo_api', 'arguments': {'method': 'GET', 'path': '/profiles'}, 'reason': 'review_available_profiles'}]
         return result
+    if name == 'developer_inspect':
+        import developer_inspection
+        return developer_inspection.call(api, arguments, actor)
     if name == 'vps_terminal':
         import terminal_observer
         return terminal_observer.call(api, arguments, actor)
-    if name in ('application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'):
+    if name in ('application_diagnostics', 'operation_timeline', 'operation_inventory', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'):
         import application_diagnostics
         return application_diagnostics.call(api, name, arguments, actor)
     if name in ('vps_changes', 'vps_incident', 'vps_probe', 'vps_compare'):
@@ -1181,7 +1184,7 @@ def control_tool(api, name, arguments=None, actor='panel'):
         if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
             raise HTTPException(422, 'Укажите ID операции')
         value = api.get_application_operation(identity, None)
-        return {key: value.get(key) for key in ('id', 'action', 'state', 'started_at', 'updated_at', 'finished_at')} | {
+        return {key: value.get(key) for key in ('id', 'action', 'state', 'result', 'stage', 'stage_result', 'message', 'error_code', 'reason', 'started_at', 'updated_at', 'finished_at')} | {
             'next_steps': [{'tool': 'operation_timeline', 'arguments': {'operation_id': identity}}]}
     if name == 'vps_api':
         endpoints = {'/overview': 'vps_overview', '/services': 'vps_services', '/components': 'vps_components',

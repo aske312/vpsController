@@ -151,8 +151,10 @@ def get(root, source, identity):
 def safe_health(value):
     states = ('passed', 'failed', 'unknown', 'not_checked', 'skipped')
     result = {'state': value.get('state') if value.get('state') in states else 'unknown'}
+    if isinstance(value.get('scope'), str) and re.fullmatch('[a-zA-Z0-9_-]{1,100}', value['scope']): result['scope'] = value['scope']
+    if value.get('application_function') in states: result['application_function'] = value['application_function']
     checks = []
-    for row in value.get('checks', [])[:32]:
+    for row in (value.get('checks') if isinstance(value.get('checks'), list) else [])[:32]:
         if not isinstance(row, dict): continue
         checks.append({key: row[key] for key in ('component', 'level', 'state', 'observed', 'error_code')
                        if isinstance(row.get(key), str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', row[key])})

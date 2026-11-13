@@ -56,6 +56,11 @@ class ScopeTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/assistant/control-tool', headers=legacy, json={'name': name, 'path': '/profiles'}).status_code, 403)
         self.assertEqual(before, self.bridge.call_count)
 
+    def test_developer_and_operation_discovery_tools_cannot_use_mihomo_credentials(self):
+        for name in ('developer_inspect', 'operation_inventory'):
+            with self.subTest(name=name):
+                self.assertEqual(self.tool(name, 'mihomo-mcp').status_code, 403)
+
     def test_scoped_credentials_cannot_change_module_actor_or_drop_scope(self):
         original = self.headers('mihomo-mcp')
         for changes in ({'X-MCP-Module': 'vps-controller-mcp'}, {'X-MCP-Actor': '11'}, {'X-MCP-Module': ''}):

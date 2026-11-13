@@ -1,14 +1,15 @@
+import { operationOutcome } from "../../shared/lib/operation-outcome.mjs";
 import { actionLabels } from "../../shared/lib/control-plane-ui";
 import type { SystemAction } from "../system-operation";
 
-export type HistoryEntry = SystemAction & { source?: string; updated_at?: string };
+export type HistoryEntry = SystemAction & { source?: string; updated_at?: string; stage?: string; stage_result?: string; error_code?: string; reason?: string; health_check?: {scope?: string; state?: string; application_function?: string} };
 export type HistoryFilter = "all" | "active" | "attention" | "completed";
 export function historyEntries(value: unknown): HistoryEntry[] {
   if (!value || typeof value !== "object" || !("items" in value) || !Array.isArray(value.items)) throw Error("Invalid history");
   return value.items.map((entry: unknown) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw Error("Invalid operation");
     const item = entry as Record<string, unknown>;
-    for (const key of ["id", "unit", "action", "source", "message", "state", "result", "started_at", "updated_at"]) {
+    for (const key of ["id", "unit", "action", "source", "message", "state", "result", "started_at", "updated_at", "stage", "stage_result", "error_code", "reason"]) {
       if (item[key] != null && typeof item[key] !== "string") throw Error("Invalid operation field");
     }
     if (!item.id && !item.unit && !item.started_at && !item.updated_at) throw Error("Missing operation identity");
@@ -17,25 +18,26 @@ export function historyEntries(value: unknown): HistoryEntry[] {
   });
 }
 const active = new Set(["queued", "running", "active", "activating", "rebooting", "powering-off"]);
-const completed = new Set(["succeeded", "finished", "done", "cancelled"]);
+const completed = new Set(["succeeded", "finished", "done", "cancelled", "skipped"]);
 const states: Record<string, string> = { queued: "В очереди", running: "Выполняется", active: "Выполняется", activating: "Запускается", unknown: "Результат неизвестен", succeeded: "Завершена", done: "Завершена", failed: "Ошибка", cancelled: "Отменена", rebooting: "Перезагрузка", "powering-off": "Выключение" };
 const sources: Record<string, string> = { system: "Система", mihomo: "Mihomo", cdn: "CDN" };
 export function historyKey(entry: HistoryEntry) { return `${entry.source || "system"}:${entry.id || entry.unit || entry.started_at || entry.updated_at}`; }
 export function historySource(entry: HistoryEntry) { return sources[entry.source || "system"] || entry.source || "Система"; }
 export function historyTitle(entry: HistoryEntry) {
+  if (entry.action === "ai-catalog") return "Проверка каталога AI";
+  if (entry.action === "runtime-check") return "Проверка компонента Nodera";
   const [kind, ...component] = (entry.action || "").split(":");
   return actionLabels[entry.action || ""] || `${actionLabels[kind] || kind || "Операция"}${component.length ? ` · ${component.join(" · ")}` : ""}`;
 }
 export function historyState(entry: HistoryEntry) {
   const state = historyResultState(entry);
-  return { label: states[state] || states.unknown, tone: active.has(state) ? "active" : state === "succeeded" || state === "done" ? "success" : state === "failed" ? "error" : state === "cancelled" ? "neutral" : "unknown" };
+  return { label: state === "skipped" ? "Пропущена" : states[state] || states.unknown, tone: active.has(state) ? "active" : state === "succeeded" || state === "done" ? "success" : state === "failed" ? "error" : state === "cancelled" || state === "skipped" ? "neutral" : "unknown" };
 }
 function historyResultState(entry: HistoryEntry) {
-  if (entry.state === "cancelled") return "cancelled";
-  if (entry.state === "failed" || entry.result && !["success", "unknown"].includes(entry.result)) return "failed";
-  if (["succeeded", "finished", "done"].includes(entry.state || "")) return entry.result === "unknown" ? "unknown" : entry.state === "finished" ? "succeeded" : entry.state!;
-  return entry.state || "unknown";
+  const outcome = operationOutcome(entry);
+  return outcome === "active" ? entry.state! : outcome === "success" ? "succeeded" : outcome === "error" ? "failed" : outcome;
 }
+
 export function historyMatches(entry: HistoryEntry, filter: HistoryFilter, query: string) {
   const state = historyResultState(entry);
   if (filter === "active" && !active.has(state) || filter === "completed" && !completed.has(state) || filter === "attention" && (active.has(state) || completed.has(state))) return false;

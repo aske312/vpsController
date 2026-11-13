@@ -1,6 +1,7 @@
 import type { createApiClient } from "../../shared/lib/api-request";
 import type { Profile } from "./types";
 import type { SystemAction } from "../../control-panel/system-operation";
+import { operationOutcome } from "../../shared/lib/operation-outcome.mjs";
 
 type Request = ReturnType<typeof createApiClient>;
 export type ProfileMutation = {
@@ -77,8 +78,8 @@ export async function checkProfileMutation(request: Request, mutation: ProfileMu
           }
           options = { ...options, systemOperationUnit: operation.unit };
           options.onOperation?.(operation);
-          if (operation.state === "failed" || operation.state === "cancelled" || (operation.result && !["success", "unknown"].includes(operation.result))) throw new ProfileMutationFailed(operation.message || "Изменение профиля не завершено успешно");
-          if (operation.state !== "succeeded" || (operation.result && operation.result !== "success")) {
+          if (["error", "cancelled"].includes(operationOutcome(operation))) throw new ProfileMutationFailed(operation.message || "Изменение профиля не завершено успешно");
+          if (operationOutcome(operation) !== "success") {
             await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs ?? 1500));
             continue;
           }
