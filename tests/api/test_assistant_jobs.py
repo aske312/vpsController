@@ -27,6 +27,8 @@ class ChatJobsTests(unittest.TestCase):
     def test_accept_replay_and_conflicting_content_never_launch_twice(self):
         first=jobs.submit(api,self.payload)
         self.assertEqual(first['state'],'queued');self.assertNotIn('payload',first)
+        self.assertNotIn('payload',operations.read(jobs.path(api,self.payload.request_id)))
+        self.assertEqual(operations.read(jobs.input_path(api,self.payload.request_id))['prompt'],'private question')
         self.assertEqual(jobs.submit(api,self.payload)['id'],first['id'])
         with self.assertRaises(HTTPException) as caught:
             jobs.submit(api,self.payload.model_copy(update={'prompt':'another'}))
@@ -44,6 +46,7 @@ class ChatJobsTests(unittest.TestCase):
         self.assertEqual(chat.call_count,1)
         value=jobs.get(api,self.payload.request_id)
         self.assertEqual(value['output'],result);self.assertNotIn('payload',operations.read(jobs.path(api,self.payload.request_id)))
+        self.assertFalse(jobs.input_path(api,self.payload.request_id).exists())
         from observability import Store
         log=Store(self.root).read(60,limit=20)
         self.assertNotIn('private question',json.dumps(log));self.assertNotIn('answer',json.dumps(log))

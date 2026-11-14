@@ -28,6 +28,10 @@ def path(api, identity):
     return root(api) / (identity + '.json')
 
 
+def input_path(api, identity):
+    return root(api) / 'inputs' / path(api, identity).name
+
+
 def authorize(api, actor):
     import assistant_control as control
     settings = control.read(api)
@@ -50,6 +54,7 @@ def reconcile(api, record):
                       duration_ms=round((time.time() - record['created_at']) * 1000),
                       error={'code': 'worker_interrupted', 'message': 'Рабочий процесс прерван; результат не подтверждён. Автоматического повтора не было.'})
         record.pop('payload', None)
+        input_path(api, record['id']).unlink(missing_ok=True)
     operations.atomic_json(path(api, record['id']), record)
     return record
 
@@ -78,12 +83,17 @@ def submit(api, payload):
             size += entry.stat().st_size
             active += old.get('state') not in TERMINAL
             own += old.get('actor') == actor and old.get('state') not in TERMINAL
+        for entry in (root(api) / 'inputs').glob('*.json'):
+            if entry.stat().st_mtime < time.time() - RETENTION: entry.unlink()
+            else: size += entry.stat().st_size
         if active >= 16 or own >= 3 or size + len(json.dumps(body).encode()) > 96 * 1024 * 1024 or retained >= 256:
             raise HTTPException(429, 'Очередь или хранилище AI заполнены; дождитесь завершения запросов')
         record = {'id': identity, 'actor': actor, 'fingerprint': fingerprint, 'revision': settings['revision'],
                   'state': 'queued', 'stage': 'queued', 'created_at': time.time(), 'updated_at': time.time(),
                   'seq': 0, 'model': payload.model or settings.get('model', ''), 'question': payload.prompt,
-                  'stream': payload.stream, 'payload': body, 'unit': 'vps-control-chat-' + identity + '.service'}
+                  'stream': payload.stream, 'unit': 'vps-control-chat-' + identity + '.service'}
+        # Keep large attachments out of status snapshots and incremental progress writes.
+        operations.atomic_json(input_path(api, identity), body)
         operations.atomic_json(file, record)
     try:
         # An independent unit survives API restarts. Credentials only come from the existing environment file.
@@ -110,6 +120,7 @@ def update(api, identity, **values):
             record.pop('payload', None)
             record['duration_ms'] = round((time.time() - record['created_at']) * 1000)
         operations.atomic_json(file, record)
+        if record['state'] in TERMINAL: input_path(api, identity).unlink(missing_ok=True)
     if record['state'] in TERMINAL:
         # Metadata only; prompts, answers, keys and exception text never enter observability.
         try:
@@ -170,7 +181,10 @@ def execute(api, identity):
         settings = authorize(api, record['actor'])
         if settings['revision'] != record['revision']:
             raise HTTPException(409, 'Настройки AI изменились после приёма запроса; генерация не запускалась')
-        result = control.chat_request(api, control.Chat.model_validate(record['payload']), record['actor'])
+        body = operations.read(input_path(api, identity))
+        fingerprint = hashlib.sha256(json.dumps([record['actor'], body], sort_keys=True).encode()).hexdigest()
+        if fingerprint != record['fingerprint']: raise HTTPException(409, 'Входные данные запроса AI не подтверждены; генерация не запускалась')
+        result = control.chat_request(api, control.Chat.model_validate(body), record['actor'])
         update(api, identity, state='done', stage='complete', output=result, partial='')
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else 'Запрос AI не выполнен'
