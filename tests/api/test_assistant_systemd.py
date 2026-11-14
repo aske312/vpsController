@@ -49,3 +49,62 @@ class AssistantCredentialSystemdTests(unittest.TestCase):
                 subprocess.run(['systemctl', 'reset-failed', unit.name], capture_output=True)
                 unit.unlink(missing_ok=True)
                 subprocess.run(['systemctl', 'daemon-reload'], check=True, capture_output=True)
+
+
+@unittest.skipUnless(sys.platform == 'linux' and os.environ.get('CORE_SYSTEMD_TESTS') == '1', 'Requires isolated systemd runner')
+class DurableChatSystemdTests(unittest.TestCase):
+    def test_chat_outlives_its_submitting_process_and_delivers_once(self):
+        import json
+        import time
+        import assistant_jobs as jobs
+        identity = uuid.uuid4().hex
+        unit = 'vps-control-chat-' + identity + '.service'
+        with tempfile.TemporaryDirectory(prefix='chat-systemd-', dir='/run') as directory:
+            root = Path(directory)
+            env = root / 'fixture.env'; env.write_text('CHAT_FIXTURE=isolated\n'); env.chmod(0o600)
+            fixture = root / 'worker.py'
+            fixture.write_text("""import sys, os, time
+from pathlib import Path
+from types import SimpleNamespace
+sys.path.insert(0, %r)
+import assistant_jobs as jobs
+import assistant_control as control
+root = Path(%r)
+api = SimpleNamespace(DATA_DIR=root/'data', ENV_FILE=root/'fixture.env')
+control.read = lambda api: {'revision': 'fixture', 'model': 'm'}
+def answer(*args, **kwargs):
+    assert os.environ.get('CHAT_FIXTURE') == 'isolated'
+    (root/'started').touch()
+    deadline = time.monotonic() + 20
+    while not (root/'release').exists():
+        if time.monotonic() > deadline: raise RuntimeError('fixture timeout')
+        time.sleep(.05)
+    return {'ok': True, 'result': {'answer': 'once', 'tools_used': []}}
+control.chat_request = answer
+if len(sys.argv) > 1:
+    jobs.execute(api, sys.argv[1])
+else:
+    jobs.__file__ = str(root/'worker.py')
+    jobs.submit(api, control.Chat(prompt='fixture', model='m', request_id=%r))
+""" % (str(ROOT/'api'), str(root), identity))
+            try:
+                submitted = subprocess.run([sys.executable, str(fixture)], capture_output=True, text=True, timeout=20)
+                self.assertEqual(submitted.returncode, 0, submitted.stderr)
+                deadline = time.monotonic() + 20
+                while not (root/'started').exists() and time.monotonic() < deadline: time.sleep(.05)
+                self.assertTrue((root/'started').exists())
+                # The API caller has exited; the independent worker still owns the task.
+                record = json.loads((root/'data/assistant/requests'/f'{identity}.json').read_text())
+                self.assertEqual(record['state'], 'running')
+                (root/'release').touch()
+                while time.monotonic() < deadline:
+                    record = json.loads((root/'data/assistant/requests'/f'{identity}.json').read_text())
+                    if record['state'] == 'done': break
+                    time.sleep(.05)
+                self.assertEqual(record['state'], 'done')
+                self.assertEqual(record['output']['result']['answer'], 'once')
+                self.assertNotIn('payload', record)
+                self.assertEqual((root/'data/assistant/requests'/f'{identity}.json').stat().st_mode & 0o777, 0o600)
+            finally:
+                subprocess.run(['systemctl','stop',unit],capture_output=True)
+                subprocess.run(['systemctl','reset-failed',unit],capture_output=True)

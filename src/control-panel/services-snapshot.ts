@@ -71,9 +71,10 @@ export function servicesUnavailable(current: ServicesStatus | null): ServicesSta
 
 /** All paths, including command read-back, share the same observation contract. */
 export function observedServicesRequest(client: ReturnType<typeof createApiClient>): ReturnType<typeof createApiClient> {
-  return async <T>(path: string, options: RequestInit = {}) => {
+  const observed = async <T>(path: string, options: RequestInit = {}) => {
     const observation = path === "/services" || path === "/services/metrics";
     const value = await client<T>(path, observation && (!options.method || options.method === "GET") ? { ...options, cache: "no-store" } : options);
     return (path === "/services" ? servicesSnapshot(value) : path === "/services/metrics" ? metricsSettingsSnapshot(value) : value) as T;
   };
+  return Object.assign(observed, { events: client.events, sessionKey: client.sessionKey });
 }

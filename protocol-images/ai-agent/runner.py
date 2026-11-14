@@ -18,6 +18,7 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 import socket
+import ssl
 import sys
 import tempfile
 import time
@@ -725,6 +726,76 @@ def serve_mcp(settings, actor, module):
     server.run(transport='stdio')
 
 
+EVENT_MODE = False
+LAST_PROGRESS = 0
+
+
+def progress(stage, text=None):
+    global LAST_PROGRESS
+    if EVENT_MODE:
+        now = time.monotonic()
+        if stage == 'receiving' and now - LAST_PROGRESS < .25: return
+        LAST_PROGRESS = now
+        value = {'event': 'progress', 'stage': stage}
+        if text is not None: value['text'] = text[:20000]
+        print(json.dumps(value, ensure_ascii=False), flush=True)
+
+
+class ProviderFailure(RuntimeError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+async def stream_message(response):
+    content, calls, usage, finished, done, size = '', {}, None, False, False, 0
+    data_lines = []
+    async for line in response.aiter_lines():
+        size += len(line)
+        if size > 2 * 1024 * 1024: raise ProviderFailure('response_limit', 'Ответ AI превысил допустимый размер')
+        if line.startswith('data:'):
+            data_lines.append(line[5:].lstrip())
+            continue
+        if line or not data_lines: continue
+        data = '\n'.join(data_lines)
+        data_lines.clear()
+        if data == '[DONE]':
+            done = True
+            break
+        chunk = json.loads(data)
+        if chunk.get('error'): raise ProviderFailure('provider_stream_error', 'Провайдер сообщил об ошибке во время ответа')
+        if isinstance(chunk.get('usage'), dict): usage = chunk['usage']
+        choices = chunk.get('choices') or []
+        if not choices: continue
+        choice = choices[0]
+        delta = choice.get('delta') or {}
+        if isinstance(delta.get('content'), str):
+            content += delta['content']
+            if len(content) > 200000: raise ProviderFailure('response_limit', 'Ответ AI превысил допустимый размер')
+            progress('receiving', content)
+        for call in delta.get('tool_calls') or []:
+            index = call.get('index')
+            if type(index) is not int or not 0 <= index < 8:
+                raise ProviderFailure('invalid_response', 'Некорректный вызов инструмента в ответе AI')
+            target = calls.setdefault(index, {'id': '', 'type': 'function', 'function': {'name': '', 'arguments': ''}})
+            if isinstance(call.get('id'), str): target['id'] += call['id']
+            for key in ('name', 'arguments'):
+                piece = (call.get('function') or {}).get(key)
+                if isinstance(piece, str): target['function'][key] += piece
+            if len(target['function']['arguments']) > 24000 or len(target['function']['name']) > 160 or len(target['id']) > 256:
+                raise ProviderFailure('response_limit', 'Вызов инструмента AI превысил допустимый размер')
+        if choice.get('finish_reason') is not None:
+            if choice['finish_reason'] not in ('stop', 'tool_calls'):
+                raise ProviderFailure('incomplete_response', 'Провайдер остановил ответ до завершения')
+            finished = True
+    if not done or not finished:
+        raise ProviderFailure('stream_interrupted', 'Поток AI оборвался до завершения. Автоматического повтора не было')
+    if calls and any(not call['id'] or not call['function']['name'] for call in calls.values()):
+        raise ProviderFailure('invalid_response', 'AI не завершил вызов инструмента')
+    return {'role': 'assistant', 'content': content or None,
+            **({'tool_calls': [calls[key] for key in sorted(calls)]} if calls else {}), '_usage': usage}
+
+
 async def provider_request(settings, messages, tools, *, completion_limit=None):
     """Pin a public DNS answer while retaining the provider hostname for TLS."""
     parsed = urllib.parse.urlsplit(settings['provider_url'])
@@ -740,12 +811,19 @@ async def provider_request(settings, messages, tools, *, completion_limit=None):
     if completion_limit is not None: payload['max_completion_tokens'] = completion_limit
     if tools:
         payload['tools'] = tools
-    async with httpx.AsyncClient(timeout=70, follow_redirects=False, trust_env=False) as client:
-        response = await client.post(url, headers={'Host': parsed.hostname,
-                                      'Authorization': 'Bearer ' + settings['api_key']},
-                                     json=payload, extensions={'sni_hostname': parsed.hostname})
+    progress('waiting_model', '')
+    streaming = settings.get('streaming', False)
+    if streaming: payload.update(stream=True, stream_options={'include_usage': True})
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10, write=20, pool=10), follow_redirects=False, trust_env=False) as client:
+        headers = {'Host': parsed.hostname, 'Authorization': 'Bearer ' + settings['api_key']}
+        if streaming:
+            async with client.stream('POST', url, headers=headers, json=payload, extensions={'sni_hostname': parsed.hostname}) as response:
+                if response.status_code != 200:
+                    raise ProviderFailure('provider_http_' + str(response.status_code), 'AI-провайдер вернул HTTP ' + str(response.status_code))
+                return await stream_message(response)
+        response = await client.post(url, headers=headers, json=payload, extensions={'sni_hostname': parsed.hostname})
     if response.status_code != 200:
-        raise RuntimeError('AI-провайдер вернул HTTP ' + str(response.status_code))
+        raise ProviderFailure('provider_http_' + str(response.status_code), 'AI-провайдер вернул HTTP ' + str(response.status_code))
     data = response.json()
     return {**data['choices'][0]['message'], '_usage': data.get('usage')}
 
@@ -894,6 +972,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 raise RuntimeError('AI превысил лимит вызовов инструментов')
             messages.append({'role': 'assistant', 'content': message.get('content'), 'tool_calls': calls})
             for call in calls:
+                progress('tools', '')
                 name = call['function']['name']
                 try:
                     if name not in connections:
@@ -932,6 +1011,15 @@ async def check(settings, module, actor):
 def safe_error(exc):
     # Neither transport URLs (which contain bot tokens), provider payloads nor
     # Telethon exception text are returned to a browser or Telegram user.
+    if isinstance(exc, ProviderFailure): return str(exc)
+    if isinstance(exc, socket.gaierror): return 'Не удалось разрешить DNS-имя AI-провайдера'
+    if tls_failure(exc): return 'Не удалось установить защищённое TLS-соединение с AI-провайдером'
+    if isinstance(exc, httpx.ConnectTimeout): return 'Не удалось подключиться к AI-провайдеру за 10 секунд'
+    if isinstance(exc, httpx.ReadTimeout): return 'AI-провайдер не присылал данные более 120 секунд. Автоматического повтора не было'
+    if isinstance(exc, httpx.WriteTimeout): return 'Передача запроса AI-провайдеру не завершилась вовремя; результат неизвестен'
+    if isinstance(exc, httpx.TransportError): return 'Соединение с AI-провайдером прервано. Автоматического повтора не было'
+    if isinstance(exc, asyncio.TimeoutError): return 'Истёк общий срок выполнения запроса AI'
+    if isinstance(exc, json.JSONDecodeError): return 'AI-провайдер вернул некорректный ответ'
     if isinstance(exc, AttachmentError):
         return str(exc)
     if isinstance(exc, (PermissionError, ValueError)) and not isinstance(exc, json.JSONDecodeError):
@@ -939,6 +1027,27 @@ def safe_error(exc):
     if isinstance(exc, RuntimeError) and str(exc).startswith(('AI-провайдер вернул HTTP ', 'API vpsController отклонил инструмент: HTTP ', 'Telegram Bot API вернул HTTP ')):
         return str(exc)
     return 'Запрос не выполнен. Проверьте подключение и настройки модуля.'
+
+
+def tls_failure(exc):
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ssl.SSLError): return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def error_code(exc):
+    if isinstance(exc, ProviderFailure): return exc.code
+    if isinstance(exc, socket.gaierror): return 'provider_dns_error'
+    if tls_failure(exc): return 'provider_tls_error'
+    for kind, code in ((httpx.ConnectTimeout, 'provider_connect_timeout'), (httpx.ReadTimeout, 'provider_read_timeout'),
+                       (httpx.WriteTimeout, 'provider_write_timeout'), (httpx.TransportError, 'provider_transport_error'),
+                       (asyncio.TimeoutError, 'runtime_timeout'), (json.JSONDecodeError, 'invalid_response'),
+                       (KeyError, 'invalid_response'), (IndexError, 'invalid_response')):
+        if isinstance(exc, kind): return code
+    return 'runtime_error'
 
 
 async def request_main(payload, mode):
@@ -972,11 +1081,13 @@ if __name__ == '__main__':
             serve_mcp(json.loads(Path(os.environ['NODERA_CONFIG']).read_text()), os.environ['NODERA_ACTOR'], sys.argv[2])
         else:
             payload = json.loads(sys.stdin.read(10 * 1024 * 1024))
-            result = asyncio.run(asyncio.wait_for(request_main(payload, sys.argv[1]), timeout=130))
+            EVENT_MODE = payload.get('_events') is True
+            result = asyncio.run(asyncio.wait_for(request_main(payload, sys.argv[1]), timeout=240))
             print(json.dumps({'ok': True, 'result': result}, ensure_ascii=False))
     except Exception as exc:
         if len(sys.argv) > 1 and sys.argv[1] in ('--mcp', '--bot'):
             logging.error('Runtime stopped: %s', type(exc).__name__)
         else:
-            print(json.dumps({'ok': False, 'error': safe_error(exc)}, ensure_ascii=False))
+            code = error_code(exc)
+            print(json.dumps({'ok': False, 'error': safe_error(exc), 'diagnostic': {'code': code}}, ensure_ascii=False))
         sys.exit(1)

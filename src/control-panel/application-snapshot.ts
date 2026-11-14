@@ -39,11 +39,12 @@ export function applicationStatusSnapshot(value: unknown, validateOperation: (va
 
 /** Operation observations must not be served by stale-while-revalidate caches. */
 export function observedApplicationRequest(client: ReturnType<typeof createApiClient>, snapshot: (value: unknown) => ApplicationStatus): ReturnType<typeof createApiClient> {
-  return async <T>(path: string, options: RequestInit = {}) => {
+  const observed = async <T>(path: string, options: RequestInit = {}) => {
     const observation = path === "/application/status";
     const value = await client<T>(path, observation ? { ...options, cache: "no-store" } : options);
     return (observation ? snapshot(value) : value) as T;
   };
+  return Object.assign(observed, { events: client.events, sessionKey: client.sessionKey });
 }
 
 export function applicationStatusUnavailable(current: ApplicationStatus | null, pending: boolean): ApplicationStatus | null {

@@ -6,13 +6,14 @@ import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
 import { useNotifier, useNotifications } from "../../shared/notifications/notification-center";
 import { mutationFailureState } from "../../shared/lib/api-request";
+import { observeChatJob, rememberChat, savedChat, chatStage, ChatJobError, type ChatJob, type ChatOutput } from "./chat-jobs";
 import { ChatIcon } from "./chat-icon";
 import { AssistantAnswer } from "./assistant-answer";
 import { conversationMarkdown } from "./answer-format";
 import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
-import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId, type ProviderUsage } from "./assistant-state";
+import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId } from "./assistant-state";
 import { ProviderMonitor, initialProviderConnection, providerStatusText, type ProviderConnection } from "./provider-connection";
 import { queueProviderCatalog } from "./provider-details";
 import { NoderaSettings, SettingsDialog, panels, type Panel } from "./nodera-settings";
@@ -39,6 +40,13 @@ function rememberConversation(actor: string, identity: string | null) {
 
 export function AssistantView({ active, onOpenChat, request, refreshKey, busy, onDirtyChange, confirmAction, admitOperation, onOperation }: Props) {
   const [panel, setPanel] = useState<Panel>('chat');
+  const [streaming, setStreaming] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState(0);
+  const [hasPendingChat, setHasPendingChat] = useState(false);
+  const [chatStageText, setChatStageText] = useState("");
+  const observation = useRef<AbortController | null>(null);
+  useEffect(() => { try { setStreaming(sessionStorage.getItem("nodera-streaming") === "true"); } catch {} }, []);
+  useEffect(() => () => { observation.current?.abort(); pendingTurns.current = []; writing.current = false; chatRunning.current = false; }, [request]);
   const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
   const sectionMenu = useRef<HTMLDetailsElement>(null);
   const [status, setStatus] = useState<McpStatus>();
@@ -125,21 +133,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     }
   }, [request]);
   useEffect(() => { void load(); }, [load, refreshKey]);
-  useEffect(() => {
-    if (working !== "chat") return;
-    let current = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const observe = async () => {
-      try {
-        const identity = chatRequestId.current;
-        const value = await request<{state: string; position: number; waiting: number}>(`/assistant/queue?request_id=${identity}${actor ? `&telegram_id=${actor}` : ""}`, {cache: "no-store"});
-        if (current && identity === chatRequestId.current) setChatQueue(value);
-      } catch { /* The chat result remains authoritative; never repeat its POST. */ }
-      if (current && typeof window !== "undefined") timer = setTimeout(() => void observe(), 1500);
-    };
-    void observe();
-    return () => { current = false; clearTimeout(timer); };
-  }, [working, request, actor]);
   const loadModels = useCallback(async () => { await apiMonitor.current?.refresh(); }, []);
   useEffect(() => {
     apiMonitor.current?.stop();
@@ -195,6 +188,40 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     else { setConversations([]); setMemoryBusy(false); }
     return invalidateMemory;
   }, [agentInstalled, cacheEnabled, loadConversations, invalidateMemory]);
+  useEffect(() => {
+    if (!status?.chat_jobs || chatRunning.current) return;
+    const identity = savedChat(request, actor);
+    setHasPendingChat(Boolean(identity));
+    if (!identity) return;
+    const controller = new AbortController();
+    observation.current = controller;
+    writing.current = true; chatRunning.current = true; interacted.current = true;
+    setWorking("chat");
+    const turnId = ++nextTurn.current;
+    let inserted = false;
+    void observeChatJob(request, identity, actor, streaming, job => {
+      if (controller.signal.aborted) return;
+      setChatStageText(chatStage(job.stage));
+      if (!inserted) {
+        inserted = true;
+        setTurns(current => [...current, { id: turnId, question: job.question, model: job.model, files: [], queue_state: "running" }]);
+      }
+      if (streaming) setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, answer: job.partial || undefined } : turn));
+    }, controller.signal).then(result => {
+      if (controller.signal.aborted) return;
+      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action } : turn));
+      setConversationId(result.conversation_id ?? null); rememberConversation(actor, result.conversation_id ?? null);
+    }).catch(cause => {
+      if (controller.signal.aborted) return;
+      if (cause instanceof ChatJobError) rememberChat(request, actor, null);
+      setMemoryError(cause instanceof Error ? cause.message : "Результат AI не подтверждён");
+      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, error: cause instanceof Error ? cause.message : "Результат AI не подтверждён" } : turn));
+    }).finally(() => {
+      if (controller.signal.aborted) return;
+      writing.current = false; chatRunning.current = false; setWorking(""); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor)));
+    });
+    return () => { controller.abort(); writing.current = false; chatRunning.current = false; };
+  }, [request, actor, status?.chat_jobs, streaming, recoveryKey]);
   useEffect(() => { transcript.current?.scrollTo({ top: transcript.current.scrollHeight }); }, [turns, panel]);
   async function attachFiles(incoming: File[]) {
     if (!incoming.length || fileRead.current || writing.current && !chatRunning.current) return;
@@ -280,7 +307,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     catch (cause) { setError(cause instanceof Error ? cause.message : "Команда не принята"); }
   }
   async function send() {
-    if (!(prompt.trim() || files.length) || !selectedModel || writing.current && !chatRunning.current || fileRead.current) return;
+    if (hasPendingChat && !chatRunning.current || !(prompt.trim() || files.length) || !selectedModel || writing.current && !chatRunning.current || fileRead.current) return;
     if (pendingTurns.current.length >= 5) { setError("В очереди уже 5 сообщений. Дождитесь ответа."); return; }
     const turn: Turn = { id: ++nextTurn.current, question: prompt.trim(), model: selectedModel, files, queue_state: "queued" };
     pendingTurns.current.push(turn);
@@ -301,11 +328,24 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         setChatQueue({state: "submitting", position: 0});
         setTurns(current => current.map(item => item.id === id ? { ...item, queue_state: "running" } : item));
         try {
-          const result = await request<{ result: { answer: string; tools_used: string[] }; conversation_id?: string; cache_error?: string; provider_usage?: Record<string, ProviderUsage>; pending_action?: PendingAction }>("/assistant/chat", {
-            method: "POST", body: JSON.stringify({ prompt: question, telegram_id: actor ? Number(actor) : null, model: next.model,
-              request_id: chatRequestId.current,
-              attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history: status?.chat_attachments ? chatHistory(context, attached) : [], conversation_id: conversation }),
-          });
+          const identity = chatRequestId.current;
+          const payload = { prompt: question, telegram_id: actor ? Number(actor) : null, model: next.model,
+            request_id: identity, stream: streaming && status?.chat_streaming === true,
+            attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history: status?.chat_attachments ? chatHistory(context, attached) : [], conversation_id: conversation };
+          if (!status?.chat_jobs) throw new Error("Обновите панель для защищённого выполнения чата");
+          rememberChat(request, actor, identity); setHasPendingChat(true);
+          try {
+            const accepted = await request<ChatJob>("/assistant/requests", { method: "POST", body: JSON.stringify(payload) });
+            if (client.current === request) setChatStageText(chatStage(accepted.stage));
+          }
+          catch (cause) { if (mutationFailureState(cause) !== "unknown") { rememberChat(request, actor, null); throw cause; } }
+          const controller = new AbortController();
+          observation.current = controller;
+          const result: ChatOutput = await observeChatJob(request, identity, actor, payload.stream, job => {
+            if (client.current !== request || controller.signal.aborted) return;
+            setChatStageText(chatStage(job.stage));
+            if (payload.stream) setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: job.partial || undefined } : turn));
+          }, controller.signal);
           if (client.current === request) {
             if (apiMonitor.current === connection) setChatConnection("responding");
             const completed = { ...next, queue_state: undefined, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action };
@@ -336,7 +376,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           break;
         }
       }
-    } finally { chatRunning.current = false; writing.current = false; setWorking(""); setChatQueue(null); }
+    } finally { if (client.current === request) { chatRunning.current = false; writing.current = false; setWorking(""); setChatQueue(null); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor))); } }
   }
   async function confirmService(turn: Turn) {
     const action = turn.pending_action;
@@ -366,7 +406,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   if (!managedComponent?.installed) return <section hidden={!active} className="mcpWorkspace"><p>Установите Nodera в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = managedComponent.management?.state !== "managed" || managedComponent.management?.retained;
   const blocked = busy || Boolean(working) || readingFiles || memoryBusy || Boolean(loadError) || Boolean(readOnly);
-  const composerBlocked = busy || Boolean(working && working !== "chat") || readingFiles || memoryBusy || Boolean(loadError) || Boolean(readOnly);
+  const composerBlocked = hasPendingChat && !working || busy || Boolean(working && working !== "chat") || readingFiles || memoryBusy || Boolean(loadError) || Boolean(readOnly);
   const conflict = status.settings.revision !== draft.expected_revision;
   const agentReady = selectedComponent?.installed && selectedComponent.enabled && selectedComponent.configured;
   const chooseActor = (value: string) => { memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(""); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
@@ -413,7 +453,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const connectionLabel = chatConnection === "failed" ? "Ошибка последнего запроса к AI" : providerStatusText(apiConnection);
   const pendingLabel = (turn: Turn) => turn.queue_state === "queued"
     ? `В очереди · ${turns.filter(item => item.queue_state === "queued" && item.id <= turn.id).length}`
-    : chatQueue?.state === "queued" ? `В очереди AI · ${chatQueue.position}` : "Обрабатывает запрос…";
+    : chatQueue?.state === "queued" ? `В очереди AI · ${chatQueue.position}` : chatStageText || "Обрабатывает запрос…";
   return <div hidden={!active} className={`mcpWorkspace noderaWorkspace ${active && isChat ? "isChat" : ""}`}>
     {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
     {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
@@ -454,9 +494,14 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           </div>
           <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title={working === "chat" ? "Добавить в очередь" : "Отправить"} disabled={composerBlocked || dirty || !(prompt.trim() || files.length) || !selectedModel || !agentReady} onClick={() => void send()}>{readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
       </div>
+      {hasPendingChat && !working && <button type="button" className="ghostButton" onClick={() => setRecoveryKey(value => value + 1)}>Восстановить ответ</button>}
       <p className="mcpChatHint">{working === "chat" ? "Можно отправить ещё вопрос — он попадёт в очередь и получит контекст предыдущего ответа." : "Shift+Enter — новая строка · файлы передаются выбранному AI-провайдеру"}</p>
     </section>
     {chatSettingsOpen && <SettingsDialog title="Настройки чата" close={() => setChatSettingsOpen(false)}>
+        <label className="mcpToggle"><input type="checkbox" checked={streaming} disabled={working === "chat" || !status.chat_streaming} onChange={event => {
+          setStreaming(event.target.checked); try { sessionStorage.setItem("nodera-streaming", String(event.target.checked)); } catch {}
+        }}/>Потоковый ответ</label>
+        <p>{status.chat_streaming ? "Показывать текст по мере получения. При выключении ответ появится целиком." : "Для потоковых ответов обновите компонент Nodera."}</p>
         {status.settings.accounts.length > 0 && actorSelect}
         {cacheEnabled && <label className="mcpConversationPicker">Диалог<select aria-label="Сохранённый диалог" value={conversationId ?? ""} title={conversations.find(item => item.id === conversationId)?.title} disabled={blocked} onChange={event => {
           if (event.target.value) void loadConversation(event.target.value); else newChat();

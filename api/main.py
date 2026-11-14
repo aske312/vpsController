@@ -34,7 +34,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -484,6 +484,27 @@ def assistant_queue(request_id: str | None = None, telegram_id: int | None = Non
     actor = str(telegram_id) if telegram_id else 'panel'
     if actor != 'panel': assistant_roles.require(assistant_control.read(sys.modules[__name__]), actor, 'chat')
     return assistant_broker.broker.status(actor, request_id)
+
+
+@app.post('/api/assistant/requests', status_code=202)
+def assistant_submit(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
+    import assistant_jobs
+    return assistant_jobs.submit(sys.modules[__name__], payload)
+
+
+@app.get('/api/assistant/requests/{identity}')
+def assistant_result(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    import assistant_jobs
+    return assistant_jobs.get(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+
+
+@app.get('/api/assistant/requests/{identity}/stream')
+def assistant_stream(identity: str, request: Request, telegram_id: int | None = None, _: None = Depends(require_token)):
+    import assistant_jobs
+    actor = str(telegram_id) if telegram_id else 'panel'
+    assistant_jobs.get(sys.modules[__name__], identity, actor)
+    return StreamingResponse(assistant_jobs.events(sys.modules[__name__], identity, actor, request),
+                             media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
 
 
 @app.get('/api/assistant/context')

@@ -91,6 +91,7 @@ export type Observation = { active?: boolean; unit_present?: boolean | null; sta
 export type McpStatus = {
   provider_observations?: Record<string, import("./provider-details").ProviderObservation>;
   chat_attachments?: boolean;
+  chat_jobs?: boolean; chat_streaming?: boolean;
   web_tools?: boolean; web_extract_tools?: boolean; context_tools?: boolean;
   chat_persona?: boolean; agent_version?: string; nodera_version?: string; nodera_available_version?: string;
   nodera_management?: { state: string; retained?: boolean };

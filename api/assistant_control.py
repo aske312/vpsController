@@ -48,6 +48,14 @@ _runtime_slots = threading.BoundedSemaphore(2)
 _catalog_slots = threading.BoundedSemaphore(1)
 
 
+def version_at_least(path, minimum):
+    try:
+        value = path.read_text().strip()
+        return bool(re.fullmatch(r'\d+\.\d+\.\d+', value)) and tuple(map(int, value.split('.'))) >= minimum
+    except OSError:
+        return False
+
+
 class Account(BaseModel):
     model_config = {'extra': 'forbid'}
     telegram_id: int = Field(strict=True, gt=0, le=2**52)
@@ -267,6 +275,7 @@ class ChatMessage(BaseModel):
 
 class Chat(BaseModel):
     model_config = {'extra': 'forbid'}
+    stream: StrictBool = False
     prompt: str = Field(default='', max_length=12000)
     request_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
@@ -616,6 +625,7 @@ def status(api):
             'nodera_version': nodera_version, 'nodera_available_version': available_version,
             'nodera_management': combined,
             'chat_attachments': agent_version >= (1, 1, 0),
+            'chat_jobs': True, 'chat_streaming': agent_version >= (1, 23, 0),
             'agent_version': '.'.join(map(str, agent_version)),
             'chat_persona': agent_version >= (1, 2, 0),
             'web_tools': agent_version >= (1, 7, 0),
@@ -838,7 +848,7 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
         roles.require(settings, actor, 'model_select')
     settings = {**settings, 'memory_enabled': settings.get('memory_enabled', True) and roles.allows(settings, actor, 'memory')}
     files = [item.model_dump() for item in payload.attachments]
-    body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files,
+    body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files, 'stream': payload.stream,
             'history': [item.model_dump() for item in payload.history]}
     if channel == 'bot' and settings.get('model_mode') == 'catalog' and not body['model']:
         preference = operations.read(bot_model_path(api, actor))
@@ -924,6 +934,11 @@ def bot_models(api, actor, model=None, page=1):
 
 
 def runtime_request(api, mode, body):
+    if mode == '--chat':
+        import assistant_runtime
+        settings = read(api)
+        with assistant_runtime.admission(api, settings.get('provider_url', 'default')):
+            return _runtime_request(api, mode, body)
     if mode != '--check' or body.get('module') == 'ai-agent' and read(api).get('model_mode') == 'catalog':
         return _runtime_request(api, mode, body)
     import operation_log
@@ -946,6 +961,12 @@ def _runtime_request(api, mode, body):
         raise HTTPException(409, 'Среда AI-agent остановлена. Запустите компонент в разделе Службы')
     python = runtime_directory(component) / 'venv' / 'bin' / 'python'
     value = read(api)
+    body = dict(body)
+    streaming = body.pop('stream', False)
+    runtime_events = mode == '--chat' and version_at_least(runtime_directory(component) / 'version', (1, 23, 0))
+    if streaming and not runtime_events:
+        raise HTTPException(409, 'Обновите компонент Nodera для потоковых ответов')
+    value['streaming'] = streaming
     grants = roles.effective(value, str(body.get('actor', 'panel')))
     value['web_enabled'] = value.get('web_enabled', True) and 'web' in grants
     value['personalization_enabled'] = value.get('personalization_enabled', True) and 'memory' in grants
@@ -1029,7 +1050,11 @@ def _runtime_request(api, mode, body):
         with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               text=True, env=env, start_new_session=os.name == 'posix') as process:
             try:
-                stdout, _ = process.communicate(json.dumps({'settings': value, **body}), timeout=150)
+                if runtime_events:
+                    import assistant_runtime
+                    output, code = assistant_runtime.communicate(process, {'settings': value, **body, '_events': True})
+                else:
+                    stdout, _ = process.communicate(json.dumps({'settings': value, **body}), timeout=150)
             except subprocess.TimeoutExpired:
                 if os.name == 'posix':
                     import signal
@@ -1038,8 +1063,9 @@ def _runtime_request(api, mode, body):
                     process.kill()
                 process.communicate()
                 raise
-            output = json.loads(stdout)
-            code = process.returncode
+            if not runtime_events:
+                output = json.loads(stdout)
+                code = process.returncode
     except subprocess.TimeoutExpired:
         raise HTTPException(504, 'Проверка или запрос AI превысили время ожидания') from None
     except (OSError, ValueError):
@@ -1047,7 +1073,13 @@ def _runtime_request(api, mode, body):
     finally:
         _runtime_slots.release()
     if code or not output.get('ok'):
-        raise HTTPException(502, output.get('error', 'Модуль завершился с ошибкой'))
+        diagnostic = output.get('diagnostic', {})
+        error = HTTPException(502, output.get('error', 'Модуль завершился с ошибкой'))
+        diagnostic = diagnostic if isinstance(diagnostic, dict) else {}
+        error.error_code = diagnostic.get('code', 'runtime_error')
+        if not isinstance(error.error_code, str) or not re.fullmatch('[a-z0-9_]{1,80}', error.error_code):
+            error.error_code = 'runtime_error'
+        raise error
     if component == 'nodera-bot' and mode == '--check':
         try:
             bot_identity(api, value['bot_token'], output.get('result', {}).get('username'))

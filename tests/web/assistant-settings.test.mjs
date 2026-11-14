@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import * as chatJobs from '../../src/features/assistant/chat-jobs.ts';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
 import * as answerFormat from '../../src/features/assistant/answer-format.ts';
@@ -36,19 +37,29 @@ function mount(status, catalog = [], overrides = {}) {
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {};
-  const require = name => name === 'react' ? hooks : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name === 'react' ? hooks : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
   const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
   new Function('require', 'exports', outputText)(require, exported);
+  const jobs = new Map();
   const request = async (path, options) => {
     if (path === '/assistant/mihomo-profiles') return { items: [{id: 'own', name: 'Моя подписка'}] };
     if (path === '/assistant/bot-users') return { items: [] };
     if (path === '/assistant/models') return overrides.models ? overrides.models(options) : { models: catalog };
     if (path.startsWith('/assistant/queue?')) return overrides.queue ? overrides.queue(path) : {state:'running', position:0, waiting:0};
-    if (options?.method === 'PUT' || path === '/assistant/chat') writes.push(JSON.parse(options.body));
-    if (path === '/assistant/chat') return overrides.chat ? overrides.chat(options) : { result: { answer: 'OK', tools_used: [] } };
+    if (options?.method === 'PUT' || path === '/assistant/requests') writes.push(JSON.parse(options.body));
+    if (path === '/assistant/requests') {
+      const payload=JSON.parse(options.body);
+      const accepted={id:payload.request_id,seq:0,state:'queued',stage:'queued',question:payload.prompt,model:payload.model,stream:payload.stream};
+      const result=Promise.resolve(overrides.chat ? overrides.chat(options) : {result:{answer:'OK',tools_used:[]}}).then(
+        output=>({...accepted,seq:1,state:'done',stage:'complete',output}),
+        error=>({...accepted,seq:1,state:'failed',stage:'error',error:{code:'provider_transport_error',message:error.message}}));
+      jobs.set(payload.request_id,result);
+      return accepted;
+    }
+    if (path.startsWith('/assistant/requests/')) return jobs.get(path.split('/')[3].split('?')[0]);
     return status;
   };
   const props = { active: true, onOpenChat: overrides.onOpenChat || (() => {}), request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
@@ -73,7 +84,7 @@ function nodes(tree, predicate, disabled = false) {
   return [...(predicate(tree) ? [{ node: tree, disabled: blocked }] : []), ...nodes(tree.props?.children, predicate, blocked)];
 }
 function fixture() {
-  return { settings: { revision: 'a'.repeat(32), modules: { 'ai-agent': false, 'nodera-bot': true },
+  return { chat_jobs:true, chat_streaming:true, settings: { revision: 'a'.repeat(32), modules: { 'ai-agent': false, 'nodera-bot': true },
     mcp: { 'telegram-mcp': false, 'vps-controller-mcp': false }, provider_url: '', model: '', telegram_api_id: null,
     accounts: [], api_key_configured: false, bot_token_configured: true, telegram_api_hash_configured: false },
     modules: ['ai-agent', 'nodera-bot'].map(id => ({ id, installed: true, configured: id === 'nodera-bot', management: { state: 'managed' } })),
@@ -101,7 +112,7 @@ test('saved connection data is visible in AI settings before a manual check and 
   assert.doesNotMatch(text, /Аккаунт ·/);
 });
 
-test('a pending chat shows queue position and submits the question only once', async () => {
+test('a pending background chat shows acceptance and submits the question only once', async () => {
   const status = fixture();
   Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
   Object.assign(status.modules[0], {enabled:true, configured:true});
@@ -113,12 +124,12 @@ test('a pending chat shows queue position and submits the question only once', a
   tree = view.render();
   nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
   view.render(); await Promise.resolve(); tree = view.render();
-  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('2')).length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('В очереди AI')).length, 1);
   assert.match(view.writes[0].request_id, /^[0-9a-f]{32}$/);
   resolve({result:{answer:'finished', tools_used:[]}});
   await new Promise(setImmediate); tree = view.render();
   assert.equal(view.writes.length, 1);
-  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('2')).length, 0);
+  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('В очереди AI')).length, 0);
 });
 
 test('pending turn survives inactive page and answer notification opens chat without another POST', async () => {
@@ -433,7 +444,7 @@ test('new catalog chats use the saved default and copy actions sit outside the a
   nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({ target: { value: 'hello', style: {}, scrollHeight: 48 } });
   tree = view.render();
   nodes(tree, n => n.type === 'textarea')[0].node.props.onKeyDown({ key: 'Enter', preventDefault() {} });
-  await Promise.resolve();
+  await new Promise(setImmediate);
   assert.equal(view.writes[0].model, 'default-model');
   tree = view.render();
   const answer = nodes(tree, n => n.type === 'article' && n.props.className.startsWith('mcpAnswer'))[0].node;
@@ -520,4 +531,19 @@ test('access exposes all five roles, owner permissions remain fixed, and persona
   assert.equal(personal.props.wide, true);
   assert.equal(nodes(personal, n => n.type === 'nav' && n.props['aria-label'] === 'Разделы персонализации').length, 1);
   assert.equal(nodes(personal, n => n.type === 'h3' && n.props.children === 'Личная память собеседника').length, 0);
+});
+
+
+test('streaming defaults off and can be enabled independently in chat settings', async () => {
+  const status=fixture();Object.assign(status.settings,{model:'m',modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0],{enabled:true,configured:true});
+  const view=mount(status);view.render();await Promise.resolve();
+  let tree=view.render();nodes(tree,n=>n.type==='button'&&n.props.children?.[1]==='Настройки чата')[0].node.props.onClick();
+  tree=view.render();const input=nodes(tree,n=>n.type==='input'&&n.props.type==='checkbox')[0];
+  assert.equal(input.node.props.checked,false);assert.equal(input.disabled,false);
+  input.node.props.onChange({target:{checked:true}});tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'hello',style:{},scrollHeight:48}});
+  tree=view.render();nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length,1);assert.equal(view.writes[0].stream,true);
 });

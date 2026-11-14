@@ -1,3 +1,5 @@
+import { readEventStream } from "./event-stream.ts";
+
 type RequestOptions = {
   formatHttpError?: (detail: string, status: number) => string;
   readTimeoutMs?: number;
@@ -149,7 +151,11 @@ export function mutationFailureState(cause: unknown): "unknown" | "error" {
 
 // All clients in one authenticated session share reads. Custom cancellation and
 // headers remain independent; fresh observations never join a cached revalidation.
-export function createApiClient(token: string, options: RequestOptions = {}) {
+export type ApiClient = (<T = ApiResult>(path: string, init?: ApiRequestInit<T>) => Promise<T>) & {
+  events?: (path: string, publish: (value: unknown) => void, signal: AbortSignal) => Promise<void>;
+  sessionKey?: string;
+};
+export function createApiClient(token: string, options: RequestOptions = {}): ApiClient {
   if (!sessionGenerations.has(token)) sessionGenerations.set(token, ++nextSessionGeneration);
   const sessionGeneration = sessionGenerations.get(token);
   const currentSession = () => Boolean(token) && sessionGenerations.get(token) === sessionGeneration;
@@ -298,9 +304,28 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
     pending.set(pendingKey, result);
     return result as Promise<T>;
   };
-  return <T = ApiResult>(path: string, init: ApiRequestInit<T> = {}): Promise<T> => execute<T>(path, init).then((value) => {
+  const client = <T = ApiResult>(path: string, init: ApiRequestInit<T> = {}): Promise<T> => execute<T>(path, init).then((value) => {
     if (!currentSession()) throw expired();
     // Draft editing by one consumer must not mutate another section's cache.
     return structuredClone(value);
   }).catch((cause) => { throw formatCause(cause); });
+  const events = async (path: string, publish: (value: unknown) => void, signal: AbortSignal) => {
+    if (!currentSession()) throw expired();
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    let idle: ReturnType<typeof setTimeout>;
+    const received = () => { clearTimeout(idle); idle = setTimeout(() => controller.abort(), 45000); };
+    received();
+    try {
+      if (signal.aborted) abort();
+      const response = await fetch(`/api${path}`, { headers: { Authorization: `Basic ${token}`, Accept: "text/event-stream" },
+        signal: controller.signal, cache: "no-store" });
+      if (response.status === 401) invalidateApiSession(token);
+      if (!response.ok) throw new ApiRequestError(`Поток AI: HTTP ${response.status}`, "http", response.status);
+      if (!response.headers.get("Content-Type")?.includes("text/event-stream")) throw new ApiRequestError("Некорректный поток AI", "response");
+      await readEventStream(response, value => { if (!currentSession()) throw expired(); publish(value); }, received);
+    } finally { clearTimeout(idle!); signal.removeEventListener("abort", abort); controller.abort(); }
+  };
+  return Object.assign(client, { events, sessionKey: tokenFingerprint(token) });
 }
