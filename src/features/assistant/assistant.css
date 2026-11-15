@@ -405,6 +405,27 @@ button.noderaTag { cursor:pointer; }
 .noderaUserSummary span { color:var(--muted); }
 .noderaAccountRoles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
 .noderaAccountRoles small { display:block; }
+.noderaRolePicker { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:7px; }
+.noderaRolePicker button { display:grid; align-content:start; gap:6px; min-width:0; padding:10px; border:1px solid var(--line); border-radius:9px; background:var(--panel-inset); color:var(--text); text-align:left; overflow-wrap:anywhere; cursor:pointer; }
+.noderaRolePicker button[aria-pressed=true],.noderaRolePermissions > nav button[aria-pressed=true] { border-color:var(--cyan); background:rgba(97,207,216,.1); }
+.noderaRoleSummary { display:flex; flex-wrap:wrap; align-items:start; justify-content:space-between; gap:8px; padding-block:8px; }
+.noderaRoleSummary > div { flex:1 1 250px; min-width:0; }
+.noderaRoleSummary h3 { margin:0 0 5px; font-size:16px; }
+.noderaRoleSummary p { margin:0; }
+.noderaRoleSummary .noderaTag { flex-shrink:0; margin:0; }
+.noderaRoleToolbar { display:grid; grid-template-columns:minmax(0,1fr) 180px; gap:12px; }
+.noderaRolePermissions { display:grid; grid-template-columns:190px minmax(0,1fr); gap:18px; min-width:0; }
+.noderaRolePermissions > nav { display:grid; gap:5px; align-self:start; position:sticky; top:0; }
+.noderaRolePermissions > nav button { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--panel-inset); color:var(--text); text-align:left; cursor:pointer; }
+.noderaRolePermissions > nav small { flex-shrink:0; }
+.noderaRolePermissionList { min-width:0; }
+.noderaRolePermissionList .noderaPermissionGrid { grid-template-columns:minmax(0,1fr); gap:0; }
+.noderaRolePermissionList .noderaPermissionGroup { gap:6px; }
+@media (max-width:760px) {
+ .noderaRolePicker { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .noderaRoleToolbar,.noderaRolePermissions { grid-template-columns:minmax(0,1fr); }
+ .noderaRolePermissions > nav { grid-template-columns:repeat(2,minmax(0,1fr)); position:static; }
+}
 @container (max-width:700px) {
  .noderaRolesLayout { grid-template-columns:minmax(0,1fr); }
  .noderaRoleNav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }

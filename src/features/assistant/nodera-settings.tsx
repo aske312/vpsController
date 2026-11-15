@@ -66,6 +66,8 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const [permanent, setPermanent] = useState(true);
   const [personalTab, setPersonalTab] = useState<"character" | "behavior" | "memory">("character");
   const [roleEdit, setRoleEdit] = useState<Role>("user");
+  const [rolePolicy, setRolePolicy] = useState<Draft["role_permissions"]>();
+  const [roleFilter, setRoleFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [permissionSearch, setPermissionSearch] = useState("");
   const [roleGroup, setRoleGroup] = useState(permissionGroups[0].title);
   const [userPermissionGroup, setUserPermissionGroup] = useState(permissionGroups[0].title);
@@ -535,15 +537,38 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     </SettingsDialog>}
   </section>;
 
-  const roleSettings = <section className="noderaSettings" aria-label="Роли и права"><header className="noderaBlockHead"><div><h2>Роли и права</h2><p className="mcpFieldHint">Выберите роль, затем настройте её разрешения. Личные исключения задаются в карточке пользователя.</p></div></header>
-    <div className="noderaRolesLayout"><nav className="noderaRoleNav" aria-label="Роли">{(Object.keys(roleNames) as Role[]).map(role => <button type="button" key={role} aria-label={`Роль: ${roleNames[role]}`} aria-pressed={roleEdit === role} onClick={() => { setRoleEdit(role); setPermissionSearch(""); }}><strong>{roleNames[role]}</strong><small>{draft.accounts.filter(item => accountRole(item) === role).length} пользователей · {fixedRoles.includes(role) ? "Закреплённые права" : "Настраиваемые права"}</small></button>)}</nav>
-    <div className="noderaRoleContent"><header><h3>{roleNames[roleEdit]}</h3><p>{roleDescriptions[roleEdit]}</p></header>
-      {fixedRoles.includes(roleEdit) && <p className="mcpFieldHint">Права этой роли закреплены политикой доступа. Включённый AI не ограничивает редактирование настраиваемых ролей.</p>}
-      <label className="noderaPermissionSearch">Поиск разрешения<input type="search" value={permissionSearch} onChange={event => setPermissionSearch(event.target.value)} placeholder="Например, подписка или диагностика"/></label>
-      <PermissionGroupNav selected={roleGroup} select={setRoleGroup}/>
-      {permissionGroups.filter(group => permissionSearch.trim() || group.title === roleGroup).map(group => <section className="noderaPermissionGroup" key={group.title}><h3>{group.title}</h3><div className="noderaPermissionGrid">{group.items.filter(id => permissionNames[id].toLocaleLowerCase().includes(permissionSearch.trim().toLocaleLowerCase())).map(id => <label className="noderaPermissionSwitch" key={id}><span>{permissionNames[id]}<small>{fixedRoles.includes(roleEdit) ? "Закреплено ролью" : "Разрешение роли"}</small></span><input type="checkbox" role="switch" aria-label={permissionNames[id]} checked={(fixedRoles.includes(roleEdit) ? roleDefaults[roleEdit] : draft.role_permissions?.[roleEdit] ?? roleDefaults[roleEdit]).includes(id)} disabled={blocked || fixedRoles.includes(roleEdit) || id === "roles_manage" || roleEdit === "user" && !userPermissions.includes(id)} onChange={event => { const grants = new Set(draft.role_permissions?.[roleEdit] ?? roleDefaults[roleEdit]); if (event.target.checked) grants.add(id); else grants.delete(id); patch({ role_permissions: { ...draft.role_permissions, [roleEdit]: [...grants] } }); }}/><i aria-hidden="true"/></label>)}</div></section>)}
-      <small>Изменения прав применяются после сохранения настроек раздела. Назначение роли и продуктов — в настройках пользователя.</small>
-    </div></div>
+  const roleGrants = new Set(fixedRoles.includes(roleEdit) ? roleDefaults[roleEdit] : rolePolicy?.[roleEdit] ?? roleDefaults[roleEdit]);
+  const matchingRoleGroups = permissionGroups.filter(group => permissionSearch.trim() || group.title === roleGroup).map(group => ({
+    ...group, items: group.items.filter(id => permissionNames[id].toLocaleLowerCase().includes(permissionSearch.trim().toLocaleLowerCase())
+      && (roleFilter === "all" || roleGrants.has(id) === (roleFilter === "enabled"))),
+  })).filter(group => group.items.length);
+  const closeRoles = () => { setRolePolicy(undefined); setPermissionSearch(""); };
+  const roleSettings = <section className="noderaSettings" aria-label="Роли и права"><header className="noderaBlockHead">
+    <div><h2>Роли и права</h2><p className="mcpFieldHint">Права пяти ролей. Личные исключения — в карточке пользователя.</p></div>
+    <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setRolePolicy({ ...draft.role_permissions }); setPermissionSearch(""); setRoleFilter("all"); }}><ChatIcon name="gear"/>Настроить роли</button>
+    </header>
+    {rolePolicy && <SettingsDialog title="Роли и права" wide close={closeRoles} blocked={blocked} submit={() => { patch({ role_permissions: rolePolicy }); closeRoles(); }}>
+      <nav className="noderaRolePicker" aria-label="Роли">{(Object.keys(roleNames) as Role[]).map(role => <button type="button" key={role} aria-label={`Роль: ${roleNames[role]}`} aria-pressed={roleEdit === role} onClick={() => { setRoleEdit(role); setPermissionSearch(""); setRoleFilter("all"); }}>
+        <strong>{roleNames[role]}</strong><small>Пользователей: {draft.accounts.filter(item => accountRole(item) === role).length}</small>
+      </button>)}</nav>
+      <header className="noderaRoleSummary"><div><h3>{roleNames[roleEdit]}</h3><p>{roleDescriptions[roleEdit]}</p></div><span className="noderaTag">Разрешено: {roleGrants.size} из {Object.keys(permissionNames).length}</span></header>
+      <p className="mcpFieldHint">{fixedRoles.includes(roleEdit) ? "Права закреплены политикой этой роли. Для настройки разрешений выберите модератора или пользователя." : roleEdit === "user" ? "Можно настроить доступ к AI и своей подписке. Административные права этой роли недоступны." : "Настройте разрешения для всех модераторов. Управление ролями доступно только владельцу."}</p>
+      <div className="noderaRoleToolbar">
+        <label>Поиск по всем разрешениям роли<input type="search" value={permissionSearch} onChange={event => setPermissionSearch(event.target.value)} placeholder="Название разрешения"/></label>
+        <label>Показать<select value={roleFilter} onChange={event => setRoleFilter(event.target.value as typeof roleFilter)}><option value="all">Все разрешения</option><option value="enabled">Разрешённые</option><option value="disabled">Запрещённые</option></select></label>
+      </div>
+      <div className="noderaRolePermissions"><nav aria-label="Группы разрешений">{permissionGroups.map(group => <button type="button" key={group.title} aria-pressed={!permissionSearch.trim() && roleGroup === group.title} onClick={() => { setRoleGroup(group.title); setPermissionSearch(""); }}>
+        <span>{group.title}</span><small>{group.items.filter(id => roleGrants.has(id)).length} / {group.items.length}</small>
+      </button>)}</nav><div className="noderaRolePermissionList">
+        {matchingRoleGroups.length ? matchingRoleGroups.map(group => <section className="noderaPermissionGroup" key={group.title}><h3>{group.title}</h3><div className="noderaPermissionGrid">{group.items.map(id => {
+          const fixed = fixedRoles.includes(roleEdit) || id === "roles_manage" || roleEdit === "user" && !userPermissions.includes(id);
+          return <label className="noderaPermissionSwitch" key={id}><span>{permissionNames[id]}<small>{fixed ? "Закреплено политикой роли" : roleGrants.has(id) ? "Разрешено" : "Запрещено"}</small></span>
+            <input type="checkbox" role="switch" aria-label={permissionNames[id]} checked={roleGrants.has(id)} disabled={blocked || fixed} onChange={event => { const grants = new Set(rolePolicy[roleEdit] ?? roleDefaults[roleEdit]); if (event.target.checked) grants.add(id); else grants.delete(id); setRolePolicy({ ...rolePolicy, [roleEdit]: [...grants] }); }}/><i aria-hidden="true"/>
+          </label>;
+        })}</div></section>) : <p className="mcpFieldHint" role="status">Нет разрешений по выбранным условиям.</p>}
+      </div></div>
+      <small>«Применить» добавит изменения в настройки раздела. Для сохранения на сервере нажмите «Сохранить» на странице «Доступ».</small>
+    </SettingsDialog>}
   </section>;
 
   return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{roleSettings}{users}</>}</div>;

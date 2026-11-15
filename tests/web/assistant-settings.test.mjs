@@ -374,10 +374,13 @@ test('access can save role permissions during an AI response without mixing chat
   nodes(view.render(),n=>n.type==='textarea')[0].node.props.onKeyDown({key:'Enter',preventDefault(){}});
   await new Promise(setImmediate);
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Настроить роли')[0].node.props.onClick();
   tree=view.render();
   const permission=nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0];
   assert.equal(permission.disabled,false);
   permission.node.props.onChange({target:{checked:false}});
+  tree=view.render();
+  nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Роли и права')[0].node.props.submit();
   tree=view.render();
   const save=nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить')[0];
   assert.equal(save.disabled,false);
@@ -552,11 +555,15 @@ test('access exposes all five roles, owner permissions remain fixed, and persona
   view.render(); await Promise.resolve();
   nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   let tree = view.render();
+  assert.equal(nodes(tree, n => n.props['aria-label']?.startsWith('Роль: ')).length, 0);
+  nodes(tree,n=>n.type==='button'&&n.props.children?.[1]==='Настроить роли')[0].node.props.onClick();
+  tree=view.render();
   assert.equal(nodes(tree, n => n.props['aria-label']?.startsWith('Роль: ')).length, 5);
   nodes(tree, n => n.props['aria-label'] === 'Роль: Владелец')[0].node.props.onClick();
   tree = view.render();
-  const owner = nodes(tree, n => n.type === 'section' && n.props['aria-label'] === 'Роли и права')[0].node;
+  const owner = nodes(tree, n => typeof n.type === 'function' && n.props.title === 'Роли и права')[0].node;
   assert.equal(nodes(owner, n => n.type === 'input' && n.props.type === 'checkbox').filter(item => !item.disabled).length, 0);
+  owner.props.close();
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
   tree = view.render();
   nodes(tree, n => n.props['aria-label'] === 'Настроить Персонализация')[0].node.props.onClick();
@@ -567,6 +574,28 @@ test('access exposes all five roles, owner permissions remain fixed, and persona
   assert.equal(nodes(personal, n => n.type === 'h3' && n.props.children === 'Личная память собеседника').length, 0);
 });
 
+
+test('role modal stages edits across roles, cancels without changing settings, and applies through the page save', async () => {
+  const status=fixture(),view=mount(status);view.render();await Promise.resolve();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  const open=()=>nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Настроить роли')[0].node.props.onClick();
+  const dialog=()=>nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Роли и права')[0].node;
+  const web=()=>nodes(dialog(),n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0].node;
+  open();web().props.onChange({target:{checked:false}});
+  assert.equal(web().props.checked,false);
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить').length,0);
+  dialog().props.close();
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить').length,0);
+  open();assert.equal(web().props.checked,true);web().props.onChange({target:{checked:false}});
+  for (const role of ['Модератор','Пользователь']) nodes(dialog(),n=>n.props['aria-label']==='Роль: '+role)[0].node.props.onClick();
+  assert.equal(web().props.checked,false);
+  dialog().props.submit();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить')[0].node.props.onClick();
+  await Promise.resolve();
+  assert.equal(view.writes.length,1);
+  assert.ok(!view.writes[0].role_permissions.user.includes('web'));
+  assert.equal(status.settings.role_permissions,undefined);
+});
 
 test('streaming defaults off and can be enabled independently in chat settings', async () => {
   const status=fixture();Object.assign(status.settings,{model:'m',modules:{'ai-agent':true,'nodera-bot':true}});
