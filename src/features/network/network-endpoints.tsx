@@ -191,7 +191,7 @@ export function NetworkEndpoints({
                   generation.current++;
                   if (type.mode === false && !relay.dialog) relay.openHost(undefined, true);
                   setAddresses(type.mode);
-                }}><i><RouteTypeIcon kind={type.mode === false ? "relay" : type.mode} /></i><span><strong>{type.title}</strong><small>{type.description}</small></span><b aria-hidden="true">›</b></button>)}
+                }}><i><RouteTypeIcon kind={type.mode === false ? "relay" : type.mode} /></i><span><strong>{type.title}</strong></span><b aria-hidden="true">›</b></button>)}
               </nav>
               {(hasChanges || relay.changed) && <p className="networkRouteSidebarNote">Есть несохранённые изменения.</p>}
             </aside>
@@ -248,7 +248,6 @@ export function NetworkEndpoints({
                     </div>
                     {duplicate && <small className="networkRouteDraftHint">Этот адрес уже добавлен для выбранного типа маршрута.</small>}
                     {!!result?.consumers?.length && <label><span>Подключение для проверки</span><select aria-label={`Подключение ${field.label}`} value={consumerIds[field.key] || ""} disabled={Boolean(checking)} onChange={(event) => setConsumerIds((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Первое совместимое подключение</option>{result.consumers.map((consumer) => <option key={consumer.id} value={consumer.id}>{consumer.label} · {consumer.id}</option>)}</select></label>}
-                    <details className="networkEndpointDnsHint"><summary>Как настроить DNS</summary><p>{field.kind === "cdn" ? "A/AAAA на IP VPS, proxy включён у CDN-провайдера. Нужен домен." : "Для домена: A/AAAA на IP VPS. В Cloudflare выберите DNS only. Порт в DNS не указывается."}</p><p>{field.help}</p></details>
                     {result && (
                       <em className={`networkEndpointCheck ${result.status}`}>
                         {result.message}

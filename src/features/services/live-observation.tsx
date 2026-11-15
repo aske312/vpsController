@@ -46,7 +46,7 @@ function LiveJournal({ request, services }: { request: Request; services: { id: 
     <label className="opsField">Уровень и выше<select value={priority} onChange={event => { reset(); setPriority(event.target.value); }}><option value="err">Ошибки</option><option value="warning">Предупреждения</option><option value="info">Информация</option><option value="debug">Отладка</option></select></label>
     <button type="button" onClick={() => { setNotice(""); setRunning(!running); }}>{running ? "Пауза" : lines.length ? "Продолжить" : "Начать просмотр"}</button>
     <button type="button" onClick={reset}>Новый просмотр</button><button type="button" disabled={!lines.length} onClick={() => download(lines)}>Скачать показанные строки</button>
-  </div><small>{running ? "Прямой эфир" : "Пауза"} · {lines.length} / 2000 строк. При продолжении используется курсор; старые строки вытесняются.</small>
+  </div><small>{running ? "Прямой эфир" : "Пауза"} · {lines.length} / 2000</small>
     {notice && <p role="status">{notice}</p>}<pre className="observabilityTerminal" tabIndex={0} aria-label="Журнал в реальном времени">{lines.join("\n") || "Выберите источник и начните просмотр."}</pre></>;
 }
 
@@ -81,5 +81,5 @@ function HostConnections({ request }: { request: Request }) {
 
 export function LiveObservation({ request, services }: { request: Request; services: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
-  return <details className="observabilityJournal" onToggle={event => setOpen(event.currentTarget.open)}><summary><strong>Прямой эфир и соединения VPS</strong><small>Журнал с паузой и чтение ss / conntrack</small></summary>{open && <><HostConnections request={request}/><LiveJournal request={request} services={services}/></>}</details>;
+  return <details className="observabilityJournal" onToggle={event => setOpen(event.currentTarget.open)}><summary><strong>Прямой эфир и соединения VPS</strong></summary>{open && <><HostConnections request={request}/><LiveJournal request={request} services={services}/></>}</details>;
 }

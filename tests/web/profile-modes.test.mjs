@@ -59,18 +59,15 @@ test("Protection reflects profile-only traffic functions while inheriting connec
   assert.deepEqual(profile, { block_privacy: true, dns_secure: false });
 });
 
-test("one capture button shows the current mode with client compatibility context", () => {
+test("one capture button shows the current mode and its available controls", () => {
   const proxy = render(ProfileProtection, { connection_mode: "proxy", tun_force: true });
   assert.equal((proxy.match(/class="mihomoModeToggle"/g) || []).length, 1);
   assert.match(proxy, /aria-label="Режим подключения: Proxy"/);
   assert.doesNotMatch(proxy, /DNS Hijack|Strict Route|Fake-IP DNS/);
-  assert.match(proxy, /Mihomo 1\.19\.31/);
-  assert.match(proxy, /клиентской подписке/);
   const tun = render(ProfileProtection, { connection_mode: "tun" });
   assert.match(tun, /aria-label="Режим подключения: TUN"/);
   assert.match(tun, /DNS Hijack/);
   assert.match(tun, /Strict Route/);
-  assert.match(tun, /разрешение VPN/);
 });
 
 test("one routing button exposes local brand icons only in selected mode without guidance", () => {

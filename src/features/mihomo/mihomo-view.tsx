@@ -1444,9 +1444,7 @@ export function MihomoPage({
                 {status?.runtime?.state === "error" ? "Error" : status?.active === true ? "Running" : status?.active === false ? "Stopped" : "Unknown"}
               </span>
             </div>
-            <p className="mihomoHeroLead">
-              Профили, защищённые маршруты и правила доступа в одном контуре.
-            </p>
+
           </div>
 
           <div className="mihomoHeroFacts">
@@ -1515,7 +1513,7 @@ export function MihomoPage({
             <div>
               <p className="eyebrow">MIHOMO PROFILES</p>
               <h2>Профили устройств</h2>
-              <p>Каждый профиль собирается из независимых подключений на базе установленных компонентов.</p>
+
             </div>
             <button className="primaryButton" onClick={newProfile} disabled={!modulesReadKnown || !profilesReadKnown || !installedChannels.length}>Новый профиль</button>
           </header>
@@ -1563,7 +1561,7 @@ export function MihomoPage({
             {!profiles.length && <Empty title={profilesReadKnown ? "Профилей пока нет" : "Список профилей не подтверждён"} text={profilesReadKnown ? "Установите компонент и соберите первое подключение в профиле." : "Обновите данные после восстановления соединения."} />}
           </div>
           <section className="mihomoClientGuide">
-            <header><p className="eyebrow">CLIENT SETUP</p><h3>Настройка и подключение</h3><p>Одна подписка поддерживает несколько устройств. Приложение с включённой отправкой HWID регистрирует отдельное устройство; без HWID используется общий набор. Подписка и скачиваемый файл всегда выдаются в формате YAML для совместимого клиента.</p></header>
+            <header><h3>Настройка и подключение</h3></header>
             <ol><li><b>1</b><span>Нажмите «Скопировать подписку» у нужного профиля.</span></li><li><b>2</b><span>В клиенте добавьте удалённый профиль по URL.</span></li><li><b>3</b><span>После изменений обновите профиль в клиенте.</span></li></ol>
             <details className="mihomoClientAppsDetails"><summary>Приложения для подключения</summary><div className="mihomoClientApps">
               <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>PC · WINDOWS / LINUX</small><strong>Clash Verge Rev</strong><span>Официальные релизы ↗</span></a>
@@ -1600,30 +1598,30 @@ export function MihomoPage({
       {view === "dns" && (
         <form className="mihomoDnsWorkspace mihomoDnsV2" onSubmit={saveDnsWorkspace}>
           {dnsRevisionConflict && <p className="mihomoHint" role="alert">DNS-настройки изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Загрузить актуальные данные</button></p>}
-          <header className="mihomoDnsHeader"><div><p className="eyebrow">DNS ПРОФИЛЕЙ</p><h2>Разрешение доменов</h2><p>Настройте резолверы и путь DNS-запросов для клиентских конфигураций.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
-          <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b><span>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Быстрее и точнее для правил" : "Максимальная совместимость"}</span></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.nameserver || "")]?.note || "DNS профиля"}</span></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.fallback || "")]?.note || "Используется при сбое"}</span></div></section>
-          <p className="mihomoHint">Режим «DNS по маршруту» выбирается отдельно в настройках профиля → Маршрутизация.</p>
-          <section className="mihomoDnsMode"><header><div><b>Режим обработки</b><small>Как Mihomo сопоставляет домены с правилами маршрутизации.</small></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b><small>{value === "fake-ip" ? "Рекомендуется для TUN и правил по доменам" : "Для приложений, несовместимых с Fake IP"}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
-          <section className="mihomoDnsAdvanced"><header><div><b>Дополнительная обработка</b><small>Параметры попадут непосредственно в DNS-секцию профилей.</small></div></header><div>{([{ key: "ipv6", code: "IPv6", title: "IPv6", hint: "Возвращать записи AAAA" }, { key: "prefer_h3", code: "H3", title: "HTTP/3", hint: "Для совместимых DoH-серверов" }] as const).map((feature) => {
+          <header className="mihomoDnsHeader"><div><h2>Разрешение доменов</h2></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
+          <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b></div></section>
+
+          <section className="mihomoDnsMode"><header><div><b>Режим обработки</b></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
+          <section className="mihomoDnsAdvanced"><header><div><b>Дополнительная обработка</b></div></header><div>{([{ key: "ipv6", code: "IPv6", title: "IPv6", hint: "Возвращать записи AAAA" }, { key: "prefer_h3", code: "H3", title: "HTTP/3", hint: "Для совместимых DoH-серверов" }] as const).map((feature) => {
             const enabled = Boolean(dnsDraft[feature.key]);
-            return <button type="button" key={feature.key} aria-pressed={enabled} className={enabled ? "is-selected" : ""} onClick={() => updateDnsDraft(feature.key, !enabled)}><span>{feature.code}</span><p><b>{feature.title}</b><small>{feature.hint}</small></p><i>{enabled ? "Включено" : "Выключено"}</i></button>;
-          })}<label><span><b>Кэш DNS</b><small>Алгоритм вытеснения записей</small></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b><small>По одному домену или маске на строку. Для них клиент получит реальный IP.</small></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
-          <section className="mihomoDnsRouteResolvers"><header><b>Резолверы по маршруту</b><small>Общие резолверы для профилей с разделением DNS.</small></header><div>{([
+            return <button type="button" key={feature.key} aria-pressed={enabled} className={enabled ? "is-selected" : ""} onClick={() => updateDnsDraft(feature.key, !enabled)}><span>{feature.code}</span><p><b>{feature.title}</b></p><i>{enabled ? "Включено" : "Выключено"}</i></button>;
+          })}<label><span><b>Кэш DNS</b></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
+          <section className="mihomoDnsRouteResolvers"><header><b>Резолверы по маршруту</b></header><div>{([
             ["direct_nameserver", "DNS напрямую", "Для сайтов с прямым маршрутом."],
             ["nameserver", "DNS через VPN", "Для остальных сайтов и доменных исключений VPN."],
             ["fallback", "Резервный DNS через VPN", "При отказе основного остаётся внутри VPN."],
-          ] as const).filter(([key]) => dnsByRoute || key === "direct_nameserver").map(([key, title, note]) => <label key={key}><span><b>{title}</b><small>{note}</small></span><select value={String(dnsDraft[key] || "")} onChange={(event) => updateDnsDraft(key, event.target.value)}>
+          ] as const).filter(([key]) => dnsByRoute || key === "direct_nameserver").map(([key, title]) => <label key={key}><span><b>{title}</b></span><select value={String(dnsDraft[key] || "")} onChange={(event) => updateDnsDraft(key, event.target.value)}>
             {dnsByRoute && key !== "direct_nameserver" && !String(dnsDraft[key] || "").startsWith("https://") && <option value={String(dnsDraft[key] || "")} disabled>Выберите DoH-резолвер</option>}
             {dnsOptions.filter((option) => !dnsByRoute || key === "direct_nameserver" || option.value.startsWith("https://")).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select></label>)}</div>
           {dnsSaveError && <p className="mihomoHint" role="alert">{dnsSaveError}</p>}
           <details className="mihomoDnsRouteDetails"><summary>Дополнительные резолверы</summary><div>
-            <label><span><b>DNS адреса VPN-сервера</b><small>Работает напрямую до подключения туннеля.</small></span><select value={String(dnsDraft.proxy_nameserver || "")} onChange={(event) => updateDnsDraft("proxy_nameserver", event.target.value)}>{dnsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-            <label><span><b>Начальный DNS</b><small>IP или DoH по IP для разрешения имён DNS-серверов.</small></span><input value={String(dnsDraft.bootstrap_nameserver || "")} placeholder="1.1.1.1" onChange={(event) => updateDnsDraft("bootstrap_nameserver", event.target.value)} /></label>
-            <label><span><b>DNS локальной сети</b><small>system или адрес DNS вашего роутера.</small></span><input value={String(dnsDraft.local_nameserver || "")} placeholder="system" onChange={(event) => updateDnsDraft("local_nameserver", event.target.value)} /></label>
+            <label><span><b>DNS адреса VPN-сервера</b></span><select value={String(dnsDraft.proxy_nameserver || "")} onChange={(event) => updateDnsDraft("proxy_nameserver", event.target.value)}>{dnsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <label><span><b>Начальный DNS</b></span><input value={String(dnsDraft.bootstrap_nameserver || "")} placeholder="1.1.1.1" onChange={(event) => updateDnsDraft("bootstrap_nameserver", event.target.value)} /></label>
+            <label><span><b>DNS локальной сети</b></span><input value={String(dnsDraft.local_nameserver || "")} placeholder="system" onChange={(event) => updateDnsDraft("local_nameserver", event.target.value)} /></label>
           </div></details></section>
           {!dnsByRoute && <>
-          {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Дополнительный резолвер для проверки ответов.']] as const).map(([key, title, note]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b><small>{note}</small></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b><small>{meta.note}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
+          {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Дополнительный резолвер для проверки ответов.']] as const).map(([key, title]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
           </>}
           <aside className="mihomoDnsNote"><b>Применение настроек</b><span>{dnsByRoute ? "При недоступности VPN туннельный DNS не переключается на прямой. Для правил по IP и приложениям DNS может понадобиться до выбора маршрута. " : "Основной и резервный DNS должны отличаться. "}После сохранения обновите подписку в клиенте.</span></aside>
           <footer className="mihomoDnsFooter"><button type="button" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Отменить изменения</button><span>{!dnsReadKnown ? "Не удалось прочитать настройки DNS. Обновите данные; ваш ввод сохранён." : dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy) || dnsRevisionConflict || Boolean(dnsSaveError)}>{busy === "settings:dns-private" ? "Сохранение…" : dnsSaveError ? "Проверьте DNS" : "Сохранить DNS"}</button></footer>
@@ -1635,46 +1633,46 @@ export function MihomoPage({
         <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
           {routingRevisionConflict && <p className="mihomoHint" role="alert">Настройки маршрутизации изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Загрузить актуальные данные</button></p>}
           <header className="mihomoRoutingHeader">
-            {view === "rules" ? <div><p className="eyebrow">MIHOMO RULE STUDIO</p><h2>Правила</h2><p>Домены, игровые маршруты, UDP и P2P вынесены в отдельную библиотеку. Каждый набор включается отдельно в профиле.</p></div> : <div><p className="eyebrow">MIHOMO SETTINGS</p><h2>Настройки Mihomo</h2><p>Общее поведение профилей, проверка каналов, домены TLS/CDN и редактируемые шаблоны подключений.</p></div>}
+            {view === "rules" ? <div><h2>Правила</h2></div> : <div><h2>Настройки Mihomo</h2></div>}
             <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
           </header>
 
           {view === "rules" && <>
           <section className="mihomoRuleStudio">
-            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}{(visiblePersonalRules.length > 0 || !normalizedRuleSearch) && <section className="mihomoPersonalRuleLibrary"><h4>Персональные</h4>{visiblePersonalRules.map((rule) => { const profileCount = profiles.reduce((count, profile) => count + (profile.devices || []).filter((device) => (device.personal_rule_ids || []).includes(rule.id)).length, 0); return <button type="button" key={rule.id} className={activeRuleList === `personal:${rule.id}` ? "is-active" : ""} onClick={() => setActiveRuleList(`personal:${rule.id}`)}><span>{rule.code}</span><p><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></p><i>{profileCount} устр.</i></button>; })}<button type="button" className="mihomoRuleLibraryAdd" disabled={!routingReadKnown} onClick={() => openPersonalRuleEditor()}>+ Создать персональное правило</button></section>}</div></aside>
+            <aside><header><b>Библиотека правил</b><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b></p><i>{profileCount} проф.</i></button>; })}</section>)}{(visiblePersonalRules.length > 0 || !normalizedRuleSearch) && <section className="mihomoPersonalRuleLibrary"><h4>Персональные</h4>{visiblePersonalRules.map((rule) => { const profileCount = profiles.reduce((count, profile) => count + (profile.devices || []).filter((device) => (device.personal_rule_ids || []).includes(rule.id)).length, 0); return <button type="button" key={rule.id} className={activeRuleList === `personal:${rule.id}` ? "is-active" : ""} onClick={() => setActiveRuleList(`personal:${rule.id}`)}><span>{rule.code}</span><p><b>{rule.title}</b><small>{rule.entries.length}</small></p><i>{profileCount} устр.</i></button>; })}<button type="button" className="mihomoRuleLibraryAdd" disabled={!routingReadKnown} onClick={() => openPersonalRuleEditor()}>+ Создать персональное правило</button></section>}</div></aside>
             <article>
               {selectedPersonalRule ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PERSONAL RULE</p><h3>{selectedPersonalRule.title}</h3><p>{selectedPersonalRule.description || (selectedPersonalRule.kind === "process" ? "Приложения, перечисленные ниже, будут направлены через выбранный маршрут в TUN." : "Домены, перечисленные ниже, будут направлены через выбранный маршрут.")}</p></div><span>{selectedPersonalRule.entries.length} знач.</span></header>
+                <header className="mihomoRuleEditorHead"><div><h3>{selectedPersonalRule.title}</h3></div><span>{selectedPersonalRule.entries.length} знач.</span></header>
                 <div className="mihomoPersonalRuleMeta"><span>{selectedPersonalRule.kind === "process" ? "Приложения в TUN" : "Сайты"}</span><span>{selectedPersonalRule.target}</span></div>
                 <div className="mihomoPersonalRuleEntries">{selectedPersonalRule.entries.map((entry) => <code key={entry}>{entry}</code>)}</div>
                 <footer className="mihomoRuleEditorActions"><span>Правило доступно для включения в настройках каждого устройства.</span><nav><button type="button" className="ghostButton" disabled={!routingReadKnown} onClick={() => openPersonalRuleEditor(selectedPersonalRule)}>Изменить</button><button type="button" className="dangerButton" disabled={!routingReadKnown || Boolean(busy)} onClick={() => void removePersonalRule(selectedPersonalRule)}>Удалить</button></nav></footer>
               </> : activeRuleList === "direct_games_udp_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Выбранные исключения остаются в GATE.312, остальной UDP идёт напрямую.</p></div><span>{selectedUdpExclusions.size} искл.</span></header>
+                <header className="mihomoRuleEditorHead"><div><h3>UDP напрямую</h3></div><span>{selectedUdpExclusions.size} искл.</span></header>
                 <div className="mihomoGameCatalog">
                   {udpExclusionCatalog.map((resource) => { const selected = selectedUdpExclusions.has(resource.id); return <button type="button" key={resource.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleUdpExclusion(resource.id)}><span>{resource.code}</span><b>{resource.name}</b><i>{selected ? "Через VPN" : "Напрямую"}</i></button>; })}
                 </div>
-                <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Полные правила Mihomo через GATE.312, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
+                <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
               </> : activeRuleList === "direct_p2p_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>P2P и торренты напрямую</h3><p>Выбранные клиенты обходят GATE.312. Используйте только если провайдер разрешает P2P.</p></div><span>{selectedP2pClients.size} напрямую</span></header>
+                <header className="mihomoRuleEditorHead"><div><h3>P2P и торренты напрямую</h3></div><span>{selectedP2pClients.size} напрямую</span></header>
                 <div className="mihomoMessage is-error">Прямой маршрут раскрывает ваш публичный IP участникам раздачи и не обходит ограничения провайдера.</div>
                 <div className="mihomoGameCatalog">
                   {p2pClientCatalog.map((client) => { const selected = selectedP2pClients.has(client.id); return <button type="button" key={client.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleP2pClient(client.id)}><span>{client.code}</span><b>{client.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>
-                <label className="mihomoCustomGames"><span><b>Дополнительные процессы</b><small>Имена P2P-процессов напрямую, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_p2p_processes || "")} placeholder={"client.exe\np2p-client"} onChange={(event) => updateRoutingDraft("direct_p2p_processes", event.target.value)} /></label>
+                <label className="mihomoCustomGames"><span><b>Дополнительные процессы</b></span><textarea rows={5} value={String(routingDraft.direct_p2p_processes || "")} placeholder={"client.exe\np2p-client"} onChange={(event) => updateRoutingDraft("direct_p2p_processes", event.target.value)} /></label>
               </> : activeRuleList === "direct_games_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Игры без ограничений для российских IP идут напрямую. Игры с известными ограничениями заранее направлены через GATE.312; любое направление можно изменить.</p></div><span>{directGames.size} напрямую</span></header>
+                <header className="mihomoRuleEditorHead"><div><h3>Маршруты игр</h3></div><span>{directGames.size} напрямую</span></header>
                 <div className="mihomoCatalogToolbar"><input aria-label="Поиск игр" value={gameSearch} placeholder="Найти игру…" onChange={(event) => setGameSearch(event.target.value)} /><nav>{([['all', 'Все'], ['direct', 'Напрямую'], ['vpn', 'VPN'], ['restricted', 'Ограничения РФ']] as const).map(([value, label]) => <button type="button" key={value} className={gameFilter === value ? "is-active" : ""} onClick={() => setGameFilter(value)}>{label}</button>)}</nav><span>{visibleGames.length} из {gameRoutingCatalog.length}</span></div>
                 <div className="mihomoGameCatalog mihomoLargeCatalog">
                   {visibleGames.map((game) => { const direct = directGames.has(game.id); return <button type="button" key={game.id} className={direct ? "is-selected" : ""} aria-pressed={direct} title={game.family} onClick={() => setGameRoute(game.id, direct ? "tunnel" : "direct")}><span>{game.code}</span><b>{game.name}</b><i>{direct ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>
                 {!visibleGames.length && <div className="mihomoHint">Игры по этому запросу не найдены.</div>}
-                <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>
-                <label className="mihomoCustomGames"><span><b>Дополнительные процессы</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
+
+                <label className="mihomoCustomGames"><span><b>Дополнительные процессы</b></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
               </> : selectedRuleList ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} Выберите нужные группы.</p></div><span>{selectedRuleCount} правил</span></header>
+                <header className="mihomoRuleEditorHead"><div><h3>{selectedRuleList.title}</h3></div><span>{selectedRuleCount} правил</span></header>
                 {ruleIconGroups[selectedRuleList.id] && <div className={`mihomoGameCatalog${ruleIconGroups[selectedRuleList.id].length > 12 ? " mihomoLargeCatalog" : ""}`}>{ruleIconGroups[selectedRuleList.id].map((group) => { const lines = ruleGroupLines(selectedRuleList, group); const current = new Set(selectedRuleText.split("\n").map((line) => line.trim()).filter(Boolean)); const selectedCount = lines.filter((line) => current.has(line)).length; const enabled = lines.length > 0 && selectedCount === lines.length; return <button type="button" key={group.id} className={enabled ? "is-selected" : ""} aria-pressed={enabled} onClick={() => toggleRuleIconGroup(selectedRuleList, group)}><span>{group.code}</span><b>{group.name}</b><i>{ruleGroupStatus(selectedRuleList.id, enabled, selectedCount > 0 && !enabled)}</i></button>; })}</div>}
                 <footer className="mihomoRuleEditorActions"><span>{routingDirty ? "Есть несохранённые изменения" : selectedRuleValue === "@default" ? "Стандартный набор" : "Выбор сохранён"}</span><nav><button type="button" className="ghostButton" disabled={selectedRuleValue === "@default" && (selectedRuleList.id !== "quic_compatibility" || !String(routingDraft.quic_domains || "").trim())} onClick={() => { updateRoutingDraft(selectedRuleList.key, "@default"); if (selectedRuleList.id === "quic_compatibility") updateRoutingDraft("quic_domains", ""); }}>По умолчанию</button></nav></footer>
-                {selectedRuleList.id === "quic_compatibility" ? <label className="mihomoCustomGames"><span><b>Дополнительные сайты</b><small>Домены без URL, по одному на строку. Ограничивается только UDP/443.</small></span><textarea rows={5} value={String(routingDraft.quic_domains || "")} spellCheck={false} placeholder={"example.com\nvideo.example.org"} onChange={event => updateRoutingDraft("quic_domains", event.target.value)} /></label> : <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Собственные правила Mihomo, по одному на строку. Они дополняют выбранные выше группы.</small></span><textarea rows={5} value={ruleExtraLines(selectedRuleList).join("\n")} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nIP-CIDR,203.0.113.0/24,DIRECT,no-resolve"} onChange={(event) => updateRuleExtras(selectedRuleList, event.target.value)} /></label>}
+                {selectedRuleList.id === "quic_compatibility" ? <label className="mihomoCustomGames"><span><b>Дополнительные сайты</b></span><textarea rows={5} value={String(routingDraft.quic_domains || "")} spellCheck={false} placeholder={"example.com\nvideo.example.org"} onChange={event => updateRoutingDraft("quic_domains", event.target.value)} /></label> : <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b></span><textarea rows={5} value={ruleExtraLines(selectedRuleList).join("\n")} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nIP-CIDR,203.0.113.0/24,DIRECT,no-resolve"} onChange={(event) => updateRuleExtras(selectedRuleList, event.target.value)} /></label>}
               </> : <div className="mihomoHint">Списки правил загружаются…</div>}
             </article>
           </section>
@@ -1686,18 +1684,18 @@ export function MihomoPage({
           {view === "routing" && <>
           <section className="mihomoSettingsBoard">
             <div className="mihomoSettingsSummary">
-              <div><small>РЕЖИМ</small><b>{routingDraft.mode === "global" ? "Global" : "Rule"}</b><span>маршрутизация трафика</span></div>
-              <div><small>СТРАТЕГИЯ</small><b>{routingDraft.strategy === "url-test" ? "Latency" : routingDraft.strategy === "select" ? "Manual" : "Fallback"}</b><span>выбор защищённого канала</span></div>
+              <div><small>РЕЖИМ</small><b>{routingDraft.mode === "global" ? "Global" : "Rule"}</b></div>
+              <div><small>СТРАТЕГИЯ</small><b>{routingDraft.strategy === "url-test" ? "Latency" : routingDraft.strategy === "select" ? "Manual" : "Fallback"}</b></div>
               <div><small>ПРЕСЕТЫ</small><b>{profilePresets.length}</b><span>{profilePresets.reduce((sum, item) => sum + item.components.length, 0)} каналов в шаблонах</span></div>
               <button type="button" className="primaryButton" disabled={!routingReadKnown} onClick={openPresetSettings}>Редактировать пресеты</button>
             </div>
             <div className="mihomoSettingsGrid">
-              <article><header><span>01</span><div><b>Поведение трафика</b><small>Базовый режим всех профилей</small></div></header><div className="mihomoRoutingFields">
+              <article><header><span>01</span><div><b>Поведение трафика</b></div></header><div className="mihomoRoutingFields">
                 <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
                 <label><span>Стратегия по умолчанию</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option><option value="load-balance">Балансировка каналов</option></select></label>
                 {routingDraft.strategy === "load-balance" && <BalanceStrategy value={routingDraft.load_balance_strategy} onChange={value => updateRoutingDraft("load_balance_strategy", value)}/>}
               </div></article>
-              <article><header><span>02</span><div><b>Проверка доступности</b><small>Health check защищённых каналов</small></div></header><div className="mihomoRoutingFields">
+              <article><header><span>02</span><div><b>Проверка доступности</b></div></header><div className="mihomoRoutingFields">
                 <label className="is-wide"><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
                 <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={10} max={3600} value={Number(routingDraft.interval || 30)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
                 <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
@@ -1708,8 +1706,8 @@ export function MihomoPage({
           </section>
 
           <section className="mihomoPresetCatalogSettings">
-            <header><div><p className="eyebrow">PROFILE BLUEPRINTS</p><h3>Шаблоны новых профилей</h3><small>Встроенные пресеты не заблокированы: их можно переименовать, изменить или удалить.</small></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Управлять</button></header>
-            <div>{profilePresets.map((preset, index) => <article key={preset.id}><span>{String(index + 1).padStart(2, "0")}</span><p><b>{preset.name}</b><small>{preset.description || "Без описания"}</small></p><em>{preset.components.length} каналов</em><i>{preset.strategy === "url-test" ? "по задержке" : preset.strategy === "select" ? "вручную" : "резерв"}</i></article>)}</div>
+            <header><div><h3>Шаблоны новых профилей</h3></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Управлять</button></header>
+            <div>{profilePresets.map((preset, index) => <article key={preset.id}><span>{String(index + 1).padStart(2, "0")}</span><p><b>{preset.name}</b></p><em>{preset.components.length} каналов</em><i>{preset.strategy === "url-test" ? "по задержке" : preset.strategy === "select" ? "вручную" : "резерв"}</i></article>)}</div>
           </section>
           </>}
 
@@ -1726,7 +1724,7 @@ export function MihomoPage({
               <div><p className="eyebrow">MODULE SETTINGS</p><h2>{editing.name}</h2></div>
               <button type="button" className="iconButton" aria-label="Закрыть настройки" onClick={() => void closeSettings()}>x</button>
             </header>
-            <p>{editing.description}</p>{editing.category === "transport" && <p>Здесь находятся общие параметры сервера. Параметры отдельного подключения доступны в профиле → Подключения.</p>}
+
             {editing.id === "transport-hysteria2" && <p className="mihomoHint">Обфускация: {settingsDraft.obfs ? "Salamander включён" : "выключена"}. Клиенты должны обновить подписку после изменения. Сохранение использует штатную операцию изменения серверного канала с проверкой и откатом.</p>}
             {settingsRevisionConflict && <p role="alert">{latestSettingsModule ? "Настройки компонента изменились. Ваш ввод сохранён; загрузите актуальные данные перед новой записью." : "Компонент больше не доступен. Ваш ввод сохранён."} <button type="button" disabled={!latestSettingsModule || Boolean(busy)} onClick={() => void reloadSettings()}>Загрузить актуальные настройки</button></p>}
             <div className="mihomoFields">
@@ -1748,7 +1746,7 @@ export function MihomoPage({
                   ) : (
                     <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: field.type === "number" ? Number(event.target.value) : event.target.value }))} />
                   )}
-                  {field.help && <small>{field.help}</small>}
+
                 </label>
               ))}
             </div>
@@ -1774,7 +1772,7 @@ export function MihomoPage({
                 <header><small>КОНФИГУРАЦИЯ</small><b>Параметры профиля</b></header>
                 <section className="mihomoDeviceBuilder">
                   <div className="mihomoCommonSettings">{profileDevices.filter((device) => device.scope === "common").slice(0, 1).map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>ALL</i><span><b>Параметры профиля</b></span></button>)}</div>
-                  <header><div><b>Устройства</b><small>Устройства определяются по HWID и приложению. Без HWID — общий профиль.</small></div></header>
+                  <header><div><b>Устройства</b></div></header>
                   <div>{profileDevices.filter((device) => device.scope !== "common").map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>{devicePlatformMeta(device).code}</i><span><b><DeviceClientBadge device={device} />{device.name}</b><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {deviceSystemLabel(device)}</small></span><em title="Удалить устройство" onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next.find((item) => item.scope === "common")?.id || next[0].id); }}>×</em></button>)}</div>
                   {!profileDevices.some((device) => device.scope !== "common") && <p className="mihomoConnectionEmpty">Подключите клиент с HWID по ссылке профиля для отдельного устройства.</p>}
                 </section>
@@ -1790,7 +1788,7 @@ export function MihomoPage({
                 const common = profileDevices.find(device => device.scope === "common")!;
                 setProfileStrategyTouched(Boolean(common.routing?.strategy)); setActiveDeviceId(common.id);
               } : undefined} />
-            {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
+            {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b></span></button>; })}</div></section>}
             {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
             {profileStep === 3 && <><ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue}/>
               <AdvancedRouting value={effectiveProfileRouting.structured_policy} inherited={!activeProfileDevice?.routing?.structured_policy || activeProfileDevice.routing.structured_policy === "@inherit"} connections={deviceConnections} onChange={value => setProfileRoutingValue("structured_policy", value)} reset={inheritStructuredPolicy}/>
@@ -1799,7 +1797,7 @@ export function MihomoPage({
             {activeProfileRouting.strategy === "load-balance" && <BalanceStrategy value={effectiveProfileRouting.load_balance_strategy} onChange={value => setProfileRoutingValue("load_balance_strategy", value)}/>}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
-            <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
+            <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b>{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b>{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
               <header><div><b>Пресеты</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => void closeProfile(() => setView("routing"))}>Настроить пресеты</button></header>
               <div>{profilePresets.filter((preset) => commonDevice || preset.components.every((item) => {
@@ -1817,12 +1815,12 @@ export function MihomoPage({
                 const missingTls = needsTls && !availableNetworkRoute("tls");
                 const missingModules = preset.components.filter((definition) => !modules.some((item) => item.id === definition.id && item.installed));
                 const unavailable = missingCdn || missingTls || missingModules.length > 0;
-                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : preset.description}</small></span></button>;
+                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : ""}</small></span></button>;
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">
               {!networkStatus && <p className="mihomoHint" role="status">Состояние маршрутов сети неизвестно. Обновите данные перед добавлением TLS/CDN-подключения. Ваш ввод сохранён.</p>}
-              <header><div><b>Подключения устройства</b><small>Каналы попадут только в подписку выбранного устройства. После создания проверьте TLS/CDN-подключения в разделе «Сеть».</small></div></header>
+              <header><div><b>Подключения устройства</b></div></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).map((module) => (
                   <button key={module.id} type="button" onClick={() => addProfileConnection(module)}>+ {module.id === "transport-reality" ? "Xray" : module.name}</button>
@@ -1880,7 +1878,6 @@ export function MihomoPage({
                 </div>
               </div>
             </section>
-                <aside className="mihomoProfileTechnicalNote">Настройки применяются к выбранному подключению. Порты общих серверов, подсети и серверная обфускация задаются в Компонентах. После сохранения обновите подписку на устройстве.</aside>
               </main>
             </div>
             <footer>
@@ -1901,9 +1898,9 @@ export function MihomoPage({
           return <article key={device.id}>
             <AccessReveal key={device.subscription}><Image src={device.qr} alt={`QR импорта ${device.name}`} width={240} height={240} unoptimized /></AccessReveal>
             <div><b>{device.name} · {device.scope === "common" ? "Универсальная подписка" : "YAML"}</b>
-              {device.scope !== "common" && <small>{device.manual ? "Общий YAML для всех устройств профиля, без привязки к HWID." : "Устройство привязано к HWID."}</small>}
-              <small>Добавьте ссылку как подписку или отсканируйте QR в приложении. {device.manual ? "Подписка сохранённого общего устройства выдаётся в формате YAML." : "Подписка выдаётся в формате YAML. Используйте приложение с поддержкой Mihomo/Clash YAML."} После изменения настроек обновите подписку.</small>
-              <small>Формат файла: {"YAML"}.</small>
+
+
+
               {verifiedClients.length ? <div><b>Проверенные приложения для этих подключений</b>{verifiedClients.map((client) => <p key={client.id}><a href={client.app_url} target="_blank" rel="noreferrer">{client.client_name} {client.client_version}</a> · {client.os} {client.os_version} · {client.core_name} {client.core_version}</p>)}</div> : <small>Для этих подключений пока нет проверенных приложений.</small>}
               <nav>
                 <button className="primaryButton" disabled={busy === `download:${createdProfile.id}`} onClick={() => void downloadConfig(latestCreatedProfile || createdProfile, latestDevice || device)}>Скачать YAML</button>
@@ -1917,7 +1914,7 @@ export function MihomoPage({
       {personalRuleDialog && <div className="mihomoDialogBackdrop mihomoPersonalRuleBackdrop" onClick={(event) => { if (event.target === event.currentTarget) void closePersonalRule(); }}>
         <form ref={personalRuleDialogRef} role="dialog" aria-modal="true" aria-label="Персональное правило" tabIndex={-1} className="mihomoDialog mihomoPersonalRuleDialog" onSubmit={savePersonalRule}>
           {personalRuleRevisionConflict && <p role="alert">{latestPersonalRule ? "Правило изменилось. Ваш ввод сохранён." : "Правило удалено. Ваш ввод сохранён."} <button type="button" disabled={!latestPersonalRule || Boolean(busy)} onClick={() => void reloadPersonalRule()}>Загрузить актуальные данные</button></p>}
-          <header><div><p className="eyebrow">PERSONAL RULE</p><h2>{personalRuleDialog === "new" ? "Новое персональное правило" : "Изменить персональное правило"}</h2><small>Правило появится отдельной иконкой в категории «Персональные» и будет доступно всем устройствам.</small></div><button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePersonalRule(); }}>×</button></header>
+          <header><div><h2>{personalRuleDialog === "new" ? "Новое персональное правило" : "Изменить персональное правило"}</h2></div><button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePersonalRule(); }}>×</button></header>
           <div className="mihomoPersonalRuleForm">
             <label><span>Код и название</span><div className="mihomoPersonalRuleFormRow"><input value={personalRuleDraft.code} maxLength={8} placeholder="GAME" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, code: event.target.value }))} required /><input value={personalRuleDraft.title} maxLength={80} placeholder="Например, Игровой трафик" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, title: event.target.value }))} required /></div></label>
             <label><span>Тип правила</span><select value={personalRuleDraft.kind} onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, kind: event.target.value as PersonalRule["kind"] }))}><option value="domain">Сайты / домены</option><option value="process">Приложения в TUN</option></select></label>
@@ -1932,11 +1929,11 @@ export function MihomoPage({
         <form ref={presetDialogRef} role="dialog" aria-modal="true" aria-label="Пресеты Mihomo" tabIndex={-1} className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
           {presetRevisionConflict && <p role="alert">Пресеты изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPresets()}>Загрузить актуальные данные</button></p>}
           <header>
-            <div><p className="eyebrow">PROFILE BLUEPRINTS</p><h2>Пресеты Mihomo</h2><small>Готовые схемы подключений для новых устройств и профилей</small></div>
+            <div><h2>Пресеты Mihomo</h2></div>
             <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span></div>
             <button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePresets(); }}>×</button>
           </header>
-          <div className="mihomoPresetIntro"><span>01</span><p><b>Каждый пресет — независимый шаблон.</b><small>Название отображается при создании профиля. Стратегия управляет выбором канала, а список ниже определяет состав подключений.</small></p></div>
+          <div className="mihomoPresetIntro"><span>01</span></div>
           <div className="mihomoPresetEditor">
             <aside className="mihomoPresetRail">
               <header><b>Пресеты</b><small>Выберите шаблон</small></header>
@@ -1954,7 +1951,7 @@ export function MihomoPage({
               <label className="mihomoPresetDescription"><small>Описание</small><input value={preset.description} placeholder="Когда использовать этот пресет" onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, description: event.target.value } : item))} /></label>
               <div className="mihomoPresetGroups">
                 {presetOptionGroups.map((group) => <section key={group.id}>
-                  <header><b>{group.title}</b><small>{group.note}</small></header>
+                  <header><b>{group.title}</b></header>
                   <div>{group.options.map((option) => {
                     const selected = preset.components.some((item) => item.id === option.id && (item.xray_protocol || "vless") === (option.xray_protocol || "vless") && Boolean(item.cdn) === Boolean(option.cdn) && Boolean(item.tls) === Boolean(option.tls) && String(item.transport || "") === String(option.transport || ""));
                     return <label key={`${option.id}-${option.xray_protocol || "vless"}-${option.cdn ? "cdn" : option.tls ? "tls" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;

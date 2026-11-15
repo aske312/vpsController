@@ -36,7 +36,7 @@ export function TelegramAlerts({ request, refreshKey, blocked = false }: { reque
     generation.current++;
     setBusy(true); setError(""); setNotice("");
     try {
-      if (test) { await request("/assistant/alerts/test", { method: "POST" }); setNotice("Тест добавлен в очередь. Статус доставки можно обновить."); }
+      if (test) { await request("/assistant/alerts/test", { method: "POST" }); setNotice("Тест добавлен в очередь."); }
       else { const value = await request<Status>("/assistant/alerts", { method: "PUT", body: JSON.stringify({ ...draft, expected_revision: status.revision }) }); editing.current = false; setStatus(value); setDraft(value.settings); setNotice("Настройки алертов сохранены."); }
     } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
   };
@@ -45,15 +45,15 @@ export function TelegramAlerts({ request, refreshKey, blocked = false }: { reque
     try { await load(); } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(status?.settings);
-  return <section className="noderaSettings noderaOwnerAlerts"><header className="noderaBlockHead"><h2>Уведомления владельцу</h2></header>
-    <p>Сбои, восстановление и новая загрузка VPS. Работают независимо от AI и диалога с ботом. Полную недоступность VPS можно обнаружить только после восстановления.</p>
+  return <div className="noderaOwnerAlerts">
+
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {draft && status && <><label className="noderaPermissionSwitch"><input type="checkbox" role="switch" checked={draft.enabled} disabled={busy || blocked} onChange={event => edit({ ...draft, enabled: event.target.checked })}/>Включить алерты</label>
       <label>Получатель<select value={draft.owner_id ?? ""} disabled={busy || blocked} onChange={event => edit({ ...draft, owner_id: event.target.value ? Number(event.target.value) : null })}><option value="">Выберите владельца</option>{status.owners.map(owner => <option key={owner.telegram_id} value={owner.telegram_id}>{owner.name || owner.telegram_id}</option>)}</select></label>
-      <small>Список использует сохранённые роли. Токен бота: {status.token_configured ? "настроен" : "не настроен"}.</small>
+      <p>Токен бота: {status.token_configured ? "настроен" : "не настроен"}</p>
       <div className="noderaPermissionList">{([['failures', 'Сбои'], ['recoveries', 'Восстановление'], ['boots', 'Загрузка VPS']] as const).map(([key, title]) => <label className="noderaPermissionSwitch" key={key}><input type="checkbox" role="switch" checked={draft[key]} disabled={busy || blocked} onChange={event => edit({ ...draft, [key]: event.target.checked })}/>{title}</label>)}</div>
       <p>В очереди: {status.pending}. {status.last_delivery ? `${deliveryNames[status.last_delivery.state] ?? status.last_delivery.state} · ${new Date(status.last_delivery.at * 1000).toLocaleString()}` : "Доставок пока нет"}</p>
       <div className="buttonRow"><button type="button" disabled={busy || blocked || !dirty} onClick={() => void act()}>Сохранить алерты</button><button type="button" disabled={busy || blocked || dirty || !status.settings.enabled} onClick={() => void act(true)}>Тест доставки</button><button type="button" disabled={busy} onClick={() => void refresh()}>{dirty ? "Отменить правки и обновить" : "Обновить статус"}</button></div>
     </>}
-  </section>;
+  </div>;
 }

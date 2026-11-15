@@ -33,7 +33,7 @@ export function ApplicationView({ application, services, applicationVersion, app
           <div className="applicationSummaryCopy">
             <p className="eyebrow">APPLICATION CONTROL</p>
             <h1>Приложение</h1>
-            <p>Фактическое состояние API и web-службы, установленная ветка, доступ панели и безопасные операции обновления.</p>
+
           </div>
           <div className="applicationSummaryStats">
             <span><small>API</small><strong>{apiRuntime.label}</strong><em>autostart {autostart}</em></span>
@@ -83,10 +83,10 @@ export function ApplicationView({ application, services, applicationVersion, app
 
 
             <div className="applicationPrimaryActions">
-              <button onClick={() => void runApplicationAction("restart")} disabled={mutationBlocked}><span>RESTART</span><strong>Перезапустить</strong><small>Панель и API без reboot VPS</small></button>
-              <button onClick={() => void runApplicationAction("update")} disabled={mutationBlocked}><span>UPDATE</span><strong>Обновить</strong><small>Установить проверенный релиз</small></button>
-              <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><span>NETWORK</span><strong>Проверить сеть</strong><small>Internet и все установленные протоколы</small></button>
-              <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><span>VERIFY</span><strong>Целостность</strong><small>Файлы, права и конфигурация</small></button>
+              <button onClick={() => void runApplicationAction("restart")} disabled={mutationBlocked}><span>RESTART</span><strong>Перезапустить</strong></button>
+              <button onClick={() => void runApplicationAction("update")} disabled={mutationBlocked}><span>UPDATE</span><strong>Обновить</strong></button>
+              <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><span>NETWORK</span><strong>Проверить сеть</strong></button>
+              <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><span>VERIFY</span><strong>Целостность</strong></button>
             </div>
 
             <div className="applicationSecondaryActions">
@@ -130,11 +130,11 @@ export function ApplicationView({ application, services, applicationVersion, app
             <header><div><p className="eyebrow">SYSTEM LIFECYCLE</p><h2>VPS и системные пакеты</h2></div></header>
             <div className="applicationLifecycleActions">
               <button onClick={() => void runApplicationAction("safe-update")} disabled={mutationBlocked}><strong>Обновить сервер</strong><small>{updates?.available ? `${updates.available} доступных обновлений · точка восстановления · без перезагрузки` : "Все пакеты ОС · точка восстановления · без перезагрузки"}</small></button>
-              <button onClick={() => void runApplicationAction("reboot")} disabled={mutationBlocked}><strong>Перезагрузить VPS</strong><small>Корректно завершить службы и reboot</small></button>
+              <button onClick={() => void runApplicationAction("reboot")} disabled={mutationBlocked}><strong>Перезагрузить VPS</strong></button>
               <button className="danger" onClick={() => void runApplicationAction("poweroff")} disabled={mutationBlocked}><strong>Выключить VPS</strong><small>Повторный запуск потребуется у провайдера</small></button>
             </div>
             <div className="applicationRecoveryState">
-              <span><strong>{application?.recovery?.available ? "Точка восстановления готова" : "Точка будет создана автоматически"}</strong><small>Хранятся три зашифрованные копии приложения, личных данных и конфигурации. Это не снимок диска и не откат пакетов Debian.</small></span>
+              <span><strong>{application?.recovery?.available ? "Точка восстановления готова" : "Точка будет создана автоматически"}</strong></span>
               {application?.recovery?.report_available && <button onClick={() => void downloadUpdateReport()} disabled={busy}>Скачать отчёт и логи</button>}
             </div>
           </section>

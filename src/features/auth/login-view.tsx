@@ -19,15 +19,15 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy
           <div className="loginHeroCopy">
             <p className="loginKicker"><span /> CONTROL &amp; MANAGEMENT</p>
             <h1>Контроль системы.<br /><em>Управление в одном месте.</em></h1>
-            <p>Единый интерфейс для контроля состояния приложения, управления сервисами и конфигурацией сервера.</p>
+
           </div>
-          <div className="loginHeroStatus"><span className="loginPulse" /><div><strong>CONTROL NODE</strong><small>Защищённый административный контур</small></div></div>
+          <div className="loginHeroStatus"><span className="loginPulse" /><div><strong>CONTROL NODE</strong></div></div>
         </aside>
 
         <div className="loginPanelWrap">
           <form className="loginPanel" onSubmit={login} aria-busy={disabled}>
             <header className="loginPanelHeader"><span className="loginLock"><LockIcon /></span><div><p>MANAGEMENT ACCESS</p><h2>Вход в панель управления</h2></div></header>
-            <p className="loginPanelCopy">Авторизуйтесь для контроля и управления приложением.</p>
+
             <div className="loginFields">
               <label className="loginField"><span>Логин</span><div className="loginInputWrap"><UserIcon /><input type="text" disabled={disabled} value={loginUser} onChange={(event) => setLoginUser(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus required placeholder="admin" /></div></label>
               <label className="loginField"><span>Пароль</span><div className="loginInputWrap loginPasswordWrap"><KeyIcon /><input type={loginPasswordVisible ? "text" : "password"} disabled={disabled} value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" required placeholder="Введите пароль" /><button type="button" className="loginVisibility" disabled={disabled} onClick={() => setLoginPasswordVisible((value) => !value)} aria-label={loginPasswordVisible ? "Скрыть пароль" : "Показать пароль"} aria-pressed={loginPasswordVisible}>{loginPasswordVisible ? <EyeOffIcon /> : <EyeIcon />}</button></div></label>

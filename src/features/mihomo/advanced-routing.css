@@ -1,22 +1,37 @@
-.mihomoStructuredPolicy { display: grid; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 18px; min-width: 0; }
-.mihomoStructuredPolicy header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-.mihomoStructuredPolicy header div, .mihomoStructuredPolicy label { display: grid; gap: 6px; min-width: 0; }
-.mihomoStructuredPolicy small, .mihomoStructuredPolicy p { font-size: 12px; line-height: 1.6; opacity: .75; }
+.mihomoStructuredPolicy { container: routing-policy / inline-size; display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; min-width: 0; width: 100%; box-sizing: border-box; }
+.mihomoStructuredPolicy > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.mihomoStructuredPolicy .mihomoPolicyHeaderActions { display: flex; align-items: center; gap: 8px; }
+.mihomoPolicyInherited { color: var(--muted); font-size: 11px; }
+.mihomoStructuredPolicy .mihomoPolicyRule > label,.mihomoStructuredPolicy .mihomoPolicyFields > label { display: grid; gap: 6px; min-width: 0; }
 .mihomoStructuredPolicy input:not([type="checkbox"]), .mihomoStructuredPolicy select { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: inherit; }
 .mihomoStructuredPolicy button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.mihomoPolicyRule { display: grid; grid-template-columns: 24px minmax(130px, 1fr) minmax(130px, 1.3fr) minmax(120px, 1fr) auto; gap: 10px; align-items: center; }
-.mihomoPolicyGroup { padding: 14px; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 12px; }
-.mihomoPolicyFields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
+.mihomoPolicyRule { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; min-width: 0; }
+.mihomoPolicyRule > span { align-self: center; color: var(--muted); font-size: 12px; }
+.mihomoPolicyGroup { padding: 12px; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 10px; min-width: 0; }
+.mihomoPolicyFields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 10px; align-items: end; }
 .mihomoPolicyMembers { display: flex; flex-wrap: wrap; gap: 12px; }
 .mihomoStructuredPolicy .mihomoPolicyMembers label { display: flex; align-items: center; }
 .mihomoStructuredPolicy .mihomoPolicyMembers input { appearance: none; width: 32px; min-width: 32px; height: 18px; min-height: 18px; padding: 0; margin: 0; border: 0; border-radius: 12px; background: var(--dim); flex-shrink: 0; position: relative; }
 .mihomoPolicyMembers input::before { content: ""; display: block; width: 12px; height: 12px; background: var(--text); border-radius: 50%; position: absolute; top: 3px; left: 3px; }
-.mihomoPolicyMembers input:checked { background: var(--green); }
-.mihomoPolicyMembers input:checked::before { left: 17px; }
+.mihomoStructuredPolicy .mihomoPolicyMembers input:checked { background: var(--green); }
+.mihomoStructuredPolicy .mihomoPolicyMembers input:checked::before { left: 17px; transform: none; }
 .mihomoPolicyMembers input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .mihomoPolicyOrder { display: grid; gap: 6px; padding-left: 18px; }
 .mihomoPolicyOrder li { display: flex; gap: 6px; align-items: center; }
 .mihomoPolicyOrder li span { flex: 1; overflow-wrap: anywhere; }
-.mihomoPolicyActions { display: flex; gap: 4px; }
+.mihomoPolicyActions { display: flex; gap: 4px; align-self: end; }
+.mihomoStructuredPolicy .mihomoPolicyActions button { padding: 6px; min-width: 30px; min-height: 32px; }
 .mihomoFinalRuleOrder { max-height: 420px; overflow: auto; padding-left: 36px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
-@media (max-width: 760px) { .mihomoPolicyRule { grid-template-columns: 24px minmax(0, 1fr); align-items: start; padding-block: 12px; border-bottom: 1px solid var(--line); } .mihomoPolicyRule label, .mihomoPolicyActions { grid-column: 2; } .mihomoStructuredPolicy { padding: 12px; } }
+.mihomoProfileDialog .mihomoStructuredPolicy { padding: 14px; border-radius: 12px; background: var(--panel-inset); }
+@container routing-policy (max-width: 700px) {
+  .mihomoPolicyRule { grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr); align-items: end; padding-block: 10px; border-bottom: 1px solid var(--line); }
+  .mihomoPolicyRule > span { grid-column: 1; grid-row: 1 / 3; align-self: start; padding-top: 24px; }
+  .mihomoPolicyRule > label:nth-of-type(3) { grid-column: 2; }
+  .mihomoPolicyActions { grid-column: 3; justify-content: end; }
+}
+@container routing-policy (max-width: 440px) {
+  .mihomoPolicyRule { grid-template-columns: 18px minmax(0, 1fr); }
+  .mihomoPolicyRule > label,.mihomoPolicyRule > label:nth-of-type(3),.mihomoPolicyActions { grid-column: 2; }
+  .mihomoPolicyActions { justify-content: start; }
+  .mihomoPolicyFields { grid-template-columns: minmax(0, 1fr); }
+}

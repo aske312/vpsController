@@ -24,7 +24,7 @@ export function RelayLossResult({ result, source, stale = false }: { result?: Re
       <div><dt>Локальные отбрасывания Agent / VPS</dt><dd>{result.agent_local_drops} / {result.origin_local_drops}</dd></div>
       <div><dt>RTT Relay ↔ VPS</dt><dd>{result.relay_vps_rtt_ms ?? "—"} мс</dd></div>
     </dl>}
-    <p>100 пакетов по 1200 байт без повторных отправок. Это отдельный диагностический UDP-порт между теми же узлами; медиатест протокола показан отдельно.</p>
+
   </section>;
 }
 

@@ -604,6 +604,20 @@ test('access exposes all five roles, owner permissions remain fixed, and persona
 });
 
 
+test('Telegram alerts open only in a separate Access modal and closing it does not save account settings', async () => {
+  const view = mount(fixture()); view.render(); await Promise.resolve();
+  nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
+  const alerts = tree => nodes(tree, n => typeof n.type === 'function' && n.type.name === 'TelegramAlerts');
+  assert.equal(alerts(view.render()).length, 0);
+  nodes(view.render(), n => n.type === 'button' && n.props.children === 'Настроить алерты')[0].node.props.onClick();
+  let tree = view.render();
+  const dialog = nodes(tree, n => typeof n.type === 'function' && n.props.title === 'Алерты Telegram')[0].node;
+  assert.equal(alerts(dialog).length, 1);
+  dialog.props.close(); tree = view.render();
+  assert.equal(alerts(tree).length, 0);
+  assert.equal(view.writes.length, 0);
+});
+
 test('role modal stages edits across roles, cancels without changing settings, and applies through the page save', async () => {
   const status=fixture(),view=mount(status);view.render();await Promise.resolve();
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();

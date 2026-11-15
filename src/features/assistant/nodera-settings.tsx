@@ -6,7 +6,7 @@ import { TelegramAlerts } from "./telegram-alerts";
 import { enabledTelegramTools } from "./assistant-state";
 import { type ProviderConnection } from "./provider-connection";
 import { dollars, latestObservation, quotaFacts, quotaText, queueProviderCatalog, type ProviderObservation, type ProviderCatalog } from "./provider-details";
-import { accountProducts, productNames, type Product, fixedRoles, userPermissions, permissionGroups, accountPermissions, accountRole, permissionNames, roleDefaults, roleNames, type Role, type Permission, moduleState, type Draft, type McpId, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
+import { accountProducts, productNames, type Product, fixedRoles, userPermissions, permissionGroups, accountPermissions, accountRole, permissionNames, roleDefaults, roleNames, type Role, type Permission, moduleState, type Draft, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
 
 export const panels = [
   { id: "chat", label: "Чат", icon: "chat" },
@@ -35,23 +35,11 @@ type Props = {
   check: (id: ModuleId) => Promise<void>;
 };
 
-const moduleDescriptions: Record<McpId, string> = {
-  "telegram-mcp": "tg-mcp-guarded: чтение и действия с отдельными правами пользователя и подтверждением изменений.",
-  "vps-controller-mcp": "Состояние сервера, службы, системные журналы и диагностика приложения.",
-  "mihomo-mcp": "Профили, подключения, модули, DNS и маршрутизация Mihomo. Изменения — с подтверждением.",
-};
 const blankAccount = (): AccountDraft => ({
   role: "guest", products: [], permission_overrides: {}, telegram_id: 0, name: "", bot_access: false, bot_chat_access: false, address_as: "",
   telegram_access: false, vps_access: false, excluded_dialogs: [],
   excluded_dialogs_text: "", session: null, session_configured: false,
 });
-const roleDescriptions: Record<Role, string> = {
-  owner: "Полный доступ, включая управление ролями и правами.",
-  administrator: "Управление продуктами, сервером и диагностикой. Без изменения ролей.",
-  moderator: "Настраиваемые права на продукты и обслуживание сервера.",
-  user: "AI и своя подписка. Без управления общими лимитами и сервисами.",
-  guest: "Только команда /id. Без доступа к AI и подпискам.",
-};
 
 function PermissionGroupNav({ selected, select }: { selected: string; select: (value: string) => void }) {
   return <nav className="noderaPermissionNav" aria-label="Группы разрешений">{permissionGroups.map(group => <button type="button" key={group.title} aria-pressed={selected === group.title} onClick={() => select(group.title)}>{group.title}</button>)}</nav>;
@@ -68,6 +56,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const [personalTab, setPersonalTab] = useState<"character" | "behavior" | "memory">("character");
   const [roleEdit, setRoleEdit] = useState<Role>("user");
   const [rolePolicy, setRolePolicy] = useState<Draft["role_permissions"]>();
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [roleFilter, setRoleFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [permissionSearch, setPermissionSearch] = useState("");
   const [roleGroup, setRoleGroup] = useState(permissionGroups[0].title);
@@ -299,7 +288,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
           </div>
         </article>;
       })}</div>}
-    {!!providers.length && <p className="mcpFieldHint">Запросы и токены — учёт панели. Квота и баланс — последние данные провайдера; «—» означает, что данных нет. Подробности квоты — в настройках API.</p>}
+
     {providerEdit && <SettingsDialog title="Подключение API" close={() => setProviderEdit(undefined)}
       submit={() => storeProvider({ ...providerEdit, name: providerEdit.name.trim() || new URL(providerEdit.provider_url).hostname })} blocked={blocked}>
       <label>Название<input value={providerEdit.name} maxLength={80} onChange={event => setProviderEdit({ ...providerEdit, name: event.target.value })}/></label>
@@ -323,7 +312,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const tokenPresent = Boolean(draft.bot_token ?? draft.bot_token_configured);
   const telegram = <section className="noderaSettings" aria-label="Telegram">
     <header className="noderaBlockHead"><h2>Telegram</h2><span className="mcpBadge">{moduleState(status, "nodera-bot")}</span></header>
-    <p>В Telegram доступны кнопки управления и выбор модели. Обычные сообщения получает AI по умолчанию; команды сервера доступны администраторам.</p>
+
     <fieldset className="noderaTelegram" disabled={botLocked}>
       <div className="noderaCredentials">
         <fieldset disabled={botCredentialsLocked} className="noderaBotToken">
@@ -336,7 +325,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         {botCheck && !botCheck.ok && <p className="mcpCheck error" role="status">{botCheck.text}</p>}
         {status.legacy_bot.active && <p className="mcpNotice">Для запуска остановите прежнего Telegram-бота.</p>}
       </div>
-      <small>Роли и настройки пользователей применяются без остановки бота. При изменении токена работающий бот перезапустится после сохранения.</small>
+
     </fieldset>
   </section>;
 
@@ -350,7 +339,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         return <article key={item.id} className={`mcpModule ${enabled ? "isInstalled" : ""}`}>
           <header><div className="mcpModuleIdentity"><span className="mcpModuleIcon"><ChatIcon name={item.id === "telegram-mcp" ? "telegram" : "module"}/></span>
             <strong>{item.name}</strong></div></header>
-          <p>{item.description ?? moduleDescriptions[item.id]}</p>
+
           <p className="mcpFieldHint" aria-label={`Количество инструментов ${item.name}`}>Инструментов: {(status.tools[item.id] ?? []).length}
             {item.id === "telegram-mcp" && actor && <> · разрешено пользователю: {telegramAllowed ? enabledTelegramTools(selectedAccount).filter(name => (status.tools[item.id] ?? []).includes(name)).length : 0}</>}
           </p>
@@ -389,7 +378,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
           <label className="mcpToggle"><input type="checkbox" checked={draft.memory_enabled} onChange={event => patch({ memory_enabled: event.target.checked })}/>Сохранять диалоги</label>
           {draft.memory_enabled && <><label>Срок хранения, дни<input type="number" min={1} max={90} value={draft.memory_days}
             onChange={event => patch({ memory_days: Number(event.target.value) })}/></label>
-            <small>От последнего сообщения в диалоге.</small></>}
+            </>}
         </div>
       </div>
       <label className="noderaInstructions">Дополнительные инструкции<textarea value={draft.assistant_instructions} maxLength={4000} rows={5}
@@ -401,25 +390,25 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     <div className="noderaToolsList">
       {([{ id: "web", name: "Интернет", description: "Поиск и чтение источников", enabled: draft.web_enabled ?? true, available: status.web_tools, change: () => patch({ web_enabled: !draft.web_enabled }), settings: () => setInternetOpen(true) },
         { id: "memory", name: "Персонализация", description: "Характер, память и контекст собеседника", enabled: draft.personalization_enabled ?? true, available: status.context_tools, change: () => patch({ personalization_enabled: !draft.personalization_enabled }), settings: () => { setContextActor(actor); setContextOpen(true); } }]).map(tool => <div className="noderaToolRow" key={tool.id}>
-        <span><strong>{tool.name}</strong><small>{tool.description}{!tool.available && " · обновите Nodera"}</small></span>
+        <span><strong>{tool.name}</strong>{!tool.available && <small>Обновите Nodera</small>}</span>
         <button type="button" role="switch" className="noderaAISwitch" aria-label={tool.name} aria-checked={tool.enabled} disabled={blocked || !tool.available} onClick={tool.change}><span className="noderaSwitchTrack"><span/></span></button>
         <button type="button" className="mcpIconButton" aria-label={`Настроить ${tool.name}`} title="Настроить" disabled={blocked || !tool.available || contextBusy} onClick={tool.settings}><ChatIcon name="gear"/></button>
       </div>)}
     </div>
     {internetOpen && <SettingsDialog title="Интернет" close={() => setInternetOpen(false)}>
-      <p>Поиск, чтение страниц и сопоставление источников. Парсинг извлекает структуру страницы без JavaScript и входа на сайт.</p>
-      <label className="noderaPermissionSwitch"><span>Парсинг страниц<small>Заголовки, ссылки, таблицы и метаданные</small></span><input type="checkbox" role="switch" aria-label="Парсинг страниц" checked={draft.web_extract_enabled ?? true} disabled={blocked} onChange={event => patch({ web_extract_enabled: event.target.checked })}/></label>
+
+      <label className="noderaPermissionSwitch"><span>Парсинг страниц</span><input type="checkbox" role="switch" aria-label="Парсинг страниц" checked={draft.web_extract_enabled ?? true} disabled={blocked} onChange={event => patch({ web_extract_enabled: event.target.checked })}/></label>
       <label>Источников для исследования<select value={draft.web_max_sources ?? 3} disabled={blocked} onChange={event => patch({ web_max_sources: Number(event.target.value) })}>{[1,2,3,4,5].map(value => <option value={value} key={value}>{value}</option>)}</select></label>
       <label>Лимит чтения страницы<select value={draft.web_read_chars ?? 14000} disabled={blocked} onChange={event => patch({ web_read_chars: Number(event.target.value) })}>{[2000,6000,14000,20000].map(value => <option value={value} key={value}>{value.toLocaleString("ru-RU")} символов</option>)}</select></label>
       <label>Предпочитаемые сайты<input placeholder="example.com, docs.example.org" value={sitesText} disabled={blocked} onChange={event => { setSitesText(event.target.value); patch({ web_domains: event.target.value.split(",").map(value => value.trim()).filter(Boolean) }); }}/></label>
-      <small>До 8 доменов. Пусто — весь интернет. Ассистент может уточнять область поиска.</small>
-      <small>Чтение по теме возвращает релевантные фрагменты. Страницы и ссылки проверяются перед загрузкой; локальные адреса недоступны. Новые возможности требуют обновления Nodera.</small>
+
+
     </SettingsDialog>}
     {contextOpen && <SettingsDialog title="Персонализация" wide close={() => setContextOpen(false)}>
       <nav className="noderaDialogTabs" aria-label="Разделы персонализации">{([{id: "character", label: "Характер"}, {id: "behavior", label: "Общение"}, {id: "memory", label: "Память пользователей"}] as const).map(tab => <button type="button" key={tab.id} className="ghostButton" aria-pressed={personalTab === tab.id} onClick={() => setPersonalTab(tab.id)}>{tab.label}</button>)}</nav>
-      {personalTab === "character" && <section className="noderaPersonalSection"><h3>Персонаж Nodera</h3><p>Общий характер ассистента: как она общается, что ценит и как проявляет себя. Настройки действуют для всех собеседников.</p><label>Характер Nodera<textarea rows={8} maxLength={2000} value={draft.assistant_character ?? ""} disabled={blocked} onChange={event => patch({ assistant_character: event.target.value })}/></label><small>Изменения сохраняются общей кнопкой «Сохранить» в разделе.</small></section>}
-      {personalTab === "behavior" && <section className="noderaPersonalSection">{behavior}<small>Манера общения и срок временной памяти. Изменения сохраняются кнопкой «Сохранить» в разделе.</small></section>}
-      {personalTab === "memory" && <section className="noderaPersonalSection"><h3>Личная память собеседника</h3><p>Сведения каждого пользователя хранятся отдельно. Добавление и удаление фактов применяются сразу.</p>
+      {personalTab === "character" && <section className="noderaPersonalSection"><h3>Персонаж Nodera</h3><label>Характер Nodera<textarea rows={8} maxLength={2000} value={draft.assistant_character ?? ""} disabled={blocked} onChange={event => patch({ assistant_character: event.target.value })}/></label></section>}
+      {personalTab === "behavior" && <section className="noderaPersonalSection">{behavior}</section>}
+      {personalTab === "memory" && <section className="noderaPersonalSection"><h3>Личная память собеседника</h3>
       {contextData?.cache && <p className="mcpFieldHint">Кеш персонализации: {(contextData.cache.used_bytes / 1024 / 1024).toFixed(1)} МБ / 5 ГБ. Временный контекст — {draft.memory_days ?? 30} дней; важные сведения хранятся до удаления.</p>}
       <label>Собеседник<select value={contextActor} disabled={contextBusy} onChange={event => setContextActor(event.target.value)}><option value="">Администратор панели</option>{draft.accounts.map(account => <option key={account.telegram_id} value={String(account.telegram_id)}>{account.name || account.telegram_id}</option>)}</select></label>
       {contextError && <p role="alert">{contextError}</p>}
@@ -471,7 +460,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         setUserEdit(undefined);
         setUserSection("profile"); setPermissionSearch("");
       }}>
-      <div className="noderaUserSummary"><strong>{account.name || "Новый пользователь"}</strong><span>{account.telegram_id || "Telegram ID не указан"} · {roleNames[accountRole(account)]}</span><small>Изменения применяются после сохранения раздела. Останавливать AI и инструменты не нужно.</small></div>
+      <div className="noderaUserSummary"><strong>{account.name || "Новый пользователь"}</strong><span>{account.telegram_id || "Telegram ID не указан"} · {roleNames[accountRole(account)]}</span></div>
       <div className="noderaUserEditor"><nav className="noderaUserNav" aria-label="Настройки пользователя">{[{id:"profile",label:"Профиль"},{id:"access",label:"Роль и продукты"},{id:"permissions",label:"Личные права"},{id:"telegram",label:"Telegram"},{id:"info",label:"Сведения"}].map(item => <button type="button" key={item.id} aria-pressed={userSection === item.id} onClick={() => { setUserSection(item.id); setPermissionSearch(""); }}>{item.label}</button>)}</nav><div className="noderaUserContent">
       <section className="noderaUserSection" hidden={userSection !== "profile"}>
       {userEdit.index < 0 && !userEdit.observed && bot?.installed && status.settings.bot_token_configured && <div className="noderaBar">
@@ -481,14 +470,14 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </div>}
       <label>Telegram ID<input type="number" min={1} max={2 ** 52} required readOnly={userEdit.index >= 0 || userEdit.observed} value={account.telegram_id || ""} onChange={event => editAccount({ telegram_id: Number(event.target.value) })}/></label>
       <label>Имя в таблице<input value={account.name} maxLength={80} onChange={event => editAccount({ name: event.target.value })}/></label>
-      <small>Учётную запись можно добавить вручную по Telegram ID или выбрать из контактов бота. Роль привязана к ID, имя и username не выдают права.</small>
+
       </section><section className="noderaUserSection" hidden={userSection !== "access"}>
       <h3>Роль пользователя</h3>
-      <div className="noderaAccountRoles">{(Object.keys(roleNames) as Role[]).map(role => <button type="button" key={role} aria-pressed={accountRole(account) === role} disabled={blocked} onClick={() => accountRole(account) !== role && editAccount({ role, products: role === "guest" ? [] : ["owner", "administrator"].includes(role) ? ["assistant", "mihomo"] : accountProducts(account).length ? accountProducts(account) : ["assistant"], permission_overrides: {} })}><strong>{roleNames[role]}</strong><small>{roleDescriptions[role]}</small></button>)}</div>
+      <div className="noderaAccountRoles">{(Object.keys(roleNames) as Role[]).map(role => <button type="button" key={role} aria-pressed={accountRole(account) === role} disabled={blocked} onClick={() => accountRole(account) !== role && editAccount({ role, products: role === "guest" ? [] : ["owner", "administrator"].includes(role) ? ["assistant", "mihomo"] : accountProducts(account).length ? accountProducts(account) : ["assistant"], permission_overrides: {} })}><strong>{roleNames[role]}</strong></button>)}</div>
       <small>При смене роли личные исключения сбрасываются. Права роли настраиваются в разделе «Роли и права».</small>
-      <fieldset className="noderaProducts"><legend>Доступ к продуктам</legend>{(Object.keys(productNames) as Product[]).map(product => <label className="noderaPermissionSwitch" key={product}><span>{productNames[product]}</span><input type="checkbox" role="switch" aria-label={productNames[product]} checked={accountProducts(account).includes(product)} disabled={blocked || fixedRoles.includes(accountRole(account))} onChange={event => { const products = new Set(accountProducts(account)); if (event.target.checked) products.add(product); else products.delete(product); editAccount({ products: [...products] }); }}/></label>)}<small>AI — общение с моделью; Mihomo — управление своей подпиской. Telegram служит каналом доступа. Для Mihomo выберите привязанную подписку ниже; её срок и квота настраиваются в самом Mihomo. Гостю доступна только /id; владелец и администратор имеют доступ к обоим продуктам.</small></fieldset>
+      <fieldset className="noderaProducts"><legend>Доступ к продуктам</legend>{(Object.keys(productNames) as Product[]).map(product => <label className="noderaPermissionSwitch" key={product}><span>{productNames[product]}</span><input type="checkbox" role="switch" aria-label={productNames[product]} checked={accountProducts(account).includes(product)} disabled={blocked || fixedRoles.includes(accountRole(account))} onChange={event => { const products = new Set(accountProducts(account)); if (event.target.checked) products.add(product); else products.delete(product); editAccount({ products: [...products] }); }}/></label>)}</fieldset>
       </section><section className="noderaUserSection" hidden={userSection !== "permissions"}>
-      <h3>Личные права · {Object.keys(account.permission_overrides ?? {}).length} исключений</h3><p>Основа — роль «{roleNames[accountRole(account)]}». {fixedRoles.includes(accountRole(account)) ? "Её разрешения закреплены политикой доступа. Для личной настройки прав выберите роль модератора или пользователя в разделе «Роль и продукты»." : "Здесь можно изменить отдельные разрешения для этого пользователя."}</p>
+      <h3>Личные права · {Object.keys(account.permission_overrides ?? {}).length} исключений</h3>
         <button type="button" className="ghostButton" disabled={blocked || fixedRoles.includes(accountRole(account))} onClick={() => editAccount({ role: accountRole(account), permission_overrides: {} })}>Использовать права роли</button>
         <label>Поиск разрешения<input type="search" value={permissionSearch} onChange={event => setPermissionSearch(event.target.value)}/></label>
         <PermissionGroupNav selected={userPermissionGroup} select={setUserPermissionGroup}/>
@@ -503,7 +492,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         <option value="">Без привязки</option>{subscriptions.items.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
         {account.mihomo_profile_id && !subscriptions.items.some(profile => profile.id === account.mihomo_profile_id) && <option value={account.mihomo_profile_id}>{account.mihomo_profile_id} · не подтверждена</option>}
       </select></label>
-      <small>{subscriptions.error ?? "Пользователь сможет настраивать только эту подписку и её устройства. Лимиты изменяет администратор."}</small>
+      {subscriptions.error && <small role="alert">{subscriptions.error}</small>}
       </section><section className="noderaUserSection" hidden={userSection !== "info"}>
       {(() => {
         const contact = contactsById.get(account.telegram_id);
@@ -517,7 +506,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       {accountGrants.has("telegram_read") && <>
         <Secret label="Telegram-сессия" configured={account.session_configured} value={account.session} onChange={session => editAccount({ session })}/>
         <label>Исключённые диалоги<input value={account.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => editAccount({ excluded_dialogs_text: event.target.value })}/></label>
-        <p className="mcpFieldHint">Инструменты Telegram включаются отдельно для этого пользователя. Новые возможности применяются в AI-agent 1.17 и новее. Исключения действуют и при расширенном доступе.</p>
+
         {(["read", "actions"] as const).map(profile => <details className="noderaPermissionOverrides" key={profile}>
           <summary>{profile === "read" ? "Чтение, поиск и вложения" : "Действия и пакетные операции"} · {(draft.telegram_tool_catalog ?? []).filter(tool => tool.profile === profile && enabledTelegramTools(account).includes(tool.name)).length} включено</summary>
           <div className="noderaPermissionGrid">{(draft.telegram_tool_catalog ?? []).filter(tool => tool.profile === profile).map(tool => <label className="noderaPermissionSwitch" key={tool.name} title={tool.name}><span>{tool.title}</span>
@@ -546,15 +535,15 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   })).filter(group => group.items.length);
   const closeRoles = () => { setRolePolicy(undefined); setPermissionSearch(""); };
   const roleSettings = <section className="noderaSettings" aria-label="Роли и права"><header className="noderaBlockHead">
-    <div><h2>Роли и права</h2><p className="mcpFieldHint">Права пяти ролей. Личные исключения — в карточке пользователя.</p></div>
+    <div><h2>Роли и права</h2></div>
     <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setRolePolicy({ ...draft.role_permissions }); setPermissionSearch(""); setRoleFilter("all"); }}><ChatIcon name="gear"/>Настроить роли</button>
     </header>
     {rolePolicy && <SettingsDialog title="Роли и права" wide close={closeRoles} blocked={blocked} submit={() => { patch({ role_permissions: rolePolicy }); closeRoles(); }}>
       <nav className="noderaRolePicker" aria-label="Роли">{(Object.keys(roleNames) as Role[]).map(role => <button type="button" key={role} aria-label={`Роль: ${roleNames[role]}`} aria-pressed={roleEdit === role} onClick={() => { setRoleEdit(role); setPermissionSearch(""); setRoleFilter("all"); }}>
         <strong>{roleNames[role]}</strong><small>Пользователей: {draft.accounts.filter(item => accountRole(item) === role).length}</small>
       </button>)}</nav>
-      <header className="noderaRoleSummary"><div><h3>{roleNames[roleEdit]}</h3><p>{roleDescriptions[roleEdit]}</p></div><span className="noderaTag">Разрешено: {roleGrants.size} из {Object.keys(permissionNames).length}</span></header>
-      <p className="mcpFieldHint">{fixedRoles.includes(roleEdit) ? "Права закреплены политикой этой роли. Для настройки разрешений выберите модератора или пользователя." : roleEdit === "user" ? "Можно настроить доступ к AI и своей подписке. Административные права этой роли недоступны." : "Настройте разрешения для всех модераторов. Управление ролями доступно только владельцу."}</p>
+      <header className="noderaRoleSummary"><div><h3>{roleNames[roleEdit]}</h3>{fixedRoles.includes(roleEdit) && <span className="noderaTag">Закреплённая роль</span>}</div><span className="noderaTag">Разрешено: {roleGrants.size} из {Object.keys(permissionNames).length}</span></header>
+
       <div className="noderaRoleToolbar">
         <label>Поиск по всем разрешениям роли<input type="search" value={permissionSearch} onChange={event => setPermissionSearch(event.target.value)} placeholder="Название разрешения"/></label>
         <label>Показать<select value={roleFilter} onChange={event => setRoleFilter(event.target.value as typeof roleFilter)}><option value="all">Все разрешения</option><option value="enabled">Разрешённые</option><option value="disabled">Запрещённые</option></select></label>
@@ -564,16 +553,19 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </button>)}</nav><div className="noderaRolePermissionList">
         {matchingRoleGroups.length ? matchingRoleGroups.map(group => <section className="noderaPermissionGroup" key={group.title}><h3>{group.title}</h3><div className="noderaPermissionGrid">{group.items.map(id => {
           const fixed = fixedRoles.includes(roleEdit) || id === "roles_manage" || roleEdit === "user" && !userPermissions.includes(id);
-          return <label className="noderaPermissionSwitch" key={id}><span>{permissionNames[id]}<small>{fixed ? "Закреплено политикой роли" : roleGrants.has(id) ? "Разрешено" : "Запрещено"}</small></span>
+          return <label className="noderaPermissionSwitch" key={id} title={fixed ? "Неизменяемое право роли" : undefined}><span>{permissionNames[id]}</span>
             <input type="checkbox" role="switch" aria-label={permissionNames[id]} checked={roleGrants.has(id)} disabled={blocked || fixed} onChange={event => { const grants = new Set(rolePolicy[roleEdit] ?? roleDefaults[roleEdit]); if (event.target.checked) grants.add(id); else grants.delete(id); setRolePolicy({ ...rolePolicy, [roleEdit]: [...grants] }); }}/>
           </label>;
         })}</div></section>) : <p className="mcpFieldHint" role="status">Нет разрешений по выбранным условиям.</p>}
       </div></div>
-      <small>«Применить» добавит изменения в настройки раздела. Для сохранения на сервере нажмите «Сохранить» на странице «Доступ».</small>
+
     </SettingsDialog>}
   </section>;
 
-  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}<TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/>{roleSettings}{users}</>}</div>;
+  const alerts = <section className="noderaSettings"><header className="noderaBlockHead"><h2>Алерты Telegram</h2><button type="button" className="ghostButton" onClick={() => setAlertsOpen(true)}>Настроить алерты</button></header>
+    {alertsOpen && <SettingsDialog title="Алерты Telegram" close={() => setAlertsOpen(false)}><TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/></SettingsDialog>}
+  </section>;
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{alerts}{roleSettings}{users}</>}</div>;
 }
 
 export function SettingsDialog({ title, close, submit, blocked, children, wide = false }: {

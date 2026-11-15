@@ -114,7 +114,7 @@ export function ServicesDashboard({
         <div className="servicesHeroCopy">
           <p className="eyebrow">SERVICES CONTROL</p>
           <h1>Службы и обслуживание</h1>
-          <p>Systemd, защищённые каналы, журналы и плановые операции узла.</p>
+
           <div className={`nodeStatusLine ${nodeTone}`}>
             <i aria-hidden="true" />
             <small>NODE STATE</small>
@@ -229,7 +229,7 @@ export function ServicesDashboard({
           </header>
           <div className="operationsBody">
           {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
-          <p>Обновление ОС выполняется только по включённому расписанию и не запускает перезагрузку. Перезагрузка настраивается отдельно. Отключение расписаний сохраняется после перезагрузки сервера.</p>
+
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={serviceBusy} onChange={(patch) => onAutomationChange("cleanup", patch)} />

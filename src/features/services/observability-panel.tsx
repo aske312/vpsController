@@ -114,7 +114,7 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
         {eventsShown && <details ref={eventConsole} className="observabilityConsole" open><summary>Последние события · {data.events.length}</summary><div className="observabilityTerminalHead"><small>Результат последнего показа</small><button type="button" className="ghostButton" disabled={!data.events.length} onClick={() => downloadLog(eventLines.join("\n"), "request-events.log")}>Скачать .log</button></div>
         <div className="observabilityTerminal" role="region" aria-label="Последние события" tabIndex={0}>{data.events.length ? data.events.map((event, index) => <div className={event.status >= 400 ? "isError" : ""} key={event.id}>{eventLines[index]}</div>) : <span className="observabilityEmpty">Событий в выбранном окне нет.</span>}</div></details>}
       </>}
-      <p>Статистика ограничена сроком хранения и лимитом записей. Выдача подписки не подтверждает подключение клиента. HTTP-ошибка сама по себе не определяет сбой DNS, outbound или сети клиента.</p>
+
       <button type="button" className="ghostButton" disabled={blocked} onClick={() => void observeConnections()}>Проверить соединения</button>
       {connections && <p>{connections.available ? `Активных каналов: ${connections.observed_active_channels}. Установленных соединений: ${connections.established_connections ?? "полный счётчик недоступен"}; подтверждено доступными счётчиками: ${connections.known_established_connections}. Каналов без счётчика: ${connections.channels_without_connection_count}.` : "Наблюдения транспорта Mihomo недоступны."}</p>}
       <details className="observabilityJournal"><summary><strong>Журналы сервисов и системы</strong><small>Источник, уровень и период</small></summary>

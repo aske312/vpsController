@@ -22,7 +22,7 @@ export function RelayProfilePicker({ host, profiles, selected, onChange }: { hos
   const choices = useChoices(profiles, selected, profile => `${profile.name} ${profile.channels.flatMap(channel => channel.route_ids).map(id => host.routes.find(route => route.id === id)?.listen_port || "").join(" ")}`);
   return <div className="relayProfilePicker">
     <div className="relayConsumerHeading"><h3>Профили <small>{profiles.length}</small></h3><small>Каналов через этот Relay / всего</small></div>
-    <small className="relayProfilePortsLabel">Под счётчиками — входные порты Relay</small>
+
     {(profiles.length > PAGE_SIZE || choices.query) && <ChoiceSearch query={choices.query} onChange={choices.search} label="Поиск профиля Relay" placeholder="Профиль или порт" />}
     <div className="relayProfileChoices" role="group" aria-label="Профили Relay">{choices.visible.map(profile => {
       const configured = profile.channels.filter(channel => channel.host_id === host.id);

@@ -95,7 +95,7 @@ export function OperationHistory({ token }: { token: string }) {
     <button type="button" className="ghostButton" onClick={() => setOpen(true)}>Операции</button>
     <dialog ref={dialog} className="operationHistoryDialog" aria-labelledby="operation-history-title" onCancel={close} onClose={() => setOpen(false)}>
       <div className="operationHistoryShell">
-        <header className="operationHistoryHeader"><div><p className="eyebrow">OPERATIONS</p><h2 id="operation-history-title">История операций</h2><p>Выберите операцию, чтобы посмотреть результат и этапы выполнения.</p></div><button type="button" autoFocus onClick={close} aria-label="Закрыть историю операций">×</button></header>
+        <header className="operationHistoryHeader"><div><h2 id="operation-history-title">История операций</h2></div><button type="button" autoFocus onClick={close} aria-label="Закрыть историю операций">×</button></header>
         <div className="operationHistoryTools">
           <label className="operationHistorySearch"><span>Найти операцию</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Название, сообщение или ID" /></label>
           <button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)}>{loading ? "Обновляем…" : "Обновить историю"}</button>
@@ -120,8 +120,8 @@ export function OperationHistory({ token }: { token: string }) {
               <div className="operationHistoryDetailHeading"><span className={`operationState ${presentation.tone}`}>{presentation.label}</span><h3>{historyTitle(entry)}</h3><p>{historySource(entry)} · {safeDateTime(entry.started_at || entry.updated_at)}</p></div>
               {entry.id && <div className="operationIdentity"><code>{entry.id}</code><div><button type="button" onClick={() => void copy(entry)}>Скопировать ID</button><button type="button" onClick={() => void copy(entry, true)}>Контекст для Nodera</button></div></div>}
               <dl className="operationEvidence"><div><dt>Состояние операции</dt><dd>{entry.state || "unknown"}</dd></div><div><dt>Результат</dt><dd>{entry.result || "не указан"}</dd></div>{entry.stage && <div><dt>Последний этап</dt><dd>{entry.stage} · {entry.stage_result || "не указан"}</dd></div>}{entry.error_code && <div><dt>Код ошибки</dt><dd>{entry.error_code}</dd></div>}</dl>
-              {entry.action === "ai-catalog" && <p className="operationHistoryNotice">Проверка каталога подтверждает только доступ к списку моделей. Генерация ответа AI этой проверкой не подтверждается.</p>}
-              {entry.action === "runtime-check" && <p className="operationHistoryNotice">Результат относится к явной проверке компонента. Полную работоспособность чата оценивайте отдельной функциональной проверкой.</p>}
+
+
               {entry.message && <p className={`operationHistoryResult ${presentation.tone}`}>{notificationText(entry.message)}</p>}
               {presentation.tone === "active" && Number.isFinite(entry.progress) && <div className="operationHistoryProgress"><progress max={100} value={Math.max(0, Math.min(100, entry.progress!))} aria-label="Ход операции" /><span>{Math.round(Math.max(0, Math.min(100, entry.progress!)))}%</span></div>}
               {open && entry.id && <OperationJournal key={`${token}:${historyKey(entry)}`} request={request} entry={entry} />}

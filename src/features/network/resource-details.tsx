@@ -34,6 +34,6 @@ export function ResourceDetails({ entry, consumers }: { entry: RouteEntry; consu
       <div><dt>Серверы DNS</dt><dd>{domain.dns?.nameservers.join(" · ") || "Не определены"}</dd></div>
       {!!domain.dns?.records?.cname.length && <div><dt>CNAME</dt><dd>{domain.dns.records.cname.join(" · ")}</dd></div>}
       {(domain.ip_info || []).map(ip => <div key={ip.address}><dt>{ip.address}</dt><dd>{[ipProvider(ip), ip.asn, ip.network, ip.ptr].filter(value => value && value !== "Unknown").join(" · ") || "Сведения о сети не получены"}</dd></div>)}
-    </dl><p>DNS-провайдер обслуживает записи домена. Провайдер IP / CDN относится к входным адресам и может отличаться от хостинга VPS.</p></details>}
+    </dl></details>}
   </section>;
 }

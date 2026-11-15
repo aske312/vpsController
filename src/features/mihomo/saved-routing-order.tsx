@@ -23,7 +23,7 @@ export function SavedRoutingOrder({ request, profileId, deviceId, disabled }: {
     finally { if (!controller.signal.aborted) setBusy(false); }
   };
   return <details className="mihomoAdvancedRules"><summary>Итоговый порядок сохранённых правил</summary>
-    <p>Включает системные, персональные, готовые и дополнительные правила в порядке применения к устройству.</p>
+
     <button type="button" disabled={disabled || busy} onClick={() => void read()}>{busy ? "Чтение…" : "Показать итоговый порядок"}</button>
     {disabled && <small>Сохраните изменения профиля для просмотра актуального результата.</small>}
     {error && <p role="alert">{error}</p>}{!disabled && rules && <ol className="mihomoFinalRuleOrder">{rules.map((rule, index) => <li key={`${index}:${rule}`}><code>{rule}</code></li>)}</ol>}

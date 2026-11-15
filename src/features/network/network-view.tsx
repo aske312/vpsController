@@ -182,7 +182,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
           <div className="networkPageIdentity">
             <p className="eyebrow networkSectionEyebrow">NETWORK WORKSPACE</p>
             <h1>Сеть</h1>
-            <p className="networkHeroLead">Домены, адреса сервера и Relay — ресурсы и подключения в одном месте.</p>
+
             <dl className="networkHeroFacts">
               <div><dt>АДРЕСА ВХОДА</dt><dd>{status ? new Set(status.domains.map(item => item.value.toLowerCase())).size : "—"}</dd></div>
               <div><dt>RELAY</dt><dd>{relay.status?.hosts.length ?? "—"}</dd></div>

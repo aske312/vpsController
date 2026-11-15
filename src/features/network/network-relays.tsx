@@ -165,7 +165,7 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
     {relay.failed && <p role="status" className="networkNotice">Relay UNKNOWN — обновление не удалось. Действия заблокированы до успешного чтения. <button disabled={relay.reading} onClick={() => void relay.load()}>Повторить чтение Relay</button></p>}
     {relay.status?.pending && <div className="networkNotice" role="status"><strong>Результат изменения Relay не подтверждён{host ? ` · ${host.name} (${host.client_address || new URL(host.agent_url).hostname})` : ""}.</strong>
       {recovery && <p>{recovery.action === "put" ? "Создание" : "Удаление"} {recovery.transport.toUpperCase()} {recovery.listen_port} → {recovery.target_ip}:{recovery.target_port}. {recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}</p>}
-      <p>Проверка только прочитает состояние. Восстановление отдельно повторит сохранённую команду с тем же ID и ревизией, если результат ещё не подтверждён. После восстановления повторно сохраните настройки профиля.</p>
+
       <button disabled={relay.locked} onClick={() => void relay.submit("/network/relays/reconcile", { method: "POST" })}>Проверить результат операции</button>
       {recovery && <button disabled={relay.locked} onClick={() => relay.setRecoveryConfirmation(true)}>Восстановить пересылку</button>}
     </div>}
@@ -211,7 +211,7 @@ export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
       <section className="relaySettingsSection"><header><h3>Узел</h3></header>
         <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
         <label>Страна<select value={relay.country} onChange={event => relay.changeCountry(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit}><option value="">Определять автоматически</option>{relayCountries.map(country => <option key={country.code} value={country.code}>{country.name}</option>)}</select></label>
-        <small>Указанная страна заменяет результат определения по IP для этого Relay.</small>
+
         <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="По умолчанию — IP Agent" /></label>
         <small>Без CDN, схемы и порта.</small>
       </section>

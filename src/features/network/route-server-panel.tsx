@@ -16,9 +16,9 @@ export function ServerAddressPanel({ row, control }: { row: ServerAddress; contr
   const locked = control.locked || row.presence !== "present";
   return <>
     <section className="routeTaskCard"><header><h3>Назначение IP</h3></header>
-      <fieldset className="routeRoleChoices"><legend className="networkSrOnly">Роль IP-адреса</legend>{roles.map(({ role, description }) => <label key={role} className={chosen === role ? "is-selected" : ""}>
+      <fieldset className="routeRoleChoices"><legend className="networkSrOnly">Роль IP-адреса</legend>{roles.map(({ role }) => <label key={role} className={chosen === role ? "is-selected" : ""}>
         <input type="radio" name="server-address-role" value={role} checked={chosen === role} disabled={locked} onChange={() => setSelection(role)} />
-        <span><strong>{addressRoleLabels[role]}</strong><small>{description}</small></span>{row.role === role && <span className="routeCurrentRole">Сейчас</span>}
+        <span><strong>{addressRoleLabels[role]}</strong></span>{row.role === role && <span className="routeCurrentRole">Сейчас</span>}
       </label>)}</fieldset>
       <div className="routeRoleApply"><small>Существующие подключения сохранят свои адреса.</small><button type="button" className="routeActionPrimary" disabled={locked || chosen === row.role} onClick={() => void control.setRole(row.address, chosen)}>Применить роль</button></div>
     </section>

@@ -243,7 +243,7 @@ export function OverviewDashboard({
             )}
 
             {!mihomoInstalled && (
-              <div className="overviewNoRoutes"><span>◇</span><div><h2>Защищённые каналы не установлены</h2><p>Доступные компоненты показаны ниже в каталоге.</p></div></div>
+              <div className="overviewNoRoutes"><span>◇</span><div><h2>Защищённые каналы не установлены</h2></div></div>
             )}
           </div>
 
