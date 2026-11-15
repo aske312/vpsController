@@ -296,11 +296,7 @@ finish_operation() {
           write_action_status "succeeded" 100 "Автообновление отключено; запуск пропущен без обновления и перезагрузки"
           return 0
         fi
-        write_action_status "rebooting" 100 "Системные обновления установлены и проверены; точка восстановления сохранена, сервер перезагружается"
-        if ! systemctl --no-block --no-wall reboot; then
-          write_action_status "failed" 100 "Обновления установлены, но автоматическая перезагрузка не запущена; точка восстановления сохранена"
-          return 1
-        fi
+        write_action_status "succeeded" 100 "Системные обновления установлены и проверены; точка восстановления сохранена. Перезагрузка выполняется отдельно"
         ;;
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
     esac
@@ -424,7 +420,7 @@ PY
 )" || return 1
   read -r enabled cadence weekday hour minute <<<"${values}"
   calendar="$(automation_calendar "${cadence}" "${weekday}" "${hour}" "${minute}")" || return 1
-  install_automation_timer "update" "Scheduled full server update and reboot by 312node.net" "auto-safe-update" "${enabled}" "${calendar}" "${unit_dir}"
+  install_automation_timer "update" "Scheduled OS update without reboot by 312node.net" "auto-safe-update" "${enabled}" "${calendar}" "${unit_dir}"
 }
 
 configure_os_update_policy() {
@@ -475,7 +471,7 @@ safe_update_server() {
     write_action_status "failed" "${ACTION_PROGRESS}" "Обновление содержит ошибки; приложение и конфигурация восстановлены, доступен отчёт"
     return 1
   fi
-  printf '\nReboot: automatic after successful checks\n'
+  printf '\nReboot: manual only; not requested by this update\n'
   printf 'Result: success\nRecovery point: retained locally\nFinished: %s\n' "$(date --iso-8601=seconds)"
   ok "Full server update completed; recovery point retained"
 }
@@ -3308,7 +3304,7 @@ PY
 }
 
 update_kernel() {
-  # Compatibility for existing clients: the same recovery/full-upgrade/reboot policy.
+  # Compatibility for existing clients: the same recovery/full-upgrade policy, without reboot.
   safe_update_server
 }
 
@@ -3453,7 +3449,7 @@ PY
   update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
   install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" || return 1
   install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" || return 1
-  install_automation_timer "update" "Scheduled full server update and reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}" || return 1
+  install_automation_timer "update" "Scheduled OS update without reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}" || return 1
   disable_native_update_timer || return 1
   ok "расписания обслуживания применены."
 }
@@ -3748,7 +3744,7 @@ usage() {
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту Ubuntu
   security-recover восстановить настройки после прерванного усиления защиты
-  kernel-update    полное обновление ОС с точкой восстановления и reboot (совместимый псевдоним)
+  kernel-update    полное обновление ОС с точкой восстановления без reboot (совместимый псевдоним)
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания

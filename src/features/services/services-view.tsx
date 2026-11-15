@@ -229,11 +229,11 @@ export function ServicesDashboard({
           </header>
           <div className="operationsBody">
           {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
-          <p>Плановое обновление ОС с перезагрузкой выполняется только по включённому расписанию. Отключение сохраняется после перезагрузки сервера.</p>
+          <p>Обновление ОС выполняется только по включённому расписанию и не запускает перезагрузку. Перезагрузка настраивается отдельно. Отключение расписаний сохраняется после перезагрузки сервера.</p>
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={serviceBusy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
-            <ScheduleRow title="Полное обновление и перезагрузка" value={automationDraft?.update} timer={services?.timers.update} busy={serviceBusy} onChange={(patch) => onAutomationChange("update", patch)} />
+            <ScheduleRow title="Обновление ОС" value={automationDraft?.update} timer={services?.timers.update} busy={serviceBusy} onChange={(patch) => onAutomationChange("update", patch)} />
           </div>
           <div className="servicesLogActions">
             <button type="button" className="servicePrimary" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить</button>

@@ -129,7 +129,7 @@ export function ApplicationView({ application, services, applicationVersion, app
           <section className="applicationLifecycle">
             <header><div><p className="eyebrow">SYSTEM LIFECYCLE</p><h2>VPS и системные пакеты</h2></div></header>
             <div className="applicationLifecycleActions">
-              <button onClick={() => void runApplicationAction("safe-update")} disabled={mutationBlocked}><strong>Обновить сервер</strong><small>{updates?.available ? `${updates.available} доступных обновлений · точка восстановления · автоматический reboot` : "Все пакеты ОС · точка восстановления · автоматический reboot"}</small></button>
+              <button onClick={() => void runApplicationAction("safe-update")} disabled={mutationBlocked}><strong>Обновить сервер</strong><small>{updates?.available ? `${updates.available} доступных обновлений · точка восстановления · без перезагрузки` : "Все пакеты ОС · точка восстановления · без перезагрузки"}</small></button>
               <button onClick={() => void runApplicationAction("reboot")} disabled={mutationBlocked}><strong>Перезагрузить VPS</strong><small>Корректно завершить службы и reboot</small></button>
               <button className="danger" onClick={() => void runApplicationAction("poweroff")} disabled={mutationBlocked}><strong>Выключить VPS</strong><small>Повторный запуск потребуется у провайдера</small></button>
             </div>

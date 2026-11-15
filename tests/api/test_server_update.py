@@ -34,9 +34,13 @@ class ServerUpdateTests(unittest.TestCase):
         return re.search(r"(?ms)^" + name + r"\(\) \{.*?^\}", self.source).group()
 
     def invoke(self, action="safe-update", failure="", real_backup=False, automatic=True):
-        (self.root / 'automation.json').write_text(json.dumps({'update': {'enabled': automatic}}), encoding='utf-8')
+        policy = self.root / 'automation.json'
+        if automatic == 'missing':
+            policy.unlink(missing_ok=True)
+        else:
+            policy.write_text('{' if automatic == 'malformed' else json.dumps({'update': {'enabled': automatic}}), encoding='utf-8')
         functions = "\n".join(self.function(name) for name in (
-            "safe_update_server", "automatic_update_enabled", "auto_safe_update_server", "update_kernel", "finish_operation"))
+            "safe_update_server", "automatic_update_enabled", "auto_safe_update_server", "update_kernel", "reboot_server", "finish_operation"))
         if real_backup:
             functions += "\n" + self.function("create_recovery_point")
         script = r'''set -Eeuo pipefail
@@ -95,6 +99,7 @@ case "$TEST_ACTION" in
   safe-update) safe_update_server ;;
   auto-safe-update) auto_safe_update_server ;;
   kernel-update) update_kernel ;;
+  reboot) reboot_server ;;
 esac
 '''
         result = subprocess.run([BASH, "-s"], env={**os.environ,
@@ -103,7 +108,7 @@ esac
         events = self.events.read_text().splitlines() if self.events.exists() else []
         return result, events
 
-    def test_all_entry_points_backup_upgrade_check_and_reboot_in_order(self):
+    def test_all_update_entry_points_backup_upgrade_check_without_reboot(self):
         for action in ("safe-update", "auto-safe-update", "kernel-update"):
             with self.subTest(action=action):
                 self.events.unlink(missing_ok=True)
@@ -113,7 +118,9 @@ esac
                 self.assertEqual(events, ["BACKUP", "POLICY",
                     "APT:-o DPkg::Lock::Timeout=300 -o APT::Update::Error-Mode=any update",
                     "APT:-o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade --no-remove -y",
-                    "INTEGRITY", "NETWORK", "STATUS:rebooting", "SERVICE:--no-block --no-wall reboot"])
+                    "INTEGRITY", "NETWORK", "STATUS:succeeded"])
+                report = (self.root / 'recovery/report.txt').read_text(encoding='utf-8')
+                self.assertIn('Reboot: manual only; not requested by this update', report)
                 self.assertFalse(self.cache.exists())
 
     def test_failures_never_reboot_and_invalidate_package_observation(self):
@@ -140,25 +147,32 @@ esac
                 self.assertFalse(any(line.startswith(("APT:", "SERVICE:")) for line in events))
                 self.assertEqual(events[-1], "STATUS:failed")
 
-    def test_rejected_reboot_is_failed_not_success(self):
-        result, events = self.invoke(failure="reboot")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(events[-3:], ["STATUS:rebooting", "SERVICE:--no-block --no-wall reboot", "STATUS:failed"])
+    def test_reboot_is_only_requested_by_the_separate_explicit_action(self):
+        result, events = self.invoke(action="reboot")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(events, ["SERVICE:--no-block --no-wall reboot", "STATUS:rebooting"])
 
     def test_disabled_auto_update_never_runs_packages_or_reboot_but_manual_update_still_works(self):
-        result, events = self.invoke('auto-safe-update', automatic=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(events, ['STATUS:succeeded'])
+        for automatic in (False, 'missing'):
+            with self.subTest(automatic=automatic):
+                self.events.unlink(missing_ok=True)
+                result, events = self.invoke('auto-safe-update', automatic=automatic)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(events, ['STATUS:succeeded'])
         self.events.unlink()
         result, events = self.invoke('safe-update', automatic=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('STATUS:rebooting', events)
+        self.assertEqual(events[-1], 'STATUS:succeeded')
+        self.assertFalse(any(row.startswith('SERVICE:') for row in events))
 
     def test_invalid_automatic_policy_cannot_be_treated_as_enabled(self):
-        result, events = self.invoke('auto-safe-update', automatic='yes')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(any(row.startswith(('APT:', 'SERVICE:')) for row in events))
-        self.assertEqual(events[-1], 'STATUS:failed')
+        for automatic in ('yes', None, 'malformed'):
+            with self.subTest(automatic=automatic):
+                self.events.unlink(missing_ok=True)
+                result, events = self.invoke('auto-safe-update', automatic=automatic)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(row.startswith(('APT:', 'SERVICE:')) for row in events))
+                self.assertEqual(events[-1], 'STATUS:failed')
 
     def test_setup_disables_distro_timer_and_preserves_the_UI_schedule(self):
         script = 'set -eu\nCOMMAND_PATH=/usr/local/sbin/vps-control\n'

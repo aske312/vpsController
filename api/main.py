@@ -4801,7 +4801,7 @@ def managed_services() -> dict[str, dict]:
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
-            "name": "Автообновление и перезагрузка", "unit": "vps-control-auto-update.timer",
+            "name": "Автообновление ОС", "unit": "vps-control-auto-update.timer",
             "controls": ["start", "stop", "restart"],
         },
         "ssh": {
