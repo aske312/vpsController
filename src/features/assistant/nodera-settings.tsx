@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
 import { enabledTelegramTools } from "./assistant-state";
-import { providerStatusText, type ProviderConnection } from "./provider-connection";
+import { type ProviderConnection } from "./provider-connection";
 import { dollars, latestObservation, quotaFacts, quotaText, queueProviderCatalog, type ProviderObservation, type ProviderCatalog } from "./provider-details";
 import { accountProducts, productNames, type Product, fixedRoles, userPermissions, permissionGroups, accountPermissions, accountRole, permissionNames, roleDefaults, roleNames, type Role, type Permission, moduleState, type Draft, type McpId, type McpStatus, type ModuleId, type ProviderDraft } from "./assistant-state";
 
@@ -194,7 +194,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       const current = providersRef.current.find(row => row.id === provider.id);
       if (!current || current.provider_url !== provider.provider_url || current.api_key !== provider.api_key) return;
       notify.error(cause instanceof Error ? cause.message : "Проверка не выполнена");
-      setProviderChecks(current => ({ ...current, [provider.id]: { ...current[provider.id], text: cause instanceof Error ? cause.message : "Проверка не выполнена", failed: true } }));
+      setProviderChecks(current => ({ ...current, [provider.id]: { ...current[provider.id], text: cause instanceof Error ? cause.message : "Проверка не выполнена", failed: true, checking: false } }));
     } finally {
       setCheckingProvider(undefined);
     }
@@ -233,9 +233,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </button>
       </div>
     </header>
-    {!providers.length ? <p className="mcpFieldHint">Нет подключений</p> : <div className="noderaTableScroll"><table className="noderaProviderTable">
-      <thead><tr><th className="noderaDefaultColumn" aria-label="API по умолчанию"/><th aria-label="Состояние"/><th>API</th><th>Задержка</th><th>Модель по умолчанию</th><th>Запросы</th><th>Токены ↑ / ↓</th><th>Квота / лимит</th><th>Баланс ($)</th><th aria-label="Действия"/></tr></thead>
-      <tbody>{providers.map(provider => {
+    {!providers.length ? <p className="mcpFieldHint">Нет подключений</p> : <div className="noderaConnectionList">{providers.map(provider => {
         const usage = status.provider_usage?.[provider.id];
         const active = draft.active_provider === provider.id;
         const probeResult = providerChecks[provider.id];
@@ -245,30 +243,48 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         const observation = latestObservation(cached, probeResult, observed?.observation);
         const info = observation?.provider_info;
         const checkedModels = observed?.models.length ? observed.models : providerModels[provider.id];
-        const modelCount = info?.models_count ?? (checkedModels?.length || undefined);
+        const modelCount = info?.models_count ?? checkedModels?.length;
         const models = [...new Set([provider.model, ...(observed?.models ?? []), ...(providerModels[provider.id] ?? [])].filter(Boolean))];
         const tokens = usage?.reported_requests ? `${usage.prompt_tokens.toLocaleString("ru")} / ${usage.completion_tokens.toLocaleString("ru")}` : "—";
         const quota = quotaText(observation?.quota);
         const requests = usage?.requests.toLocaleString("ru") ?? "—";
-        const state = observed?.state === "error" || probeResult?.failed ? "failed" : probeResult?.checking || observed?.state === "checking" ? "checking" : info ? "available" : "unknown";
-        const stateLabel = observed ? providerStatusText(observed) : probeResult?.failed ? "Ошибка проверки API" : info ? "API доступен" : "API ещё не проверен";
-        return <tr key={provider.id} className={active ? "isDefaultProvider" : undefined}>
-          <td className="noderaDefaultColumn"><input type="radio" name="nodera-default-provider" aria-label={`API по умолчанию: ${provider.name}`} checked={active} disabled={blocked} onChange={() => patch({ active_provider: provider.id })}/></td>
-          <td><span className={`mcpConnectionDot ${state}`} role="img" aria-label={stateLabel} title={observed?.error || probeResult?.text || stateLabel}/></td>
-          <th scope="row" title={provider.provider_url}><strong>{provider.name}</strong></th>
-          <td className="noderaMetric" title="Длительность загрузки каталога; не задержка ответа AI">{typeof info?.catalog_latency_ms === "number" ? `${Math.round(info.catalog_latency_ms)} мс` : "—"}</td>
-          <td><div className="noderaProviderModel"><select aria-label={`Модель по умолчанию: ${provider.name}`} value={provider.model} disabled={blocked || provider.model_mode === "single"}
+        const checking = checkingProvider === provider.id || probeResult?.checking || observed?.state === "checking";
+        const state = checking ? "checking" : observed?.state === "error" || probeResult?.failed ? "failed" : info ? "available" : "unknown";
+        const stateLabel = ({ checking: "Проверка API…", failed: "Ошибка проверки API", available: "API доступен", unknown: "API ещё не проверен" })[state];
+        const checkedAt = info?.checked_at;
+        return <article key={provider.id} className={`noderaConnection ${active ? "isDefaultProvider" : ""}`} aria-label={provider.name}>
+          <header className="noderaConnectionHead">
+            <div className="noderaConnectionIdentity"><h3>{provider.name}</h3><small>{provider.provider_url}</small></div>
+            <div className="noderaConnectionActions">
+              <button type="button" className="noderaTag" aria-pressed={active} disabled={blocked} onClick={() => patch({ active_provider: provider.id })}>{active ? "По умолчанию" : "Сделать основным"}</button>
+              <button type="button" className="mcpIconButton" aria-label={`Настроить ${provider.name}`} title="Настроить API" disabled={blocked} onClick={() => setProviderEdit(provider)}><ChatIcon name="gear"/></button>
+            </div>
+          </header>
+          <div className="noderaConnectionStatus" role="status" title={observed?.error || probeResult?.text || stateLabel}>
+            <span className={`mcpConnectionDot ${state}`} aria-hidden="true"/>{stateLabel}
+            {typeof checkedAt === "number" && <small>Проверка каталога: {new Date(checkedAt * 1000).toLocaleString("ru-RU")}</small>}
+          </div>
+          <div className="noderaConnectionBody">
+            <div className="noderaConnectionModel"><label><span>Модель по умолчанию</span><select aria-label={`Модель по умолчанию: ${provider.name}`} value={provider.model} disabled={blocked || provider.model_mode === "single"}
             onChange={event => patch({ providers: providers.map(item => item.id === provider.id ? { ...item, model: event.target.value } : item) })}>
             <option value="">Выберите модель</option>{models.map(model => <option key={model} value={model}>{model}</option>)}
-          </select><button type="button" className="mcpIconButton" aria-label={`Загрузить модели: ${provider.name}`} title="Загрузить модели и проверить API" disabled={blocked || !!checkingProvider || !(provider.api_key ?? provider.api_key_configured)} onClick={() => void probe(provider)}><ChatIcon name="refresh"/></button></div>
-            <small>{typeof modelCount === "number" ? `Моделей: ${modelCount}` : provider.model_mode === "single" ? "Одна модель" : "Каталог не загружен"}</small>
-          </td>
-          <td className="noderaMetric" title="Запросы, учтённые этой панелью">{requests}</td><td className="noderaMetric" title="Вход / выход, учтённые этой панелью">{tokens}</td><td className="noderaMetric" title="Остаток ключа; при известном коэффициенте — USD">{quota}</td><td className="noderaMetric" title="Баланс аккаунта в USD по данным провайдера">{dollars(observation?.quota?.balance_usd)}</td>
-          <td><button type="button" className="mcpIconButton" aria-label={`Настроить ${provider.name}`} title="Настроить API" disabled={blocked} onClick={() => setProviderEdit(provider)}><ChatIcon name="gear"/></button></td>
-        </tr>;
-      })}</tbody>
-    </table></div>}
-    {!!providers.length && <p className="mcpFieldHint">Запросы и токены — учёт панели. Баланс в $ доступен при подтверждённом коэффициенте USD; иначе — «—». Подробности квоты — в настройках API.</p>}
+            </select></label>
+              <div className="noderaConnectionCatalog"><small>{typeof modelCount === "number" ? `Моделей: ${modelCount}` : provider.model_mode === "single" ? "Одна модель" : "Каталог не загружен"}</small>
+                <button type="button" className="ghostButton" aria-label={`Загрузить модели: ${provider.name}`} disabled={blocked || !!checkingProvider || !(provider.api_key ?? provider.api_key_configured)} onClick={() => void probe(provider)}><ChatIcon name="refresh"/>{checking ? "Проверка…" : "Проверить API"}</button>
+              </div>
+            </div>
+            <dl className="noderaConnectionMetrics">
+              <div><dt title="Длительность загрузки каталога; не задержка ответа AI">Отклик каталога</dt><dd>{typeof info?.catalog_latency_ms === "number" ? `${Math.round(info.catalog_latency_ms)} мс` : "—"}</dd></div>
+              <div><dt title="Запросы, учтённые этой панелью">Запросы панели</dt><dd>{requests}</dd></div>
+              <div><dt title="Вход / выход, учтённые этой панелью">Токены: вход / выход</dt><dd>{tokens}</dd></div>
+              <div><dt>Остаток ключа{observation?.quota?.remaining_usd === undefined && observation?.quota?.unlimited !== true && typeof observation?.quota?.remaining === "number" ? " (ед.)" : ""}</dt><dd>{quota}</dd></div>
+              <div><dt>Баланс аккаунта, USD</dt><dd>{dollars(observation?.quota?.balance_usd)}</dd></div>
+              <div><dt>Обновление квоты</dt><dd>{typeof observation?.quota_checked_at === "number" ? new Date(observation.quota_checked_at * 1000).toLocaleString("ru-RU") : "—"}</dd></div>
+            </dl>
+          </div>
+        </article>;
+      })}</div>}
+    {!!providers.length && <p className="mcpFieldHint">Запросы и токены — учёт панели. Квота и баланс — последние данные провайдера; «—» означает, что данных нет. Подробности квоты — в настройках API.</p>}
     {providerEdit && <SettingsDialog title="Подключение API" close={() => setProviderEdit(undefined)}
       submit={() => storeProvider({ ...providerEdit, name: providerEdit.name.trim() || new URL(providerEdit.provider_url).hostname })} blocked={blocked}>
       <label>Название<input value={providerEdit.name} maxLength={80} onChange={event => setProviderEdit({ ...providerEdit, name: event.target.value })}/></label>
