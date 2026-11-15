@@ -331,4 +331,5 @@ export const profileStrategies = [
   { value: "fallback", code: "SAFE", title: "Резерв", text: "Первое доступное подключение в порядке приоритета 1 → последнее." },
   { value: "url-test", code: "FAST", title: "Автовыбор", text: "Новые соединения — через канал с минимальной задержкой; открытые потоки сохраняются." },
   { value: "select", code: "MAN", title: "Вручную", text: "Выбирать канал в приложении." },
+  { value: "load-balance", code: "BAL", title: "Балансировка", text: "Распределять новые соединения между доступными каналами." },
 ];

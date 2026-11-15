@@ -44,6 +44,8 @@ export function ConnectionEditor({ connection, title, fields, targets, disabled,
       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} disabled={disabled} onClick={onDelete}>×</button>
     </header>
     {address}
+    {connection.component === "transport-reality" && <p className="mihomoHint">{String(connection.settings.xray_protocol || "vless").toUpperCase()} · {String(connection.settings.transport || "xhttp").toUpperCase()}{connection.settings.transport === "xhttp" && ` · ${String(connection.settings.xhttp_mode || "auto")}`}. XHTTP доступен для VLESS; SplitHTTP — прежнее название транспорта. Параметры TLS/CDN показаны отдельно для выбранного маршрута. Совместимость зависит от ядра клиента; базовая версия Mihomo — 1.19.31.</p>}
+    {connection.component === "transport-hysteria2" && <p className="mihomoHint">Hysteria2 · QUIC/UDP. Salamander: {connection.credential?.obfs === true ? "включён в сохранённом подключении" : connection.credential?.obfs === false ? "выключен в сохранённом подключении" : "определится при сохранении по настройке серверного канала"}. Переключатель доступен в настройках Hysteria2. Клиент получает соответствующие параметры из подписки. Изменение серверной обфускации использует штатную операцию с проверкой и откатом.</p>}
     {primary.length > 0 && renderFields(primary)}
     {advanced.length > 0 && <details className="mihomoConnectionAdvanced"><summary>Дополнительно <span>{advanced.length}</span></summary>{renderFields(advanced)}</details>}
     {footer && <footer className="mihomoConnectionFooter">{footer}</footer>}

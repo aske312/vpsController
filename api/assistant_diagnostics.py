@@ -41,7 +41,8 @@ def call(api, name, arguments, actor):
     user = next((row for row in settings['accounts'] if str(row['telegram_id']) == actor), {})
     roles.require(settings, actor, {'vps_logs': 'logs_read', 'vps_network': 'network_read', 'vps_security': 'security_read', 'vps_diagnostics': 'diagnostics'}[name])
     if name == 'vps_network':
-        return sanitize(api, api.get_network(None))
+        import network_observer
+        return network_observer.collect(api, network_observer.parse(arguments.get('body') or {}))
     if name == 'vps_security':
         return sanitize(api, api.security(None))
     if name == 'vps_logs':

@@ -668,7 +668,7 @@ def serve_mcp(settings, actor, module):
 
         @server.tool()
         async def vps_observability(method: str = 'GET', path: str = '/events', body: dict | None = None) -> dict:
-            """Наблюдаемость: GET /restarts — загрузки ОС, события запусков/остановок служб без HTTP-шума, OOM/panic/watchdog, системные apt-таймеры, операции и последний отчёт обновления; body: minutes 1..10080, limit 1..120, until Unix UTC для прошлого окна, boot_id из отчёта, services список ID из vps_services. Текущее состояние и последний отчёт помечены отдельно от исторического окна; отсутствие событий не исключает сбой. GET /events (body: minutes, request_id, trace_id, operation_id, service panel|mihomo, component, operation_type, error_code, stage, kind, errors, limit), /settings, /connections, /journal (body: service application|system|dns|gateway|ID службы, minutes 1..10080, priority err|warning|info|debug, limit 1..120). PATCH /settings с enabled, errors_only, retention_days 1..90, max_events 100..100000, revision из GET требует подтверждения человека. Выдача подписки не означает подключение. HTTP-ошибка не доказывает сбой DNS/outbound/сети клиента. Неизвестное число соединений или затронутых пользователей нельзя выдавать за ноль."""
+            """Наблюдаемость: GET /restarts — загрузки ОС, события запусков/остановок служб без HTTP-шума, OOM/panic/watchdog, системные apt-таймеры, операции и последний отчёт обновления; body: minutes 1..10080, limit 1..120, until Unix UTC для прошлого окна, boot_id из отчёта, services список ID из vps_services. Текущее состояние и последний отчёт помечены отдельно от исторического окна; отсутствие событий не исключает сбой. GET /events (body: minutes, request_id, trace_id, operation_id, service panel|mihomo, component, operation_type, error_code, stage, kind, errors, limit), /settings, /connections, /journal (body: service application|system|dns|gateway|ID службы, minutes 1..10080, priority err|warning|info|debug, limit 1..120). PATCH /settings с enabled, errors_only, retention_days 1..90, max_events 100..100000, revision из GET требует подтверждения человека. Выдача подписки не означает подключение. HTTP-ошибка не доказывает сбой DNS/outbound/сети клиента. Неизвестное число соединений или затронутых пользователей нельзя выдавать за ноль. GET /owner-alerts: owner notification status. POST /owner-alerts/test: fixed owner delivery test, no body, requires roles_manage and human confirmation. /journal accepts cursor from next_cursor for bounded continuation."""
             return await vps_call(settings, actor, 'vps_observability', method=method, path=path, body=body or {})
 
         @server.tool()
@@ -677,9 +677,9 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'vps_logs', service=service, lines=lines)
 
         @server.tool()
-        async def vps_network() -> dict:
-            """Прочитать раздел Сеть: адреса, DNS, маршруты и наблюдения. Только администратор."""
-            return await vps_call(settings, actor, 'vps_network')
+        async def vps_network(body: dict | None = None) -> dict:
+            """Только чтение: source=summary (сеть), ss (сокеты) или conntrack. Фильтры protocol=tcp|udp, family=ipv4|ipv6, state=all|established, limit=1..120. Неполная/недоступная выдача не означает ноль соединений. Shell и изменение firewall недоступны."""
+            return await vps_call(settings, actor, 'vps_network', body=body or {})
 
         @server.tool()
         async def vps_security() -> dict:

@@ -36,6 +36,7 @@ class JournalQuery(BaseModel):
     minutes: int = Field(default=60, strict=True, ge=1, le=10080)
     priority: str = Field(default='info', pattern='^(err|warning|info|debug)$')
     limit: int = Field(default=60, strict=True, ge=1, le=120)
+    cursor: str | None = Field(default=None, max_length=512, pattern=r'^[a-zA-Z0-9;=_:-]+$')
     operation_id: str | None = Field(default=None, pattern='^[0-9a-f]{32}$')
 
 
@@ -92,6 +93,24 @@ def call(api, arguments, actor):
     method = arguments.get('method', 'GET')
     path = arguments.get('path') or '/events'
     body = arguments.get('body') or {}
+    if path == '/owner-alerts':
+        roles.require(settings, actor, 'roles_manage')
+        import telegram_alerts
+        if method == 'GET' and not body: return telegram_alerts.status(api)
+        raise HTTPException(422, 'Алерты: GET /owner-alerts, POST /owner-alerts/test без произвольного текста')
+    if method == 'POST' and path == '/owner-alerts/test':
+        roles.require(settings, actor, 'roles_manage')
+        if body: raise HTTPException(422, 'Тест не принимает получателя или текст')
+        import assistant_commands
+        record = {'kind': 'observability', 'service': 'observability', 'action': 'owner-alert-test', 'body': {},
+                  'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex, 'expires': time.time() + 120,
+                  'revision': settings['revision'], 'submitted': False}
+        with control.operations.locked(api.DATA_DIR):
+            target = assistant_commands.pending_path(api, actor)
+            previous = control.operations.read(target)
+            if previous.get('submitted') and not previous.get('completed_text'): raise HTTPException(409, 'Предыдущее действие ещё выполняется')
+            control.operations.atomic_json(target, record)
+        return {'confirmation_required': True, 'message': 'Подтвердите тест доставки сохранённому владельцу.'}
     if method == 'GET':
         if path == '/restarts':
             roles.require(settings, actor, 'server_read')
@@ -139,8 +158,14 @@ def confirm(api, actor, record):
     roles.require(settings, actor, 'server_manage')
     if settings['revision'] != record['revision']:
         raise HTTPException(409, 'Права изменились; подготовьте подтверждение заново')
-    configure(api, observability.Settings.model_validate(record['body']))
-    text = 'Настройки наблюдаемости сохранены.'
+    if record.get('action') == 'owner-alert-test':
+        roles.require(settings, actor, 'roles_manage')
+        import telegram_alerts
+        telegram_alerts.test(api)
+        text = 'Тест уведомлений добавлен в очередь владельца.'
+    else:
+        configure(api, observability.Settings.model_validate(record['body']))
+        text = 'Настройки наблюдаемости сохранены.'
     with control.operations.locked(api.DATA_DIR):
         path = assistant_commands.pending_path(api, actor)
         current = control.operations.read(path)
@@ -153,7 +178,7 @@ def confirm(api, actor, record):
     return text
 
 
-def journal(api, service='application', minutes=60, priority='info', limit=60, operation_id=None):
+def journal_arguments(api, service='application', minutes=60, priority='info', limit=60, operation_id=None, cursor=None, follow=False):
     if type(minutes) is not int or not 1 <= minutes <= 10080 or type(limit) is not int or not 1 <= limit <= 120 or priority not in ('err', 'warning', 'info', 'debug'):
         raise HTTPException(422, 'Некорректный фильтр журналов')
     units = {'application': ['vps-control-api.service', 'vps-control-web.service'],
@@ -169,9 +194,28 @@ def journal(api, service='application', minutes=60, priority='info', limit=60, o
         unit = record.get('unit', '')
         if re.fullmatch(r'vps-control-(?:action-[0-9]+|cdn-security-[0-9a-f]{32})\.service', unit):
             selected_units, operation_unit = [unit], True
-    args = ['journalctl', '-r', '--since', f'{minutes} minutes ago', '-p', priority, '-n', str(limit), '--no-pager', '-o', 'json',
+    if cursor is not None and (not isinstance(cursor, str) or not re.fullmatch(r'[a-zA-Z0-9;=_:-]{1,512}', cursor)):
+        raise HTTPException(422, 'Некорректный курсор журнала')
+    args = ['journalctl', '-p', priority, '-n', str(limit), '--no-pager', '-o', 'json',
             '--output-fields=__REALTIME_TIMESTAMP,__CURSOR,_SYSTEMD_UNIT,PRIORITY,MESSAGE']
+    if cursor: args += ['--after-cursor=' + cursor]
+    else: args += ['--since', f'{minutes} minutes ago']
+    if follow: args += ['--follow']
+    elif not cursor: args += ['-r']
     for unit in selected_units: args += ['-u', unit]
+    return args, operation_unit
+
+
+def journal(api, service='application', minutes=60, priority='info', limit=60, operation_id=None, cursor=None):
+    args, operation_unit = journal_arguments(api, service, minutes, priority, limit, operation_id, cursor)
+    if cursor:
+        try:
+            probe = api.run('journalctl', '--cursor=' + cursor, '-n', '1', '--no-pager', '-o', 'json', '--output-fields=__CURSOR', timeout=6, check=True)
+            found = json.loads(probe.splitlines()[0]).get('__CURSOR') == cursor
+        except (ValueError, IndexError, RuntimeError): found = False
+        if not found:
+            return {'service': service, 'available': False, 'gap': True, 'next_cursor': None, 'lines': [], 'records': [],
+                    'reason': 'Курсор недоступен после ротации или очистки. Начните новое ограниченное чтение.'}
     output = api.run(*args, timeout=12, check=True)
     import assistant_diagnostics
     records, legacy, unparsed, budget = [], [], 0, 9000
@@ -188,7 +232,7 @@ def journal(api, service='application', minutes=60, priority='info', limit=60, o
                 if match: ids[key] = match.group(1)
             safe = assistant_diagnostics.sanitize(api, message)[:budget]
             budget -= len(safe)
-            records.append({'id': 'journal:' + str(at) + ':' + str(index) + ':' + str(row.get('_SYSTEMD_UNIT', 'unknown'))[:160], 'at': at, 'source': 'journald', 'message': safe,
+            records.append({'id': 'journal:' + str(at) + ':' + str(index) + ':' + str(row.get('_SYSTEMD_UNIT', 'unknown'))[:160], 'at': at, 'source': 'journald', 'message': safe, 'cursor': row.get('__CURSOR'),
                             'unit': row.get('_SYSTEMD_UNIT') if re.fullmatch(r'[a-zA-Z0-9@_.-]{1,160}', str(row.get('_SYSTEMD_UNIT', ''))) else None,
                             'priority': str(row.get('PRIORITY', ''))[:1], **ids})
             legacy.append(datetime.fromtimestamp(at, timezone.utc).isoformat() + ' ' + safe)
@@ -198,6 +242,7 @@ def journal(api, service='application', minutes=60, priority='info', limit=60, o
             budget -= len(safe)
             legacy.append(safe)
     return {'service': service, 'window_minutes': minutes, 'priority': priority, 'lines': legacy, 'records': records, 'available': True,
+            'next_cursor': (records[-1] if cursor else records[0]).get('cursor') if records else cursor,
             'coverage': {'requested_from': time.time() - minutes * 60, 'requested_until': time.time(), 'limit': limit,
                          'possibly_truncated': len(output.splitlines()) >= limit or budget <= 0, 'unparsed_records': unparsed,
                          'operation_unit_selected': operation_unit,

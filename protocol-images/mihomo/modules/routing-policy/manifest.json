@@ -99,7 +99,8 @@
       "options": [
         "fallback",
         "url-test",
-        "select"
+        "select",
+        "load-balance"
       ]
     },
     {

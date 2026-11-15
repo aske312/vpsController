@@ -2,6 +2,7 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
+import { TelegramAlerts } from "./telegram-alerts";
 import { enabledTelegramTools } from "./assistant-state";
 import { type ProviderConnection } from "./provider-connection";
 import { dollars, latestObservation, quotaFacts, quotaText, queueProviderCatalog, type ProviderObservation, type ProviderCatalog } from "./provider-details";
@@ -572,7 +573,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     </SettingsDialog>}
   </section>;
 
-  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{roleSettings}{users}</>}</div>;
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}<TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/>{roleSettings}{users}</>}</div>;
 }
 
 export function SettingsDialog({ title, close, submit, blocked, children, wide = false }: {

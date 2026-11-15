@@ -1,5 +1,6 @@
 """Publish automatically refreshed MRS files from a fixed catalog of feeds."""
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -69,14 +70,18 @@ class MrsCache:
                     else:
                         entries = [line.strip() for line in source.decode('utf-8-sig').splitlines()
                                    if line.strip() and not line.lstrip().startswith(('#', '!'))]
-                    if not isinstance(entries, list) or not entries or not all(
+                    behavior = feed.get('behavior', 'domain')
+                    if not isinstance(entries, list) or not entries: raise ValueError('Invalid empty feed')
+                    if behavior == 'ipcidr':
+                        for entry in entries: ipaddress.ip_network(entry, strict=False)
+                    elif behavior != 'domain' or not all(
                             isinstance(entry, str) and entry and not any(c.isspace() for c in entry)
                             and not any(c in entry for c in '<>/') for entry in entries):
                         raise ValueError('Invalid domain feed')
                     input_path = folder / ('source.' + feed['format'])
                     input_path.write_bytes(source)
                     output_path = folder / 'rules.mrs'
-                    result = subprocess.run([str(self.core), 'convert-ruleset', 'domain', feed['format'],
+                    result = subprocess.run([str(self.core), 'convert-ruleset', behavior, feed['format'],
                                              str(input_path), str(output_path)],
                                             capture_output=True, timeout=45, check=False)
                     if result.returncode or not output_path.is_file() or not 16 <= output_path.stat().st_size <= MAX_BYTES:

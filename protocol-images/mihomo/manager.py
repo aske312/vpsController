@@ -45,6 +45,8 @@ import client_compatibility
 from client_capabilities import FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from dns_routing import mihomo_route_dns, validate_route_dns
 from routing_presets import AD_RULES, QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
+import routing_policy
+import yaml
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
@@ -953,6 +955,14 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     result = yaml_profile_routing(current) if current is not None else routing_defaults()
     result.pop("vless_max_connections_per_device", None)
     for key, raw in values.items():
+        if key == 'structured_policy':
+            result[key] = raw if raw == '@inherit' else routing_policy.canonical(raw)
+            continue
+        if key == 'load_balance_strategy':
+            if raw not in ('consistent-hashing', 'round-robin', 'sticky-sessions'):
+                raise HTTPException(422, 'Unsupported load-balance strategy')
+            result[key] = raw
+            continue
         if key in {"connection_mode", "routing_scope"}:
             options = ("tun", "proxy") if key == "connection_mode" else ("all", "selected")
             if not isinstance(raw, str) or raw not in options:
@@ -1010,6 +1020,8 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                 result[key] = str(raw)
     if result.get('route_dns'):
         client_dns_settings(result)
+    if result.get('structured_policy') and result['structured_policy'] != '@inherit':
+        routing_policy.rules(result['structured_policy'], mode=connection_mode(result))
     if result.get('routing_scope') == 'selected':
         profile_final_rules(result)
     return result
@@ -1017,6 +1029,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 
 MRS_CACHE = MrsCache(DATA_ROOT / 'rule-sets' / 'mrs', CORE_BIN, {
     **SECURITY_PROVIDERS,
+    **routing_policy.GEO_CATALOG,
 })
 
 
@@ -1523,6 +1536,7 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
         rules.extend(tunnel_game_rules(routing))
         rules.extend(direct_game_rules(routing))
         rules.extend(direct_p2p_rules(routing))
+    rules.extend(routing_policy.rules(routing.get('structured_policy', '{}'), mode=connection_mode(routing), os=routing.get('_device_os')))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
     if routing.get('connection_mode') == 'proxy':
@@ -2006,6 +2020,9 @@ def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
         return get_routing_schema()
     check_module_settings_revision(ROUTING_MODULE_ID, patch.expected_revision)
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
+    if next_values.get('structured_policy') == '@inherit': next_values.pop('structured_policy')
+    if any(key in patch.values for key in ('structured_policy', 'strategy', 'load_balance_strategy')):
+        for item in profiles(): validate_client_capabilities(normalize_profile(deepcopy(item)), defaults=next_values)
     atomic_json(ROUTING_SETTINGS_FILE, {**next_values, **mutation_metadata("routing", patch)})
     return get_routing_schema()
 
@@ -4069,6 +4086,7 @@ def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     values = device.get("routing")
     base = profile.get("routing", {}) if isinstance(profile.get("routing"), dict) else {}
     result = {**base, **values} if isinstance(values, dict) else dict(base)
+    if result.get('structured_policy') == '@inherit': result.pop('structured_policy')
     for key in ("test_url", "interval", "tolerance", "health_timeout", "max_failed_times"):
         result.pop(key, None)
     if "windows_geolocation" in result and not (device.get("os") == "windows" and device.get("hwid_hash") and device_id != profile.get("common_device_id")):
@@ -5072,6 +5090,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             direct_name, cdn_name, tls_name = None, None, connection_label(connection, index + 1, "tls")
         rendered.append((connection, direct_name, cdn_name, tls_name))
     routing = {**routing_settings(), **profile_routing}
+    routing["_device_os"] = next((device.get("os") for device in normalized.get("devices", []) if device["id"] == selected_device), None)
     routing["_personal_rule_lines"] = personal_rule_lines_for_device(normalized, selected_device)
     ech_requested = bool(profile_routing.get("tunnel_ech", False))
     # The client resolves current ECH parameters through encrypted DNS. A
@@ -5202,7 +5221,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             lines.append(f"      - {q(tls_name)}")
     if not rendered:
         lines.append('      - "REJECT"')
-    if group_type in ("fallback", "url-test"):
+    if group_type in ("fallback", "url-test", "load-balance"):
         lines += [
             f"    url: {q(routing.get('test_url', 'https://www.gstatic.com/generate_204'))}",
             f"    interval: {int(routing.get('interval', 30))}",
@@ -5212,7 +5231,11 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         ]
         if group_type == "url-test":
             lines.append("    tolerance: 0")
-    providers = dict(SECURITY_PROVIDERS)
+        if group_type == 'load-balance':
+            lines.append('    strategy: ' + str(routing.get('load_balance_strategy', 'consistent-hashing')))
+    for group in routing_policy.groups(routing.get('structured_policy', '{}'), rendered, routing):
+        lines.extend('  ' + line for line in yaml.safe_dump([group], allow_unicode=True, sort_keys=False).splitlines())
+    providers = {**SECURITY_PROVIDERS, **routing_policy.GEO_CATALOG}
     used_providers = {name: definition for name, definition in providers.items() if any(
         rule.startswith(f'RULE-SET,{name},') or f'(RULE-SET,{name})' in rule for rule in rules)}
     # Read-only legacy installations cannot build a cache, and IP-only panels
@@ -5220,10 +5243,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     automatic_mrs = bool(os.getenv('PUBLIC_DOMAIN', '').strip()) and component_is_managed()
     if profile_routing.get('mrs_rule_sets', automatic_mrs):
         used_providers = {name: mrs_provider(name, definition) for name, definition in used_providers.items()}
+    else:
+        used_providers = {name: mrs_provider(name, definition) if name in routing_policy.GEO_CATALOG else definition for name, definition in used_providers.items()}
     if used_providers:
         lines.append('rule-providers:')
         for name, definition in used_providers.items():
-            lines += [f'  {name}:', '    type: http', '    behavior: domain',
+            lines += [f'  {name}:', '    type: http', '    behavior: ' + definition.get('behavior', 'domain'),
                       f"    format: {definition['format']}", f"    url: {q(definition['url'])}",
                       f"    path: ./rule-providers/{name}.{'txt' if definition['format'] == 'text' else definition['format']}",
                       f"    interval: {definition['interval']}", '    size-limit: 16777216',
@@ -5260,10 +5285,15 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
     validate_client_capabilities(candidate)
 
 
-def validate_client_capabilities(profile):
+def validate_client_capabilities(profile, defaults=None):
     common_id = profile.get("common_device_id") or profile.get("devices", [{}])[0].get("id")
     for device in profile.get("devices", []):
         routing = yaml_profile_routing(device.get("routing", {}))
+        effective = {**(routing_settings() if defaults is None else defaults), **device_routing(profile, device['id'])}
+        policy = effective.get('structured_policy', '{}')
+        routing_policy.rules(policy, mode=connection_mode(effective), os=device.get('os') if device['id'] != common_id else None)
+        selected = [entry for entry in subscription_limits.client_connections(profile, effective_client_connections(profile.get('connections', []))) if entry.get('device_id', common_id) == device['id']]
+        routing_policy.groups(policy, [(entry, str(entry.get('id', entry.get('component', 'legacy'))), None, None) for entry in selected], effective)
         if routing.get("windows_geolocation") and (device["id"] == common_id or device.get("os") != "windows" or not device.get("hwid_hash")):
             raise HTTPException(status_code=422, detail="Геолокация Windows доступна только зарегистрированному по HWID устройству Windows")
         if device["id"] == common_id:

@@ -3,6 +3,7 @@ export const profileFunctionKeys: readonly string[] = ["block_malware", "block_a
 
 export function profileRoutingSettings(defaults: ProfileRouting, profile: ProfileRouting): ProfileRouting {
   const result = { ...defaults, ...profile };
+  if (profile.structured_policy === "@inherit") result.structured_policy = defaults.structured_policy || "{}";
   // Traffic presets are opt-in per profile, matching the YAML generator.
   for (const key of profileFunctionKeys) result[key] = Boolean(profile[key]);
   return result;

@@ -16,6 +16,17 @@ from mrs_cache import MrsCache
 
 
 class MrsCacheTests(unittest.TestCase):
+    def test_ipcidr_conversion_and_bad_refresh_keep_last_good(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        cache = MrsCache(root, 'test-core', {'geoip-cn': {'url': 'https://feed.invalid/cn.list', 'format': 'text', 'behavior': 'ipcidr', 'interval': 3600}})
+        self.set_source(b'192.0.2.0/24\n2001:db8::/32\n')
+        cache.refresh('geoip-cn', now=10000)
+        self.assertEqual(self.convert.call_args.args[0][2], 'ipcidr')
+        first = cache.read('geoip-cn')
+        self.set_source(b'<html>upstream error</html>')
+        with self.assertRaises(ValueError): cache.refresh('geoip-cn', now=14000)
+        self.assertEqual(cache.read('geoip-cn'), first)
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.cache = MrsCache(self.root, 'test-core', {

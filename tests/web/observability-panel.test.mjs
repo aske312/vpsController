@@ -18,7 +18,12 @@ function mount() {
   const actual=createRequire(import.meta.url), exports={};
   const source=readFileSync(new URL('../../src/features/services/observability-panel.tsx',import.meta.url),'utf8');
   const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
-  new Function('require','exports',output)(name=>name==='react'?hooks:name.endsWith('/api-request')?{}:actual(name),exports);
+  const live = {};
+  const require = name=>name==='react'?hooks:name==='./live-observation'?live:name.endsWith('/api-request')?{}:actual(name);
+  const liveSource=readFileSync(new URL('../../src/features/services/live-observation.tsx',import.meta.url),'utf8');
+  const liveOutput=ts.transpileModule(liveSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+  new Function('require','exports',liveOutput)(require,live);
+  new Function('require','exports',output)(require,exports);
   return {calls,render(){cursor=0;const tree=exports.ObservabilityPanel({request,busy:false});for(const effect of effects.splice(0))effect();return tree;}};
 }
 function nodes(tree, match) {

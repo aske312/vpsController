@@ -127,6 +127,7 @@ async def lifespan(_: FastAPI):
     migration_task = None
     relay_recovery_task = None
     component_health_task = None
+    owner_alert_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
         migration_task = asyncio.create_task(migrate_legacy_components())
@@ -134,9 +135,15 @@ async def lifespan(_: FastAPI):
         metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
         metrics_monitor.start()
         component_health_task = asyncio.create_task(component_checks.monitor(sys.modules[__name__]))
+        import telegram_alerts
+        owner_alert_task = asyncio.create_task(telegram_alerts.monitor(sys.modules[__name__]))
     try:
         yield
     finally:
+        if owner_alert_task is not None:
+            owner_alert_task.cancel()
+            try: await owner_alert_task
+            except asyncio.CancelledError: pass
         if component_health_task is not None:
             component_health_task.cancel()
             try: await component_health_task
@@ -5015,6 +5022,27 @@ def observability_settings(_: None = Depends(require_token)) -> dict:
     return observability_control.evidence(sys.modules[__name__])['settings']
 
 
+@app.get('/api/assistant/alerts')
+def owner_alert_status(_: None = Depends(require_token)) -> dict:
+    import telegram_alerts
+    return telegram_alerts.status(sys.modules[__name__])
+
+
+@app.put('/api/assistant/alerts')
+def owner_alert_config(payload: dict, _: None = Depends(require_token)) -> dict:
+    import telegram_alerts
+    from pydantic import ValidationError
+    try: parsed = telegram_alerts.Settings.model_validate(payload)
+    except ValidationError: raise HTTPException(422, 'Некорректные настройки алертов') from None
+    return telegram_alerts.configure(sys.modules[__name__], parsed)
+
+
+@app.post('/api/assistant/alerts/test')
+def owner_alert_test(_: None = Depends(require_token)) -> dict:
+    import telegram_alerts
+    return telegram_alerts.test(sys.modules[__name__])
+
+
 @app.put('/api/observability/settings')
 def update_observability_settings(payload: observability.Settings, _: None = Depends(require_token)) -> dict:
     import observability_control
@@ -5027,11 +5055,35 @@ def observability_connections(_: None = Depends(require_token)) -> dict:
     return observability_control.connections(sys.modules[__name__])
 
 
+@app.get('/api/observability/network')
+def host_network_observation(source: str = 'ss', protocol: str = 'tcp', family: str = 'ipv4', state: str = 'established',
+                             limit: int = 60, _: None = Depends(require_token)) -> dict:
+    import network_observer
+    return network_observer.collect(sys.modules[__name__], network_observer.parse({
+        'source': source, 'protocol': protocol, 'family': family, 'state': state, 'limit': limit}))
+
+
 @app.get('/api/observability/journal')
 def observability_journal(service: str = 'application', minutes: int = 60, priority: str = 'info',
-                          limit: int = 60, _: None = Depends(require_token)) -> dict:
+                          limit: int = 60, cursor: str | None = None, _: None = Depends(require_token)) -> dict:
     import observability_control
-    return observability_control.journal(sys.modules[__name__], service, minutes, priority, limit)
+    return observability_control.journal(sys.modules[__name__], service, minutes, priority, limit, cursor=cursor)
+
+
+@app.get('/api/observability/journal/stream')
+async def observability_journal_stream(request: Request, service: str = 'application', minutes: int = 60,
+                                        priority: str = 'info', cursor: str | None = None,
+                                        _: None = Depends(require_token)):
+    import hashlib
+    import journal_stream
+    import observability_control
+    from pydantic import ValidationError
+    try: query = observability_control.JournalQuery(service=service, minutes=minutes, priority=priority, cursor=cursor)
+    except ValidationError: raise HTTPException(422, 'Некорректные фильтры журнала') from None
+    observability_control.journal_arguments(sys.modules[__name__], **query.model_dump(), follow=True)
+    user = hashlib.sha256(request.headers.get('authorization', '').encode()).hexdigest()
+    lease = journal_stream.reserve(user)
+    return journal_stream.Response(journal_stream.events(sys.modules[__name__], request, lease, query), lease)
 
 
 @app.get("/api/services/operation-history")

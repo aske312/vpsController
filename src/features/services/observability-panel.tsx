@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
+import { LiveObservation } from "./live-observation";
 
 type Policy = { enabled: boolean; errors_only: boolean; retention_days: number; max_events: number; revision: number };
 type Evidence = {
@@ -127,6 +128,7 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
         </div>
         {journal && <><div className="observabilityTerminalHead"><small>Показано строк: {journal.length} · максимум 120</small><button type="button" className="ghostButton" disabled={!journal.length} onClick={() => downloadLog(journal.join("\n"), "service-journal.log")}>Скачать показанные строки</button></div><pre className="observabilityTerminal" tabIndex={0} aria-label="Журнал службы">{journal.length ? journal.join("\n") : "Записей по выбранным фильтрам нет."}</pre></>}
       </details>
+      <LiveObservation request={request} services={services}/>
       {draft && <form className="observabilityPolicy" onSubmit={event => { event.preventDefault(); void save(); }}>
         <div className="servicesLogControls">
           <LogSwitch label="Собирать события" checked={draft.enabled} disabled={blocked} onChange={enabled => setDraft({ ...draft, enabled })}/>

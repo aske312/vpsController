@@ -15,6 +15,12 @@ const { ProfileModeToggle } = await loader.ssrLoadModule("/src/features/mihomo/p
 const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/vpn-services.json", import.meta.url), "utf8"));
 const render = (Component, routing) => renderToStaticMarkup(createElement(Component, { routing, onChange() {} }));
 
+test("explicit policy inheritance restores global rules without reviving a previous override", () => {
+  const defaults = { structured_policy: '{"rules":[],"groups":[]}' };
+  assert.equal(profileRoutingSettings(defaults, { structured_policy: "@inherit" }).structured_policy, defaults.structured_policy);
+  assert.equal(profileRoutingSettings({}, { structured_policy: "@inherit" }).structured_policy, "{}");
+});
+
 function findElement(element, predicate) {
   if (!isValidElement(element)) return undefined;
   if (predicate(element)) return element;
@@ -53,16 +59,18 @@ test("Protection reflects profile-only traffic functions while inheriting connec
   assert.deepEqual(profile, { block_privacy: true, dns_secure: false });
 });
 
-test("one capture button shows the current mode without guidance", () => {
+test("one capture button shows the current mode with client compatibility context", () => {
   const proxy = render(ProfileProtection, { connection_mode: "proxy", tun_force: true });
   assert.equal((proxy.match(/class="mihomoModeToggle"/g) || []).length, 1);
   assert.match(proxy, /aria-label="Режим подключения: Proxy"/);
   assert.doesNotMatch(proxy, /DNS Hijack|Strict Route|Fake-IP DNS/);
-  assert.doesNotMatch(proxy, /mihomoHint|После сохранения|переопределяет TUN/);
+  assert.match(proxy, /Mihomo 1\.19\.31/);
+  assert.match(proxy, /клиентской подписке/);
   const tun = render(ProfileProtection, { connection_mode: "tun" });
   assert.match(tun, /aria-label="Режим подключения: TUN"/);
   assert.match(tun, /DNS Hijack/);
   assert.match(tun, /Strict Route/);
+  assert.match(tun, /разрешение VPN/);
 });
 
 test("one routing button exposes local brand icons only in selected mode without guidance", () => {

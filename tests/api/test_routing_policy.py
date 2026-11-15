@@ -1,0 +1,175 @@
+from copy import deepcopy
+import json
+import http.server
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import socket
+import threading
+import time
+import unittest
+from unittest.mock import patch
+
+import yaml
+from fastapi import HTTPException
+from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
+from tests.api.test_mihomo_rules_runtime import profile
+import routing_policy as policy
+
+
+class StructuredRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'))
+        self.enterContext(patch.object(manager, 'public_endpoint', return_value='127.0.0.1'))
+        self.enterContext(patch.object(manager, 'module_is_installed', return_value=True))
+
+    def raw(self, groups=None, rules=None): return json.dumps({'groups': groups or [], 'rules': rules or []})
+
+    def test_cycles_unknown_references_and_injection_are_rejected(self):
+        for groups in ([{'name': 'A', 'members': ['group:B']}, {'name': 'B', 'members': ['group:A']}],
+                       [{'name': 'A', 'members': ['group:deleted']}], [{'name': 'A', 'members': ['DIRECT']}],
+                       [{'name': 'DIRECT'}]):
+            with self.assertRaises(HTTPException): policy.parse(self.raw(groups))
+        for rule in ({'kind': 'domain', 'value': 'example.com,DIRECT'}, {'kind': 'geoip', 'value': 'http://evil'},
+                     {'kind': 'domain', 'value': 'example.com', 'target': 'deleted'}):
+            with self.assertRaises(HTTPException): policy.parse(self.raw(rules=[rule]))
+
+    def test_order_named_groups_and_load_balance_algorithms_reach_export(self):
+        item = profile()
+        item['connections'].append({**deepcopy(item['connections'][0]), 'id': 'second', 'name': 'second'})
+        raw = self.raw([{'name': 'Media', 'type': 'fallback', 'members': ['connection:second', 'connection:c']}], [
+            {'kind': 'domain-suffix', 'value': 'example.com', 'target': 'Media'},
+            {'kind': 'ip-cidr', 'value': '2001:db8::1/64', 'target': 'REJECT'}])
+        item['routing'] = {'structured_policy': raw, 'rules': 'DOMAIN,legacy.test,DIRECT'}
+        config = yaml.safe_load(manager.render_profile(item))
+        group = config['proxy-groups'][1]
+        self.assertEqual(group['name'], 'policy:Media')
+        self.assertEqual(group['proxies'], [config['proxies'][1]['name'], config['proxies'][0]['name']])
+        rules = config['rules']
+        self.assertLess(rules.index('DOMAIN-SUFFIX,example.com,policy:Media'), rules.index('DOMAIN,legacy.test,DIRECT'))
+        self.assertIn('IP-CIDR6,2001:db8::/64,REJECT,no-resolve', rules)
+        self.assertEqual(rules[-1], 'MATCH,' + manager.MIHOMO_PROXY_GROUP)
+        for algorithm in ('consistent-hashing', 'round-robin', 'sticky-sessions'):
+            item['routing'].update(strategy='load-balance', load_balance_strategy=algorithm)
+            self.assertEqual(yaml.safe_load(manager.render_profile(item))['proxy-groups'][0]['strategy'], algorithm)
+
+    def test_missing_connection_and_unsupported_process_never_silently_downgrade(self):
+        raw = self.raw([{'name': 'Media', 'members': ['connection:deleted']}])
+        with self.assertRaises(HTTPException): policy.groups(raw, [], {})
+        raw = self.raw(rules=[{'kind': 'process', 'value': 'browser.exe'}])
+        for options in ({'mode': 'proxy'}, {'mode': 'tun', 'os': 'android'}):
+            with self.assertRaises(HTTPException): policy.rules(raw, **options)
+        self.assertEqual(policy.rules(raw, mode='tun', os='windows'), ['PROCESS-NAME,browser.exe,GATE.312'])
+        empty = policy.groups(self.raw([{'name': 'Empty'}]), [], {})
+        self.assertEqual(empty[0]['proxies'], ['REJECT'])
+
+    def test_geo_catalog_and_legacy_profiles_preserve_behavior(self):
+        raw = self.raw(rules=[{'kind': 'geoip', 'value': 'cn', 'target': 'DIRECT'}, {'kind': 'geosite', 'value': 'youtube'}])
+        self.assertEqual(policy.rules(raw), ['RULE-SET,geoip-cn,DIRECT,no-resolve', 'RULE-SET,geosite-youtube,GATE.312'])
+        item = profile()
+        before = manager.render_profile(item)
+        item['routing'] = {'structured_policy': '{}'}
+        self.assertEqual(before, manager.render_profile(item))
+        routing = {'structured_policy': self.raw(rules=[{'kind': 'domain', 'value': 'test.example'}]), 'routing_scope': 'selected'}
+        self.assertEqual(manager.profile_final_rules(routing)[-1], 'MATCH,DIRECT')
+
+    def test_inheritance_can_be_restored_without_resurrecting_old_common_policy(self):
+        item = profile()
+        item['routing'] = {'structured_policy': self.raw(rules=[{'kind': 'domain', 'value': 'old.test'}])}
+        item['devices'][0]['routing'] = manager.validate_routing({'structured_policy': '@inherit', 'routing_scope': 'selected'}, current={})
+        self.assertNotIn('structured_policy', manager.device_routing(item, 'common'))
+        self.assertNotIn('old.test', manager.render_profile(item))
+
+    @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires packaged Mihomo')
+    def test_packaged_core_validates_each_group_algorithm_and_client_tun(self):
+        for algorithm in ('consistent-hashing', 'round-robin', 'sticky-sessions'):
+            item = profile()
+            item['routing'] = {'strategy': 'load-balance', 'load_balance_strategy': algorithm,
+                'connection_mode': 'tun', 'structured_policy': self.raw([
+                    {'name': 'Reserve', 'type': 'fallback'}, {'name': 'Latency', 'type': 'url-test', 'members': ['group:Reserve']},
+                    {'name': 'Manual', 'type': 'select'}, {'name': 'Balance', 'type': 'load-balance', 'strategy': algorithm}], [
+                    {'kind': 'domain', 'value': 'example.com', 'target': 'Balance'}, {'kind': 'ip-cidr', 'value': '2001:db8::/32', 'target': 'REJECT'}])}
+            with tempfile.TemporaryDirectory() as folder:
+                target = Path(folder) / 'config.yaml'
+                target.write_text(manager.render_profile(item), encoding='utf-8')
+                result = subprocess.run([os.environ['PRIVACY_MIHOMO_BIN'], '-t', '-d', folder, '-f', str(target)], capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace'))
+
+    @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires packaged Mihomo')
+    def test_real_traffic_fails_over_and_never_escapes_via_direct(self):
+        class Proxy(http.server.BaseHTTPRequestHandler):
+            def do_CONNECT(self):
+                if not self.server.healthy:
+                    self.send_error(503)
+                    return
+                self.send_response(200, 'Connection established')
+                self.end_headers()
+                request = self.rfile.readline()
+                while self.rfile.readline().strip(): pass
+                if b'/health ' in request:
+                    self.wfile.write(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                else:
+                    marker = self.server.marker
+                    self.wfile.write(b'HTTP/1.1 200 OK\r\nContent-Length: ' + str(len(marker)).encode() + b'\r\nConnection: close\r\n\r\n' + marker)
+                self.wfile.flush()
+            def log_message(self, *_): pass
+        servers = []
+        try:
+            for marker in (b'via-primary', b'via-reserve'):
+                server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+                server.daemon_threads = True
+                server.healthy, server.marker = True, marker
+                servers.append(server)
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+            item = profile()
+            item['connections'].append({**deepcopy(item['connections'][0]), 'id': 'second', 'name': 'second'})
+            item['routing'] = {'structured_policy': self.raw([{'name': 'Reserve', 'type': 'fallback', 'members': ['connection:c', 'connection:second']}],
+                [{'kind': 'domain', 'value': 'routing.audit.test', 'target': 'Reserve'}])}
+            with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as ready:
+                config = yaml.safe_load(manager.render_profile(item))
+                port = free_port(udp=True)
+                config.update({'mixed-port': port, 'external-controller': '', 'log-level': 'silent'})
+                config['tun']['enable'] = False
+                config['dns']['enable'] = False
+                config['rules'].insert(0, f'DST-PORT,{ready},DIRECT')
+                config['proxies'] = [{'name': entry['name'], 'type': 'http', 'server': '127.0.0.1', 'port': server.server_port} for entry, server in zip(config['proxies'], servers)]
+                for group in config['proxy-groups']:
+                    group.update(url='http://health.test/health', interval=1, timeout=500, **{'max-failed-times': 1})
+                target = Path(folder) / 'config.yaml'
+                target.write_text(yaml.safe_dump(config), encoding='utf-8')
+                process = subprocess.Popen([os.environ['PRIVACY_MIHOMO_BIN'], '-d', folder, '-f', str(target)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                try:
+                    wait_port(port, process)
+                    wait_http_proxy(port, process, ready)
+                    def request():
+                        try:
+                            with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
+                                client.settimeout(2)
+                                client.sendall(b'GET http://routing.audit.test:80/ HTTP/1.1\r\nHost: routing.audit.test\r\nConnection: close\r\n\r\n')
+                                data = b''
+                                while chunk := client.recv(8192): data += chunk
+                                return data
+                        except OSError: return b''
+                    def expect(marker):
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline:
+                            if marker in request(): return
+                            time.sleep(.1)
+                        self.fail('Fallback did not reach ' + marker.decode())
+                    expect(b'via-primary')
+                    servers[0].healthy = False
+                    expect(b'via-reserve')
+                    servers[1].healthy = False
+                    time.sleep(1.2)
+                    response = request()
+                    self.assertNotIn(b'via-', response)
+                    self.assertNotIn(b'proxy-ready', response)
+                finally:
+                    process.terminate()
+                    process.wait(timeout=10)
+        finally:
+            for server in servers:
+                server.shutdown()
+                server.server_close()

@@ -10,6 +10,8 @@ import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
+import { AdvancedRouting, BalanceStrategy } from "./advanced-routing";
+import { SavedRoutingOrder } from "./saved-routing-order";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
 import { aggregateUsage, usageBytes, usagePeriodLabel, subscriptionTraffic, unlimitedSubscription } from "./subscription-limits";
@@ -662,6 +664,16 @@ export function MihomoPage({
       if (device.id !== activeDeviceId) return device;
       const routing = { ...(device.routing || profileRouting) };
       if (value) routing.strategy = value; else delete routing.strategy;
+      return { ...device, routing };
+    }));
+  }
+
+  function inheritStructuredPolicy() {
+    setProfileDevices(current => current.map(device => {
+      if (device.id !== activeDeviceId) return device;
+      const routing = { ...(device.routing || {}) };
+      if (device.scope === "common") routing.structured_policy = "@inherit";
+      else delete routing.structured_policy;
       return { ...device, routing };
     }));
   }
@@ -1667,7 +1679,8 @@ export function MihomoPage({
             </article>
           </section>
 
-          <details className="mihomoAdvancedRules"><summary><span><b>Глобальные дополнительные правила</b><small>Для всех конфигураций Mihomo</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><small>Эти правила применяются ко всем профилям. Для выборочного включения создайте правило в категории «Персональные».</small><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
+          <AdvancedRouting value={routingDraft.structured_policy} onChange={value => updateRoutingDraft("structured_policy", value)}/>
+          {String(routingDraft.rules || "").trim() && <details className="mihomoAdvancedRules"><summary>Прежние дополнительные правила · сохранены без изменений</summary><pre className="observabilityTerminal">{String(routingDraft.rules)}</pre></details>}
           </>}
 
           {view === "routing" && <>
@@ -1681,7 +1694,8 @@ export function MihomoPage({
             <div className="mihomoSettingsGrid">
               <article><header><span>01</span><div><b>Поведение трафика</b><small>Базовый режим всех профилей</small></div></header><div className="mihomoRoutingFields">
                 <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
-                <label><span>Стратегия по умолчанию</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option></select></label>
+                <label><span>Стратегия по умолчанию</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option><option value="load-balance">Балансировка каналов</option></select></label>
+                {routingDraft.strategy === "load-balance" && <BalanceStrategy value={routingDraft.load_balance_strategy} onChange={value => updateRoutingDraft("load_balance_strategy", value)}/>}
               </div></article>
               <article><header><span>02</span><div><b>Проверка доступности</b><small>Health check защищённых каналов</small></div></header><div className="mihomoRoutingFields">
                 <label className="is-wide"><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
@@ -1713,6 +1727,7 @@ export function MihomoPage({
               <button type="button" className="iconButton" aria-label="Закрыть настройки" onClick={() => void closeSettings()}>x</button>
             </header>
             <p>{editing.description}</p>{editing.category === "transport" && <p>Здесь находятся общие параметры сервера. Параметры отдельного подключения доступны в профиле → Подключения.</p>}
+            {editing.id === "transport-hysteria2" && <p className="mihomoHint">Обфускация: {settingsDraft.obfs ? "Salamander включён" : "выключена"}. Клиенты должны обновить подписку после изменения. Сохранение использует штатную операцию изменения серверного канала с проверкой и откатом.</p>}
             {settingsRevisionConflict && <p role="alert">{latestSettingsModule ? "Настройки компонента изменились. Ваш ввод сохранён; загрузите актуальные данные перед новой записью." : "Компонент больше не доступен. Ваш ввод сохранён."} <button type="button" disabled={!latestSettingsModule || Boolean(busy)} onClick={() => void reloadSettings()}>Загрузить актуальные настройки</button></p>}
             <div className="mihomoFields">
               {(editing.settings || []).filter((field) => editing.id !== "transport-reality" || String(settingsDraft.transport || "xhttp") === "xhttp" || !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)).map((field) => (
@@ -1777,7 +1792,11 @@ export function MihomoPage({
               } : undefined} />
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
             {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
-            {profileStep === 3 && <ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue} />}
+            {profileStep === 3 && <><ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue}/>
+              <AdvancedRouting value={effectiveProfileRouting.structured_policy} inherited={!activeProfileDevice?.routing?.structured_policy || activeProfileDevice.routing.structured_policy === "@inherit"} connections={deviceConnections} onChange={value => setProfileRoutingValue("structured_policy", value)} reset={inheritStructuredPolicy}/>
+              {profileDialog && profileDialog !== "new" && <SavedRoutingOrder key={`${profileDialog.id}:${activeDeviceId}`} request={request} profileId={profileDialog.id} deviceId={activeDeviceId} disabled={profileDirty || Boolean(busy) || Boolean(pendingProfileSave)}/>}
+            </>}
+            {activeProfileRouting.strategy === "load-balance" && <BalanceStrategy value={effectiveProfileRouting.load_balance_strategy} onChange={value => setProfileRoutingValue("load_balance_strategy", value)}/>}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
             <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>

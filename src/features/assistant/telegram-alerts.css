@@ -1,0 +1,7 @@
+.noderaOwnerAlerts { display: grid; gap: 12px; }
+.noderaOwnerAlerts p, .noderaOwnerAlerts small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.noderaOwnerAlerts > label:not(.noderaPermissionSwitch) { display: grid; gap: 8px; }
+.noderaOwnerAlerts select { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-inset); color: var(--text); }
+.noderaOwnerAlerts .buttonRow { display: flex; flex-wrap: wrap; gap: 8px; }
+.noderaOwnerAlerts .buttonRow button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.noderaOwnerAlerts .noderaPermissionSwitch { flex-direction: row-reverse; }
