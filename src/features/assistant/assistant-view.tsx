@@ -270,7 +270,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         dirtyRef.current = false;
         setDraft(saved);
       }
-      setChecks({}); setMessage("Настройки сохранены");
+      setChecks({}); setMessage(next.settings_apply?.bot_restarted ? "Настройки сохранены; Telegram-бот перезапущен" : "Настройки сохранены");
       return next;
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Настройки не сохранены"); }
     finally { writing.current = false; setWorking(""); }
@@ -406,6 +406,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const managedComponent = selectedComponent?.installed ? selectedComponent : botComponent;
   if (!managedComponent?.installed) return <section hidden={!active} className="mcpWorkspace"><p>Установите Nodera в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = managedComponent.management?.state !== "managed" || managedComponent.management?.retained;
+  const editingBlocked = working === "save" || Boolean(readOnly);
   const settingsBlocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
   const blocked = settingsBlocked || chatBusy || readingFiles || memoryBusy;
   const composerBlocked = hasPendingChat && !chatBusy || settingsBlocked || readingFiles || memoryBusy;
@@ -544,8 +545,9 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         </div>
       </section>
       {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
+      {dirty && settingsBlocked && !editingBlocked && <p className="mcpNotice" role="status">Настройки можно редактировать. Сохранение станет доступно после завершения текущей операции или восстановления связи.</p>}
       <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
-        blocked={settingsBlocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
+        blocked={editingBlocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
         working={working}/>
     </>}
   </div>;

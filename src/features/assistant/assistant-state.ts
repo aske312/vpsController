@@ -97,6 +97,7 @@ export type McpStatus = {
   nodera_management?: { state: string; retained?: boolean };
   provider_usage?: Record<string, ProviderUsage>;
   bot_live_access?: boolean;
+  settings_apply?: { bot_restarted: boolean };
   bot_username?: string | null;
   settings: Settings; runtime_installed: boolean; bot: Observation; agent?: Observation; legacy_bot: Observation;
   modules: { id: ModuleId; name: string; enabled: boolean; configured: boolean; installed: boolean; management: {state: string; retained?: boolean}; execution: "service" | "on-demand" }[];

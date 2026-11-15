@@ -301,10 +301,9 @@ class AssistantTests(unittest.TestCase):
         payload = self.payload(); payload['accounts'] *= 2
         with self.assertRaises(ValueError): control.Settings.model_validate(payload)
 
-    def test_running_bot_requires_stop_before_credential_snapshot_changes(self):
-        self.observe.return_value['active'] = True
-        payload = self.payload()
-        payload['component'] = 'nodera-bot'
+    def test_running_bot_state_changes_use_the_explicit_service_action(self):
+        payload, _ = self.running_bot_settings()
+        payload['modules']['nodera-bot'] = False
         with self.assertRaises(api.HTTPException) as caught: self.save(payload)
         self.assertEqual(caught.exception.status_code, 409)
 
@@ -333,6 +332,69 @@ class AssistantTests(unittest.TestCase):
         self.assertTrue(current['accounts'][0]['bot_access'])
         self.assertEqual(snapshot.read_text(), 'running-bot-credential-snapshot')
         service_command.assert_not_called()
+
+    def running_bot_settings(self):
+        payload = self.payload()
+        payload['expected_revision'] = control.read(api)['revision']
+        payload.update(component='nodera', modules={'ai-agent': True, 'nodera-bot': True})
+        saved = self.save(payload)
+        payload['expected_revision'] = saved['settings']['revision']
+        self.observe.side_effect = lambda unit: ({'active': True, 'enabled': False, 'unit_present': True, 'state': 'active', 'runtime': {'state': 'running'}}
+            if unit in (control.BOT_UNIT, control.AGENT_UNIT) else {'active': False, 'unit_present': False, 'state': 'inactive'})
+        unit = self.root / 'bot.service'; unit.touch()
+        return payload, unit
+
+    def test_running_bot_applies_roles_and_users_live_without_restart(self):
+        payload, _ = self.running_bot_settings()
+        snapshot = control.directory(api) / 'nodera-bot/runtime.json'
+        snapshot.write_text('existing-credentials')
+        payload['role_permissions'] = {'moderator': ['chat', 'server_read']}
+        payload['accounts'][0].update(role='moderator', products=['assistant'], permission_overrides={'chat': False})
+        with patch.object(worker, 'checked') as commands:
+            result = self.save(payload)
+        current = control.read(api)
+        self.assertEqual(control.roles.effective(current, '11'), {'server_read'})
+        self.assertFalse(result['settings_apply']['bot_restarted'])
+        self.assertEqual(snapshot.read_text(), 'existing-credentials')
+        commands.assert_not_called()
+
+    def test_running_bot_restarts_only_for_new_token_and_preserves_autostart(self):
+        payload, unit = self.running_bot_settings()
+        payload['bot_token'] = '123456:new-token-abcdefghijklmnopqrstuvwxyz'
+        with patch.object(worker, 'assert_unit_owner', return_value=unit), patch.object(worker, 'checked') as commands:
+            result = self.save(payload)
+        self.assertTrue(result['settings_apply']['bot_restarted'])
+        commands.assert_called_once_with(['systemctl', 'restart', control.BOT_UNIT])
+        credentials = json.loads((control.directory(api) / 'nodera-bot/runtime.json').read_text())
+        self.assertEqual(credentials['bot_token'], payload['bot_token'])
+        self.assertEqual(control.read(api)['bot_token'], payload['bot_token'])
+
+    def test_failed_token_restart_restores_settings_and_restarts_previous_credentials(self):
+        for rollback_fails in (False, True):
+            with self.subTest(rollback_fails=rollback_fails):
+                payload, unit = self.running_bot_settings()
+                previous = control.read(api)
+                payload['bot_token'] = '123456:new-token-abcdefghijklmnopqrstuvwxyz'
+                effects = [RuntimeError('service failed'), RuntimeError('rollback failed') if rollback_fails else None]
+                with patch.object(worker, 'assert_unit_owner', return_value=unit), patch.object(worker, 'checked', side_effect=effects) as commands:
+                    with self.assertRaises(api.HTTPException) as error: self.save(payload)
+                self.assertEqual(error.exception.status_code, 503 if rollback_fails else 409)
+                self.assertEqual(control.read(api), previous)
+                credentials = json.loads((control.directory(api) / 'nodera-bot/runtime.json').read_text())
+                self.assertEqual(credentials['bot_token'], previous['bot_token'])
+                self.assertEqual([call.args[0] for call in commands.call_args_list], [['systemctl', 'restart', control.BOT_UNIT]] * 2)
+
+    def test_running_bot_cannot_save_empty_token_or_restart_for_unchanged_token(self):
+        payload, _ = self.running_bot_settings()
+        previous = control.read(api)
+        payload['bot_token'] = ''
+        with patch.object(worker, 'checked') as commands:
+            with self.assertRaises(api.HTTPException) as error: self.save(payload)
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertEqual(control.read(api), previous)
+            payload['bot_token'] = previous['bot_token']
+            self.assertFalse(self.save(payload)['settings_apply']['bot_restarted'])
+        commands.assert_not_called()
 
     def test_agent_setup_does_not_require_bot_service_observation(self):
         self.observe.side_effect = lambda unit: ({'active': False, 'unit_present': None, 'state': 'unknown'}

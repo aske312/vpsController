@@ -186,7 +186,7 @@ def remove_nodera(api):
         remove(api, component)
 
 
-def perform(api, action, *, restoring=False):
+def perform(api, action, *, restoring=False, settings=None, preserve_autostart=False):
     from fastapi import HTTPException
     if action not in ('start', 'stop', 'restart'):
         raise ValueError('Use the image catalog to install a component')
@@ -202,7 +202,8 @@ def perform(api, action, *, restoring=False):
     unit_path = assert_unit_owner('nodera-bot')
     if not unit_path.is_file(): raise HTTPException(409, 'Служба NoderaBot не установлена')
     if action != 'stop':
-        settings = control.read(api)
+        # Configuration applies a captured snapshot while holding its settings lock.
+        settings = control.read(api) if settings is None else settings
         if not settings['modules']['nodera-bot'] or not control.ready(settings, 'nodera-bot'):
             raise HTTPException(409, 'Сохраните настройки NoderaBot перед запуском')
         version = (control.runtime_directory('nodera-bot') / 'version').read_text().strip()
@@ -214,7 +215,8 @@ def perform(api, action, *, restoring=False):
         credentials = {'modules': settings['modules'], 'mcp': settings['mcp'], 'bot_token': settings['bot_token'],
                        'control_token': settings['control_token'], 'accounts': [{k: v for k, v in a.items() if k != 'session'} for a in settings['accounts']]}
         control.operations.atomic_json(control.directory(api) / 'nodera-bot' / 'runtime.json', credentials)
-    checked(['systemctl', 'disable' if action == 'stop' else 'enable', control.BOT_UNIT])
+    if not preserve_autostart:
+        checked(['systemctl', 'disable' if action == 'stop' else 'enable', control.BOT_UNIT])
     checked(['systemctl', action, control.BOT_UNIT])
     observed = api.observe_service(control.BOT_UNIT)
     if (action == 'stop' and observed.get('state') != 'inactive') or (action != 'stop' and not observed.get('active')):

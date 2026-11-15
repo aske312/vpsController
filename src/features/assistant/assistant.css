@@ -375,13 +375,11 @@ button.noderaTag { cursor:pointer; }
 .noderaDialogFields .noderaPermissionSwitch,.noderaSettings .noderaPermissionSwitch { display:flex; align-items:center; justify-content:space-between; gap:12px; position:relative; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
 .noderaPermissionSwitch > span { flex:1; min-width:0; }
 .noderaPermissionSwitch small { display:block; margin-top:4px; }
-.noderaPermissionSwitch > input { position:absolute; opacity:0; width:1px; height:1px; }
-.noderaPermissionSwitch > i { flex-shrink:0; position:relative; width:32px; height:18px; border-radius:12px; background:#354a59; transition:background .15s; }
-.noderaPermissionSwitch > i::after { content:""; position:absolute; width:12px; height:12px; border-radius:50%; top:3px; left:3px; background:#aebfcb; transition:transform .15s; }
-.noderaPermissionSwitch > input:checked + i { background:#267b67; }
-.noderaPermissionSwitch > input:checked + i::after { transform:translateX(14px); background:#a1efd6; }
-.noderaPermissionSwitch > input:disabled + i { opacity:.4; }
-.noderaPermissionSwitch > input:focus-visible + i { outline:2px solid var(--cyan); outline-offset:3px; }
+.mcpWorkspace .noderaPermissionSwitch > input[type=checkbox] { appearance:none; flex:none; position:relative; width:32px; min-width:32px; height:18px; min-height:18px; margin:0; padding:0; border:0; border-radius:12px; background:#354a59; cursor:pointer; transition:background .15s; }
+.noderaPermissionSwitch > input::before { content:""; position:absolute; width:12px; height:12px; border-radius:50%; top:3px; left:3px; background:#aebfcb; transition:transform .15s; }
+.mcpWorkspace .noderaPermissionSwitch > input:checked { background:#267b67; }
+.noderaPermissionSwitch > input:checked::before { transform:translateX(14px); background:#a1efd6; }
+.noderaPermissionSwitch > input:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
 .noderaOverrideRow { display:flex; align-items:center; gap:8px; min-width:0; }
 .noderaOverrideRow > label { flex:1; }
 .noderaUserSection { display:grid; gap:12px; min-width:0; }

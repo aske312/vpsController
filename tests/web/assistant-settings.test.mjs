@@ -63,8 +63,8 @@ function mount(status, catalog = [], overrides = {}) {
     if (path.startsWith('/assistant/requests/')) return jobs.get(path.split('/')[3].split('?')[0]);
     return status;
   };
-  const props = { active: true, onOpenChat: overrides.onOpenChat || (() => {}), request, busy: false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
-  return { writes, notifications, setActive(value) { props.active = value; }, render() {
+  const props = { active: true, onOpenChat: overrides.onOpenChat || (() => {}), request, busy: overrides.busy ?? false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
+  return { writes, notifications, setActive(value) { props.active = value; }, setBusy(value) { props.busy = value; }, render() {
     cursor = 0;
     const tree = exported.AssistantView(props);
     const expand = node => {
@@ -399,16 +399,42 @@ test('access can save role permissions during an AI response without mixing chat
   assert.equal(view.writes.filter(value=>value.prompt==='hello').length,1);
 });
 
-test('running Telegram bot locks its token and shows the stop action', async () => {
+test('running Telegram bot allows token editing and shows the stop action', async () => {
   const view = mount(fixture());
   view.render(); await Promise.resolve();
   nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   const tree = view.render();
-  assert.equal(nodes(tree, n => n.type === 'fieldset' && n.props.className === 'noderaBotToken')[0].disabled, true);
+  assert.equal(nodes(tree, n => n.type === 'fieldset' && n.props.className === 'noderaBotToken')[0].disabled, false);
   const botSwitch = nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'Telegram bot')[0];
   assert.equal(botSwitch.disabled, false);
   assert.equal(botSwitch.node.props['aria-checked'], true);
   assert.equal(nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'AI').length, 0);
+});
+
+test('background panel work does not block role or user editing while active bot settings are preserved', async () => {
+  const status=fixture();status.settings.modules['ai-agent']=true;
+  status.settings.accounts=[{telegram_id:11,name:'Member',role:'user',products:['assistant'],excluded_dialogs:[],permission_overrides:{},session_configured:false}];
+  const view=mount(status,[],{busy:true});view.render();await Promise.resolve();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  let tree=view.render();
+  const open=nodes(tree,n=>n.type==='button'&&n.props.children?.[1]==='Настроить роли')[0];
+  assert.equal(open.disabled,false);open.node.props.onClick();
+  tree=view.render();
+  const permission=nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0];
+  assert.equal(permission.disabled,false);permission.node.props.onChange({target:{checked:false}});
+  nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Роли и права')[0].node.props.submit();
+  tree=view.render();
+  const user=nodes(tree,n=>n.props['aria-label']==='Настроить пользователя Member')[0];
+  assert.equal(user.disabled,false);user.node.props.onClick();
+  tree=view.render();nodes(tree,n=>n.type==='input'&&n.props.value==='Member')[0].node.props.onChange({target:{value:'Edited while busy'}});
+  nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node.props.submit();
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить')[0].disabled,true);
+  view.setBusy(false);
+  const save=nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить')[0];
+  assert.equal(save.disabled,false);save.node.props.onClick();await Promise.resolve();
+  assert.equal(view.writes[0].accounts[0].name,'Edited while busy');
+  assert.ok(!view.writes[0].role_permissions.user.includes('web'));
+  assert.equal(view.writes[0].modules['nodera-bot'],true);
 });
 
 test('chat scope lives in settings and subscription binding is saved with address preferences', async () => {

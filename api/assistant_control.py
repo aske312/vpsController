@@ -675,8 +675,8 @@ def configure(api, payload):
             require_installed(api, 'nodera-bot')
             if not bot.get('active') and bot.get('state') not in ('inactive', 'failed'):
                 raise HTTPException(409, 'Состояние Telegram-бота не подтверждено')
-        if (unified or payload.component == 'nodera-bot') and bot.get('active') and bot_changes:
-            raise HTTPException(409, 'Для изменения токена или включения NoderaBot сначала остановите его. Список администраторов можно менять без остановки')
+        if (unified or payload.component == 'nodera-bot') and bot.get('active') and payload.modules['nodera-bot'] != old['modules']['nodera-bot']:
+            raise HTTPException(409, 'Измените состояние Telegram-бота его переключателем. Роли, пользователей и токен можно сохранять при работающем боте')
         if old['revision'] != payload.expected_revision:
             raise operations.OperationConflict('Настройки MCP изменились. Обновите раздел перед сохранением')
         submitted = payload.model_dump(exclude={'expected_revision', 'component'})
@@ -745,8 +745,24 @@ def configure(api, payload):
                 account.update(bot_access='subscriptions_admin' in grants, bot_chat_access='chat' in grants and 'subscriptions_admin' not in grants, vps_access=bool(grants & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), telegram_access='telegram_read' in grants)
         value['revision'] = uuid.uuid4().hex
         value['control_token'] = old.get('control_token') or secrets.token_urlsafe(48)
+        restart_bot = (unified or payload.component == 'nodera-bot') and bot.get('active') is True and value.get('bot_token') != old.get('bot_token')
+        if restart_bot and not ready(value, 'nodera-bot'):
+            raise HTTPException(422, 'Работающему Telegram-боту нужен токен. Для его удаления сначала выключите бота переключателем')
         store(api, value)
-    return status(api)
+        if restart_bot:
+            import assistant_worker
+            try:
+                assistant_worker.perform(api, 'restart', settings=value, preserve_autostart=True)
+            except Exception:
+                store(api, old)
+                try:
+                    assistant_worker.perform(api, 'restart', settings=old, preserve_autostart=True)
+                except Exception:
+                    raise HTTPException(503, 'Настройки восстановлены, но запуск Telegram-бота не подтверждён. Проверьте состояние службы') from None
+                raise HTTPException(409, 'Новый токен не применён. Прежние настройки и работа Telegram-бота восстановлены') from None
+    result = status(api)
+    result['settings_apply'] = {'bot_restarted': bool(restart_bot)}
+    return result
 
 
 def provider_usage(api, value, result=None):
