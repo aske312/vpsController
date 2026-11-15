@@ -372,7 +372,7 @@ button.noderaTag { cursor:pointer; }
 .noderaRoleEditor > nav button { display:flex; justify-content:space-between; gap:8px; padding:10px; border-radius:8px; color:var(--muted); text-align:left; background:var(--panel-inset); }
 .noderaRoleEditor > nav button[aria-pressed=true] { color:var(--cyan); background:rgba(97,207,216,.12); }
 .noderaRoleEditor .noderaPermissionGrid { grid-template-columns:minmax(0,1fr); }
-.noderaDialogFields .noderaPermissionSwitch { display:flex; align-items:center; justify-content:space-between; gap:12px; position:relative; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+.noderaDialogFields .noderaPermissionSwitch,.noderaSettings .noderaPermissionSwitch { display:flex; align-items:center; justify-content:space-between; gap:12px; position:relative; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
 .noderaPermissionSwitch > span { flex:1; min-width:0; }
 .noderaPermissionSwitch small { display:block; margin-top:4px; }
 .noderaPermissionSwitch > input { position:absolute; opacity:0; width:1px; height:1px; }
@@ -390,3 +390,27 @@ button.noderaTag { cursor:pointer; }
 @media(max-width:640px) { .noderaRoleEditor { grid-template-columns:minmax(0,1fr); gap:12px; } .noderaRoleEditor > nav { position:static; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .noderaUserTabs { top:-12px; } }
 .noderaPermissionGroup h3 { margin:8px 0 0; font-size:13px; }
 .noderaPermissionGroup input:disabled + span { color:var(--muted); }
+.noderaRolesLayout,.noderaUserEditor { display:grid; grid-template-columns:190px minmax(0,1fr); gap:18px; min-width:0; }
+.noderaRoleNav,.noderaUserNav { display:flex; flex-direction:column; align-self:start; gap:6px; }
+.noderaRoleNav button,.noderaUserNav button,.noderaAccountRoles button { display:grid; gap:5px; min-width:0; padding:10px; border:1px solid var(--line); border-radius:8px; color:var(--text); background:var(--panel-inset); text-align:left; cursor:pointer; }
+.noderaRoleNav button[aria-pressed=true],.noderaUserNav button[aria-pressed=true],.noderaAccountRoles button[aria-pressed=true],.noderaPermissionNav button[aria-pressed=true] { border-color:var(--cyan); background:rgba(97,207,216,.1); }
+.noderaRoleNav small { display:block; }
+.noderaRoleContent,.noderaUserContent { display:grid; align-content:start; gap:12px; min-width:0; }
+.noderaRoleContent h3,.noderaUserSection h3 { margin:0; font-size:14px; }
+.noderaRoleContent > small,.noderaUserSummary small { color:var(--muted); }
+.noderaRoleContent .noderaPermissionGrid,.noderaUserContent .noderaPermissionGrid { grid-template-columns:minmax(0,1fr); gap:0; }
+.noderaPermissionNav { display:flex; flex-wrap:wrap; gap:5px; }
+.noderaPermissionNav button { padding:6px 9px; border:1px solid var(--line); border-radius:8px; color:var(--text); font-size:11px; cursor:pointer; }
+.noderaUserSummary { display:grid; gap:4px; padding:12px; border:1px solid var(--line); border-radius:8px; overflow-wrap:anywhere; }
+.noderaUserSummary span { color:var(--muted); }
+.noderaAccountRoles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.noderaAccountRoles small { display:block; }
+@container (max-width:700px) {
+ .noderaRolesLayout { grid-template-columns:minmax(0,1fr); }
+ .noderaRoleNav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:700px) {
+ .noderaUserEditor { grid-template-columns:minmax(0,1fr); }
+ .noderaUserNav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .noderaAccountRoles { grid-template-columns:minmax(0,1fr); }
+}

@@ -50,6 +50,7 @@ function mount(status, catalog = [], overrides = {}) {
     if (path === '/assistant/models') return overrides.models ? overrides.models(options) : { models: catalog };
     if (path.startsWith('/assistant/queue?')) return overrides.queue ? overrides.queue(path) : {state:'running', position:0, waiting:0};
     if (options?.method === 'PUT' || path === '/assistant/requests') writes.push(JSON.parse(options.body));
+    if (options?.method === 'PUT' && overrides.save) return overrides.save(options);
     if (path === '/assistant/requests') {
       const payload=JSON.parse(options.body);
       const accepted={id:payload.request_id,seq:0,state:'queued',stage:'queued',question:payload.prompt,model:payload.model,stream:payload.stream};
@@ -358,13 +359,48 @@ test('AI settings can be edited and submitted while NoderaBot is running', async
   assert.ok(view.notifications.some(item => item.state === 'success' && item.message === 'Настройки сохранены'));
 });
 
+test('access can save role permissions during an AI response without mixing chat and save lifetimes', async () => {
+  const status = fixture();
+  Object.assign(status.settings, {model:'m', modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0], {enabled:true,configured:true});
+  let finishChat, finishSave;
+  const view = mount(status, [], {
+    chat: () => new Promise(resolve => { finishChat = resolve; }),
+    save: () => new Promise(resolve => { finishSave = resolve; }),
+  });
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'hello',style:{},scrollHeight:48}});
+  nodes(view.render(),n=>n.type==='textarea')[0].node.props.onKeyDown({key:'Enter',preventDefault(){}});
+  await new Promise(setImmediate);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  tree=view.render();
+  const permission=nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0];
+  assert.equal(permission.disabled,false);
+  permission.node.props.onChange({target:{checked:false}});
+  tree=view.render();
+  const save=nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить')[0];
+  assert.equal(save.disabled,false);
+  save.node.props.onClick(); await Promise.resolve();
+  assert.equal(view.writes.length,2);
+  assert.ok(!view.writes[1].role_permissions.user.includes('web'));
+  finishChat({result:{answer:'Completed while saving',tools_used:[]}});
+  await new Promise(setImmediate);
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить')[0].disabled,true);
+  finishSave({...status,settings:{...status.settings,revision:'b'.repeat(32),role_permissions:view.writes[1].role_permissions}});
+  await new Promise(setImmediate);
+  tree=view.render();
+  assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить').length,0);
+  nodes(tree,n=>n.type==='button'&&n.props.children?.[1]==='Чат')[0].node.props.onClick();
+  assert.equal(nodes(view.render(),n=>n.props.text==='Completed while saving').length,1);
+  assert.equal(view.writes.filter(value=>value.prompt==='hello').length,1);
+});
+
 test('running Telegram bot locks its token and shows the stop action', async () => {
   const view = mount(fixture());
   view.render(); await Promise.resolve();
   nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   const tree = view.render();
-  const toggles = nodes(tree, n => n.type === 'input' && n.props.type === 'checkbox');
-  assert.equal(toggles.length, 0);
   assert.equal(nodes(tree, n => n.type === 'fieldset' && n.props.className === 'noderaBotToken')[0].disabled, true);
   const botSwitch = nodes(tree, n => n.props.role === 'switch' && n.props['aria-label'] === 'Telegram bot')[0];
   assert.equal(botSwitch.disabled, false);
@@ -468,20 +504,20 @@ test('user permission switch can override and restore role inheritance while sec
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
   let tree=view.render();
   nodes(tree,n=>n.props['aria-label']==='Настроить пользователя Member')[0].node.props.onClick();
-  tree=view.render();
+  const userTree=()=>nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node;
+  tree=userTree();
   nodes(tree,n=>n.type==='input'&&n.props.value==='Member')[0].node.props.onChange({target:{value:'Member updated'}});
-  tree=view.render();
-  nodes(tree,n=>n.type==='button'&&n.props.children==='Продукты и права')[0].node.props.onClick();
-  tree=view.render();
+  tree=userTree();
+  nodes(tree,n=>n.type==='button'&&n.props.children==='Личные права')[0].node.props.onClick();
+  tree=userTree();
   const permission=nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0];
   assert.equal(permission.node.props.checked,true);
   permission.node.props.onChange({target:{checked:false}});
-  tree=view.render();
+  tree=userTree();
   assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0].node.props.checked,false);
   nodes(tree,n=>n.props['aria-label']==='По роли: Поиск в интернете')[0].node.props.onClick();
-  tree=view.render();
+  tree=userTree();
   assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0].node.props.checked,true);
-  assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Управление ролями и правами')[0].disabled,true);
   nodes(tree,n=>n.type==='button'&&n.props.children==='Telegram')[0].node.props.onClick();
   tree=view.render();
   const dialog=nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node;
@@ -491,6 +527,7 @@ test('user permission switch can override and restore role inheritance while sec
   await Promise.resolve();
   assert.deepEqual(view.writes.at(-1).accounts[0].permission_overrides,{});
   assert.equal(view.writes.at(-1).accounts[0].telegram_id,11);
+  assert.equal(view.writes.at(-1).accounts[0].name,'Member updated');
 });
 
 test('tools use switches and gears; model and tool count are separate header facts', async () => {
@@ -515,13 +552,10 @@ test('access exposes all five roles, owner permissions remain fixed, and persona
   view.render(); await Promise.resolve();
   nodes(view.render(), n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   let tree = view.render();
-  assert.equal(nodes(tree, n => n.props['aria-label']?.startsWith('Настроить роль ')).length, 0);
-  nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Роли и права')[0].node.props.onClick();
+  assert.equal(nodes(tree, n => n.props['aria-label']?.startsWith('Роль: ')).length, 5);
+  nodes(tree, n => n.props['aria-label'] === 'Роль: Владелец')[0].node.props.onClick();
   tree = view.render();
-  nodes(tree, n => n.props['aria-label'] === 'Редактируемая роль')[0].node.props.onChange({target:{value:'owner'}});
-  tree = view.render();
-  const owner = nodes(tree, n => typeof n.type === 'function' && n.props.title === 'Ролевая модель')[0].node;
-  assert.equal(owner.props.wide, true);
+  const owner = nodes(tree, n => n.type === 'section' && n.props['aria-label'] === 'Роли и права')[0].node;
   assert.equal(nodes(owner, n => n.type === 'input' && n.props.type === 'checkbox').filter(item => !item.disabled).length, 0);
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки AI')[0].node.props.onClick();
   tree = view.render();

@@ -70,6 +70,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const setError = (text: string) => { if (text) notify.error(text); };
   const setMessage = (text: string) => { if (text) notify.success(text); };
   const [working, setWorking] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const [actor, setActor] = useState("");
   const [prompt, setPrompt] = useState("");
   const [catalog, setCatalog] = useState<string[]>([]);
@@ -195,8 +196,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     if (!identity) return;
     const controller = new AbortController();
     observation.current = controller;
-    writing.current = true; chatRunning.current = true; interacted.current = true;
-    setWorking("chat");
+    chatRunning.current = true; interacted.current = true;
+    setChatBusy(true);
     const turnId = ++nextTurn.current;
     let inserted = false;
     void observeChatJob(request, identity, actor, streaming, job => {
@@ -218,13 +219,13 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, error: cause instanceof Error ? cause.message : "Результат AI не подтверждён" } : turn));
     }).finally(() => {
       if (controller.signal.aborted) return;
-      writing.current = false; chatRunning.current = false; setWorking(""); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor)));
+      chatRunning.current = false; setChatBusy(false); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor)));
     });
-    return () => { controller.abort(); writing.current = false; chatRunning.current = false; };
+    return () => { controller.abort(); chatRunning.current = false; setChatBusy(false); };
   }, [request, actor, status?.chat_jobs, streaming, recoveryKey]);
   useEffect(() => { transcript.current?.scrollTo({ top: transcript.current.scrollHeight }); }, [turns, panel]);
   async function attachFiles(incoming: File[]) {
-    if (!incoming.length || fileRead.current || writing.current && !chatRunning.current) return;
+    if (!incoming.length || fileRead.current || writing.current) return;
     if (!status?.chat_attachments) { setError("Для файлов обновите Nodera в Обзоре"); return; }
     interacted.current = true; fileRead.current = true; setReadingFiles(true); setError("");
     try { const added = await readChatFiles(incoming, files); if (client.current === request) setFiles(current => [...current, ...added]); }
@@ -307,7 +308,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     catch (cause) { setError(cause instanceof Error ? cause.message : "Команда не принята"); }
   }
   async function send() {
-    if (hasPendingChat && !chatRunning.current || !(prompt.trim() || files.length) || !selectedModel || writing.current && !chatRunning.current || fileRead.current) return;
+    if (hasPendingChat && !chatRunning.current || !(prompt.trim() || files.length) || !selectedModel || writing.current || fileRead.current) return;
     if (pendingTurns.current.length >= 5) { setError("В очереди уже 5 сообщений. Дождитесь ответа."); return; }
     const turn: Turn = { id: ++nextTurn.current, question: prompt.trim(), model: selectedModel, files, queue_state: "queued" };
     pendingTurns.current.push(turn);
@@ -316,7 +317,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     setTurns(current => [...current, turn]);
     if (chatRunning.current) return;
     chatRunning.current = true;
-    writing.current = true; setWorking("chat"); setError("");
+    setChatBusy(true); setError("");
     const connection = apiMonitor.current;
     const context = [...turns];
     let conversation = conversationId;
@@ -376,7 +377,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           break;
         }
       }
-    } finally { if (client.current === request) { chatRunning.current = false; writing.current = false; setWorking(""); setChatQueue(null); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor))); } }
+    } finally { if (client.current === request) { chatRunning.current = false; setChatBusy(false); setChatQueue(null); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor))); } }
   }
   async function confirmService(turn: Turn) {
     const action = turn.pending_action;
@@ -405,8 +406,9 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const managedComponent = selectedComponent?.installed ? selectedComponent : botComponent;
   if (!managedComponent?.installed) return <section hidden={!active} className="mcpWorkspace"><p>Установите Nodera в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = managedComponent.management?.state !== "managed" || managedComponent.management?.retained;
-  const blocked = busy || Boolean(working) || readingFiles || memoryBusy || Boolean(loadError) || Boolean(readOnly);
-  const composerBlocked = hasPendingChat && !working || busy || Boolean(working && working !== "chat") || readingFiles || memoryBusy || Boolean(loadError) || Boolean(readOnly);
+  const settingsBlocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
+  const blocked = settingsBlocked || chatBusy || readingFiles || memoryBusy;
+  const composerBlocked = hasPendingChat && !chatBusy || settingsBlocked || readingFiles || memoryBusy;
   const conflict = status.settings.revision !== draft.expected_revision;
   const agentReady = selectedComponent?.installed && selectedComponent.enabled && selectedComponent.configured;
   const chooseActor = (value: string) => { memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(""); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
@@ -492,13 +494,13 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
               }
             }}><header><span>Модели · {availableModels.length}</span><button type="button" className="mcpIconButton" aria-label="Обновить модели" disabled={catalogLoading} onClick={() => void loadModels()}><ChatIcon name="refresh"/></button></header><div role="listbox" aria-label="Доступные модели">{availableModels.map(id => <button type="button" role="option" aria-selected={id === selectedModel} key={id} onClick={() => { setModel(id); setModelMenu(false); modelButton.current?.focus(); }}><span>{id}</span>{id === selectedModel && <ChatIcon name="check"/>}</button>)}{!availableModels.length && <p>{catalogLoading ? 'Загрузка…' : 'Каталог пуст'}</p>}</div></div></>}
           </div>
-          <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title={working === "chat" ? "Добавить в очередь" : "Отправить"} disabled={composerBlocked || dirty || !(prompt.trim() || files.length) || !selectedModel || !agentReady} onClick={() => void send()}>{readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
+          <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title={chatBusy ? "Добавить в очередь" : "Отправить"} disabled={composerBlocked || dirty || !(prompt.trim() || files.length) || !selectedModel || !agentReady} onClick={() => void send()}>{readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
       </div>
-      {hasPendingChat && !working && <button type="button" className="ghostButton" onClick={() => setRecoveryKey(value => value + 1)}>Восстановить ответ</button>}
-      <p className="mcpChatHint">{working === "chat" ? "Можно отправить ещё вопрос — он попадёт в очередь и получит контекст предыдущего ответа." : "Shift+Enter — новая строка · файлы передаются выбранному AI-провайдеру"}</p>
+      {hasPendingChat && !chatBusy && !working && <button type="button" className="ghostButton" onClick={() => setRecoveryKey(value => value + 1)}>Восстановить ответ</button>}
+      <p className="mcpChatHint">{chatBusy ? "Можно отправить ещё вопрос — он попадёт в очередь и получит контекст предыдущего ответа." : "Shift+Enter — новая строка · файлы передаются выбранному AI-провайдеру"}</p>
     </section>
     {chatSettingsOpen && <SettingsDialog title="Настройки чата" close={() => setChatSettingsOpen(false)}>
-        <label className="mcpToggle"><input type="checkbox" checked={streaming} disabled={working === "chat" || !status.chat_streaming} onChange={event => {
+        <label className="mcpToggle"><input type="checkbox" checked={streaming} disabled={chatBusy || !status.chat_streaming} onChange={event => {
           setStreaming(event.target.checked); try { sessionStorage.setItem("nodera-streaming", String(event.target.checked)); } catch {}
         }}/>Потоковый ответ</label>
         <p>{status.chat_streaming ? "Показывать текст по мере получения. При выключении ответ появится целиком." : "Для потоковых ответов обновите компонент Nodera."}</p>
@@ -536,14 +538,14 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
               onClick={() => selectPanel(item.id)}><ChatIcon name={item.icon}/>{item.label}</button>)}
           </nav>
           {dirty && <div className="mcpActions">
-            <button type="button" className="ghostButton" disabled={blocked} onClick={discardSettings}>Отменить</button>
-            <button type="button" className="primaryButton" disabled={blocked || conflict} onClick={() => void save()}>Сохранить</button>
+            <button type="button" className="ghostButton" disabled={settingsBlocked} onClick={discardSettings}>Отменить</button>
+            <button type="button" className="primaryButton" disabled={settingsBlocked || conflict} onClick={() => void save()}>Сохранить</button>
           </div>}
         </div>
       </section>
       {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
       <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
-        blocked={blocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
+        blocked={settingsBlocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
         working={working}/>
     </>}
   </div>;
