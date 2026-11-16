@@ -81,6 +81,62 @@ class StructuredRoutingTests(unittest.TestCase):
         self.assertNotIn('structured_policy', manager.device_routing(item, 'common'))
         self.assertNotIn('old.test', manager.render_profile(item))
 
+    def test_selection_is_strict_and_disabled_rules_keep_dependency_groups(self):
+        for value in ('[]', '{"Media": 1}', '{"../group": false}', 'null', False):
+            with self.subTest(value=value), self.assertRaises(HTTPException):
+                manager.validate_routing({policy.SELECTION_KEY: value}, current={})
+        raw = self.raw([
+            {'id': 'media-id', 'name': 'Media', 'members': ['group:Reserve']},
+            {'id': 'reserve-id', 'name': 'Reserve', 'members': ['*']},
+        ], [
+            {'kind': 'domain', 'value': 'media.test', 'target': 'Media'},
+            {'kind': 'domain', 'value': 'reserve.test', 'target': 'Reserve'},
+            {'kind': 'domain', 'value': 'direct.test', 'target': 'DIRECT'},
+        ])
+        result = policy.parse(policy.effective({'structured_policy': raw, policy.SELECTION_KEY: '{"reserve-id":false,"@rules":false}'}))
+        self.assertEqual([rule.value for rule in result.rules], ['media.test'])
+        self.assertEqual([group.name for group in result.groups], ['Media', 'Reserve'])
+
+    def test_global_definitions_stay_live_while_profile_selection_changes_export(self):
+        raw = self.raw([{'id': 'media-id', 'name': 'Media', 'members': ['*']}, {'id': 'work-id', 'name': 'Work', 'members': ['*']}], [
+            {'kind': 'domain', 'value': 'media.test', 'target': 'Media'},
+            {'kind': 'domain', 'value': 'work.test', 'target': 'Work'},
+            {'kind': 'domain', 'value': 'direct.test', 'target': 'DIRECT'},
+        ])
+        defaults = {**manager.routing_settings(), 'structured_policy': raw}
+        item = profile()
+        item['routing'] = {policy.SELECTION_KEY: '{"media-id":false}'}
+        with patch.object(manager, 'routing_settings', return_value=defaults):
+            config = yaml.safe_load(manager.render_profile(item))
+            self.assertNotIn('DOMAIN,media.test,policy:Media', config['rules'])
+            self.assertIn('DOMAIN,work.test,policy:Work', config['rules'])
+            self.assertIn('DOMAIN,direct.test,DIRECT', config['rules'])
+            self.assertNotIn('policy:Media', [group['name'] for group in config['proxy-groups']])
+            defaults['structured_policy'] = raw.replace('work.test', 'new-work.test').replace('Media', 'Video')
+            config = yaml.safe_load(manager.render_profile(item))
+            self.assertIn('DOMAIN,new-work.test,policy:Work', config['rules'])
+            self.assertNotIn('policy:Video', [group['name'] for group in config['proxy-groups']])
+        self.assertNotIn('structured_policy', item['routing'])
+
+    def test_device_selection_overrides_only_one_group_and_keeps_profile_choices(self):
+        item = profile()
+        item['routing'] = {policy.SELECTION_KEY: '{"Media":false,"Work":false}'}
+        item['devices'] += [{'id': 'phone', 'os': 'android', 'routing': {policy.SELECTION_KEY: '{"Media":true}'}}]
+        common = json.loads(manager.device_routing(item, 'common')[policy.SELECTION_KEY])
+        phone = json.loads(manager.device_routing(item, 'phone')[policy.SELECTION_KEY])
+        self.assertEqual(common, {'Media': False, 'Work': False})
+        self.assertEqual(phone, {'Media': True, 'Work': False})
+        del item['devices'][1]['routing'][policy.SELECTION_KEY]
+        self.assertEqual(json.loads(manager.device_routing(item, 'phone')[policy.SELECTION_KEY]), common)
+
+    def test_disabled_process_rules_are_not_validated_as_active_on_mobile(self):
+        item = profile()
+        item['devices'] += [{'id': 'phone', 'os': 'android', 'routing': {policy.SELECTION_KEY: '{"@rules":false}'}}]
+        defaults = {'connection_mode': 'tun', 'structured_policy': self.raw(rules=[{'kind': 'process', 'value': 'browser.exe'}])}
+        manager.validate_client_capabilities(item, defaults=defaults)
+        item['devices'][1]['routing'][policy.SELECTION_KEY] = '{"@rules":true}'
+        with self.assertRaises(HTTPException): manager.validate_client_capabilities(item, defaults=defaults)
+
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires packaged Mihomo')
     def test_packaged_core_validates_each_group_algorithm_and_client_tun(self):
         for algorithm in ('consistent-hashing', 'round-robin', 'sticky-sessions'):

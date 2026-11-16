@@ -1,8 +1,22 @@
 export type ProfileRouting = Record<string, string | number | boolean>;
 export const profileFunctionKeys: readonly string[] = ["block_malware", "block_advertising", "block_privacy", "quic_compatibility"];
 
+export const policySelectionKey = "structured_policy_selection";
+export function parsePolicySelection(raw: unknown): Record<string, boolean> {
+  try {
+    const value = JSON.parse(String(raw || "{}"));
+    return value && !Array.isArray(value) && typeof value === "object"
+      ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean")) : {};
+  } catch { return {}; }
+}
+export function mergeProfileRouting(...layers: ProfileRouting[]): ProfileRouting {
+  const result = Object.assign({}, ...layers);
+  if (layers.some(layer => policySelectionKey in layer)) result[policySelectionKey] = JSON.stringify(Object.assign({}, ...layers.map(layer => parsePolicySelection(layer[policySelectionKey]))));
+  return result;
+}
+
 export function profileRoutingSettings(defaults: ProfileRouting, profile: ProfileRouting): ProfileRouting {
-  const result = { ...defaults, ...profile };
+  const result = mergeProfileRouting(defaults, profile);
   if (profile.structured_policy === "@inherit") result.structured_policy = defaults.structured_policy || "{}";
   // Traffic presets are opt-in per profile, matching the YAML generator.
   for (const key of profileFunctionKeys) result[key] = Boolean(profile[key]);

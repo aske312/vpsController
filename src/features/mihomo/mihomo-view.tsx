@@ -10,10 +10,10 @@ import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
-import { AdvancedRouting, BalanceStrategy, ProfileAdvancedRouting } from "./advanced-routing";
+import { AdvancedRouting, BalanceStrategy, ProfilePolicyGroups } from "./advanced-routing";
 import { SavedRoutingOrder } from "./saved-routing-order";
 import { ProfileRoutingMode } from "./profile-routing-mode";
-import { profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
+import { mergeProfileRouting, policySelectionKey, profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
 import { aggregateUsage, usageBytes, usagePeriodLabel, subscriptionTraffic, unlimitedSubscription } from "./subscription-limits";
 import { ProfileGeneral } from "./profile-general";
 import type { SubscriptionLimits } from "./types";
@@ -204,7 +204,7 @@ export function MihomoPage({
   const commonProfileRouting = profileDevices.find((device) => device.scope === "common")?.routing || profileRouting;
   const activeProfileRouting = activeProfileDevice?.scope === "common"
     ? commonProfileRouting
-    : { ...commonProfileRouting, ...(activeProfileDevice?.routing || {}) };
+    : mergeProfileRouting(commonProfileRouting, activeProfileDevice?.routing || {});
   const effectiveProfileRouting = profileRoutingSettings(routingPolicy?.values || {}, activeProfileRouting);
   const activeConnectionMode = profileConnectionMode(effectiveProfileRouting);
   const activeCapabilities = clientCapabilities(activeProfileDevice?.scope === "common" ? undefined : activeProfileDevice?.os || "unknown");
@@ -672,8 +672,17 @@ export function MihomoPage({
     setProfileDevices(current => current.map(device => {
       if (device.id !== activeDeviceId) return device;
       const routing = { ...(device.routing || {}) };
-      if (device.scope === "common") routing.structured_policy = "@inherit";
-      else delete routing.structured_policy;
+      routing.structured_policy = "@inherit";
+      return { ...device, routing };
+    }));
+  }
+
+  function inheritPolicySelection() {
+    setProfileDevices(current => current.map(device => {
+      if (device.id !== activeDeviceId) return device;
+      const routing = { ...(device.routing || {}) };
+      if (device.scope === "common") routing[policySelectionKey] = "{}";
+      else delete routing[policySelectionKey];
       return { ...device, routing };
     }));
   }
@@ -1791,7 +1800,10 @@ export function MihomoPage({
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b></span></button>; })}</div></section>}
             {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
             {profileStep === 3 && <><ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue}/>
-              <ProfileAdvancedRouting key={activeDeviceId} value={effectiveProfileRouting.structured_policy} inherited={!activeProfileDevice?.routing?.structured_policy || activeProfileDevice.routing.structured_policy === "@inherit"} connections={deviceConnections} onChange={value => setProfileRoutingValue("structured_policy", value)} reset={inheritStructuredPolicy}/>
+              <ProfilePolicyGroups value={effectiveProfileRouting.structured_policy} selection={effectiveProfileRouting[policySelectionKey]} ownSelection={activeProfileDevice?.routing?.[policySelectionKey]}
+                onChange={value => setProfileRoutingValue(policySelectionKey, value)} onReset={inheritPolicySelection}
+                onEdit={() => { void closeProfile(() => setView("rules")); }} legacy={Boolean(activeProfileRouting.structured_policy && activeProfileRouting.structured_policy !== "@inherit")}
+                onUseShared={inheritStructuredPolicy} disabled={Boolean(busy) || Boolean(pendingProfileSave)}/>
               {profileDialog && profileDialog !== "new" && <SavedRoutingOrder key={`${profileDialog.id}:${activeDeviceId}`} request={request} profileId={profileDialog.id} deviceId={activeDeviceId} disabled={profileDirty || Boolean(busy) || Boolean(pendingProfileSave)}/>}
             </>}
             {activeProfileRouting.strategy === "load-balance" && <BalanceStrategy value={effectiveProfileRouting.load_balance_strategy} onChange={value => setProfileRoutingValue("load_balance_strategy", value)}/>}

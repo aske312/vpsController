@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import react from "@vitejs/plugin-react";
 import { createTestLoader } from "./vite-test-loader.mjs";
-import { profileConnectionMode, profileModeChange, profileRuleVisible, profileFunctionKeys, profileRoutingSettings } from "../../src/features/mihomo/profile-modes.ts";
+import { mergeProfileRouting, parsePolicySelection, policySelectionKey, profileConnectionMode, profileModeChange, profileRuleVisible, profileFunctionKeys, profileRoutingSettings } from "../../src/features/mihomo/profile-modes.ts";
 
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
@@ -19,6 +19,14 @@ test("explicit policy inheritance restores global rules without reviving a previ
   const defaults = { structured_policy: '{"rules":[],"groups":[]}' };
   assert.equal(profileRoutingSettings(defaults, { structured_policy: "@inherit" }).structured_policy, defaults.structured_policy);
   assert.equal(profileRoutingSettings({}, { structured_policy: "@inherit" }).structured_policy, "{}");
+});
+
+test("device selection inherits each group independently and keeps explicit false", () => {
+  const common = { [policySelectionKey]: '{"Media":false,"Work":false}' };
+  const device = { [policySelectionKey]: '{"Media":true}' };
+  assert.deepEqual(parsePolicySelection(mergeProfileRouting(common, device)[policySelectionKey]), { Media: true, Work: false });
+  const result = profileRoutingSettings({ [policySelectionKey]: '{"Other":false}' }, mergeProfileRouting(common, device));
+  assert.deepEqual(parsePolicySelection(result[policySelectionKey]), { Other: false, Media: true, Work: false });
 });
 
 function findElement(element, predicate) {

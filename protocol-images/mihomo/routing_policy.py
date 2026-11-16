@@ -26,6 +26,7 @@ class Rule(BaseModel):
 
 class Group(BaseModel):
     model_config = {'extra': 'forbid'}
+    id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
     name: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_-]{0,39}$')
     type: Literal['select', 'fallback', 'url-test', 'load-balance'] = 'fallback'
     members: list[str] = Field(default_factory=lambda: ['*'], min_length=1, max_length=100)
@@ -45,6 +46,8 @@ def parse(raw):
         policy = Policy.model_validate(json.loads(raw or '{}'))
         names = [group.name for group in policy.groups]
         if len(set(names)) != len(names) or any(name in ('DIRECT', 'REJECT', 'GLOBAL') for name in names): raise ValueError('Повторяющееся или зарезервированное имя группы')
+        identities = [group.id or group.name for group in policy.groups]
+        if len(set(identities)) != len(identities): raise ValueError('Повторяющийся ID группы')
         graph = {}
         for group in policy.groups:
             graph[group.name] = []
@@ -74,8 +77,58 @@ def parse(raw):
         raise HTTPException(422, 'Некорректная политика маршрутизации: ' + (str(exc)[:180] if not isinstance(exc, ValidationError) else 'проверьте поля правил и групп')) from None
 
 
-def canonical(raw): return parse(raw).model_dump_json()
+def canonical(raw): return parse(raw).model_dump_json(exclude_none=True)
 def group_name(name): return 'policy:' + name
+
+
+SELECTION_KEY = 'structured_policy_selection'
+
+
+def selection(raw):
+    try:
+        if not isinstance(raw, str) or len(raw) > 16000: raise ValueError()
+        value = json.loads(raw or '{}')
+        if not isinstance(value, dict) or len(value) > 201 or any(
+                not isinstance(key, str) or not (key == '@rules' or re.fullmatch(r'[A-Za-z0-9_-]{1,64}', key))
+                or type(enabled) is not bool for key, enabled in value.items()): raise ValueError()
+        return value
+    except (ValueError, TypeError):
+        raise HTTPException(422, 'Некорректный выбор групп маршрутизации') from None
+
+
+def merge_selection(*values):
+    result = {}
+    for value in values: result.update(selection('{}' if value is None else value))
+    return json.dumps(result, separators=(',', ':'))
+
+
+def merge_routing(*values):
+    result = {}
+    for value in values: result.update(value)
+    if any(SELECTION_KEY in value for value in values):
+        result[SELECTION_KEY] = merge_selection(*(value.get(SELECTION_KEY) for value in values))
+    return result
+
+
+def effective(routing):
+    """Selection changes rules, never the shared definitions or their order.
+
+    A disabled group's own rules are omitted. It may still be needed as a
+    channel dependency of another enabled group, so retain that dependency.
+    """
+    policy = parse(routing.get('structured_policy', '{}'))
+    choices = selection(routing.get(SELECTION_KEY, '{}'))
+    enabled = {group.name for group in policy.groups if choices.get(group.id or group.name, True)}
+    rules = [rule for rule in policy.rules if rule.target in enabled or
+             rule.target in ('DIRECT', 'REJECT', GROUP) and choices.get('@rules', True)]
+    required = set(enabled)
+    definitions = {group.name: group for group in policy.groups}
+    pending = list(required)
+    while pending:
+        for member in definitions[pending.pop()].members:
+            if member.startswith('group:') and member[6:] not in required:
+                required.add(member[6:]); pending.append(member[6:])
+    return Policy(rules=rules, groups=[group for group in policy.groups if group.name in required]).model_dump_json(exclude_none=True)
 
 
 def rules(raw, *, mode=None, os=None):

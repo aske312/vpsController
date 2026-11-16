@@ -7,7 +7,7 @@ import { createTestLoader } from "./vite-test-loader.mjs";
 
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
-const { AdvancedRouting } = await loader.ssrLoadModule("/src/features/mihomo/advanced-routing.tsx");
+const { AdvancedRouting, ProfilePolicyGroups } = await loader.ssrLoadModule("/src/features/mihomo/advanced-routing.tsx");
 function nodes(node, predicate) {
   if (!isValidElement(node)) return [];
   return [...(predicate(node) ? [node] : []), ...Children.toArray(node.props.children).flatMap(child => nodes(child, predicate))];
@@ -63,5 +63,26 @@ test("group rename updates references in parent groups as well as routing rules"
   ], rules: [{ kind: "domain", value: "example.com", target: "Media" }] }), onChange: raw => { next = JSON.parse(raw); } });
   nodes(tree, node => node.type === "input" && node.props.value === "Media")[0].props.onChange({ target: { value: "Video" } });
   assert.equal(next.rules[0].target, "Video");
+  assert.equal(next.groups[0].id, "Media");
   assert.deepEqual(next.groups[1].members, ["group:Video"]);
+});
+
+test("profile cards toggle one reference without copying or editing definitions", () => {
+  const value = JSON.stringify({ groups: [{ id: "media-id", name: "Media", type: "fallback", members: ["*"], strategy: "consistent-hashing" }],
+    rules: [{ kind: "domain", value: "media.test", target: "Media" }, { kind: "domain", value: "direct.test", target: "DIRECT" }] });
+  let next, edited = 0;
+  const props = { value, selection: '{"media-id":false,"@rules":false}', ownSelection: '{}',
+    onChange: raw => { next = JSON.parse(raw); }, onReset() {}, onEdit() { edited++; }, onUseShared() {} };
+  const tree = ProfilePolicyGroups(props);
+  const cards = nodes(tree, node => node.type === "button" && typeof node.props["aria-pressed"] === "boolean");
+  assert.equal(cards.length, 2);
+  assert.equal(cards[1].props["aria-pressed"], false);
+  cards[1].props.onClick();
+  assert.deepEqual(next, { "media-id": true });
+  nodes(tree, node => node.type === "button" && node.props.children === "Настроить на странице «Правила»")[0].props.onClick();
+  assert.equal(edited, 1);
+  const html = renderToStaticMarkup(createElement(ProfilePolicyGroups, props));
+  assert.doesNotMatch(html, /<(input|select|textarea)\b/);
+  assert.doesNotMatch(html, /media\.test|direct\.test/);
+  assert.match(html, /Media/);
 });

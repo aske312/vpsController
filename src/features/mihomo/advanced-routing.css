@@ -34,16 +34,19 @@
 .mihomoStructuredPolicy .mihomoPolicyActions button { padding: 6px; min-width: 30px; min-height: 32px; }
 .mihomoFinalRuleOrder { max-height: 420px; overflow: auto; padding-left: 36px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .mihomoProfileDialog .mihomoStructuredPolicy { padding: 14px; border-radius: 12px; background: var(--panel-inset); }
-.mihomoPolicyDisclosure { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-inset); }
-.mihomoPolicyDisclosure > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px; cursor: pointer; list-style: none; }
-.mihomoPolicyDisclosure > summary::-webkit-details-marker { display: none; }
-.mihomoPolicyDisclosure > summary::before { content: "›"; color: var(--muted); font-size: 20px; line-height: 1; }
-.mihomoPolicyDisclosure[open] > summary::before { transform: rotate(90deg); }
-.mihomoPolicyDisclosure > summary > span:first-of-type { flex: 1; min-width: 160px; display: grid; gap: 5px; }
-.mihomoPolicyDisclosure > summary b { font-size: 13px; }
-.mihomoPolicyDisclosure > summary small,.mihomoPolicyDisclosureCount { color: var(--muted); font-size: 11px; line-height: 1.5; }
-.mihomoPolicyDisclosure > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 12px; }
-.mihomoProfileDialog .mihomoPolicyDisclosure > .mihomoStructuredPolicy { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; }
+.mihomoPolicyPicker { display:grid; gap:12px; min-width:0; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--panel-inset); }
+.mihomoPolicyPicker > header,.mihomoPolicyPicker > footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.mihomoPolicyPicker > header > div { display:grid; gap:4px; }
+.mihomoPolicyPicker > header b { font-size:12px; }
+.mihomoPolicyPicker small,.mihomoPolicyPicker p,.mihomoPolicyPicker > footer { color:var(--muted); font-size:11px; line-height:1.6; }
+.mihomoPolicyPicker p { margin:0; }
+.mihomoPolicyPicker > header button,.mihomoPolicyPicker > footer button,.mihomoPolicyLegacy > button { padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); font-size:11px; cursor:pointer; }
+.mihomoPolicyPickerCards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr)); gap:8px; min-width:0; }
+.mihomoPolicyPickerCards .mihomoProfileRuleButton span { min-width:0; display:grid; gap:4px; }
+.mihomoPolicyPickerCards .mihomoProfileRuleButton b { overflow-wrap:anywhere; }
+.mihomoPolicyPickerCards .mihomoProfileRuleButton small { display:block; }
+.mihomoPolicyPicker button:disabled { opacity:.5; cursor:default; }
+.mihomoPolicyLegacy { display:grid; justify-items:start; gap:8px; padding:12px; border:1px solid var(--line); border-radius:8px; }
 @container routing-policy (max-width: 700px) {
   .mihomoPolicyRule { grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr); align-items: end; padding-block: 10px; border-bottom: 1px solid var(--line); }
   .mihomoPolicyRule > span { grid-column: 1; grid-row: 1 / 3; align-self: start; padding-top: 24px; }

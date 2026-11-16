@@ -958,6 +958,9 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
         if key == 'structured_policy':
             result[key] = raw if raw == '@inherit' else routing_policy.canonical(raw)
             continue
+        if key == routing_policy.SELECTION_KEY:
+            result[key] = routing_policy.merge_selection(raw)
+            continue
         if key == 'load_balance_strategy':
             if raw not in ('consistent-hashing', 'round-robin', 'sticky-sessions'):
                 raise HTTPException(422, 'Unsupported load-balance strategy')
@@ -1021,7 +1024,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     if result.get('route_dns'):
         client_dns_settings(result)
     if result.get('structured_policy') and result['structured_policy'] != '@inherit':
-        routing_policy.rules(result['structured_policy'], mode=connection_mode(result))
+        routing_policy.rules(routing_policy.effective(result), mode=connection_mode(result))
     if result.get('routing_scope') == 'selected':
         profile_final_rules(result)
     return result
@@ -1536,7 +1539,7 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
         rules.extend(tunnel_game_rules(routing))
         rules.extend(direct_game_rules(routing))
         rules.extend(direct_p2p_rules(routing))
-    rules.extend(routing_policy.rules(routing.get('structured_policy', '{}'), mode=connection_mode(routing), os=routing.get('_device_os')))
+    rules.extend(routing_policy.rules(routing_policy.effective(routing), mode=connection_mode(routing), os=routing.get('_device_os')))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
     if routing.get('connection_mode') == 'proxy':
@@ -2021,7 +2024,7 @@ def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     check_module_settings_revision(ROUTING_MODULE_ID, patch.expected_revision)
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
     if next_values.get('structured_policy') == '@inherit': next_values.pop('structured_policy')
-    if any(key in patch.values for key in ('structured_policy', 'strategy', 'load_balance_strategy')):
+    if any(key in patch.values for key in ('structured_policy', routing_policy.SELECTION_KEY, 'strategy', 'load_balance_strategy')):
         for item in profiles(): validate_client_capabilities(normalize_profile(deepcopy(item)), defaults=next_values)
     atomic_json(ROUTING_SETTINGS_FILE, {**next_values, **mutation_metadata("routing", patch)})
     return get_routing_schema()
@@ -4085,7 +4088,7 @@ def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     device = next((entry for entry in profile.get("devices", []) if str(entry.get("id")) == device_id), {})
     values = device.get("routing")
     base = profile.get("routing", {}) if isinstance(profile.get("routing"), dict) else {}
-    result = {**base, **values} if isinstance(values, dict) else dict(base)
+    result = routing_policy.merge_routing(base, values if isinstance(values, dict) else {})
     if result.get('structured_policy') == '@inherit': result.pop('structured_policy')
     for key in ("test_url", "interval", "tolerance", "health_timeout", "max_failed_times"):
         result.pop(key, None)
@@ -4387,7 +4390,7 @@ def device_matches_client(device: dict[str, Any], metadata: dict[str, Any]) -> b
 def verification_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     """Include exporter inheritance without inheriting device-only switches."""
     values = device_routing(profile, device_id)
-    routing = {**routing_settings(), **values}
+    routing = routing_policy.merge_routing(routing_settings(), values)
     routing["_personal_rule_lines"] = personal_rule_lines_for_device(profile, device_id)
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled", "tunnel_ech", "tunnel_privacy"):
         routing[key] = bool(values.get(key, False))
@@ -5089,7 +5092,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
             direct_name, cdn_name, tls_name = None, None, connection_label(connection, index + 1, "tls")
         rendered.append((connection, direct_name, cdn_name, tls_name))
-    routing = {**routing_settings(), **profile_routing}
+    routing = routing_policy.merge_routing(routing_settings(), profile_routing)
     routing["_device_os"] = next((device.get("os") for device in normalized.get("devices", []) if device["id"] == selected_device), None)
     routing["_personal_rule_lines"] = personal_rule_lines_for_device(normalized, selected_device)
     ech_requested = bool(profile_routing.get("tunnel_ech", False))
@@ -5233,7 +5236,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             lines.append("    tolerance: 0")
         if group_type == 'load-balance':
             lines.append('    strategy: ' + str(routing.get('load_balance_strategy', 'consistent-hashing')))
-    for group in routing_policy.groups(routing.get('structured_policy', '{}'), rendered, routing):
+    for group in routing_policy.groups(routing_policy.effective(routing), rendered, routing):
         lines.extend('  ' + line for line in yaml.safe_dump([group], allow_unicode=True, sort_keys=False).splitlines())
     providers = {**SECURITY_PROVIDERS, **routing_policy.GEO_CATALOG}
     used_providers = {name: definition for name, definition in providers.items() if any(
@@ -5289,8 +5292,8 @@ def validate_client_capabilities(profile, defaults=None):
     common_id = profile.get("common_device_id") or profile.get("devices", [{}])[0].get("id")
     for device in profile.get("devices", []):
         routing = yaml_profile_routing(device.get("routing", {}))
-        effective = {**(routing_settings() if defaults is None else defaults), **device_routing(profile, device['id'])}
-        policy = effective.get('structured_policy', '{}')
+        effective = routing_policy.merge_routing(routing_settings() if defaults is None else defaults, device_routing(profile, device['id']))
+        policy = routing_policy.effective(effective)
         routing_policy.rules(policy, mode=connection_mode(effective), os=device.get('os') if device['id'] != common_id else None)
         selected = [entry for entry in subscription_limits.client_connections(profile, effective_client_connections(profile.get('connections', []))) if entry.get('device_id', common_id) == device['id']]
         routing_policy.groups(policy, [(entry, str(entry.get('id', entry.get('component', 'legacy'))), None, None) for entry in selected], effective)
