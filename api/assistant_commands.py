@@ -230,13 +230,16 @@ def execute(api, actor, prompt):
                 return record['completed_text']
             if record.get('kind') == 'mihomo' and not settings.get('mcp', {}).get('mihomo-mcp', settings.get('mcp', {}).get('vps-controller-mcp', False)):
                 raise HTTPException(403, 'Контур Mihomo MCP выключен; изменение не отправлено')
-            if record.get('kind') in ('mihomo', 'telegram') and record.get('submitted'):
+            if record.get('kind') == 'relay':
+                import assistant_relay
+                assistant_relay.require(settings, actor, manage=True)
+            if record.get('kind') in ('mihomo', 'telegram', 'relay') and record.get('submitted'):
                 raise HTTPException(409, 'Запрос уже отправлен. Проверьте результат: /operation ' + record['operation_id'])
             existing = control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'))
             if not existing and (time.time() > record['expires'] or control._read(api)['revision'] != record['revision']):
                 path.unlink()
                 raise HTTPException(409, 'Подтверждение истекло или права изменились. Отправьте /service заново')
-            if not existing and record.get('kind') not in ('mihomo', 'roles', 'observability', 'telegram', 'diagnostic_rules', 'diagnostic_probe'):
+            if not existing and record.get('kind') not in ('mihomo', 'roles', 'observability', 'telegram', 'diagnostic_rules', 'diagnostic_probe', 'relay'):
                 definition = api.managed_services().get(record['service'], {})
                 if record['action'] not in controls(record['service'], definition):
                     path.unlink()
@@ -246,6 +249,9 @@ def execute(api, actor, prompt):
         # Use the panel's durable, idempotent service worker and admission lock.
         # Never hold the file lock across admission, which acquires it itself.
         try:
+            if record.get('kind') == 'relay':
+                import assistant_relay
+                return assistant_relay.confirm(api, actor, record)
             if record.get('kind') == 'telegram':
                 import assistant_telegram
                 return assistant_telegram.confirm(api, actor, record)
@@ -268,7 +274,7 @@ def execute(api, actor, prompt):
         except HTTPException as exc:
             with control.operations.locked(api.DATA_DIR):
                 current = control.operations.read(path)
-                definite_rejection = record.get('kind') not in ('mihomo', 'telegram') or exc.status_code in (403, 404, 409, 422)
+                definite_rejection = record.get('kind') not in ('mihomo', 'telegram', 'relay') or exc.status_code in (403, 404, 409, 422)
                 if definite_rejection and current.get('operation_id') == record['operation_id'] and not control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json')):
                     record['submitted'] = False
                     control.operations.atomic_json(path, record)

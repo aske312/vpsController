@@ -337,7 +337,7 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect']
+    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect', 'relay_read', 'relay_prepare']
     service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
@@ -654,7 +654,7 @@ def status(api):
                           (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else []) + (['vps_access'] if agent_version >= (1, 11, 0) else []) +
                           (['vps_observability'] if agent_version >= (1, 13, 0) else []) +
                           (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []) +
-                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []),
+                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []) + (['relay_read', 'relay_prepare'] if agent_version >= (1, 29, 0) else []),
                       'mihomo-mcp': (['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] +
                           (['mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'] if agent_version >= (1, 26, 0) else [])) if agent_version >= (1, 15, 0) else []}}
 
@@ -1180,6 +1180,9 @@ def require_bot_actor(value, actor, *, chat=False):
 def control_tool(api, name, arguments=None, actor='panel'):
     import assistant_commands
     arguments = arguments or {}
+    if name in ('relay_read', 'relay_prepare'):
+        import assistant_relay
+        return (assistant_relay.read if name == 'relay_read' else assistant_relay.prepare)(api, actor, arguments.get('body', {}))
     if name == 'telegram_prepare':
         return assistant_telegram.prepare(api, actor, arguments.get('body', {}))
     if name == 'mihomo_operation':

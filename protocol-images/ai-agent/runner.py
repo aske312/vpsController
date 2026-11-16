@@ -831,6 +831,16 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'vps_operation', operation_id=operation_id)
 
         @server.tool()
+        async def relay_read(host_id: str | None = None, view: Literal['live', 'inventory'] = 'live', route_offset: int = 0, route_limit: int = 10) -> dict:
+            """Состояние Relay, клиентские IPv4/IPv6/домены, маршруты, счётчики, проверки и привязки Mihomo без секретов. inventory читает сохранённые данные без обращения к Relay; live наблюдает агенты. Для подробностей выбери host_id, маршруты листаются route_offset/route_limit, учитывай routes_more. unknown и listening не доказывают доставку клиенту. Нужны server_read и network_read."""
+            return await vps_call(settings, actor, 'relay_read', body={'host_id': host_id, 'view': view, 'route_offset': route_offset, 'route_limit': route_limit})
+
+        @server.tool()
+        async def relay_prepare(action: Literal['configure_host', 'create_route', 'private_transport', 'check_route', 'reconnect'], host_id: str, expected_revision: str, changes: dict | None = None) -> dict:
+            """Подготовить действие для СУЩЕСТВУЮЩЕГО Relay по revision из relay_read. configure_host: name/client_address/country_code_override (пустой country восстанавливает авто). create_route: transport tcp|udp, listen_port 20000..20999, target_port из targets, agent_revision из live; target_ip задаёт сервер. private_transport: enabled bool. check_route: route_id, consumer_id mihomo:<profile>:<connection> из profiles.channels в relay_read, mode exchange|media; media создаёт временный диагностический peer и измеряет путь с VPS, а не сеть устройства. reconnect: пустые changes, сохранённые параметры. Требуются server_manage и подтверждение человека в панели/Telegram. Токены, API-адрес и сертификат не меняются, удаление не предоставлено. После подтверждения проверяй vps_operation; неизвестную команду не повторяй."""
+            return await vps_call(settings, actor, 'relay_prepare', body={'action': action, 'host_id': host_id, 'expected_revision': expected_revision, 'changes': changes or {}})
+
+        @server.tool()
         async def vps_terminal(command: str = 'help', service: str | None = None, file: str | None = None,
                                family: str = 'ipv4', limit: int = 60) -> dict:
             """Отдельный read-only терминал: help показывает профили uptime/uname/memory/disk/block_devices/processes/sockets/addresses/routes/service/read_file. Запуск под vps-control-observer в systemd sandbox без записи и IP-соединений. service — ID из vps_services; read_file — только os_release/load/memory/uptime. Shell, аргументы, произвольные пути, пароли, sudo и изменение служб недоступны. Нужны server_read и terminal_read. Логи читаются через vps_logs/vps_observability, не этим инструментом."""

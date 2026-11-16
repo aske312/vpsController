@@ -37,7 +37,9 @@
         "component_check",
         "vps_terminal",
         "operation_inventory",
-        "developer_inspect"
+        "developer_inspect",
+        "relay_read",
+        "relay_prepare"
       ],
       "title": "Name",
       "type": "string"
