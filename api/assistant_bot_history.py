@@ -108,12 +108,12 @@ def append(api, settings, actor, message):
 
 def authorize(api, authorization, actor):
     settings = control.read(api)
-    if not authorization: raise HTTPException(401, 'Нужен токен истории NoderaBot')
+    if not authorization: raise HTTPException(401, 'Нужен токен истории NoderaBot', headers={'WWW-Authenticate': 'Bearer'})
     if not re.fullmatch(r'panel|[1-9][0-9]{0,15}', actor):
         raise HTTPException(403, 'Нужен собеседник Nodera')
     token = control.mcp_transport_token(settings.get('control_token', ''), 'nodera-dialog', actor)
     if not authorization or not settings.get('control_token') or not hmac.compare_digest(authorization, 'Bearer ' + token):
-        raise HTTPException(401, 'Нужен токен истории NoderaBot')
+        raise HTTPException(401, 'Нужен токен истории NoderaBot', headers={'WWW-Authenticate': 'Bearer'})
     if not settings.get('memory_enabled', True) or not settings['modules'].get('ai-agent'):
         raise HTTPException(403, 'Память диалогов выключена')
     roles.require(settings, actor, 'memory')

@@ -65,6 +65,9 @@ class BotHistoryTests(unittest.TestCase):
         self.save(1, 'private second', actor='22')
         url = '/api/assistant/bot-history/read'
         self.assertEqual(self.client.post(url, json={}).status_code, 401)
+        malformed = self.client.post(url, json={'limit': 'not an integer'})
+        self.assertEqual(malformed.status_code, 401)
+        self.assertEqual(malformed.headers.get('www-authenticate'), 'Bearer')
         self.assertEqual(self.client.post(url, headers=self.token(), json={'telegram_id': 22}).status_code, 403)
         self.assertEqual(self.client.post(url, headers={**self.token(), 'X-MCP-Actor': '22'}, json={}).status_code, 401)
         own = self.client.post(url, headers=self.token(), json={})

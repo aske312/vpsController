@@ -594,11 +594,15 @@ def nodera_history_message(payload: assistant_bot_history.Message, settings: dic
     return assistant_bot_history.append(sys.modules[__name__], settings, actor, payload)
 
 
+def require_nodera_history_reader(authorization: str | None = Header(default=None), actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_bot_history.authorize(sys.modules[__name__], authorization, actor)
+
+
 @app.post('/api/assistant/bot-history/read')
-def nodera_history_read(payload: assistant_bot_history.Read, authorization: str | None = Header(default=None),
+def nodera_history_read(payload: assistant_bot_history.Read, settings: dict = Depends(require_nodera_history_reader),
                         actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
     api = sys.modules[__name__]
-    return assistant_bot_history.read(api, assistant_bot_history.authorize(api, authorization, actor), actor, payload)
+    return assistant_bot_history.read(api, settings, actor, payload)
 
 
 @app.post('/api/assistant/bot-command')
