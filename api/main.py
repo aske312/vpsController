@@ -51,6 +51,7 @@ import component_checks
 import assistant_personalization
 import assistant_contacts
 import assistant_commands
+import assistant_chat_commands
 import assistant_bot_history
 import observability
 import diagnostic_tools
@@ -673,6 +674,17 @@ def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0,
     return {'pending_action': pending[-1] if pending else None, 'pending_actions': pending, 'operations': operations[:64]}
 
 
+@app.get('/api/assistant/commands', dependencies=[Depends(require_token)])
+def assistant_command_catalog(telegram_id: int | None = Query(default=None, gt=0, le=2**52)) -> dict:
+    import assistant_chat_commands
+    return {'items': assistant_chat_commands.catalog(sys.modules[__name__], str(telegram_id) if telegram_id else 'panel')}
+
+
+@app.post('/api/assistant/commands', dependencies=[Depends(require_token)])
+def assistant_chat_command(payload: 'assistant_chat_commands.Request') -> dict:
+    return assistant_chat_commands.execute(sys.modules[__name__], payload)
+
+
 
 @app.post('/api/assistant/service-confirm')
 def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _: None = Depends(require_token)) -> dict:
@@ -684,7 +696,7 @@ def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _:
         raise HTTPException(409, 'Это подтверждение не найдено или уже закрыто')
     module = 'mihomo-mcp' if record.get('kind') == 'mihomo' else 'telegram-mcp' if record.get('kind') == 'telegram' else 'vps-controller-mcp'
     scoped_token = assistant_control.mcp_transport_token(value['control_token'], module, actor)
-    if payload.decision == 'confirm' and not (record.get('source') == 'bot' and not record.get('kind')):
+    if payload.decision == 'confirm' and not (record.get('source') in ('bot', 'panel') and not record.get('kind')):
         assistant_control.authorize_control(api, 'Bearer ' + scoped_token, actor, module)
     text = assistant_commands.execute(api, actor, ('/confirm ' if payload.decision == 'confirm' else '/cancel ') + payload.code)
     operation = None

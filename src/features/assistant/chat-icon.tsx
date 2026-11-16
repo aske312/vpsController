@@ -1,4 +1,5 @@
 const paths = {
+  commands: 'M14 4 10 20M5 8l-3 4 3 4M19 8l3 4-3 4',
   plus: 'M12 5v14M5 12h14', send: 'm6 11 6-6 6 6M12 5v14',
   close: 'm6 6 12 12M18 6 6 18', chevron: 'm6 9 6 6 6-6',
   refresh: 'M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 12M4 12l2.3 6A7 7 0 0 0 18 17',

@@ -18,11 +18,11 @@ export async function readChatFiles(files: File[], current: ChatFile[]): Promise
     return { id: crypto.randomUUID(), name: file.name, mime, data: btoa(binary), size: file.size };
   }));
 }
-export function chatHistory(turns: { question: string; answer?: string; files?: ChatFile[] }[], currentFiles: ChatFile[] = []) {
+export function chatHistory(turns: { question: string; answer?: string; files?: ChatFile[]; context_safe?: boolean }[], currentFiles: ChatFile[] = []) {
   const result: { role: 'user' | 'assistant'; content: string; attachments?: { name: string; mime: string; data: string }[] }[] = [];
   let length = 0;
   let bytes = currentFiles.reduce((sum, file) => sum + file.size, 0);
-  for (const turn of turns.filter(turn => turn.answer).slice(-20).reverse()) {
+  for (const turn of turns.filter(turn => turn.answer && turn.context_safe !== false).slice(-20).reverse()) {
     const question = turn.question.slice(0, 8000) || 'Файлы', answer = turn.answer!.slice(0, 8000);
     const fileBytes = turn.files?.reduce((sum, file) => sum + file.size, 0) ?? 0;
     if (length + question.length + answer.length > 48000 || bytes + fileBytes > 6 * 1024 * 1024) break;

@@ -266,6 +266,15 @@
 .mcpConfirmationCard pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
 .mcpConfirmationCard footer { display:flex; flex-wrap:wrap; gap:8px; }
 .mcpConfirmationCard footer button { min-height:36px; }
+.mcpCommandButton { display:flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid var(--line); border-radius:9px; background:transparent; color:var(--muted); font-size:11px; }
+.mcpCommandMenu { position:absolute; z-index:8; left:0; right:0; bottom:calc(100% + 6px); max-height:min(340px,45dvh); overflow:auto; border:1px solid var(--line-strong); border-radius:12px; background:var(--panel); box-shadow:0 12px 35px #0008; }
+.mcpCommandMenu > header { position:sticky; top:0; display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; padding:10px 12px; background:var(--panel); border-bottom:1px solid var(--line); }
+.mcpCommandMenu header small { color:var(--muted); }
+.mcpCommandMenu > button { display:flex; flex-wrap:wrap; gap:3px 14px; width:100%; min-height:38px; padding:8px 12px; border:0; border-radius:0; text-align:left; background:transparent; }
+.mcpCommandMenu > button code { color:var(--cyan); min-width:100px; font-size:11px; overflow-wrap:anywhere; }
+.mcpCommandMenu > button span { color:var(--muted); font-size:11px; }
+.mcpCommandMenu > button[aria-selected=true],.mcpCommandMenu > button:hover { background:var(--panel-inset); }
+.mcpCommandMenu > p { padding:8px 12px; color:var(--muted); font-size:12px; }
 
 .noderaAISwitch { display:inline-flex; align-items:center; gap:7px; padding:5px 8px; border:1px solid var(--line-strong); border-radius:20px; color:var(--muted); background:rgba(5,13,22,.8); font-size:11px; cursor:pointer; }
 .noderaSwitchTrack { display:inline-flex; align-items:center; width:30px; height:17px; padding:2px; border-radius:20px; background:#354552; }

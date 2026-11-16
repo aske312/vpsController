@@ -3,6 +3,14 @@ import test from 'node:test';
 import { File } from 'node:buffer';
 import { chatHistory, readChatFiles } from '../../src/features/assistant/chat-files.ts';
 
+test('private direct command results do not enter the next AI prompt', () => {
+  const history = chatHistory([{question:'/subscription',answer:'https://host/s/private-token',context_safe:false},
+    {question:'/status',answer:'Server is running',context_safe:true}]);
+  assert.equal(history.length,2);
+  assert.equal(history[1].content,'Server is running');
+  assert.doesNotMatch(JSON.stringify(history),/private-token/);
+});
+
 test('attachments encode content, preserve names and reject unsupported or oversized files', async () => {
   const [file] = await readChatFiles([new File(['hello'], 'notes.txt')], []);
   assert.equal(file.name, 'notes.txt');

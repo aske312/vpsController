@@ -19,6 +19,13 @@ class Command(BaseModel):
     command: str = Field(min_length=1, max_length=256)
 
 
+COMMAND_PERMISSIONS = {'/subscription': 'subscription_read', '/profile': 'subscription_read', '/profiles': 'subscription_read',
+    '/devices': 'subscription_read', '/traffic': 'subscription_read', '/connect': 'subscription_read', '/models': 'model_select',
+    '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read',
+    '/components': 'server_read', '/service': 'server_manage', '/network': 'network_read', '/security': 'security_read',
+    '/diagnostics': 'diagnostics', '/logs': 'logs_read', '/ai': 'chat'}
+
+
 HELP = ('Команды сервера:\n'
         '/status — сервер и время работы\n'
         '/resources — CPU, память, диск и трафик\n'
@@ -34,7 +41,7 @@ HELP = ('Команды сервера:\n'
         '/traffic [ID] — учтённый трафик подписки\n'
         '/service <ID> <start|stop|restart> — управление службой\n'
         '/confirm <код> — подтвердить действие в течение 10 минут\n'
-        '/cancel — отменить ожидающее подтверждение\n'
+        '/cancel [код] — отменить ожидающее подтверждение\n'
         '/operation <ID> — результат фоновой операции\n'
         '/id — ваш Telegram ID\n\n'
         'Пример: /service mihomo restart. Остановка или перезапуск прерывает соединения этой службы.')
@@ -191,8 +198,12 @@ def execute(api, actor, prompt, *, source='bot'):
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
     settings = control.read(api)
-    permission = {'/subscription': 'subscription_read', '/profile': 'subscription_read', '/profiles': 'subscription_read', '/devices': 'subscription_read', '/traffic': 'subscription_read', '/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
+    permission = COMMAND_PERMISSIONS.get(command)
     if permission: roles.require(settings, actor, permission)
+    if command in ('/id', '/userid') and not args:
+        return 'Веб-чат администратора. Telegram ID не выбран.' if actor == 'panel' else 'Telegram ID: ' + actor
+    if command == '/connect' and not args:
+        return 'Подключение Mihomo:\n1. Получите ссылку: /subscription.\n2. Импортируйте подписку по URL в совместимом клиенте Mihomo.\n3. Обновите подписку, выберите профиль и включите подключение.\nПосле изменения настроек обновите подписку в клиенте.'
     if command in ('/confirm', '/operation'):
         pending = control.operations.read(pending_path(api, actor, code=args[0] if command == '/confirm' and args else None,
                                                        operation_id=args[0] if command == '/operation' and args else None))
@@ -202,10 +213,11 @@ def execute(api, actor, prompt, *, source='bot'):
         elif pending.get('kind') == 'telegram': roles.require(settings, actor, 'telegram_read')
         elif pending.get('kind') == 'mihomo': roles.require(settings, actor, 'subscription_manage' if command == '/confirm' else 'subscription_read')
         else: roles.require(settings, actor, 'server_manage' if command == '/confirm' else 'server_read')
-    if command == '/subscription' and not args:
+    if command == '/subscription' and len(args) <= 1:
         import assistant_mihomo
-        linked = assistant_mihomo.profile_for(settings, actor).get('mihomo_profile_id')
+        linked = args[0] if args else assistant_mihomo.profile_for(settings, actor).get('mihomo_profile_id')
         if not linked: return 'К учётной записи не привязана подписка Mihomo. Обратитесь к владельцу.'
+        if not re.fullmatch(assistant_mihomo.ID, linked): raise HTTPException(422, 'Укажите ID профиля из /profiles')
         result = assistant_mihomo.call(api, actor, 'GET', '/profiles/' + linked + '/subscription', {})
         return 'Ваша подписка Mihomo:\n' + result['url'] if result.get('url') else 'Подписка привязана, но публичная ссылка ещё не настроена. Обратитесь к владельцу.'
     if command in ('/profile', '/devices', '/traffic', '/profiles') and len(args) <= (0 if command == '/profiles' else 1):

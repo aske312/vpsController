@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import * as chatCommands from '../../src/features/assistant/chat-commands.ts';
 import * as chatJobs from '../../src/features/assistant/chat-jobs.ts';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
@@ -38,9 +39,9 @@ function mount(status, catalog = [], overrides = {}) {
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {}, alerts = {};
-  const confirmationModule = {};
+  const confirmationModule = {}, commandMenuModule = {};
   const confirmations = { actions: [], working: [], results: {}, errors: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
-  const require = name => name === 'react' ? hooks : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name === 'react' ? hooks : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const alertsSource = readFileSync(new URL('../../src/features/assistant/telegram-alerts.tsx', import.meta.url), 'utf8');
   const compiledAlerts = ts.transpileModule(alertsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
@@ -51,9 +52,16 @@ function mount(status, catalog = [], overrides = {}) {
   const queueSource = readFileSync(new URL('../../src/features/assistant/confirmation-queue.tsx', import.meta.url), 'utf8');
   const queueCompiled = ts.transpileModule(queueSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', queueCompiled.outputText)(require, confirmationModule);
+  const commandMenuSource = readFileSync(new URL('../../src/features/assistant/chat-command-menu.tsx', import.meta.url), 'utf8');
+  const commandMenuCompiled = ts.transpileModule(commandMenuSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  new Function('require', 'exports', commandMenuCompiled.outputText)(require, commandMenuModule);
   new Function('require', 'exports', outputText)(require, exported);
   const jobs = new Map();
   const request = async (path, options) => {
+    if (path.startsWith('/assistant/commands')) {
+      if (options?.method === 'POST') { const body = JSON.parse(options.body); writes.push(body); return overrides.command ? overrides.command(body) : {text:'Command output',context_safe:true,pending_actions:[]}; }
+      return { items: overrides.commands ?? [] };
+    }
     if (path === '/assistant/mihomo-profiles') return { items: [{id: 'own', name: 'Моя подписка'}] };
     if (path === '/assistant/bot-users') return { items: [] };
     if (path === '/assistant/models') return overrides.models ? overrides.models(options) : { models: catalog };
@@ -79,7 +87,7 @@ function mount(status, catalog = [], overrides = {}) {
     const expand = node => {
       if (Array.isArray(node)) return node.map(expand);
       if (!node?.props) return node;
-      if (node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
+      if (node.type === commandMenuModule.ChatCommandMenu || node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
       return { ...node, props: { ...node.props, children: expand(node.props.children) } };
     };
     const expanded = expand(tree);
@@ -93,6 +101,64 @@ function nodes(tree, predicate, disabled = false) {
   const blocked = disabled || tree.props?.disabled === true;
   return [...(predicate(tree) ? [{ node: tree, disabled: blocked }] : []), ...nodes(tree.props?.children, predicate, blocked)];
 }
+
+const shortcuts = [
+  {command:'/status',label:'Состояние сервера',syntax:'/status',insert:'/status',needs_args:false,kind:'direct'},
+  {command:'/service',label:'Управление службой',syntax:'/service <ID> <start|stop|restart>',insert:'/service ',needs_args:true,kind:'direct'},
+  {command:'/ai',label:'Вопрос AI',syntax:'/ai <вопрос>',insert:'/ai ',needs_args:true,kind:'ai'},
+];
+
+test('the empty chat server suggestion runs a direct shortcut instead of preparing an AI question',async()=>{
+  const view=mount(fixture(),[],{commands:shortcuts});view.render();await Promise.resolve();let tree=view.render();
+  nodes(tree,n=>n.type==='button'&&n.props.children==='Состояние сервера')[0].node.props.onClick();
+  await new Promise(setImmediate);tree=view.render();
+  assert.equal(view.writes[0].command,'/status');assert.equal(view.writes[0].request_id,undefined);
+});
+
+test('hot commands run without a selected model even while another panel operation is busy',async()=>{
+  const view=mount(fixture(),[],{commands:shortcuts,busy:true});
+  view.render();await Promise.resolve();let tree=view.render();
+  const button=nodes(tree,n=>n.props['aria-label']==='Команды')[0];assert.equal(button.disabled,false);button.node.props.onClick();
+  tree=view.render();nodes(tree,n=>n.props.role==='option'&&JSON.stringify(n.props.children).includes('/status'))[0].node.props.onClick();
+  await new Promise(setImmediate);tree=view.render();
+  assert.equal(view.writes.length,1);assert.equal(view.writes[0].command,'/status');assert.equal(view.writes[0].request_id,undefined);
+  assert.match(JSON.stringify(tree),/Command output/);
+});
+
+test('slash autocomplete filters commands and Enter executes the chosen shortcut once',async()=>{
+  const view=mount(fixture(),[],{commands:shortcuts});view.render();await Promise.resolve();let tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/sta',style:{},scrollHeight:48}});tree=view.render();
+  assert.equal(nodes(tree,n=>n.props.role==='option').length,1);
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onKeyDown({key:'Enter',preventDefault(){}});
+  await new Promise(setImmediate);tree=view.render();assert.equal(view.writes.length,1);assert.equal(view.writes[0].command,'/status');
+});
+
+test('a shortcut requiring arguments fills the composer and service preparation keeps confirmation cards',async()=>{
+  const pending={code:'aabbccdd',service:'mihomo',action:'restart',expires:Date.now()/1000+600};
+  const view=mount(fixture(),[],{commands:shortcuts,command:()=>({text:'Confirm the action',pending_actions:[pending],context_safe:true})});
+  view.render();await Promise.resolve();let tree=view.render();nodes(tree,n=>n.props['aria-label']==='Команды')[0].node.props.onClick();tree=view.render();
+  nodes(tree,n=>n.props.role==='option'&&JSON.stringify(n.props.children).includes('/service'))[0].node.props.onClick();tree=view.render();
+  assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'/service ');assert.equal(view.writes.length,0);
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/service mihomo restart',style:{},scrollHeight:48}});tree=view.render();
+  const send=nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0];assert.equal(send.disabled,false);send.node.props.onClick();
+  await new Promise(setImmediate);tree=view.render();assert.equal(view.writes[0].command,'/service mihomo restart');
+  assert.equal(nodes(tree,n=>n.props.role==='region'&&n.props['aria-label']==='Подтверждение действий').length,1);
+});
+
+test('the ai shortcut strips only its prefix and uses the normal AI job pipeline',async()=>{
+  const status=fixture();Object.assign(status.settings,{model:'fixture-model',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
+  const view=mount(status,[],{commands:shortcuts});view.render();await Promise.resolve();let tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/ai Explain this',style:{},scrollHeight:48}});tree=view.render();
+  nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);view.render();
+  assert.equal(view.writes[0].prompt,'Explain this');assert.equal(view.writes[0].command,undefined);assert.equal(view.writes[0].model,'fixture-model');
+});
+
+test('an unknown slash command stays out of the AI pipeline and reports its server rejection',async()=>{
+  const view=mount(fixture(),[],{commands:shortcuts,command:()=>{throw new Error('Unknown command');}});view.render();await Promise.resolve();let tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/unknown',style:{},scrollHeight:48}});tree=view.render();
+  nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);tree=view.render();
+  assert.equal(view.writes.length,1);assert.equal(view.writes[0].command,'/unknown');assert.equal(view.writes[0].request_id,undefined);assert.match(JSON.stringify(tree),/Unknown command/);
+});
 function fixture() {
   return { chat_jobs:true, chat_streaming:true, settings: { revision: 'a'.repeat(32), modules: { 'ai-agent': false, 'nodera-bot': true },
     mcp: { 'telegram-mcp': false, 'vps-controller-mcp': false }, provider_url: '', model: '', telegram_api_id: null,

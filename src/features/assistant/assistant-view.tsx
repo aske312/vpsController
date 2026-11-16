@@ -13,7 +13,9 @@ import { AssistantAnswer } from "./assistant-answer";
 import { conversationMarkdown } from "./answer-format";
 import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
-import { type SystemAction } from "../../control-panel/system-operation";
+import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
+import { ChatCommandMenu } from "./chat-command-menu";
+import { commandMatches, directCommand, type ChatCommand } from "./chat-commands";
 import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpStatus, type ModuleId } from "./assistant-state";
 import { ProviderMonitor, initialProviderConnection, providerStatusText, type ProviderConnection } from "./provider-connection";
 import { queueProviderCatalog } from "./provider-details";
@@ -28,7 +30,7 @@ type Props = {
   admitOperation: (path: string, options: RequestInit) => Promise<SystemAction | null | undefined>;
   onOperation: (operation: SystemAction) => void;
 };
-type Turn = { queue_state?: "queued" | "running"; pending_action?: PendingAction; pending_actions?: PendingAction[]; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string };
+type Turn = { queue_state?: "queued" | "running"; pending_action?: PendingAction; pending_actions?: PendingAction[]; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string; context_safe?: boolean };
 type Conversation = { id: string; title: string; updated_at: string; turns: number };
 function shortTitle(title: string) {
   const characters = Array.from(title);
@@ -73,6 +75,15 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const [chatBusy, setChatBusy] = useState(false);
   const [actor, setActor] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [commands, setCommands] = useState<ChatCommand[]>([]);
+  const [commandMenu, setCommandMenu] = useState(false);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandError, setCommandError] = useState("");
+  const [commandBusy, setCommandBusy] = useState(false);
+  const commandRunning = useRef(false);
+  const commandVersion = useRef(0);
+  const promptInput = useRef<HTMLTextAreaElement>(null);
   const [catalog, setCatalog] = useState<string[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState("");
@@ -136,6 +147,18 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     }
   }, [request]);
   useEffect(() => { void load(); }, [load, refreshKey]);
+  const loadCommands = useCallback(async () => {
+    const generation = ++commandVersion.current;
+    setCommandLoading(true);
+    try {
+      const value = await request<{ items: ChatCommand[] }>(`/assistant/commands${actor ? `?telegram_id=${actor}` : ""}`, { cache: "no-store" });
+      if (generation !== commandVersion.current || client.current !== request || activeActor.current !== actor) return;
+      setCommands(Array.isArray(value.items) ? value.items : []); setCommandError("");
+    } catch (cause) {
+      if (generation === commandVersion.current && client.current === request) setCommandError(cause instanceof Error ? cause.message : "Команды недоступны");
+    } finally { if (generation === commandVersion.current) setCommandLoading(false); }
+  }, [request, actor]);
+  useEffect(() => { void loadCommands(); }, [loadCommands, status?.settings.revision]);
   const loadModels = useCallback(async () => { await apiMonitor.current?.refresh(); }, []);
   useEffect(() => {
     apiMonitor.current?.stop();
@@ -317,11 +340,41 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Команда не принята"); }
   }
+  async function runCommand(command: string, clearPrompt = true) {
+    if (commandRunning.current || writing.current || fileRead.current) return;
+    commandRunning.current = true; setCommandBusy(true); setCommandMenu(false); setModelMenu(false);
+    const id = ++nextTurn.current;
+    if (clearPrompt) setPrompt("");
+    setTurns(current => [...current, { id, question: command, files: [], model: "", answer: "Выполняем команду…", context_safe: false }]);
+    try {
+      const result = await request<{ text: string; model?: string; pending_actions?: PendingAction[]; operation?: SystemAction; context_safe?: boolean }>("/assistant/commands", {
+        method: "POST", body: JSON.stringify({ command, telegram_id: actor ? Number(actor) : null, selected_model: selectedModel || null }),
+      });
+      if (client.current !== request || activeActor.current !== actor) return;
+      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.text, context_safe: result.context_safe === true } : turn));
+      if (result.pending_actions) ingestConfirmations(actor || "panel", result.pending_actions);
+      if (typeof result.model === "string") {
+        const chosen = result.model; setModel(chosen);
+        if (chosen) setCatalog(current => current.includes(chosen) ? current : [...current, chosen]);
+      }
+      if (result.operation && /^\/confirm(?:\s|$)/i.test(command)) onOperation(systemActionSnapshot(result.operation));
+    } catch (cause) {
+      if (client.current !== request || activeActor.current !== actor) return;
+      const text = mutationFailureState(cause) === "unknown" ? "Результат команды не подтверждён. Проверьте ожидающие действия и операции; команда автоматически не повторяется." : cause instanceof Error ? cause.message : "Команда не выполнена";
+      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: undefined, error: text } : turn));
+    } finally { commandRunning.current = false; if (client.current === request) setCommandBusy(false); }
+  }
+  function chooseCommand(item: ChatCommand) {
+    setCommandMenu(false);
+    if (item.needs_args) { setPrompt(item.insert); promptInput.current?.focus(); }
+    else void runCommand(item.command, prompt.trim().startsWith("/"));
+  }
   async function send() {
+    if (directCommand(prompt) && files.length) { setError("Команды не принимают вложения. Уберите файлы или отправьте обычный вопрос AI."); return; }
     const command = prompt.trim().match(/^\/(confirm|cancel)\s+([0-9a-f]{8})$/i);
     if (command) {
       const action = confirmations.actions.find(item => (item.actor || "panel") === (actor || "panel") && item.code === command[2].toLowerCase());
-      if (!action) { setError("Это подтверждение не найдено или уже закрыто. Используйте кнопки ожидающего действия."); return; }
+      if (!action) { await runCommand(prompt.trim()); return; }
       const question = prompt.trim(), id = ++nextTurn.current;
       setPrompt("");
       setTurns(current => [...current, { id, question, files: [], model: "", answer: "Отправляем решение…" }]);
@@ -330,9 +383,12 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: text || "Результат решения не подтверждён. Проверьте уведомление." } : turn));
       return;
     }
+    if (directCommand(prompt)) { await runCommand(prompt.trim()); return; }
+    const question = /^\/ai(?:\s|$)/i.test(prompt.trim()) ? prompt.trim().replace(/^\/ai\s*/i, "") : prompt.trim();
+    if (!question && !files.length) { setError("Напишите вопрос после /ai"); return; }
     if (hasPendingChat && !chatRunning.current || !(prompt.trim() || files.length) || !selectedModel || writing.current || fileRead.current) return;
     if (pendingTurns.current.length >= 5) { setError("В очереди уже 5 сообщений. Дождитесь ответа."); return; }
-    const turn: Turn = { id: ++nextTurn.current, question: prompt.trim(), model: selectedModel, files, queue_state: "queued" };
+    const turn: Turn = { id: ++nextTurn.current, question, model: selectedModel, files, queue_state: "queued" };
     pendingTurns.current.push(turn);
     interacted.current = true;
     setPrompt(""); setFiles([]); setModelMenu(false);
@@ -412,11 +468,17 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const readOnly = managedComponent.management?.state !== "managed" || managedComponent.management?.retained;
   const editingBlocked = working === "save" || Boolean(readOnly);
   const settingsBlocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
-  const blocked = settingsBlocked || chatBusy || readingFiles || memoryBusy;
-  const composerBlocked = hasPendingChat && !chatBusy || settingsBlocked || readingFiles || memoryBusy;
-  const conflict = status.settings.revision !== draft.expected_revision;
+  const blocked = settingsBlocked || chatBusy || readingFiles || memoryBusy || commandBusy;
+  const composerBlocked = hasPendingChat && !chatBusy || settingsBlocked || readingFiles || memoryBusy || commandBusy;
+  const commandBlocked = commandBusy || readingFiles || Boolean(working) || Boolean(loadError);
+  const isDirectCommand = directCommand(prompt);
+  const promptBlocked = isDirectCommand ? commandBlocked : composerBlocked;
   const agentReady = selectedComponent?.installed && selectedComponent.enabled && selectedComponent.configured;
-  const chooseActor = (value: string) => { memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(""); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
+  const canSend = Boolean(prompt.trim() || files.length) && (isDirectCommand ? !commandBlocked : !composerBlocked && !dirty && Boolean(selectedModel && agentReady));
+  const matchingCommands = commandMatches(commands, prompt);
+  const activeCommandIndex = Math.min(commandIndex, Math.max(0, matchingCommands.length - 1));
+  const conflict = status.settings.revision !== draft.expected_revision;
+  const chooseActor = (value: string) => { setCommandMenu(false); setCommandIndex(0); setCommands([]); memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(""); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
   const actorName = status.settings.accounts.find(item => String(item.telegram_id) === actor)?.name || actor || "Администратор";
   const actorSelect = <label className="mcpActor">Контур<select aria-label="Контур" title={actorName} value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id}</option>)}</select></label>;
   const newChat = () => { memoryGeneration.current++; interacted.current = true; rememberConversation(actor, null); setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setCopied(undefined); setMemoryError(''); };
@@ -482,15 +544,25 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       {apiConnection.state === "error" && <p className="mcpNotice" role="status">Проверка повторяется автоматически. Сохранённая модель и последний каталог доступны. <button type="button" className="ghostButton" onClick={() => void loadModels()}>Проверить API сейчас</button></p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
-        {!turns.length && !confirmations.actions.some(item => (item.actor || "panel") === (actor || "panel")) && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{status.settings.mcp["vps-controller-mcp"] && <div><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние сервера")}>Состояние сервера</button><button type="button" disabled={blocked} onClick={() => setPrompt("Покажи состояние служб")}>Службы</button></div>}</div>}
+        {!turns.length && !confirmations.actions.some(item => (item.actor || "panel") === (actor || "panel")) && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{commands.some(item => ["/status", "/services"].includes(item.command)) && <div>{commands.some(item => item.command === "/status") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/status", false)}>Состояние сервера</button>}{commands.some(item => item.command === "/services") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/services", false)}>Службы</button>}</div>}</div>}
         {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small>{turn.error || turn.answer ? <AssistantAnswer text={turn.error || turn.answer || ""}/> : <div className="mcpThinking" role="status"><span className="mcpThinkingDots" aria-hidden="true"><i/><i/><i/></span><span>{pendingLabel(turn)}</span></div>}{turn.queue_state === "queued" && <button type="button" className="ghostButton" onClick={() => { pendingTurns.current = pendingTurns.current.filter(item => item.id !== turn.id); setTurns(current => current.filter(item => item.id !== turn.id)); }}>Убрать из очереди</button>}{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.action_result && <p role="status">{turn.action_result}</p>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
         <ConfirmationCards actor={actor}/>
       </div>
 
       <div className="mcpComposer">
+        {commandMenu && <ChatCommandMenu items={matchingCommands} loading={commandLoading} error={commandError} activeIndex={activeCommandIndex} onSelect={chooseCommand} onRetry={() => void loadCommands()}/>}
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={composerBlocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}
-        <label className="mcpPrompt">Сообщение<textarea value={prompt} maxLength={12000} rows={2} disabled={composerBlocked} onChange={event => { interacted.current = true; setPrompt(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`; }} onPaste={event => { const incoming = Array.from(event.clipboardData.files); if (incoming.length) { event.preventDefault(); void attachFiles(incoming); } }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) { event.preventDefault(); if (!composerBlocked && !dirty && (prompt.trim() || files.length) && (selectedModel && agentReady || /^\/(?:confirm|cancel)\s+[0-9a-f]{8}$/i.test(prompt.trim()))) void send(); } }} placeholder="Спросите что-нибудь…" /></label>
+        <label className="mcpPrompt">Сообщение<textarea ref={promptInput} value={prompt} maxLength={12000} rows={2} disabled={promptBlocked} aria-controls={commandMenu ? "mcp-command-menu" : undefined} aria-activedescendant={commandMenu && matchingCommands.length ? `mcp-command-${activeCommandIndex}` : undefined} onChange={event => { interacted.current = true; setPrompt(event.target.value); setCommandMenu(/^\/[^\s]*$/.test(event.target.value.trim())); setCommandIndex(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`; }} onPaste={event => { const incoming = Array.from(event.clipboardData.files); if (incoming.length) { event.preventDefault(); void attachFiles(incoming); } }} onKeyDown={event => {
+          if (commandMenu && event.key === "Escape") { event.preventDefault(); setCommandMenu(false); return; }
+          if (commandMenu && ["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); setCommandIndex(current => Math.max(0, Math.min(matchingCommands.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)))); return; }
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) {
+            event.preventDefault();
+            if (commandMenu && matchingCommands[activeCommandIndex] && !commandBlocked) { chooseCommand(matchingCommands[activeCommandIndex]); return; }
+            if (canSend) void send();
+          }
+        }} placeholder="Спросите что-нибудь…" /></label>
         <div className="mcpComposerTools"><input ref={fileInput} type="file" aria-label="Файлы к сообщению" accept={fileAccept} multiple hidden onChange={event => { const incoming = Array.from(event.target.files ?? []); event.target.value = ""; void attachFiles(incoming); }}/><button type="button" className="mcpIconButton" aria-label="Добавить файлы или изображения" title={status.chat_attachments ? "Файлы и изображения · до 2 МБ каждый" : "Обновите Nodera для файлов"} disabled={composerBlocked || !status.chat_attachments} onClick={() => fileInput.current?.click()}><ChatIcon name="plus"/></button>
+          <button type="button" className="mcpCommandButton" aria-label="Команды" aria-haspopup="listbox" aria-expanded={commandMenu} aria-controls="mcp-command-menu" disabled={commandBlocked} onClick={() => { setCommandMenu(current => !current); setCommandIndex(0); setModelMenu(false); promptInput.current?.focus(); }}><ChatIcon name="commands"/><span>Команды</span></button>
           <div className="mcpModelControl" onKeyDown={event => { if (event.key === 'Escape') { setModelMenu(false); modelButton.current?.focus(); } }}>
             <button type="button" ref={modelButton} className="mcpModelButton" aria-label="Модель для запроса" aria-haspopup="dialog" aria-expanded={modelMenu} disabled={composerBlocked || dirty || status.settings.model_mode !== 'catalog'} onClick={() => setModelMenu(current => !current)}><span>{selectedModel || (catalogLoading ? 'Загрузка моделей…' : 'Выбрать модель')}</span><ChatIcon name="chevron"/></button>
             {modelMenu && <><button type="button" className="mcpMenuBackdrop" aria-label="Закрыть выбор модели" onClick={() => setModelMenu(false)}/><div ref={modelMenuPanel} className="mcpModelMenu" role="dialog" aria-label="Выбор модели" onKeyDown={event => {
@@ -501,7 +573,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
               }
             }}><header><span>Модели · {availableModels.length}</span><button type="button" className="mcpIconButton" aria-label="Обновить модели" disabled={catalogLoading} onClick={() => void loadModels()}><ChatIcon name="refresh"/></button></header><div role="listbox" aria-label="Доступные модели">{availableModels.map(id => <button type="button" role="option" aria-selected={id === selectedModel} key={id} onClick={() => { setModel(id); setModelMenu(false); modelButton.current?.focus(); }}><span>{id}</span>{id === selectedModel && <ChatIcon name="check"/>}</button>)}{!availableModels.length && <p>{catalogLoading ? 'Загрузка…' : 'Каталог пуст'}</p>}</div></div></>}
           </div>
-          <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title={chatBusy ? "Добавить в очередь" : "Отправить"} disabled={composerBlocked || dirty || !(prompt.trim() || files.length) || (!(selectedModel && agentReady) && !/^\/(?:confirm|cancel)\s+[0-9a-f]{8}$/i.test(prompt.trim()))} onClick={() => void send()}>{readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
+          <button type="button" className="mcpSendButton" aria-label="Отправить сообщение" title={chatBusy ? "Добавить в очередь" : "Отправить"} disabled={!canSend} onClick={() => void send()}>{readingFiles ? <span className="mcpSpinner"/> : <ChatIcon name="send"/>}</button></div>
       </div>
       {hasPendingChat && !chatBusy && !working && <button type="button" className="ghostButton" onClick={() => setRecoveryKey(value => value + 1)}>Восстановить ответ</button>}
       <p className="mcpChatHint">{chatBusy ? "Можно отправить ещё вопрос — он попадёт в очередь и получит контекст предыдущего ответа." : "Shift+Enter — новая строка · файлы передаются выбранному AI-провайдеру"}</p>
