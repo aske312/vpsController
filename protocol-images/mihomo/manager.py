@@ -5689,7 +5689,8 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
             "Content-Disposition": f'inline; filename="{Path(profile_export_filename(selected_profile)).stem}.{extension}"',
             "Profile-Update-Interval": "24",
             "X-Subscription-Source": "pro",
-            "X-Nodera-Reports-Version": "1",
+            "X-Nodera-Reports-Version": "1" if signer is not None else "0",
+            "X-Nodera-Reports-Features": "diagnostics" if signer is not None else "",
             **subscription_signing.proof_headers(signer, config.encode('utf-8'), str(request.url), nonce),
             "Subscription-Userinfo": subscription_limits.userinfo(selected_profile, DATA_ROOT / "subscription-limits"),
             "X-Nodera-Selection-State": client_channels.state(application_operation.read(
@@ -5835,6 +5836,7 @@ def receive_client_report(token: str, request: Request, payload: client_reports.
                           allow_changes: bool = Depends(subscription_mutation_access)):
     if allow_changes is not True:
         raise HTTPException(409, 'Приём статистики временно недоступен')
+    require_client_reports_pro()
     with profile_mutation_lock:
         profile, device_id = registered_command_device(token, request)
         try:
@@ -5843,6 +5845,27 @@ def receive_client_report(token: str, request: Request, payload: client_reports.
             raise HTTPException(429, 'Отчёт можно отправлять раз в 15 секунд', headers={'Retry-After': '15'}) from None
         except (OSError, client_reports.sqlite3.Error):
             raise HTTPException(503, 'Хранилище статистики временно недоступно') from None
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+def require_client_reports_pro():
+    try: signer = subscription_signing.server_signer()
+    except (OSError, ValueError, TypeError): raise HTTPException(503, 'Проверка PRO временно недоступна') from None
+    if signer is None: raise HTTPException(403, 'Диагностика клиента доступна только для PRO')
+
+
+@app.get('/api/mihomo/profiles/{profile_id}/client-reports', dependencies=[Depends(auth_required)])
+def profile_client_reports(profile_id: str, device_id: str | None = None):
+    require_client_reports_pro()
+    with profile_mutation_lock:
+        profile = next((row for row in profiles() if str(row['id']) == profile_id), None)
+        if profile is None: raise HTTPException(404, 'Profile not found')
+        allowed = {str(row['id']) for row in normalize_profile(profile)['devices']}
+        if device_id is not None and device_id not in allowed: raise HTTPException(404, 'Profile device not found')
+    try: result = client_reports.read(DATA_ROOT, profile_id, device_id)
+    except (OSError, ValueError, client_reports.sqlite3.Error): raise HTTPException(503, 'История диагностики клиента недоступна') from None
+    result['items'] = [row for row in result['items'] if row['device_id'] in allowed]
+    result['state'] = ('recent' if result['items'][0]['fresh'] else 'stale') if result['items'] else 'no_reports'
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 

@@ -22,6 +22,8 @@ def report():
 class ClientReportTests(unittest.TestCase):
     def setUp(self):
         formats.SubscriptionFormatTests.setUp(self)
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        self.enterContext(patch.object(manager.subscription_signing, 'server_signer', return_value=Ed25519PrivateKey.generate()))
         self.fetch('Nodera/0.0.4 (Windows; Mihomo)', 'pc',
                    extra_headers=((b'x-client-name', b'Nodera'), (b'x-device-os', b'windows')))
 
@@ -84,3 +86,47 @@ class ClientReportTests(unittest.TestCase):
         manager.client_reports.accept(root, 'other', 'device', schema.model_validate(report()), now=1000 + 8 * 86400)
         with closing(sqlite3.connect(root / 'client-reports/reports.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM reports').fetchone()[0], 1)
+
+    def test_pro_gate_precedes_storage_and_capability_is_not_advertised_without_signing(self):
+        with patch.object(manager.subscription_signing, 'server_signer', return_value=None):
+            response = self.send()
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(self.fetch('Nodera/0.0.11 (Windows; Mihomo)', 'pc').headers['X-Nodera-Reports-Version'], '0')
+        self.assertFalse((manager.DATA_ROOT / 'client-reports/reports.sqlite3').exists())
+
+    def test_diagnostics_reject_free_text_addresses_and_client_agent_configuration(self):
+        diagnostics = {'state': 'connected', 'mode': 'proxy', 'core_version': 'v1.19.33',
+                       'network_check': 'error', 'issues': ['https_probe_failed']}
+        for extra in ({'host': 'private.example'}, {'api_key': 'secret'}, {'issues': ['arbitrary message']}, {'uptime_seconds': True}):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.send({**report(), 'diagnostics': {**diagnostics, **extra}}).status_code, 422)
+        self.assertEqual(self.send({**report(), 'diagnostics': diagnostics}).status_code, 200)
+
+    def test_authorized_read_keeps_device_scope_unknown_values_and_freshness(self):
+        self.assertEqual(self.send().status_code, 200)
+        manager.client_reports.accept(manager.DATA_ROOT, 'foreign', 'foreign-device', manager.client_reports.Report.model_validate(report()))
+        url = '/api/mihomo/profiles/profile/client-reports'
+        client = TestClient(manager.app)
+        self.assertEqual(client.get(url).status_code, 401)
+        with patch.dict(manager.app.dependency_overrides, {manager.auth_required: lambda: None}):
+            response = client.get(url)
+            self.assertEqual(response.status_code, 200, response.text)
+            result = response.json()
+            self.assertEqual(result['state'], 'recent')
+            self.assertEqual(len(result['items']), 1)
+            self.assertIsNone(result['items'][0]['counters']['download'])
+            self.assertNotIn('foreign-device', response.text)
+            self.assertNotIn('test-token', response.text)
+            self.assertEqual(client.get(url + '?device_id=foreign-device').status_code, 404)
+            with patch.object(manager.client_reports.time, 'time', return_value=manager.client_reports.time.time() + 100):
+                self.assertEqual(client.get(url).json()['state'], 'stale')
+
+    def test_report_read_is_readonly_when_no_store_exists_and_bounds_large_events(self):
+        result = manager.client_reports.read(manager.DATA_ROOT, 'profile')
+        self.assertEqual(result['state'], 'no_reports')
+        self.assertFalse((manager.DATA_ROOT / 'client-reports').exists())
+        payload = report()
+        payload['events'] = [{'time': '2026-11-16T10:00:00Z', 'event': 'traffic', **{name: 2**63 - 1 for name in ('upload', 'download', 'delta_upload', 'delta_download')}} for _ in range(100)]
+        self.assertEqual(self.send(payload).status_code, 200)
+        result = manager.client_reports.read(manager.DATA_ROOT, 'profile')
+        self.assertLessEqual(len(json.dumps(result, ensure_ascii=False).encode()), 22000)

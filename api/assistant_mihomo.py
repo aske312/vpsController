@@ -19,7 +19,7 @@ import assistant_roles as roles
 ID = r'[a-zA-Z0-9_-]{1,64}'
 READ_ROUTES = (
     r'/status', r'/modules', rf'/modules/{ID}/settings', r'/profiles',
-    rf'/profiles/{ID}/(?:stats|subscription|config|client-verification)',
+    rf'/profiles/{ID}/(?:stats|subscription|config|client-verification|client-reports)',
     r'/stats', r'/routing/schema', r'/dns/settings', r'/reconciliation', r'/action',
 )
 WRITE_ROUTES = {
@@ -127,7 +127,7 @@ def authorize(settings, actor, method, path, body):
         return parsed.path
     if method == 'GET' and parsed.path in ('/modules', '/routing/schema'):
         return parsed.path
-    if method == 'GET' and re.fullmatch(re.escape(own) + r'/(stats|subscription|config|client-verification)', parsed.path):
+    if method == 'GET' and re.fullmatch(re.escape(own) + r'/(stats|subscription|config|client-verification|client-reports)', parsed.path):
         return parsed.path
     if method == 'PATCH' and parsed.path == own:
         allowed = {'name', 'channels', 'connections', 'devices', 'routing', 'limits', 'expected_revision', 'operation_id'}
@@ -160,7 +160,7 @@ def capabilities(api, actor):
     linked = profile_for(settings, actor).get('mihomo_profile_id')
     return {
         'role': 'administrator' if admin else 'subscriber', 'profile_id': linked,
-        'reads': list(READ_ROUTES) if admin else ['/profiles', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config'],
+        'reads': list(READ_ROUTES) if admin else ['/profiles', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config', f'/profiles/{linked}/client-reports'],
         'writes': WRITE_ROUTES if admin else {'PATCH': [f'/profiles/{linked}'], 'DELETE': [f'/profiles/{linked}/devices/<id>']},
         'confirmation_required': True,
         'permissions': sorted(roles.effective(settings, actor)),

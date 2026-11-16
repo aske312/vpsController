@@ -105,6 +105,17 @@ class MihomoOperatorTests(unittest.TestCase):
             self.assertIn(result.status_code, (403, 422), (path, result.text))
         self.assertFalse(any(method != 'GET' for method, *_ in self.calls))
 
+    def test_client_reports_follow_the_linked_profile_read_boundary(self):
+        response = self.tool(name='mihomo_api', method='GET', path='/profiles/own/client-reports?device_id=phone')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.calls[-1][:2], ('GET', '/profiles/own/client-reports?device_id=phone'))
+        before = len(self.calls)
+        for path in ('/profiles/other/client-reports', '/profiles/own/client-reports?device_id=../other'):
+            self.assertIn(self.tool(name='mihomo_api', method='GET', path=path).status_code, (403, 422))
+        self.assertEqual(len(self.calls), before)
+        capabilities = self.tool(name='mihomo_capabilities').json()
+        self.assertIn('/profiles/own/client-reports', capabilities['reads'])
+
     def test_subscriber_can_discover_connection_schema_without_global_settings_or_personal_rules(self):
         with patch.object(bridge, 'request', return_value={'items': [{'id': 'transport-wg', 'installed': True, 'connection_settings': [{'key': 'name'}], 'settings_values': {'private_key': 'global-secret'}}]}):
             result = self.tool(name='mihomo_api', path='/modules')

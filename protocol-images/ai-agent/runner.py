@@ -965,8 +965,8 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
 
         @server.tool()
-        async def mihomo_read(view: Literal['status', 'profiles', 'modules', 'stats', 'reconciliation', 'action', 'config', 'subscription', 'client-verification'], profile_id: str | None = None, device_id: str | None = None) -> dict:
-            """Чтение Mihomo без ручного пути API. Для config/subscription/client-verification нужен profile_id из profiles; device_id необязателен. Видны только разрешённые профили. Конфиг/ссылка могут содержать секреты подписки — не публикуй их посторонним. Ничего не меняет."""
+        async def mihomo_read(view: Literal['status', 'profiles', 'modules', 'stats', 'reconciliation', 'action', 'config', 'subscription', 'client-verification', 'client-reports'], profile_id: str | None = None, device_id: str | None = None) -> dict:
+            """Чтение Mihomo без ручного пути API. Для config/subscription/client-verification/client-reports нужен profile_id из profiles; device_id необязателен. client-reports — наблюдения NoderaClient PRO: состояние, режим, проверки HTTPS, ошибки и счётчики. Для помощи с клиентским подключением прочитай эти отчёты и сопоставь с серверными данными. no_reports/stale не означают исправность; null — неизвестно. Не суммируй снимки разных сессий и не выдавай совпадение по времени за причину. Видны только разрешённые профили. Конфиг/ссылка могут содержать секреты подписки — не публикуй их посторонним. Ничего не меняет."""
             return await mihomo_manage(settings, actor, 'read', view=view, profile_id=profile_id, device_id=device_id)
 
         @server.tool()
