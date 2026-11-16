@@ -107,7 +107,7 @@ class ServerCommandTests(unittest.TestCase):
     def test_pending_disappears_when_expired_submitted_or_permissions_change(self):
         code = self.prepare()
         self.assertEqual(commands.pending_action(api, '11')['code'], code)
-        with patch.object(commands.time, 'time', return_value=commands.time.time() + 61):
+        with patch.object(commands.time, 'time', return_value=control.operations.read(commands.pending_path(api, '11'))['expires'] + 1):
             self.assertIsNone(commands.pending_action(api, '11'))
         path = commands.pending_path(api, '11')
         record = control.operations.read(path)
@@ -211,7 +211,7 @@ class ServerCommandTests(unittest.TestCase):
             self.approve()
             self.assertEqual(self.call('/confirm ' + code).status_code, 409)
             code = self.prepare()
-            with patch.object(commands.time, 'time', return_value=commands.time.time() + 61):
+            with patch.object(commands.time, 'time', return_value=control.operations.read(commands.pending_path(api, '11'))['expires'] + 1):
                 self.assertEqual(self.call('/confirm ' + code).status_code, 409)
             action.assert_not_called()
 
@@ -245,13 +245,15 @@ class ServerCommandTests(unittest.TestCase):
             self.assertEqual(self.call('/confirm ' + code).status_code, 403)
             action.assert_not_called()
 
-    def test_cancel_replacement_invalid_actions_and_admission_conflict(self):
+    def test_cancel_multiple_requests_invalid_actions_and_admission_conflict(self):
         with patch.object(api, 'manage_service') as action:
             for prompt in ('/service ../../tmp restart', '/service fixture shell', '/service ssh stop', '/service nodera-bot restart'):
                 self.assertEqual(self.call(prompt).status_code, 409)
             first = self.prepare(); second = self.prepare()
-            self.assertEqual(self.call('/confirm ' + first).status_code, 409)
-            self.assertEqual(self.call('/cancel').status_code, 200)
+            self.assertEqual(len(commands.pending_actions(api, '11')), 2)
+            self.assertEqual(self.call('/cancel').status_code, 409)
+            self.assertEqual(self.call('/cancel ' + first).status_code, 200)
+            self.assertEqual(self.call('/cancel ' + second).status_code, 200)
             self.assertEqual(self.call('/confirm ' + second).status_code, 409)
             action.assert_not_called()
             code = self.prepare()

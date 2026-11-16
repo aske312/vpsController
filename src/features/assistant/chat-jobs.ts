@@ -1,9 +1,10 @@
+import type { PendingAction } from "./confirmation-queue";
 import { ApiRequestError, type createApiClient } from "../../shared/lib/api-request.ts";
 
 type Client = ReturnType<typeof createApiClient>;
 export type ChatOutput = { result: { answer: string; tools_used: string[] }; conversation_id?: string; cache_error?: string;
   provider_usage?: Record<string, import("./assistant-state").ProviderUsage>;
-  pending_action?: { service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown> } };
+  pending_action?: PendingAction; pending_actions?: PendingAction[] };
 export type ChatJob = { id: string; seq: number; state: "queued" | "running" | "done" | "failed" | "unknown";
   stage: string; question: string; model: string; stream: boolean; partial?: string; output?: ChatOutput;
   error?: { code: string; message: string } };

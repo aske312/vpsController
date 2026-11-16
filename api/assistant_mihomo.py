@@ -218,12 +218,7 @@ def call(api, actor, method, path, body):
               'method': method, 'path': path, 'body': body, 'code': secrets.token_hex(4),
               'operation_id': identity, 'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
-        pending = assistant_commands.pending_path(api, actor)
-        previous = control.operations.read(pending)
-        if previous.get('submitted') and not previous.get('completed_text'):
-            if not control.operations.read(api.DATA_DIR / 'operations' / (previous['operation_id'] + '.json')):
-                raise HTTPException(409, 'Прежнее действие ещё не подтверждено сервером. Проверьте его результат')
-        control.operations.atomic_json(pending, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'method': method, 'path': path, 'changes': sanitize(body),
             'message': 'Подтвердите действие кнопкой в чате. Запрос ещё не выполнен.'}
 
@@ -254,7 +249,7 @@ def confirm(api, actor, record):
     text = ('Операция ' + result['id'] + '\n/operation ' + result['id']) if isinstance(result, dict) and result.get('id') else 'Изменения Mihomo сохранены.'
     import assistant_commands
     with control.operations.locked(api.DATA_DIR):
-        path = assistant_commands.pending_path(api, actor)
+        path = assistant_commands.pending_path(api, actor, code=record['code'])
         current = control.operations.read(path)
         if current.get('operation_id') == record['operation_id']:
             control.operations.atomic_json(path, {**current, 'completed_text': text})

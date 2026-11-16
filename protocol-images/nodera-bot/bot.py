@@ -331,8 +331,8 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
             return 'Не получилось подготовить ответ. Попробуйте немного позже.'
         value = response.json()
         answer = value['result']['answer']
-        pending = value.get('pending_action')
-        if pending:
+        pending_items = value.get('pending_actions') or ([value['pending_action']] if value.get('pending_action') else [])
+        for pending in pending_items:
             if pending.get('changes'):
                 answer += '\n\nИзменения:\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
             answer += f"\n\nПодтвердите {pending['action']} для {pending['service']}:\n/confirm {pending['code']}"
@@ -517,9 +517,10 @@ def inline_keyboard(answer, prompt, access, actions):
             if current < total: navigation.append(button('Далее →', f'/models {current + 1}'))
             if navigation: rows.append(navigation)
         rows.append([button('AI по умолчанию', '/model default')])
-    confirmation = re.search(r'/confirm ([0-9a-f]{8})', answer)
-    if access and confirmation:
-        rows.append([button('Подтвердить действие', '/confirm ' + confirmation[1]), button('Отмена', '/cancel')])
+    confirmations = list(dict.fromkeys(re.findall(r'/confirm ([0-9a-f]{8})', answer)))
+    if access:
+        for index, code in enumerate(confirmations[:32], 1):
+            rows.append([button(f'Подтвердить {index}' if len(confirmations) > 1 else 'Подтвердить действие', '/confirm ' + code), button(f'Отказать {index}' if len(confirmations) > 1 else 'Отказать', '/cancel ' + code)])
     operation = re.search(r'/operation ([0-9a-f]{32})', answer)
     if access and operation:
         rows.append([button('Проверить результат', '/operation ' + operation[1])])

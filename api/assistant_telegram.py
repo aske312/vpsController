@@ -50,11 +50,7 @@ def prepare(api, actor, body):
               'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex, 'expires': time.time() + 60,
               'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
-        path = assistant_commands.pending_path(api, actor)
-        previous = control.operations.read(path)
-        if previous.get('submitted') and not previous.get('completed_text'):
-            raise HTTPException(409, 'Сначала проверьте результат предыдущего действия')
-        control.operations.atomic_json(path, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'tool': name, 'arguments': arguments,
             'operation_id': record['operation_id'], 'message': 'Подтвердите действие кнопкой в панели или /confirm в Telegram.'}
 
@@ -81,7 +77,7 @@ def confirm(api, actor, record):
         raise
     text = 'Результат действия Telegram: ' + json.dumps(result, ensure_ascii=False)
     with control.operations.locked(api.DATA_DIR):
-        control.operations.atomic_json(assistant_commands.pending_path(api, actor), {**record, 'completed_text': text})
+        control.operations.atomic_json(assistant_commands.pending_path(api, actor, code=record['code']), {**record, 'completed_text': text})
         control.operations.atomic_json(operation_path, {
             'id': record['operation_id'], 'action': 'telegram-action', 'state': 'succeeded' if result.get('success') else 'failed',
             'result': 'success' if result.get('success') else 'error', 'message': text,

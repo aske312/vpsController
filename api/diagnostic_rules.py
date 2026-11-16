@@ -48,13 +48,10 @@ def call(api, arguments, actor):
     import assistant_commands
     with operations.locked(api.DATA_DIR):
         if body['revision'] != read(api)['revision']: raise HTTPException(409, 'Правила изменились; прочитайте их заново')
-        pending = assistant_commands.pending_path(api, actor)
-        previous = operations.read(pending)
-        if previous.get('submitted') and not previous.get('completed_text'): raise HTTPException(409, 'Предыдущее действие ещё выполняется')
         record = {'kind': 'diagnostic_rules', 'service': 'diagnostic_rules', 'action': 'diagnostic-rules',
                   'body': body, 'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex,
                   'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
-        operations.atomic_json(pending, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'changes': body, 'operation_id': record['operation_id'],
             'message': 'Правила ещё не изменены. Требуется подтверждение пользователя в панели или /confirm.'}
 
@@ -78,7 +75,7 @@ def confirm(api, actor, record):
         operations.atomic_json(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'), operation)
         import operation_log
         operation_log.append(api.DATA_DIR, {**operation, 'component': 'observability', 'stage': 'configure', 'result': 'passed'})
-        pending = assistant_commands.pending_path(api, actor)
+        pending = assistant_commands.pending_path(api, actor, code=record['code'])
         current = operations.read(pending)
         if current.get('operation_id') == record['operation_id']:
             operations.atomic_json(pending, {**current, 'completed_text': text})

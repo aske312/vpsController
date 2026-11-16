@@ -63,11 +63,7 @@ def call(api, actor, arguments):
               'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex, 'expires': time.time() + 60,
               'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
-        path = assistant_commands.pending_path(api, actor)
-        previous = control.operations.read(path)
-        if previous.get('submitted') and not previous.get('completed_text'):
-            raise HTTPException(409, 'Сначала проверьте результат прежней команды')
-        control.operations.atomic_json(path, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'changes': body, 'operation_id': record['operation_id'],
             'message': 'Владелец должен подтвердить изменение ролей кнопкой или /confirm.'}
 
@@ -80,7 +76,7 @@ def confirm(api, actor, record):
     import assistant_commands
     text = 'Роли и права Nodera обновлены.'
     with control.operations.locked(api.DATA_DIR):
-        control.operations.atomic_json(assistant_commands.pending_path(api, actor), {**record, 'completed_text': text})
+        control.operations.atomic_json(assistant_commands.pending_path(api, actor, code=record['code']), {**record, 'completed_text': text})
         control.operations.atomic_json(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'), {
             'id': record['operation_id'], 'action': 'nodera-roles', 'state': 'succeeded', 'result': 'success',
             'message': text, 'started_at': control.operations.timestamp(), 'updated_at': control.operations.timestamp()})

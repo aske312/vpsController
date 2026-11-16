@@ -6,6 +6,11 @@ import { notificationDuration, notificationPresentation, notificationText, order
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
 
+test("pending human decisions stay ahead of newer operation notifications", () => {
+  const decision = { ...operation("decision", "info"), kind: "confirmation" };
+  assert.equal(orderedNotifications([decision, operation("newer"), operation("unknown", "unknown")])[0].id, "decision");
+});
+
 test("cancelled operation has a neutral terminal summary and cannot be revived by late progress", () => {
   const store = createNotificationStore();
   store.upsert(operation("cancelled"));

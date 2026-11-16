@@ -902,9 +902,10 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
     import assistant_commands
-    pending = assistant_commands.pending_action(api, actor)
+    pending = assistant_commands.pending_actions(api, actor)
+    output['pending_actions'] = pending
     if pending:
-        output['pending_action'] = pending
+        output['pending_action'] = pending[-1]
     try:
         usage = provider_usage(api, settings, output['result'])
         output['provider_usage'] = {entry['id']: usage[entry['id']] for entry in providers(settings) if entry['id'] in usage}
@@ -1189,7 +1190,7 @@ def control_tool(api, name, arguments=None, actor='panel'):
         identity = arguments.get('operation_id', '')
         if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity): raise HTTPException(422, 'Укажите ID операции Mihomo')
         settings = read(api)
-        pending = operations.read(assistant_commands.pending_path(api, actor))
+        pending = operations.read(assistant_commands.pending_path(api, actor, operation_id=identity))
         own = pending.get('kind') == 'mihomo' and pending.get('operation_id') == identity
         if not own: roles.require(settings, actor, 'subscriptions_admin')
         result = api.get_application_operation(identity, None)
@@ -1237,15 +1238,16 @@ def control_tool(api, name, arguments=None, actor='panel'):
         roles.require(settings, actor, 'server_read')
     if name == 'vps_service_action': roles.require(settings, actor, 'server_manage')
     if name == 'vps_operation' and not roles.allows(settings, actor, 'server_read'):
-        pending = operations.read(assistant_commands.pending_path(api, actor))
+        pending = operations.read(assistant_commands.pending_path(api, actor, operation_id=arguments.get('operation_id')))
         if arguments.get('operation_id') != pending.get('operation_id'): raise HTTPException(403, 'Доступен только результат собственной операции')
     if name == 'vps_service_action':
         service, action = arguments.get('service'), arguments.get('action')
         if not isinstance(service, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', service) or action not in ('start', 'stop', 'restart'):
             raise HTTPException(422, 'Укажите службу и действие start, stop или restart')
         # MCP can prepare an action but has no tool that confirms it.
-        assistant_commands.execute(api, actor, f'/service {service} {action}')
-        record = operations.read(assistant_commands.pending_path(api, actor))
+        reply = assistant_commands.execute(api, actor, f'/service {service} {action}', source='mcp')
+        identity = re.search(r'Операция: ([0-9a-f]{32})', reply)[1]
+        record = operations.read(assistant_commands.pending_path(api, actor, operation_id=identity))
         return {'confirmation_required': True, 'service': service, 'action': action,
                 'operation_id': record['operation_id'],
                 'message': 'Пользователь должен подтвердить действие кнопкой в панели или командой /confirm в Telegram.'}

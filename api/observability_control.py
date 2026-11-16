@@ -106,10 +106,7 @@ def call(api, arguments, actor):
                   'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex, 'expires': time.time() + 120,
                   'revision': settings['revision'], 'submitted': False}
         with control.operations.locked(api.DATA_DIR):
-            target = assistant_commands.pending_path(api, actor)
-            previous = control.operations.read(target)
-            if previous.get('submitted') and not previous.get('completed_text'): raise HTTPException(409, 'Предыдущее действие ещё выполняется')
-            control.operations.atomic_json(target, record)
+            assistant_commands.enqueue(api, actor, record)
         return {'confirmation_required': True, 'message': 'Подтвердите тест доставки сохранённому владельцу.'}
     if method == 'GET':
         if path == '/restarts':
@@ -141,11 +138,7 @@ def call(api, arguments, actor):
               'body': payload.model_dump(), 'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex,
               'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
-        path = assistant_commands.pending_path(api, actor)
-        previous = control.operations.read(path)
-        if previous.get('submitted') and not previous.get('completed_text'):
-            raise HTTPException(409, 'Предыдущее действие ещё выполняется')
-        control.operations.atomic_json(path, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'changes': record['body'], 'message': 'Настройки ещё не изменены. Подтвердите действие в чате.'}
 
 
@@ -167,7 +160,7 @@ def confirm(api, actor, record):
         configure(api, observability.Settings.model_validate(record['body']))
         text = 'Настройки наблюдаемости сохранены.'
     with control.operations.locked(api.DATA_DIR):
-        path = assistant_commands.pending_path(api, actor)
+        path = assistant_commands.pending_path(api, actor, code=record['code'])
         current = control.operations.read(path)
         if current.get('operation_id') == record['operation_id']:
             current['completed_text'] = text

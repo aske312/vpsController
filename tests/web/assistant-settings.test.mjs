@@ -16,6 +16,7 @@ function mount(status, catalog = [], overrides = {}) {
   let cursor = 0;
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const hooks = {
+    createContext: () => ({}), useContext: () => confirmations,
     useState(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = initial;
@@ -37,7 +38,9 @@ function mount(status, catalog = [], overrides = {}) {
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {}, alerts = {};
-  const require = name => name === 'react' ? hooks : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const confirmationModule = {};
+  const confirmations = { actions: [], working: [], results: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
+  const require = name => name === 'react' ? hooks : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const alertsSource = readFileSync(new URL('../../src/features/assistant/telegram-alerts.tsx', import.meta.url), 'utf8');
   const compiledAlerts = ts.transpileModule(alertsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
@@ -45,6 +48,9 @@ function mount(status, catalog = [], overrides = {}) {
   const settingsSource = readFileSync(new URL('../../src/features/assistant/nodera-settings.tsx', import.meta.url), 'utf8');
   const compiledSettings = ts.transpileModule(settingsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledSettings.outputText)(require, settings);
+  const queueSource = readFileSync(new URL('../../src/features/assistant/confirmation-queue.tsx', import.meta.url), 'utf8');
+  const queueCompiled = ts.transpileModule(queueSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  new Function('require', 'exports', queueCompiled.outputText)(require, confirmationModule);
   new Function('require', 'exports', outputText)(require, exported);
   const jobs = new Map();
   const request = async (path, options) => {
@@ -73,7 +79,7 @@ function mount(status, catalog = [], overrides = {}) {
     const expand = node => {
       if (Array.isArray(node)) return node.map(expand);
       if (!node?.props) return node;
-      if (node.type === settings.NoderaSettings) return expand(node.type(node.props));
+      if (node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
       return { ...node, props: { ...node.props, children: expand(node.props.children) } };
     };
     const expanded = expand(tree);

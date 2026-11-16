@@ -659,8 +659,19 @@ def assistant_control_tool(payload: assistant_control.ToolCall,
 
 
 @app.get('/api/assistant/pending-action')
-def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0, le=2**52), _: None = Depends(require_token)) -> dict:
-    return {'pending_action': assistant_commands.pending_action(sys.modules[__name__], str(telegram_id) if telegram_id else 'panel')}
+def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0, le=2**52), all_actors: bool = False, _: None = Depends(require_token)) -> dict:
+    api = sys.modules[__name__]
+    settings = assistant_control.read(api)
+    actor = str(telegram_id) if telegram_id else 'panel'
+    actors = ['panel', *[str(row['telegram_id']) for row in settings.get('accounts', [])]] if all_actors else [actor]
+    pending = [item for identity in actors for item in assistant_commands.pending_actions(api, identity, settings=settings)]
+    operations = [{'id': record['operation_id'], 'service': record['service'], 'action': record['action'], 'actor': identity,
+                   'created_at': record.get('created_at', record.get('expires', 0) - 600)}
+                  for identity in actors for _, record in assistant_commands.pending_records(api, identity)
+                  if record.get('submitted') and record.get('created_at', record.get('expires', 0) - 600) > time.time() - 86400]
+    operations.sort(key=lambda row: row['created_at'], reverse=True)
+    return {'pending_action': pending[-1] if pending else None, 'pending_actions': pending, 'operations': operations[:64]}
+
 
 
 @app.post('/api/assistant/service-confirm')
@@ -668,10 +679,12 @@ def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _:
     api = sys.modules[__name__]
     actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
     value = assistant_control.read(api)
-    record = assistant_control.operations.read(assistant_commands.pending_path(api, actor))
+    record = assistant_control.operations.read(assistant_commands.pending_path(api, actor, code=payload.code))
+    if not record:
+        raise HTTPException(409, 'Это подтверждение не найдено или уже закрыто')
     module = 'mihomo-mcp' if record.get('kind') == 'mihomo' else 'telegram-mcp' if record.get('kind') == 'telegram' else 'vps-controller-mcp'
     scoped_token = assistant_control.mcp_transport_token(value['control_token'], module, actor)
-    if payload.decision == 'confirm':
+    if payload.decision == 'confirm' and not (record.get('source') == 'bot' and not record.get('kind')):
         assistant_control.authorize_control(api, 'Bearer ' + scoped_token, actor, module)
     text = assistant_commands.execute(api, actor, ('/confirm ' if payload.decision == 'confirm' else '/cancel ') + payload.code)
     operation = None

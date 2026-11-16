@@ -256,6 +256,16 @@
 .noderaContactFacts dd { margin:0; overflow-wrap:anywhere; }
 .mcpServiceConfirmation details { max-width:100%; }
 .mcpServiceConfirmation pre { overflow:auto; max-height:180px; padding:8px; font-size:10px; }
+.mcpConfirmations { display:grid; gap:10px; min-width:0; width:100%; }
+.mcpConfirmations > header { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; color:var(--amber); }
+.mcpConfirmations > header small { color:var(--muted); }
+.mcpConfirmationCard { display:grid; gap:10px; min-width:0; border:1px solid var(--line-strong); border-radius:12px; padding:12px; background:var(--panel); }
+.mcpConfirmationCard > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:5px 12px; overflow-wrap:anywhere; }
+.mcpConfirmationCard > div small { margin-left:auto; color:var(--muted); }
+.mcpConfirmationCard details { min-width:0; }
+.mcpConfirmationCard pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.mcpConfirmationCard footer { display:flex; flex-wrap:wrap; gap:8px; }
+.mcpConfirmationCard footer button { min-height:36px; }
 
 .noderaAISwitch { display:inline-flex; align-items:center; gap:7px; padding:5px 8px; border:1px solid var(--line-strong); border-radius:20px; color:var(--muted); background:rgba(5,13,22,.8); font-size:11px; cursor:pointer; }
 .noderaSwitchTrack { display:inline-flex; align-items:center; width:30px; height:17px; padding:2px; border-radius:20px; background:#354552; }

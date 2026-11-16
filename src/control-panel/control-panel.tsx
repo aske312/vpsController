@@ -24,6 +24,7 @@ import { NetworkView, type NetworkListState } from "../features/network/network-
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { LoginView } from "../features/auth/login-view";
+import { AssistantConfirmations } from "../features/assistant/confirmation-queue";
 import { AssistantView } from "../features/assistant/assistant-view";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, ConfirmationRequest, LoggingSettings, Overview, ProtocolImage, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
 import { actionLabels, bytes, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
@@ -1389,7 +1390,7 @@ export function ControlPanel() {
     : tab === "application" ? "modules"
     : "modules";
 
-  return <AppWorkspace
+  return <AssistantConfirmations key={request.sessionKey} request={request} onOperation={acceptSystemOperation}><AppWorkspace
     activeTab={tab}
     visualArt={visualArt}
     protocolImages={protocolImages}
@@ -1593,7 +1594,7 @@ export function ControlPanel() {
       </div>}
       {confirmation && <ConfirmationDialog request={confirmation} onClose={closeConfirmation} />}
       <VersionFooter />
-  </AppWorkspace>;
+  </AppWorkspace></AssistantConfirmations>;
 }
 
 function VersionFooter() {

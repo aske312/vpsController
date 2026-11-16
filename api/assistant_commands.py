@@ -33,7 +33,7 @@ HELP = ('Команды сервера:\n'
         '/devices [ID] — устройства подписки\n'
         '/traffic [ID] — учтённый трафик подписки\n'
         '/service <ID> <start|stop|restart> — управление службой\n'
-        '/confirm <код> — подтвердить действие в течение 60 секунд\n'
+        '/confirm <код> — подтвердить действие в течение 10 минут\n'
         '/cancel — отменить ожидающее подтверждение\n'
         '/operation <ID> — результат фоновой операции\n'
         '/id — ваш Telegram ID\n\n'
@@ -72,10 +72,66 @@ def operation_text(value):
     return f"Операция {value['id']}\n{states.get(value.get('state'), 'состояние не подтверждено')}\n/operation {value['id']}"
 
 
-def pending_path(api, actor):
+def pending_records(api, actor):
     if actor != 'panel' and not re.fullmatch(r'[1-9][0-9]{0,15}', actor):
         raise HTTPException(403, 'Нужен числовой ID администратора бота')
-    return control.directory(api) / 'nodera-bot' / 'commands' / (actor + '.json')
+    root = control.directory(api) / 'nodera-bot' / 'commands'
+    paths = [root / (actor + '.json')]
+    folder = root / actor
+    if folder.exists(): paths += sorted(folder.glob('????????.json'))
+    records = []
+    for path in paths:
+        record = control.operations.read(path)
+        if record and re.fullmatch(r'[0-9a-f]{8}', str(record.get('code', ''))):
+            records.append((path, record))
+    return sorted(records, key=lambda row: (row[1].get('created_at', 0), row[1].get('expires', 0), row[1]['code']))
+
+
+def pending_path(api, actor, code=None, operation_id=None):
+    records = pending_records(api, actor)
+    if code is not None:
+        if not re.fullmatch(r'[0-9a-f]{8}', code): raise HTTPException(409, 'Неверный код подтверждения')
+        return next((path for path, record in records if record['code'] == code),
+                    control.directory(api) / 'nodera-bot' / 'commands' / actor / (code + '.json'))
+    if operation_id is not None:
+        return next((path for path, record in records if record.get('operation_id') == operation_id),
+                    control.directory(api) / 'nodera-bot' / 'commands' / (actor + '.json'))
+    return records[-1][0] if records else control.directory(api) / 'nodera-bot' / 'commands' / (actor + '.json')
+
+
+def enqueue(api, actor, record):
+    """Called with the application lock held. Each request keeps its own identity."""
+    rows = pending_records(api, actor)
+    now = time.time()
+    active = []
+    for path, prior in rows:
+        if not prior.get('submitted') and prior.get('expires', 0) <= now:
+            path.unlink(missing_ok=True)
+            continue
+        if prior.get('submitted') and not prior.get('completed_text') and prior.get('kind') == record.get('kind') and prior.get('service') == record.get('service'):
+            operation = control.operations.read(api.DATA_DIR / 'operations' / (prior['operation_id'] + '.json'))
+            if operation.get('state') not in ('succeeded', 'failed', 'cancelled'):
+                raise HTTPException(409, 'Результат предыдущего действия неизвестен; сначала проверьте его операцию')
+        active.append((path, prior))
+    if sum(not prior.get('submitted') for _, prior in active) >= 32:
+        raise HTTPException(409, 'В очереди уже 32 подтверждения. Примите решения по ожидающим действиям')
+    # Bound retained operation ownership without evicting unconfirmed requests.
+    completed = []
+    for path, prior in active:
+        if prior.get('submitted'):
+            operation = control.operations.read(api.DATA_DIR / 'operations' / (prior['operation_id'] + '.json'))
+            if operation.get('state') in ('succeeded', 'failed', 'cancelled') or prior.get('completed_text') and not operation:
+                completed.append((path, prior))
+    removed = completed[:-64]
+    for path, _ in removed: path.unlink(missing_ok=True)
+    if len(active) - len(removed) >= 128:
+        raise HTTPException(409, 'Слишком много сохранённых запросов; проверьте неизвестные результаты операций')
+    record['created_at'] = now
+    record['expires'] = now + 600
+    target = control.directory(api) / 'nodera-bot' / 'commands' / actor / (record['code'] + '.json')
+    if any(prior['code'] == record['code'] for _, prior in rows): raise HTTPException(409, 'Повтор идентификатора подтверждения; подготовьте запрос заново')
+    control.operations.atomic_json(target, record)
+    return target
 
 
 def profile_reply(api, settings, actor, command, args):
@@ -110,18 +166,27 @@ def profile_reply(api, settings, actor, command, args):
     return '\n'.join(rows)
 
 
-def pending_action(api, actor):
-    record = control.operations.read(pending_path(api, actor))
-    if not record or record.get('submitted') or record.get('expires', 0) <= time.time() or record.get('revision') != control.read(api)['revision']:
-        return None
-    result = {key: record[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
-    if 'body' in record:
-        import assistant_mihomo
-        result['changes'] = assistant_mihomo.sanitize(record['body'])
+def pending_actions(api, actor, *, settings=None):
+    settings = control.read(api) if settings is None else settings
+    result = []
+    for _, record in pending_records(api, actor):
+        if record.get('submitted') or record.get('expires', 0) <= time.time() or record.get('revision') != settings['revision']: continue
+        row = {key: record[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
+        row.update(actor=actor, actor_name='Администратор' if actor == 'panel' else next((a.get('name') or actor for a in settings.get('accounts', []) if str(a['telegram_id']) == actor), actor))
+        if 'body' in record:
+            import assistant_mihomo
+            row['changes'] = assistant_mihomo.sanitize(record['body'])
+        row['has_changes'] = 'body' in record
+        result.append(row)
     return result
 
 
-def execute(api, actor, prompt):
+def pending_action(api, actor):
+    rows = pending_actions(api, actor)
+    return rows[-1] if rows else None
+
+
+def execute(api, actor, prompt, *, source='bot'):
     parts = prompt.strip().split()
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
@@ -129,7 +194,8 @@ def execute(api, actor, prompt):
     permission = {'/subscription': 'subscription_read', '/profile': 'subscription_read', '/profiles': 'subscription_read', '/devices': 'subscription_read', '/traffic': 'subscription_read', '/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
     if permission: roles.require(settings, actor, permission)
     if command in ('/confirm', '/operation'):
-        pending = control.operations.read(pending_path(api, actor))
+        pending = control.operations.read(pending_path(api, actor, code=args[0] if command == '/confirm' and args else None,
+                                                       operation_id=args[0] if command == '/operation' and args else None))
         if command == '/operation' and not roles.allows(settings, actor, 'server_read') and args != [pending.get('operation_id')]:
             raise HTTPException(403, 'Доступен только результат собственной операции')
         if pending.get('kind') == 'roles': roles.require(settings, actor, 'roles_manage')
@@ -196,17 +262,15 @@ def execute(api, actor, prompt):
         api.service_action_definition(identity, api.ServiceAction(action=action))
         record = {'service': identity, 'action': action, 'code': secrets.token_hex(4),
                   'operation_id': uuid.uuid4().hex, 'expires': time.time() + 60,
-                  'revision': control.read(api)['revision'], 'submitted': False}
+                  'revision': control.read(api)['revision'], 'submitted': False, 'source': source}
         with control.operations.locked(api.DATA_DIR):
-            path = pending_path(api, actor)
-            previous = control.operations.read(path)
-            if previous.get('submitted') and previous.get('expires', 0) > time.time() and not control.operations.read(api.DATA_DIR / 'operations' / (previous['operation_id'] + '.json')):
-                raise HTTPException(409, 'Предыдущая команда отправляется. Повторите её /confirm или проверьте панель')
-            control.operations.atomic_json(path, record)
-        return f"Подтвердите {action} для {identity}. Действие может прервать соединения службы.\n/confirm {record['code']}\nКод действует 60 секунд и только для вас. /cancel — отмена.\nОперация: {record['operation_id']}"
+            enqueue(api, actor, record)
+        return f"Подтвердите {action} для {identity}. Действие может прервать соединения службы.\n/confirm {record['code']}\nКод действует 10 минут и только для вас. /cancel {record['code']} — отмена.\nОперация: {record['operation_id']}"
     if command in ('/confirm', '/cancel') and (len(args) == 1 if command == '/confirm' else len(args) in (0, 1)):
         with control.operations.locked(api.DATA_DIR):
-            path = pending_path(api, actor)
+            if command == '/cancel' and not args and len(pending_actions(api, actor, settings=settings)) > 1:
+                raise HTTPException(409, 'Ожидают несколько действий. Укажите /cancel <код> нужного действия')
+            path = pending_path(api, actor, code=args[0] if args else None)
             record = control.operations.read(path)
             if not record:
                 raise HTTPException(409, 'Нет ожидающей команды. /help — справка')

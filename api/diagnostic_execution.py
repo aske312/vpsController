@@ -22,10 +22,7 @@ def prepare(api, query, actor, *, application_runtime=False):
         'body': query.model_dump(), 'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex,
         'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False, 'application_runtime': application_runtime}
     with operations.locked(api.DATA_DIR):
-        path = assistant_commands.pending_path(api, actor)
-        previous = operations.read(path)
-        if previous.get('submitted') and not previous.get('completed_text'): raise HTTPException(409, 'Предыдущее действие ещё выполняется')
-        operations.atomic_json(path, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'operation_id': record['operation_id'],
         'message': 'Планируется один тестовый запрос генерации с лимитом 1 выходной токен. Провайдер может списать квоту. Подтвердите в панели или /confirm.',
         'scope': 'configured_provider_minimal_chat_completion; no_tools_or_user_content'}
@@ -66,7 +63,7 @@ def confirm(api, actor, record):
     with operations.locked(api.DATA_DIR):
         operations.atomic_json(path, value)
         operation_log.append(api.DATA_DIR, {**value, 'stage': 'functional_check', 'component': 'nodera'})
-        pending = assistant_commands.pending_path(api, actor)
+        pending = assistant_commands.pending_path(api, actor, code=record['code'])
         current = operations.read(pending)
         if current.get('operation_id') == value['id']: operations.atomic_json(pending, {**current, 'completed_text': text})
     return text

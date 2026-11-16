@@ -202,13 +202,7 @@ def prepare(api, actor, body):
               'operation_id': uuid.uuid4().hex, 'expires': time.time() + 120,
               'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
-        target = assistant_commands.pending_path(api, actor)
-        prior = control.operations.read(target)
-        if prior.get('submitted') and not prior.get('completed_text'):
-            observed = control.operations.read(api.DATA_DIR / 'operations' / (prior['operation_id'] + '.json'))
-            if observed.get('state') not in ('succeeded', 'failed', 'cancelled'):
-                raise HTTPException(409, 'Предыдущее действие ещё выполняется; проверьте его результат')
-        control.operations.atomic_json(target, record)
+        assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'changes': record['body'], 'operation_id': record['operation_id'],
             'message': 'Подтвердите действие кнопкой в панели или /confirm в Telegram. Запрос ещё не выполнен.'}
 
@@ -233,7 +227,7 @@ def confirm(api, actor, record):
     text = 'Операция Relay: ' + result['id'] + '\n/operation ' + result['id']
     import assistant_commands
     with control.operations.locked(api.DATA_DIR):
-        target = assistant_commands.pending_path(api, actor)
+        target = assistant_commands.pending_path(api, actor, code=record['code'])
         current = control.operations.read(target)
         if current.get('operation_id') == record['operation_id']:
             control.operations.atomic_json(target, {**current, 'completed_text': text})
