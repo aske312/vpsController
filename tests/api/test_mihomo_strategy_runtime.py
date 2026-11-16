@@ -159,6 +159,10 @@ class StrategyRuntimeTests(unittest.TestCase):
                 stack.callback(connection.close)
                 connection.sendall(f"CONNECT 127.0.0.1:{echo.server_address[1]} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode())
                 self.assertIn(b"200", headers(connection).split(b"\r\n")[0])
+                # The local CONNECT reply can precede the upstream dial. Send
+                # real payload before inspecting which proxy carried the stream.
+                connection.sendall(b"open\n")
+                self.assertEqual(connection.recv(64), b"open\n")
                 self.assertEqual(paths.get(timeout=3), expected)
                 return connection
             if strategy != "select":

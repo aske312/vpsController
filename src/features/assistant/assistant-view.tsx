@@ -99,7 +99,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const [chatConnection, setChatConnection] = useState<"unknown" | "responding" | "failed">("unknown");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  useEffect(() => { setPendingAction(null); }, [request, actor]);
+  const pendingActionGeneration = useRef(0);
+  useEffect(() => { pendingActionGeneration.current++; setPendingAction(null); }, [request, actor]);
   const nextTurn = useRef(0);
   const [checks, setChecks] = useState<Partial<Record<ModuleId, { ok: boolean; text: string; revision: string; actor: string; username?: string }>>>({});
   const version = useRef(0);
@@ -213,6 +214,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     }, controller.signal).then(result => {
       if (controller.signal.aborted) return;
       setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action } : turn));
+      pendingActionGeneration.current++;
       setPendingAction(result.pending_action ?? null);
       setConversationId(result.conversation_id ?? null); rememberConversation(actor, result.conversation_id ?? null);
     }).catch(cause => {
@@ -356,6 +358,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
             context.push(completed);
             conversation = result.conversation_id ?? null;
             setTurns(current => current.map(turn => turn.id === id ? completed : turn));
+            pendingActionGeneration.current++;
             setPendingAction(result.pending_action ?? null);
             setConversationId(conversation); rememberConversation(actor, conversation); setMemoryError(result.cache_error ?? '');
             if (result.provider_usage) setStatus(current => current ? { ...current, provider_usage: result.provider_usage } : current);
@@ -385,6 +388,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   }
   const decideAction = useCallback(async (action: PendingAction, decision: "confirm" | "reject") => {
     if (writing.current || activeActor.current !== actor) return;
+    pendingActionGeneration.current++;
     writing.current = true; setWorking("service");
     try {
       const result = await request<{ text: string; operation?: SystemAction | null }>("/assistant/service-confirm", { method: "POST",
@@ -411,9 +415,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     const poll = async () => {
       if (reading || writing.current) return;
       reading = true;
+      const generation = pendingActionGeneration.current;
       try {
         const result = await request<{ pending_action: PendingAction | null }>(`/assistant/pending-action${actor ? `?telegram_id=${actor}` : ""}`);
-        if (!stopped) setPendingAction(result.pending_action);
+        if (!stopped && generation === pendingActionGeneration.current && !writing.current) setPendingAction(result.pending_action);
       } catch { /* Keep the last request until its deadline; background failures stay quiet. */ }
       finally { reading = false; }
     };
