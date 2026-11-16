@@ -250,12 +250,48 @@ async def server_command(settings, actor, prompt):
         return response.json()['text']
 
 
+async def remember_message(settings, message, role):
+    if not settings.get('control_token') or not isinstance(message, dict): return
+    actor, identity = message.get('chat', {}).get('id'), message.get('message_id')
+    if type(actor) is not int or actor <= 0 or type(identity) is not int or identity <= 0: return
+    sender = message.get('from', {})
+    if role == 'user' and (sender.get('id') != actor or sender.get('is_bot')): return
+    text = message.get('text') or message.get('caption') or ''
+    if not text and (message.get('photo') or message.get('document')):
+        text = '[Вложение: ' + str((message.get('document') or {}).get('file_name') or 'изображение')[:200] + ']'
+    if not text: return
+    body = {'message_id': identity, 'role': role, 'text': text[:12000], 'date': message.get('date', int(time.time()))}
+    reply = message.get('reply_to_message', {})
+    if type(reply.get('message_id')) is int and reply['message_id'] > 0: body['reply_to_message_id'] = reply['message_id']
+    if (role == 'user' and reply.get('from', {}).get('is_bot')
+            and str(reply.get('from', {}).get('id')) == settings['bot_token'].split(':')[0]
+            and reply.get('chat', {}).get('id') == actor):
+        body['reply_to_text'] = (reply.get('text') or reply.get('caption') or '')[:8000]
+    try:
+        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
+            response = await client.post('http://127.0.0.1:8000/api/assistant/bot-history/message', json=body,
+                headers={'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor),
+                         'X-Nodera-Bot': hashlib.sha256(settings['bot_token'].encode()).hexdigest()})
+            if response.status_code != 200: logging.error('NoderaBot history could not be saved')
+    except Exception: logging.error('NoderaBot history could not be saved')
+
+
+async def remember_incoming(settings, message):
+    await remember_message(settings, message, 'user')
+    quoted = message.get('reply_to_message') or {}
+    if (quoted.get('from', {}).get('is_bot') and str(quoted.get('from', {}).get('id')) == settings['bot_token'].split(':')[0]
+            and quoted.get('chat', {}).get('id') == message.get('chat', {}).get('id')):
+        await remember_message(settings, quoted, 'assistant')
+
+
 async def bot_api(settings, method, **payload):
     async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
         response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload)
         if response.status_code != 200 or not response.json().get('ok'):
             raise RuntimeError('Telegram Bot API вернул HTTP ' + str(response.status_code))
-        return response.json()['result']
+        result = response.json()['result']
+    if method == 'sendMessage': await remember_message(settings, result, 'assistant')
+    return result
 
 
 async def agent_request(settings, actor, prompt, attachments=None, alert=None):
@@ -506,10 +542,11 @@ async def bot(settings):
     media_groups = {}
     dispatcher = MessageDispatcher()
     notices = {}
-    async def deliver(sender, prompt, messages=None, alert=None):
+    async def deliver(sender, prompt, messages=None, alert=None, context=None):
         actor = sender['id']
         try: access = await identify(settings, sender)
         except Exception: access = False
+        if context: await remember_incoming(settings, context)
         if not prompt and not messages: return
         admin = access is True
         role = 'admin' if admin else str(access) if access else 'guest'
@@ -552,20 +589,24 @@ async def bot(settings):
         await asyncio.sleep(1)
         if media_groups.get(key) is album: media_groups.pop(key)
         prompt = '\n'.join(row.get('caption', '').strip() for row in album if row.get('caption')).strip()
+        for message in album: await remember_incoming(settings, message)
         await deliver(sender, prompt, album)
     try:
         while True:
             try:
-                updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'callback_query'])
+                updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'edited_message', 'callback_query'])
                 for update in updates:
                     offset = max(offset, update['update_id'] + 1)
                     temporary = state_file.with_suffix('.tmp')
                     temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
                     callback = update.get('callback_query')
-                    message = callback.get('message', {}) if callback else update.get('message', {})
+                    message = callback.get('message', {}) if callback else update.get('message', update.get('edited_message', {}))
                     sender = callback.get('from', {}) if callback else message.get('from', {})
                     actor = sender.get('id')
                     if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
+                    if update.get('edited_message'):
+                        dispatcher.submit((actor, 'command'), lambda message=message: remember_incoming(settings, message))
+                        continue  # Edits update context without executing commands again.
                     messages = None
                     alert = None
                     if callback:
@@ -609,7 +650,7 @@ async def bot(settings):
                         accepted = dispatcher.submit(stream, lambda sender=sender, key=album_key, album=messages: deliver_album(sender, key, album))
                         if not accepted: media_groups.pop(album_key, None)
                     else:
-                        accepted = dispatcher.submit(stream, lambda sender=sender, prompt=prompt, messages=messages, alert=alert: deliver(sender, prompt, messages, alert))
+                        accepted = dispatcher.submit(stream, lambda sender=sender, prompt=prompt, messages=messages, alert=alert, message=message, callback=callback: deliver(sender, prompt, messages, alert, context=None if callback else message))
                     if (not accepted or dispatcher.pending.get(stream, 0) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()
                         if len(notices) > 1000: notices = {actor: time.monotonic()}

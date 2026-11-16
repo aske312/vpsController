@@ -51,6 +51,7 @@ import component_checks
 import assistant_personalization
 import assistant_contacts
 import assistant_commands
+import assistant_bot_history
 import observability
 import diagnostic_tools
 import network_routes
@@ -583,6 +584,21 @@ def nodera_queue(request_id: str | None = None, settings: dict = Depends(require
     import assistant_broker
     assistant_control.require_bot_actor(settings, actor, chat=True)
     return assistant_broker.broker.status(actor, request_id)
+
+
+@app.post('/api/assistant/bot-history/message')
+def nodera_history_message(payload: assistant_bot_history.Message, settings: dict = Depends(require_nodera_bot_transport),
+                           actor: str = Header(default='', alias='X-MCP-Actor'), bot: str = Header(default='', alias='X-Nodera-Bot')) -> dict:
+    if not hmac.compare_digest(bot, assistant_bot_history.bot_key(settings)):
+        raise HTTPException(403, 'Сообщение принадлежит другому боту')
+    return assistant_bot_history.append(sys.modules[__name__], settings, actor, payload)
+
+
+@app.post('/api/assistant/bot-history/read')
+def nodera_history_read(payload: assistant_bot_history.Read, authorization: str | None = Header(default=None),
+                        actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    api = sys.modules[__name__]
+    return assistant_bot_history.read(api, assistant_bot_history.authorize(api, authorization, actor), actor, payload)
 
 
 @app.post('/api/assistant/bot-command')

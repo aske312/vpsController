@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import re
 import socket
@@ -253,7 +254,9 @@ def send(token, recipient, text, reply_markup=None):
     except (OSError, ValueError):
         # The request may have reached Telegram. Never retry an ambiguous delivery.
         return {'state': 'unknown'}
-    if result.get('ok'): return {'state': 'sent'}
+    if result.get('ok'):
+        message = result.get('result') or {}
+        return {'state': 'sent', 'message_id': message.get('message_id'), 'date': message.get('date')}
     retry = result.get('parameters', {}).get('retry_after')
     if result.get('error_code') == 429 and type(retry) is int:
         return {'state': 'pending', 'retry_after': max(1, min(retry, 86400))}
@@ -290,6 +293,13 @@ def deliver(api):
         operations.atomic_json(path(api), value)
     markup = analysis_keyboard(settings, row) if roles.allows(settings, str(recipient), 'chat') else None
     result = send(settings['bot_token'], recipient, row['text'], reply_markup=markup)
+    if result['state'] == 'sent' and type(result.get('message_id')) is int:
+        try:
+            import assistant_bot_history
+            assistant_bot_history.append(api, settings, str(recipient), assistant_bot_history.Message(
+                message_id=result['message_id'], date=result.get('date') or int(time.time()),
+                role='assistant', text=row['text'], kind='alert'))
+        except Exception: logging.warning('Owner alert history could not be saved')
     with operations.locked(api.DATA_DIR):
         value = load(api)
         if revision != value['revision']: return

@@ -53,7 +53,7 @@ def expire(api, settings):
 
 def usage(api):
     root = control.directory(api)
-    files = list((root / 'personalization').glob('*.json')) + list((root / 'conversations').glob('*/*.json'))
+    files = list((root / 'personalization').glob('*.json')) + list((root / 'conversations').glob('*/*.json')) + list((root / 'bot-history').glob('*/*.json'))
     return {'used_bytes': sum(file.stat().st_size for file in files if file.exists()), 'limit_bytes': memory.MAX_BYTES}
 
 

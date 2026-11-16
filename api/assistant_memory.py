@@ -65,6 +65,7 @@ def _prune(api, settings):
     cutoff = time.time() - settings.get('memory_days', 30) * 86400
     files = sorted(root.glob('*/*.json'), key=lambda item: item.stat().st_mtime, reverse=True)
     counts, total = {}, sum(file.stat().st_size for file in (api.DATA_DIR / 'assistant' / 'personalization').glob('*.json'))
+    total += sum(file.stat().st_size for file in (api.DATA_DIR / 'assistant' / 'bot-history').glob('*/*.json'))
     for file in files:
         info = file.stat()
         scope = file.parent.name

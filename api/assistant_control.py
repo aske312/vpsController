@@ -646,7 +646,7 @@ def status(api):
             'bot_live_access': bool(re.fullmatch(r'\d+\.\d+\.\d+', bot_version) and tuple(map(int, bot_version.split('.'))) >= (1, 1, 0)),
             'legacy_bot': api.observe_service('tg-agent-gateway.service'),
             'tools': {'web': (['web_search', 'web_read'] + (['web_research'] if agent_version >= (1, 9, 0) else []) + (['web_extract'] if agent_version >= (1, 21, 0) else [])) if agent_version >= (1, 7, 0) else [],
-                      'personalization': ['context_read', 'context_remember', 'context_forget'] if agent_version >= (1, 9, 0) else [], 'telegram-mcp': (list(assistant_telegram.TOOLS) if agent_version >= (1, 17, 0) else ['tg_auth_status', 'tg_get_my_dialogs', 'tg_get_messages', 'tg_search_messages', 'tg_get_stats'] if agent_version >= (1, 16, 0) else ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search']),
+                      'personalization': (['context_read', 'context_remember', 'context_forget'] + (['nodera_dialog_read'] if agent_version >= (1, 27, 0) else [])) if agent_version >= (1, 9, 0) else [], 'telegram-mcp': (list(assistant_telegram.TOOLS) if agent_version >= (1, 17, 0) else ['tg_auth_status', 'tg_get_my_dialogs', 'tg_get_messages', 'tg_search_messages', 'tg_get_stats'] if agent_version >= (1, 16, 0) else ['tg_auth_status', 'tg_dialogs', 'tg_history', 'tg_search']),
                       'vps-controller-mcp': ['vps_overview', 'vps_services', 'vps_components'] +
                           (['vps_metrics', 'vps_panel'] if agent_version >= (1, 4, 0) else []) +
                           (['vps_service_action', 'vps_operation', 'vps_api'] if agent_version >= (1, 5, 0) else []) +
@@ -1015,6 +1015,17 @@ def _runtime_request(api, mode, body):
         if re.search(r'(?iu)\b(забудь|forget)\b|(?:удали|delete).{0,30}(?:памят|контекст|факт|memory)', prompt):
             value['context_permits']['forget'] = assistant_personalization.permit(value, str(body.get('actor', 'panel')), 'forget')
     body.pop('context_conversation', None)
+    if mode == '--chat' and value.get('memory_enabled', True) and {'memory', 'chat'} <= grants and value.get('bot_token'):
+        import assistant_bot_history
+        actor = str(body.get('actor', 'panel'))
+        value['bot_dialog_token'] = mcp_transport_token(value['control_token'], 'nodera-dialog', actor)
+        if actor != 'panel':
+            try:
+                recent = assistant_bot_history.read(api, value, actor, assistant_bot_history.Read(limit=8), cached=False)
+                value['bot_dialog_context'] = {'messages': [{**row, 'text': row['text'][:1000], 'reply_to_text': row.get('reply_to_text', '')[:1000]} for row in recent['messages']],
+                                               'history_complete': False, 'untrusted_source': True}
+            except (OSError, HTTPException, operations.OperationConflict):
+                value['bot_dialog_context'] = {'unavailable': True}
     expected_revision = body.pop('settings_revision', None)
     if expected_revision and value['revision'] != expected_revision:
         raise HTTPException(409, 'Настройки Nodera изменились. Обновите раздел и повторите запрос.')
