@@ -43,6 +43,7 @@ class AssistantTests(unittest.TestCase):
         source = ROOT / 'protocol-images/ai-agent'
         self.assertEqual((root / 'telegram_guarded.py').read_bytes(), (source / 'telegram_guarded.py').read_bytes())
         self.assertEqual((root / 'telegram_catalog.json').read_bytes(), (source / 'telegram_catalog.json').read_bytes())
+        self.assertEqual((root / 'control_tool_schema.json').read_bytes(), (source / 'control_tool_schema.json').read_bytes())
         self.assertFalse(list((root / 'vendor').rglob('*.pyc')))
         manifest = json.loads((root / 'vendor/tg-mcp-guarded/SOURCE.json').read_text())
         for name, digest in manifest['files'].items():

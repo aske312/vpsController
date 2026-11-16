@@ -95,6 +95,8 @@ def install(api, component, *, start_bot=True):
         (root / 'telegram_guarded.py').chmod(0o644)
         shutil.copyfile(image / 'telegram_catalog.json', root / 'telegram_catalog.json')
         (root / 'telegram_catalog.json').chmod(0o644)
+        shutil.copyfile(image / 'control_tool_schema.json', root / 'control_tool_schema.json')
+        (root / 'control_tool_schema.json').chmod(0o644)
         shutil.copytree(image / 'vendor' / 'tg-mcp-guarded', root / 'vendor' / 'tg-mcp-guarded', dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
         for asset in (root / 'vendor').rglob('*'):

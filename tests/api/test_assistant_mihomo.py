@@ -59,6 +59,28 @@ class MihomoOperatorTests(unittest.TestCase):
         self.assertEqual(identity['name'], 'Александр')
         self.assertEqual(self.tool(name='vps_services').status_code, 403)
 
+    def test_subscription_information_commands_are_scoped_and_do_not_use_ai(self):
+        settings = control.read(api)
+        settings['modules']['ai-agent'] = False
+        settings['modules']['nodera-bot'] = True
+        settings['bot_token'] = self.payload()['bot_token']
+        settings['accounts'][0].update(role='user', products=['mihomo'], permission_overrides={})
+        control.store(api, settings)
+        self.rows[0]['limits_status'] = {'state': 'active', 'used_bytes': 2500000000, 'expires_at': 1800000000}
+        with patch.object(control, 'runtime_request') as model:
+            for command in ('/profiles', '/profile', '/devices', '/traffic', '/profile own'):
+                response = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': command})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertNotIn('Private foreign', response.text)
+                self.assertNotIn('secret-wireguard', response.text)
+                self.assertNotIn('b' * 64, response.text)
+            response = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/traffic'})
+            self.assertIn('2.50 GB / 10 GB', response.json()['text'])
+            response = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/profile other'})
+            self.assertNotIn('Private foreign', response.text)
+            self.assertIn('недоступен', response.json()['text'])
+            model.assert_not_called()
+
     def test_foreign_profiles_global_settings_limits_and_path_traversal_are_denied(self):
         for method, path, body in [
             ('GET', '/profiles/other/subscription', {}), ('DELETE', '/profiles/other/devices/phone', {}),

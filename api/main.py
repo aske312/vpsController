@@ -592,7 +592,7 @@ def nodera_command(payload: assistant_commands.Command, settings: dict = Depends
     confirmation_command = bool(command and command[0].split('@')[0].lower() in ('/confirm', '/cancel', '/operation'))
     import assistant_roles
     model_command = bool(command and command[0].split('@')[0].lower() in ('/models', '/model'))
-    if command and command[0].split('@')[0].lower() == '/subscription':
+    if command and command[0].split('@')[0].lower() in ('/subscription', '/profile', '/profiles', '/devices', '/traffic'):
         assistant_roles.require(settings, actor, 'subscription_read')
     elif not confirmation_command:
         assistant_control.require_bot_actor(settings, actor, chat=model_command)

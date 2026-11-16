@@ -35,3 +35,33 @@ test("fallback member order remains explicit and connection IDs survive display 
   nodes(tree, node => node.props["aria-label"] === "Повысить приоритет участника")[1].props.onClick();
   assert.deepEqual(next.groups[0].members, ["connection:b", "connection:a"]);
 });
+
+test("a referenced group cannot be deleted until rules and parent groups release it", () => {
+  const group = name => ({ name, type: "fallback", members: ["*"], strategy: "consistent-hashing" });
+  for (const policy of [
+    { groups: [group("Media")], rules: [{ kind: "domain", value: "example.com", target: "Media" }] },
+    { groups: [group("Media"), { ...group("Parent"), members: ["group:Media"] }], rules: [] },
+  ]) {
+    let next;
+    const tree = AdvancedRouting({ value: JSON.stringify(policy), onChange: raw => { next = JSON.parse(raw); } });
+    const remove = nodes(tree, node => node.type === "button" && node.props.children === "Удалить группу")[0];
+    assert.equal(remove.props.disabled, true);
+    remove.props.onClick();
+    assert.equal(next, undefined);
+  }
+  let next;
+  const tree = AdvancedRouting({ value: JSON.stringify({ groups: [group("Unused")], rules: [] }), onChange: raw => { next = JSON.parse(raw); } });
+  nodes(tree, node => node.type === "button" && node.props.children === "Удалить группу")[0].props.onClick();
+  assert.deepEqual(next, { groups: [], rules: [] });
+});
+
+test("group rename updates references in parent groups as well as routing rules", () => {
+  let next;
+  const tree = AdvancedRouting({ value: JSON.stringify({ groups: [
+    { name: "Media", type: "fallback", members: ["*"], strategy: "consistent-hashing" },
+    { name: "Parent", type: "select", members: ["group:Media"], strategy: "consistent-hashing" },
+  ], rules: [{ kind: "domain", value: "example.com", target: "Media" }] }), onChange: raw => { next = JSON.parse(raw); } });
+  nodes(tree, node => node.type === "input" && node.props.value === "Media")[0].props.onChange({ target: { value: "Video" } });
+  assert.equal(next.rules[0].target, "Video");
+  assert.deepEqual(next.groups[1].members, ["group:Video"]);
+});

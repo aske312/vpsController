@@ -40,6 +40,23 @@ class ServerCommandTests(unittest.TestCase):
         headers = self.headers if actor is None else {**self.headers, 'X-MCP-Actor': str(actor)}
         return self.client.post('/api/assistant/bot-command', headers=headers, json={'command': command})
 
+    def test_direct_diagnostics_use_read_permissions_and_scrub_secrets_without_ai(self):
+        import assistant_diagnostics
+        secret = control.read(api)['control_token']
+        with patch.object(assistant_diagnostics, 'call', return_value={'state': 'unknown', 'api_key': 'private-key', 'message': secret}) as diagnostic, patch.object(control, 'runtime_request') as model:
+            for command, tool in [('/network', 'vps_network'), ('/security', 'vps_security'), ('/logs fixture', 'vps_logs'), ('/diagnostics', 'vps_diagnostics')]:
+                response = self.call(command)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertIn('unknown', response.json()['text'])
+                self.assertNotIn('private-key', response.text)
+                self.assertNotIn(secret, response.text)
+                self.assertEqual(diagnostic.call_args.args[1], tool)
+            model.assert_not_called()
+        # Use real authorization, before invoking security collectors.
+        with patch.object(api, 'security') as security:
+            self.assertEqual(self.call('/security', actor=999).status_code, 403)
+            security.assert_not_called()
+
     def test_mcp_prepares_but_cannot_confirm_and_checks_live_scope(self):
         value = control.read(api)
         value['mcp']['vps-controller-mcp'] = True

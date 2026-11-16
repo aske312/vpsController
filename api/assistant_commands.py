@@ -1,9 +1,11 @@
 """Explicit server commands for bot administrators, independent of AI/MCP."""
 import hmac
+import json
 import re
 import secrets
 import time
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -22,6 +24,14 @@ HELP = ('Команды сервера:\n'
         '/resources — CPU, память, диск и трафик\n'
         '/services — службы, их ID и доступные действия\n'
         '/components — установленные компоненты\n'
+        '/network — состояние сети\n'
+        '/security — состояние безопасности\n'
+        '/logs [служба] — последние логи\n'
+        '/diagnostics — пассивная диагностика\n'
+        '/profiles — доступные профили Mihomo\n'
+        '/profile [ID] — параметры подписки\n'
+        '/devices [ID] — устройства подписки\n'
+        '/traffic [ID] — учтённый трафик подписки\n'
         '/service <ID> <start|stop|restart> — управление службой\n'
         '/confirm <код> — подтвердить действие в течение 60 секунд\n'
         '/cancel — отменить ожидающее подтверждение\n'
@@ -68,12 +78,44 @@ def pending_path(api, actor):
     return control.directory(api) / 'nodera-bot' / 'commands' / (actor + '.json')
 
 
+def profile_reply(api, settings, actor, command, args):
+    import assistant_mihomo
+    # This bridge filters profiles by the actor's current permissions before
+    # formatting. Never return credentials, HWIDs or a foreign subscriber's data.
+    items = assistant_mihomo.profiles(api, actor)['items']
+    if command == '/profiles':
+        rows = [f"{item['id']} · {str(item.get('name') or item['id'])[:100]}" for item in items[:40]]
+        return 'Доступные профили Mihomo:\n' + ('\n'.join(rows) or 'Нет доступных профилей') + '\n/profile <ID> — параметры профиля'
+    linked = assistant_mihomo.profile_for(settings, actor).get('mihomo_profile_id')
+    identity = args[0] if args else linked
+    item = next((row for row in items if row['id'] == identity), None)
+    if not item:
+        return 'Профиль не найден или недоступен. /profiles — доступные профили; /profile <ID> — параметры. Если профиль не привязан, обратитесь к владельцу.'
+    name = str(item.get('name') or item['id'])[:100]
+    if command == '/devices':
+        devices = item.get('devices', [])
+        rows = [f"{str(device.get('name') or device['id'])[:100]} · {device.get('os') or 'ОС не определена'}" for device in devices[:40] if device.get('scope') != 'common' and device.get('id') != item.get('common_device_id')]
+        return f'Устройства · {name}:\n' + ('\n'.join(rows) or 'Отдельные устройства ещё не зарегистрированы. Общие подключения доступны по подписке.')
+    status, limits = item.get('limits_status') or {}, item.get('limits') or {}
+    states = {'active': 'активна', 'expired': 'срок истёк', 'exhausted': 'трафик исчерпан', 'unknown': 'состояние ограничений не подтверждено'}
+    used_bytes = status.get('used_bytes')
+    traffic = f'{used_bytes / 1000000000:.2f} GB' if type(used_bytes) in (int, float) else 'нет данных'
+    quota = number(limits['traffic_gb'], ' GB') if limits.get('traffic_gb') is not None else 'без ограничения'
+    rows = [f'Подписка · {name}', 'Состояние: ' + states.get(status.get('state'), 'нет данных'), f'Учтённый трафик: {traffic} / {quota}']
+    if command == '/profile':
+        expires = status.get('expires_at')
+        expiry = datetime.fromtimestamp(expires, timezone.utc).strftime('%d.%m.%Y %H:%M UTC') if type(expires) in (int, float) else 'не определён' if limits.get('days') is not None else 'без ограничения'
+        rows += ['Срок: ' + expiry, 'Лимит скорости: ' + (number(limits['speed_mbps'], ' Мбит/с') if limits.get('speed_mbps') is not None else 'без ограничения'),
+                 f"Подключений: {len(item.get('connections', []))}", '/devices — устройства · /subscription — ссылка']
+    return '\n'.join(rows)
+
+
 def execute(api, actor, prompt):
     parts = prompt.strip().split()
     command = parts[0].split('@')[0].lower() if parts else ''
     args = parts[1:]
     settings = control.read(api)
-    permission = {'/subscription': 'subscription_read', '/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
+    permission = {'/subscription': 'subscription_read', '/profile': 'subscription_read', '/profiles': 'subscription_read', '/devices': 'subscription_read', '/traffic': 'subscription_read', '/models': 'model_select', '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read', '/components': 'server_read', '/service': 'server_manage'}.get(command)
     if permission: roles.require(settings, actor, permission)
     if command in ('/confirm', '/operation'):
         pending = control.operations.read(pending_path(api, actor))
@@ -89,6 +131,17 @@ def execute(api, actor, prompt):
         if not linked: return 'К учётной записи не привязана подписка Mihomo. Обратитесь к владельцу.'
         result = assistant_mihomo.call(api, actor, 'GET', '/profiles/' + linked + '/subscription', {})
         return 'Ваша подписка Mihomo:\n' + result['url'] if result.get('url') else 'Подписка привязана, но публичная ссылка ещё не настроена. Обратитесь к владельцу.'
+    if command in ('/profile', '/devices', '/traffic', '/profiles') and len(args) <= (0 if command == '/profiles' else 1):
+        return profile_reply(api, settings, actor, command, args)
+    if command in ('/network', '/security', '/diagnostics', '/logs') and (not args or command == '/logs' and len(args) == 1):
+        import assistant_diagnostics
+        arguments = {'service': args[0] if args else 'application', 'lines': 40} if command == '/logs' else {}
+        result = assistant_diagnostics.call(api, {'/network': 'vps_network', '/security': 'vps_security', '/diagnostics': 'vps_diagnostics', '/logs': 'vps_logs'}[command], arguments, actor)
+        titles = {'/network': 'Состояние сети', '/security': 'Состояние безопасности', '/diagnostics': 'Пассивная диагностика', '/logs': 'Последние логи'}
+        # Reuse the existing bounded, secret-scrubbed diagnostics, without MCP
+        # or a model roundtrip. JSON also preserves unknown and partial states.
+        safe = assistant_diagnostics.sanitize(api, result, max_chars=7000)
+        return titles[command] + '\n```json\n' + json.dumps(safe, ensure_ascii=False, indent=2)[:8500] + '\n```'
     if command in BLOCKED_COMMANDS:
         raise HTTPException(403, 'Nodera не может выключать VPS или переключать режим доступа к панели')
     if command == '/models' and (not args or len(args) == 1 and args[0].isdigit()):

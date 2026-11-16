@@ -10,6 +10,73 @@ bot = load_module('assistant_dialog_bot', 'protocol-images/nodera-bot/bot.py')
 
 
 class BotDialogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_typical_requests_bypass_ai_including_polite_natural_language(self):
+        with patch.object(bot, 'agent_request', new=AsyncMock()) as agent, patch.object(bot, 'server_command', new=AsyncMock(return_value='Данные сервера')) as server:
+            for phrase, command in bot.DIRECT_COMMANDS.items():
+                if command in ('/hello', '/thanks', '/help', '/connect', '/id'): continue
+                with self.subTest(phrase=phrase):
+                    result = await bot.reply({}, {'id': 11}, phrase, True)
+                    server.assert_awaited_with({}, 11, command)
+                    self.assertTrue(result)
+            for text, command in [('Покажи ресурсы сервера, пожалуйста!', '/resources'),
+                                  ('Перезапусти службу mihomo', '/service mihomo restart'), ('логи mihomo', '/logs mihomo')]:
+                await bot.reply({}, {'id': 11}, text, True)
+                server.assert_awaited_with({}, 11, command)
+            for text in ('Привет!', 'Спасибо', 'как подключиться', 'что ты умеешь'):
+                self.assertTrue(await bot.reply({}, {'id': 11}, text, True))
+            agent.assert_not_awaited()
+
+    async def test_analytical_and_explicit_ai_questions_keep_the_original_prompt(self):
+        with patch.object(bot, 'agent_request', new=AsyncMock(return_value='AI')) as agent, patch.object(bot, 'server_command', new=AsyncMock()) as server, patch.object(bot, 'bot_api', new=AsyncMock()):
+            for text in ('Почему сервер тормозит?', 'Сравни модели AI', 'Не перезапускай mihomo', 'Перезапусти mihomo и останови ssh'):
+                self.assertEqual(bot.direct_prompt(text), text)
+                self.assertEqual(await bot.reply({}, {'id': 11}, text, True), 'AI')
+                agent.assert_awaited_with({}, 11, text)
+            self.assertEqual(await bot.reply({}, {'id': 11}, '/ai статус сервера', True), 'AI')
+            agent.assert_awaited_with({}, 11, 'статус сервера')
+            server.assert_not_awaited()
+
+    async def test_automatic_requests_keep_subscription_and_guest_access_boundaries(self):
+        with patch.object(bot, 'agent_request', new=AsyncMock()) as agent, patch.object(bot, 'server_command', new=AsyncMock(return_value='Своя подписка')) as server:
+            for phrase in ('мой профиль', 'мои устройства', 'мой трафик', 'моя подписка'):
+                self.assertEqual(await bot.reply({}, {'id': 11}, phrase, 'subscription'), 'Своя подписка')
+            self.assertIn('импорт', await bot.reply({}, {'id': 11}, 'как подключиться', 'subscription'))
+            server.reset_mock()
+            for role in ('subscription', 'chat', False):
+                for phrase in ('ресурсы', 'перезапусти mihomo', 'логи mihomo', 'безопасность'):
+                    await bot.reply({}, {'id': 11}, phrase, role)
+            await bot.reply({}, {'id': 11}, '/ai Привет', 'subscription')
+            server.assert_not_awaited()
+            agent.assert_not_awaited()
+
+    async def test_natural_command_stays_responsive_while_explicit_ai_is_waiting(self):
+        command_sent, finished = asyncio.Event(), asyncio.Event()
+        polls = 0
+        async def transport(settings, method, **payload):
+            nonlocal polls
+            if method == 'getWebhookInfo': return {}
+            if method == 'getUpdates':
+                polls += 1
+                if polls == 1:
+                    return [{'update_id': at, 'message': {'chat': {'type': 'private'}, 'from': {'id': 11}, 'text': text}}
+                            for at, text in enumerate(('/ai Подумай', 'статус сервера'), 1)]
+                await asyncio.wait_for(finished.wait(), 2)
+                raise asyncio.CancelledError()
+            if method == 'sendMessage':
+                if 'Статус готов' in payload['text']: command_sent.set()
+                if 'Ответ готов' in payload['text']: finished.set()
+            return True
+        async def answer(*_):
+            await asyncio.wait_for(command_sent.wait(), 1)
+            return 'Ответ готов'
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), \
+                patch.object(bot, 'bot_api', side_effect=transport), patch.object(bot, 'identify', new=AsyncMock(return_value=True)), \
+                patch.object(bot, 'command_menu', new=AsyncMock()), patch.object(bot, 'agent_request', side_effect=answer), \
+                patch.object(bot, 'server_command', new=AsyncMock(return_value='Статус готов')) as server:
+            with self.assertRaises(asyncio.CancelledError): await bot.bot({'modules': {'nodera-bot': True}, 'bot_token': 'fixture'})
+            server.assert_awaited_once_with({'modules': {'nodera-bot': True}, 'bot_token': 'fixture'}, 11, '/status')
+        self.assertTrue(command_sent.is_set() and finished.is_set())
+
     async def test_real_polling_loop_delivers_second_user_before_first_ai_answer_finishes(self):
         fast, slow, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
         polls = 0

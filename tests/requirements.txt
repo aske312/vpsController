@@ -2,4 +2,5 @@
 httpx2==2.13.0
 httpx==0.28.1
 pypdf==7.0.1
+jsonschema==4.26.0
 PyYAML>=6,<7

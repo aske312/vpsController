@@ -13,6 +13,7 @@ import threading
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +25,7 @@ class Endpoint(BaseHTTPRequestHandler):
         assert self.path == '/api/assistant/control-tool'
         assert self.headers['X-MCP-Actor'] == 'panel'
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        Draft202012Validator(json.loads((ROOT / 'protocol-images/ai-agent/control_tool_schema.json').read_text(encoding='utf-8'))).validate(body)
         module = 'mihomo-mcp' if body['name'].startswith('mihomo_') else 'vps-controller-mcp'
         assert self.headers['X-MCP-Module'] == module
         expected = hmac.new(b'isolated-test-token', f'nodera-mcp-v1:{module}:panel'.encode(), hashlib.sha256).hexdigest()

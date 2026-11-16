@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
+from typing import Literal
 import urllib.parse
 import zipfile
 import xml.etree.ElementTree as ET
@@ -179,14 +180,32 @@ async def vps_call(settings, actor, name, **arguments):
     scope = settings.get('control_token_scope')
     if scope is not None and scope != {'module': module, 'actor': str(actor)}:
         raise PermissionError('Учётные данные принадлежат другому контуру или пользователю')
+    payload = {'name': name, **arguments}
+    try: validate_tool_arguments(payload, control_tool_schema())
+    except ToolValidationError as exc: return exc.result()
     token = settings['control_token'] if scope else mcp_transport_token(settings['control_token'], module, actor)
     trace_headers = {key: value for key, value in settings.get('diagnostic_trace_headers', {}).items()
                      if key in ('X-VPS-Trace-ID', 'X-VPS-Parent-ID', 'X-VPS-Trace-At', 'X-VPS-Trace-Proof') and isinstance(value, str) and len(value) <= 128}
     diagnostic_names = ('vps_incident', 'vps_changes', 'vps_probe', 'vps_compare', 'mihomo_compare', 'application_diagnostics', 'operation_timeline', 'operation_inventory', 'developer_inspect', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts')
     async with httpx.AsyncClient(timeout=60 if name in diagnostic_names else 25, trust_env=False) as client:
-        response = await client.post(VPS_URL, json={'name': name, **arguments}, headers={
+        response = await client.post(VPS_URL, json=payload, headers={
             'Authorization': 'Bearer ' + token, 'X-MCP-Actor': str(actor), 'X-MCP-Module': module, **trace_headers})
         if response.status_code != 200:
+            if response.status_code == 422:
+                try: detail = response.json().get('detail')
+                except (ValueError, AttributeError): detail = None
+                # Only a typed request-validation response guarantees that the
+                # handler was not entered. Business errors retain normal handling.
+                if not isinstance(detail, list):
+                    raise RuntimeError('API vpsController отклонил инструмент: HTTP 422')
+                fields = []
+                known = set(control_tool_schema()['properties'])
+                for row in detail[:8] if isinstance(detail, list) else []:
+                    if not isinstance(row, dict): continue
+                    loc = row.get('loc')
+                    path = '.'.join(part if isinstance(part, str) and part in known else '*' for part in loc[1:8]) if isinstance(loc, list) else 'arguments'
+                    fields.append({'field': path or 'arguments', 'issue': 'API отклонил значение или обязательное поле'})
+                return ToolValidationError(fields or [{'field': 'arguments', 'issue': 'Параметры не соответствуют схеме установленного API'}], source='api').result()
             if name in diagnostic_names:
                 try:
                     detail = response.json()
@@ -198,6 +217,55 @@ async def vps_call(settings, actor, name, **arguments):
                 except (ValueError, AttributeError): pass
             raise RuntimeError('API vpsController отклонил инструмент: HTTP ' + str(response.status_code))
         return response.json()
+
+
+class ToolValidationError(ValueError):
+    def __init__(self, fields, *, source='local'):
+        super().__init__('Параметры инструмента не соответствуют схеме')
+        self.fields, self.source = fields, source
+
+    def result(self):
+        return {'error': 'tool_validation_error', 'source': self.source, 'fields': self.fields,
+                'executed': False, 'retryable': False,
+                'message': 'Вызов отклонён при проверке параметров. Исправьте поля по схеме инструмента. Автоматического повтора не было.'}
+
+
+def control_tool_schema():
+    return json.loads(Path(__file__).with_name('control_tool_schema.json').read_text(encoding='utf-8'))
+
+
+def validate_tool_arguments(arguments, schema):
+    from jsonschema import Draft202012Validator, validators
+    from referencing import Registry
+    from referencing.exceptions import NoSuchResource
+    # Only schema-defined field names and constraints enter feedback, never
+    # rejected values or jsonschema messages (which can contain credentials).
+    known = set()
+    def collect(node):
+        if isinstance(node, dict):
+            known.update(node.get('properties', {}))
+            for value in node.values(): collect(value)
+        elif isinstance(node, list):
+            for value in node: collect(value)
+    collect(schema)
+    fields = []
+    def no_remote_schema(uri):
+        raise NoSuchResource(ref=uri)
+    # The API's strict integer fields reject 60.0 and true, even though JSON
+    # Schema considers an integral float an integer. Do not silently coerce it.
+    strict = validators.extend(Draft202012Validator, type_checker=Draft202012Validator.TYPE_CHECKER.redefine('integer', lambda checker, value: type(value) is int))
+    for error in strict(schema, registry=Registry(retrieve=no_remote_schema)).iter_errors(arguments):
+        path = '.'.join(str(part) if type(part) is int or part in known else '*' for part in error.absolute_path) or 'arguments'
+        issue = {'type': 'Неверный тип', 'required': 'Не заполнено обязательное поле',
+                 'additionalProperties': 'Лишние поля; используйте только поля схемы', 'enum': 'Выберите значение из enum схемы',
+                 'pattern': 'Неверный формат', 'minimum': 'Значение меньше разрешённого', 'maximum': 'Значение больше разрешённого',
+                 'minLength': 'Значение слишком короткое', 'maxLength': 'Значение слишком длинное'}.get(error.validator, 'Значение не соответствует схеме')
+        if error.validator == 'required' and isinstance(error.instance, dict):
+            missing = [key for key in error.validator_value if key not in error.instance]
+            fields.extend({'field': (path + '.' if path != 'arguments' else '') + key, 'issue': issue} for key in missing[:8])
+        else: fields.append({'field': path, 'issue': issue})
+        if len(fields) >= 8: break
+    if fields: raise ToolValidationError(fields[:8])
 
 
 WEB_LIMIT = 2 * 1024 * 1024
@@ -574,7 +642,7 @@ def serve_mcp(settings, actor, module):
             """Узнать канал и сборку панели, текущий режим доступа и состояние её служб."""
             return await vps_call(settings, actor, 'vps_panel')
         @server.tool()
-        async def vps_service_action(service: str, action: str) -> dict:
+        async def vps_service_action(service: str, action: Literal['start', 'stop', 'restart']) -> dict:
             """Подготовить start/stop/restart службы или модуля. Выполнится только после подтверждения пользователем."""
             return await vps_call(settings, actor, 'vps_service_action', service=service, action=action)
 
@@ -630,9 +698,9 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'diagnostic_alerts', body={'limit': limit})
 
         @server.tool()
-        async def diagnostic_alert_rules(method: str = 'GET', body: dict | None = None) -> dict:
+        async def diagnostic_alert_rules(method: Literal['GET', 'PATCH'] = 'GET', body: dict | None = None) -> dict:
             """GET читает ревизию и настройки алертов. PATCH подготавливает изменение с revision: включение правил, disk_percent, http_error_percent, http_min_requests, window_minutes, trigger_samples, recovery_samples. Применение только после отдельного подтверждения человеком; модель не может подтвердить собственный запрос."""
-            return await vps_call(settings, actor, 'diagnostic_alert_rules', method=method, body=body)
+            return await vps_call(settings, actor, 'diagnostic_alert_rules', method=method, body=body or {})
 
         @server.tool()
         async def component_check(component: str, level: str = 'local_api', integration_id: str | None = None,
@@ -642,7 +710,7 @@ def serve_mcp(settings, actor, module):
                 'integration_id': integration_id, 'binding_id': binding_id, 'consumer_id': consumer_id, 'model_id': model_id})
 
         @server.tool()
-        async def vps_api(endpoint: str) -> dict:
+        async def vps_api(endpoint: Literal['/overview', '/services', '/components', '/metrics', '/application', '/logs', '/network', '/security', '/diagnostics']) -> dict:
             """Прочитать API приложения: /overview, /services, /components, /metrics, /application, /logs, /network, /security, /diagnostics. Секреты исключены."""
             return await vps_call(settings, actor, 'vps_api', endpoint=endpoint)
         @server.tool()
@@ -667,7 +735,7 @@ def serve_mcp(settings, actor, module):
                 'binding_id': binding_id, 'consumer_id': consumer_id, 'service': service})
 
         @server.tool()
-        async def vps_observability(method: str = 'GET', path: str = '/events', body: dict | None = None) -> dict:
+        async def vps_observability(method: Literal['GET', 'POST', 'PATCH'] = 'GET', path: str = '/events', body: dict | None = None) -> dict:
             """Наблюдаемость: GET /restarts — загрузки ОС, события запусков/остановок служб без HTTP-шума, OOM/panic/watchdog, системные apt-таймеры, операции и последний отчёт обновления; body: minutes 1..10080, limit 1..120, until Unix UTC для прошлого окна, boot_id из отчёта, services список ID из vps_services. Текущее состояние и последний отчёт помечены отдельно от исторического окна; отсутствие событий не исключает сбой. GET /events (body: minutes, request_id, trace_id, operation_id, service panel|mihomo, component, operation_type, error_code, stage, kind, errors, limit), /settings, /connections, /journal (body: service application|system|dns|gateway|ID службы, minutes 1..10080, priority err|warning|info|debug, limit 1..120). PATCH /settings с enabled, errors_only, retention_days 1..90, max_events 100..100000, revision из GET требует подтверждения человека. Выдача подписки не означает подключение. HTTP-ошибка не доказывает сбой DNS/outbound/сети клиента. Неизвестное число соединений или затронутых пользователей нельзя выдавать за ноль. GET /owner-alerts: owner notification status. POST /owner-alerts/test: fixed owner delivery test, no body, requires roles_manage and human confirmation. /journal accepts cursor from next_cursor for bounded continuation."""
             return await vps_call(settings, actor, 'vps_observability', method=method, path=path, body=body or {})
 
@@ -692,7 +760,7 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'vps_diagnostics')
 
         @server.tool()
-        async def vps_access(method: str = 'GET', body: dict | None = None) -> dict:
+        async def vps_access(method: Literal['GET', 'PATCH'] = 'GET', body: dict | None = None) -> dict:
             """Только владелец: GET читает роли и права; PATCH готовит назначение {telegram_id, role, products:[assistant,mihomo], mihomo_profile_id} либо матрицу {role_permissions:{role:[permissions]}}. Изменение требует подтверждения человеком."""
             return await vps_call(settings, actor, 'vps_access', method=method, body=body or {})
 
@@ -713,7 +781,7 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'mihomo_capabilities')
 
         @server.tool()
-        async def mihomo_api(method: str, path: str, body: dict | None = None) -> dict:
+        async def mihomo_api(method: Literal['GET', 'POST', 'PATCH', 'DELETE'], path: str, body: dict | None = None) -> dict:
             """API Mihomo: мониторинг, подписки, профили, устройства, модули, DNS и маршрутизация. GET читает; POST/PATCH/DELETE готовят изменение для подтверждения. Сначала прочитай mihomo_capabilities."""
             return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
         @server.tool()
@@ -977,11 +1045,16 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 try:
                     if name not in connections:
                         raise PermissionError('Инструмент недоступен')
-                    session, _ = connections[name]
-                    arguments = json.loads(call['function'].get('arguments') or '{}')
+                    session, tool = connections[name]
+                    try: arguments = json.loads(call['function'].get('arguments') or '{}')
+                    except (json.JSONDecodeError, TypeError):
+                        raise ToolValidationError([{'field': 'arguments', 'issue': 'Ожидается JSON-объект с параметрами инструмента'}]) from None
+                    validate_tool_arguments(arguments, tool.inputSchema)
                     result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=30)
                     text = '\n'.join(item.text for item in result.content if item.type == 'text')[:24000]
                     used.append(name)
+                except ToolValidationError as exc:
+                    text = json.dumps(exc.result(), ensure_ascii=False)
                 except Exception:
                     text = json.dumps({'error': 'Инструмент не выполнил запрос. Данные не подтверждены.'}, ensure_ascii=False)
                 messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': text})
@@ -1074,8 +1147,10 @@ if __name__ == '__main__':
     try:
         if sys.argv[1] == '--self-check':
             import mcp, telethon, pypdf
+            from jsonschema import Draft202012Validator
             from telegram_guarded import verify_vendor
             verify_vendor()
+            Draft202012Validator.check_schema(control_tool_schema())
             print('AI-agent runtime ready')
         elif sys.argv[1] == '--mcp':
             serve_mcp(json.loads(Path(os.environ['NODERA_CONFIG']).read_text()), os.environ['NODERA_ACTOR'], sys.argv[2])
