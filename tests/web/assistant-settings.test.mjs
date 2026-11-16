@@ -104,6 +104,7 @@ function nodes(tree, predicate, disabled = false) {
 
 const shortcuts = [
   {command:'/status',label:'Состояние сервера',syntax:'/status',insert:'/status',needs_args:false,kind:'direct'},
+  {command:'/services',label:'Службы',syntax:'/services',insert:'/services',needs_args:false,kind:'direct'},
   {command:'/service',label:'Управление службой',syntax:'/service <ID> <start|stop|restart>',insert:'/service ',needs_args:true,kind:'direct'},
   {command:'/ai',label:'Вопрос AI',syntax:'/ai <вопрос>',insert:'/ai ',needs_args:true,kind:'ai'},
 ];
@@ -133,11 +134,20 @@ test('slash autocomplete filters commands and Enter executes the chosen shortcut
   await new Promise(setImmediate);tree=view.render();assert.equal(view.writes.length,1);assert.equal(view.writes[0].command,'/status');
 });
 
+test('an exact service command opens its arguments instead of running services and trailing space closes autocomplete',async()=>{
+  const view=mount(fixture(),[],{commands:shortcuts});view.render();await Promise.resolve();let tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/service',style:{},scrollHeight:48}});tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onKeyDown({key:'Enter',preventDefault(){}});tree=view.render();
+  assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'/service ');assert.equal(view.writes.length,0);
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/service ',style:{},scrollHeight:48}});tree=view.render();
+  assert.equal(nodes(tree,n=>n.props.role==='listbox'&&n.props['aria-label']==='Быстрые команды').length,0);
+});
+
 test('a shortcut requiring arguments fills the composer and service preparation keeps confirmation cards',async()=>{
   const pending={code:'aabbccdd',service:'mihomo',action:'restart',expires:Date.now()/1000+600};
   const view=mount(fixture(),[],{commands:shortcuts,command:()=>({text:'Confirm the action',pending_actions:[pending],context_safe:true})});
   view.render();await Promise.resolve();let tree=view.render();nodes(tree,n=>n.props['aria-label']==='Команды')[0].node.props.onClick();tree=view.render();
-  nodes(tree,n=>n.props.role==='option'&&JSON.stringify(n.props.children).includes('/service'))[0].node.props.onClick();tree=view.render();
+  nodes(tree,n=>n.props.role==='option'&&JSON.stringify(n.props.children).includes('/service <ID>'))[0].node.props.onClick();tree=view.render();
   assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'/service ');assert.equal(view.writes.length,0);
   nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'/service mihomo restart',style:{},scrollHeight:48}});tree=view.render();
   const send=nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0];assert.equal(send.disabled,false);send.node.props.onClick();

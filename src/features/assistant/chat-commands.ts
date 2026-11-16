@@ -4,5 +4,6 @@ export function directCommand(text: string) {
 }
 export function commandMatches(items: ChatCommand[], prompt: string) {
   const query = prompt.trim().match(/^\/([^\s]*)$/)?.[1].toLowerCase() ?? "";
-  return items.filter(item => item.command.slice(1).startsWith(query));
+  return items.filter(item => item.command.slice(1).startsWith(query))
+    .sort((left, right) => Number(right.command.slice(1) === query) - Number(left.command.slice(1) === query));
 }
