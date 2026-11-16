@@ -86,3 +86,17 @@ test("profile cards toggle one reference without copying or editing definitions"
   assert.doesNotMatch(html, /media\.test|direct\.test/);
   assert.match(html, /Media/);
 });
+
+test("group health fields edit overrides and can restore inheritance without changing members", () => {
+  const value = JSON.stringify({ groups: [{ id: "media", name: "Media", type: "url-test", members: ["*"], strategy: "consistent-hashing", timeout: 5000, tolerance: 0 }], rules: [] });
+  let next;
+  const tree = AdvancedRouting({ value, defaults: { interval: 60, health_timeout: 3000 }, onChange: raw => { next = JSON.parse(raw); } });
+  const timeout = nodes(tree, node => node.type === "input" && node.props.type === "number" && node.props.value === 5000)[0];
+  timeout.props.onChange({ target: { value: "7000" } });
+  assert.equal(next.groups[0].timeout, 7000);
+  nodes(tree, node => node.type === "button" && node.props.children === "Наследовать общие параметры проверки")[0].props.onClick();
+  assert.equal(next.groups[0].timeout, undefined);
+  assert.equal(next.groups[0].tolerance, undefined);
+  assert.deepEqual(next.groups[0].members, ["*"]);
+  assert.equal(next.groups[0].id, "media");
+});

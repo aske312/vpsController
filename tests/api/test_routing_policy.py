@@ -129,6 +129,25 @@ class StructuredRoutingTests(unittest.TestCase):
         del item['devices'][1]['routing'][policy.SELECTION_KEY]
         self.assertEqual(json.loads(manager.device_routing(item, 'phone')[policy.SELECTION_KEY]), common)
 
+    def test_each_group_can_override_health_checks_in_exact_mihomo_units(self):
+        raw = self.raw([
+            {'name': 'Reserve', 'timeout': 5000, 'max_failed_times': 1, 'interval': 300, 'url': 'https://health.test/generate_204'},
+            {'name': 'Fast', 'type': 'url-test', 'tolerance': 50},
+            {'name': 'Manual', 'type': 'select', 'timeout': 5000},
+            {'name': 'Balance', 'type': 'load-balance', 'strategy': 'round-robin'},
+        ])
+        result = policy.groups(raw, [({'id': 'c'}, 'Node', None, None)], {'health_timeout': 2000, 'interval': 60, 'max_failed_times': 3})
+        self.assertEqual({key: result[0][key] for key in ('timeout', 'interval', 'max-failed-times', 'url')},
+                         {'timeout': 5000, 'interval': 300, 'max-failed-times': 1, 'url': 'https://health.test/generate_204'})
+        self.assertEqual(result[1]['timeout'], 2000)
+        self.assertEqual(result[1]['interval'], 60)
+        self.assertEqual(result[1]['tolerance'], 50)
+        self.assertNotIn('timeout', result[2])
+        self.assertEqual(result[3]['strategy'], 'round-robin')
+        for patch in ({'timeout': 5}, {'interval': 0}, {'max_failed_times': True}, {'tolerance': -1},
+                      {'url': 'file:///private'}, {'url': 'https://user:password@health.test/'}, {'strategy': 'random'}):
+            with self.subTest(patch=patch), self.assertRaises(HTTPException): policy.parse(self.raw([{'name': 'Invalid', **patch}]))
+
     def test_disabled_process_rules_are_not_validated_as_active_on_mobile(self):
         item = profile()
         item['devices'] += [{'id': 'phone', 'os': 'android', 'routing': {policy.SELECTION_KEY: '{"@rules":false}'}}]

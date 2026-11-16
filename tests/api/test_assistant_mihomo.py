@@ -59,6 +59,18 @@ class MihomoOperatorTests(unittest.TestCase):
         self.assertEqual(identity['name'], 'Александр')
         self.assertEqual(self.tool(name='vps_services').status_code, 403)
 
+    def test_subscriber_group_catalog_has_ids_but_no_shared_rule_values_or_endpoints(self):
+        payload = {'values': {'structured_policy': json.dumps({'groups': [{'id': 'media-id', 'name': 'Media', 'url': 'https://private-health.test/', 'members': ['connection:private']}],
+                    'rules': [{'kind': 'domain', 'value': 'private-domain.test', 'target': 'Media'}]})}, 'structured_policy_schema': {'type': 'object'}}
+        with patch.object(bridge, 'request', return_value=payload):
+            response = self.tool(name='mihomo_api', path='/routing/schema')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['policy_groups'][0]['id'], 'media-id')
+        self.assertEqual(response.json()['policy_groups'][0]['rule_count'], 1)
+        self.assertNotIn('private-', response.text)
+        self.assertNotIn('values', response.json())
+        self.assertEqual(self.tool(name='mihomo_api', method='PATCH', path='/routing/settings', body={'values': {}}).status_code, 403)
+
     def test_subscription_information_commands_are_scoped_and_do_not_use_ai(self):
         settings = control.read(api)
         settings['modules']['ai-agent'] = False

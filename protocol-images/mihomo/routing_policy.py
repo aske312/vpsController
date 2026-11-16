@@ -2,10 +2,11 @@
 import ipaddress
 import json
 import re
+import urllib.parse
 from typing import Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 GROUP = 'GATE.312'
 KINDS = ('domain', 'domain-suffix', 'ip-cidr', 'geoip', 'geosite', 'process')
@@ -31,6 +32,21 @@ class Group(BaseModel):
     type: Literal['select', 'fallback', 'url-test', 'load-balance'] = 'fallback'
     members: list[str] = Field(default_factory=lambda: ['*'], min_length=1, max_length=100)
     strategy: Literal['consistent-hashing', 'round-robin', 'sticky-sessions'] = 'consistent-hashing'
+    url: str | None = Field(default=None, max_length=1024)
+    interval: int | None = Field(default=None, strict=True, ge=10, le=3600)
+    timeout: int | None = Field(default=None, strict=True, ge=1000, le=10000)
+    max_failed_times: int | None = Field(default=None, strict=True, ge=1, le=10)
+    tolerance: int | None = Field(default=None, strict=True, ge=0, le=1000)
+
+    @field_validator('url')
+    @classmethod
+    def health_url(cls, value):
+        if value is None: return value
+        parsed = urllib.parse.urlsplit(value)
+        if re.search(r'[\x00-\x20]', value) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+            raise ValueError('Укажите HTTP(S) URL проверки без пароля и фрагмента')
+        parsed.port  # Validate a malformed or out-of-range port too.
+        return value
 
 
 class Policy(BaseModel):
@@ -163,8 +179,12 @@ def groups(raw, rendered, routing):
             else: raise HTTPException(422, 'Группа ссылается на удалённое или недоступное подключение: ' + member[11:])
         # Never add a DIRECT escape hatch when the VPN group is empty.
         entry = {'name': group_name(group.name), 'type': group.type, 'proxies': list(dict.fromkeys(members)) or ['REJECT']}
-        if group.type != 'select': entry.update(url=routing.get('test_url', 'https://www.gstatic.com/generate_204'), interval=int(routing.get('interval', 30)), lazy=False,
-            timeout=int(routing.get('health_timeout', 3000)), **{'max-failed-times': int(routing.get('max_failed_times', 2))})
+        if group.type != 'select':
+            entry.update(url=group.url if group.url is not None else routing.get('test_url', 'https://www.gstatic.com/generate_204'),
+                interval=group.interval if group.interval is not None else int(routing.get('interval', 30)), lazy=False,
+                timeout=group.timeout if group.timeout is not None else int(routing.get('health_timeout', 3000)),
+                **{'max-failed-times': group.max_failed_times if group.max_failed_times is not None else int(routing.get('max_failed_times', 2))})
+            if group.type == 'url-test': entry['tolerance'] = group.tolerance if group.tolerance is not None else int(routing.get('tolerance', 0))
         if group.type == 'load-balance': entry['strategy'] = group.strategy
         result.append(entry)
     if any(group['name'] in all_names for group in result): raise HTTPException(422, 'Имя группы совпадает с подключением')

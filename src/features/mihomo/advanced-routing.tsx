@@ -2,11 +2,17 @@ import type { ProfileConnection } from "./types";
 import { parsePolicySelection } from "./profile-modes";
 
 type Rule = { kind: string; value: string; target: string };
-type Group = { id?: string; name: string; type: string; members: string[]; strategy: string };
+type Group = { id?: string; name: string; type: string; members: string[]; strategy: string; url?: string; interval?: number; timeout?: number; max_failed_times?: number; tolerance?: number };
 type Policy = { rules: Rule[]; groups: Group[] };
 const kinds = [["domain", "Домен"], ["domain-suffix", "Домен и поддомены"], ["ip-cidr", "IP / CIDR · IPv4 или IPv6"], ["geoip", "GeoIP"], ["geosite", "GeoSite"], ["process", "Процесс · TUN"]];
 const groupTypes = [["select", "Ручной выбор"], ["fallback", "Резерв по порядку"], ["url-test", "Минимальная задержка"], ["load-balance", "Балансировка"]];
 const algorithms = [["consistent-hashing", "По адресу назначения"], ["round-robin", "По очереди"], ["sticky-sessions", "Закреплять сессии"]];
+const healthFields: { key: 'interval' | 'timeout' | 'max_failed_times' | 'tolerance'; label: string; min: number; max: number; shared: string; fallback: number }[] = [
+  { key: 'interval', label: 'Интервал, сек.', min: 10, max: 3600, shared: 'interval', fallback: 30 },
+  { key: 'timeout', label: 'Таймаут, мс', min: 1000, max: 10000, shared: 'health_timeout', fallback: 3000 },
+  { key: 'max_failed_times', label: 'Порог ошибок', min: 1, max: 10, shared: 'max_failed_times', fallback: 2 },
+  { key: 'tolerance', label: 'Погрешность выбора, мс', min: 0, max: 1000, shared: 'tolerance', fallback: 0 },
+];
 const groupHints: Record<string, string> = {
   select: "Канал выбирается вручную в клиенте Mihomo.",
   fallback: "Первый доступный канал в списке — основной, следующие — резервные.",
@@ -52,8 +58,8 @@ export function ProfilePolicyGroups({ value, selection, ownSelection, onChange, 
   </section>;
 }
 
-export function AdvancedRouting({ value, onChange, connections = [], inherited = false, reset }: {
-  value: unknown; onChange: (value: string) => void; connections?: ProfileConnection[]; inherited?: boolean; reset?: () => void;
+export function AdvancedRouting({ value, onChange, connections = [], inherited = false, reset, defaults = {} }: {
+  value: unknown; onChange: (value: string) => void; connections?: ProfileConnection[]; inherited?: boolean; reset?: () => void; defaults?: Record<string, string | number | boolean>;
 }) {
   const policy = parsePolicy(value);
   const update = (next: Policy) => onChange(JSON.stringify({ ...next, groups: next.groups.map(group => ({ ...group, id: group.id || group.name })) }));
@@ -93,6 +99,12 @@ export function AdvancedRouting({ value, onChange, connections = [], inherited =
       const members = [["*", "Все подключения устройства"], ...connections.map(connection => [`connection:${connection.id}`, connection.name || connection.component]), ...policy.groups.filter((_, at) => at !== index).map(other => [`group:${other.name}`, `Группа: ${other.name}`])];
       return <article key={index} className="mihomoPolicyGroup"><div className="mihomoPolicyFields"><label>Имя группы<input value={group.name} maxLength={40} pattern={"[A-Za-z][A-Za-z0-9_\\-]{0,39}"} title="Латинская буква, затем латиница, цифры, дефис или подчёркивание" required placeholder="Media" onChange={event => patchGroup(index, { name: event.target.value })}/></label><label>Выбор канала<select value={group.type} onChange={event => patchGroup(index, { type: event.target.value })}>{groupTypes.map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select></label>{group.type === "load-balance" && <BalanceStrategy value={group.strategy} onChange={strategy => patchGroup(index, { strategy })}/>}<button type="button" disabled={groupUsed(group.name)} title={groupUsed(group.name) ? "Сначала смените маршрут в правилах и уберите ссылки из других групп" : undefined} onClick={() => deleteGroup(index)}>Удалить группу</button></div>
         <p className="mihomoPolicyHint">{groupHints[group.type]}</p>
+        {group.type !== "select" && <details className="mihomoPolicyMemberPicker"><summary>Проверка каналов · параметры группы</summary><div className="mihomoPolicyHealth">
+          <p className="mihomoPolicyHint">Пустые поля наследуют общие настройки. Порог ошибок запускает проверку работоспособности, а не задаёт число повторных попыток.</p>
+          <div className="mihomoPolicyFields"><label>URL проверки<input type="url" value={group.url ?? ""} placeholder={String(defaults.test_url || "https://www.gstatic.com/generate_204")} onChange={event => patchGroup(index, { url: event.target.value || undefined })}/></label>
+          {healthFields.filter(field => field.key !== 'tolerance' || group.type === 'url-test').map(({ key, label, min, max, shared, fallback }) => <label key={key}>{label}<input type="number" min={min} max={max} step={1} value={group[key] ?? ""} placeholder={String(defaults[shared] ?? fallback)} onChange={event => patchGroup(index, { [key]: event.target.value === "" ? undefined : Number(event.target.value) })}/></label>)}</div>
+          <button type="button" onClick={() => patchGroup(index, { url: undefined, interval: undefined, timeout: undefined, max_failed_times: undefined, tolerance: undefined })}>Наследовать общие параметры проверки</button>
+        </div></details>}
         {groupUsed(group.name) && <p className="mihomoPolicyHint">Группа используется в правилах или других группах. Для удаления сначала уберите ссылки на неё.</p>}
         <details className="mihomoPolicyMemberPicker"><summary>Выбрать подключения · {group.members.length}</summary><div className="mihomoPolicyMembers">{members.map(([key, text]) => <label key={key}><input type="checkbox" role="switch" checked={group.members.includes(key)} disabled={group.members.length === 1 && group.members.includes(key)} onChange={event => patchGroup(index, { members: event.target.checked ? [...group.members, key] : group.members.filter(member => member !== key) })}/>{text}</label>)}</div></details>
         <ol className="mihomoPolicyOrder">{group.members.map((member, at) => <li key={member}><span>{members.find(([key]) => key === member)?.[1] || `Недоступен: ${member}`}</span><button type="button" aria-label="Повысить приоритет участника" disabled={!at} onClick={() => patchGroup(index, { members: move(group.members, at, -1) })}>↑</button><button type="button" aria-label="Понизить приоритет участника" disabled={at === group.members.length - 1} onClick={() => patchGroup(index, { members: move(group.members, at, 1) })}>↓</button><button type="button" aria-label="Убрать участника" disabled={group.members.length === 1} onClick={() => patchGroup(index, { members: group.members.filter((_, row) => row !== at) })}>×</button></li>)}</ol>

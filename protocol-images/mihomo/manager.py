@@ -1899,6 +1899,7 @@ def get_routing_schema() -> dict[str, Any]:
     values = routing_settings(stored)
     presets = profile_presets(stored_presets)
     return {"schema": routing_schema(), "values": values, "revision": module_settings_revision(ROUTING_MODULE_ID, values),
+            "structured_policy_schema": routing_policy.Policy.model_json_schema(),
             "last_operation_id": mutation_record(stored).get("id"),
             "presets": presets, "presets_revision": collection_revision("presets", presets),
             "presets_last_operation_id": mutation_record(stored_presets).get("id"),

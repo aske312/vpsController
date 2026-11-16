@@ -73,6 +73,12 @@ def sample(api):
                     and coverage.get('tracked_since', math.inf) <= coverage.get('requested_from', 0)
                     and coverage.get('coverage_since', math.inf) <= coverage.get('requested_from', 0))
     requests, errors = stats.get('requests', 0), stats.get('errors', 0)
+    # Numeric evidence only: never copy URLs, request bodies or log messages into alerts.
+    error_statuses = {}
+    for group in observations.get('errors', {}).get('data', {}).get('groups', []):
+        code, count = group.get('status'), group.get('count')
+        if type(code) is int and 400 <= code <= 599 and type(count) is int and count > 0:
+            error_statuses[code] = error_statuses.get(code, 0) + count
     conditions = {}
     service_states = {}
     for key, value in service_items.items():
@@ -104,7 +110,7 @@ def sample(api):
         'functional_checks': observations.get('functional_checks', {}).get('data') or [],
         'local_health': {key: value.get('status') for key, value in health.items()},
         'http': {'window_minutes': policy['window_minutes'], 'requests': requests, 'errors': errors, 'error_rate': errors / requests if complete and requests else None,
-                 'complete_coverage': complete}, 'disk_used_percent': disk}
+                 'complete_coverage': complete, 'error_statuses': error_statuses}, 'disk_used_percent': disk}
     eligible = bool(service_states and observations.get('health', {}).get('state', 'observed') == 'observed' and 'health' in observations and complete and requests and not errors
         and all(value['state'] in ('running', 'applied', 'succeeded', 'listening', 'waiting') for value in service_states.values())
         and all(conditions['health:' + key]['failing'] is False for key in health)
@@ -116,6 +122,26 @@ def sample(api):
     for condition in conditions.values():
         if not policy[condition['rule']]: condition['failing'] = None
     return snapshot, conditions, eligible
+
+
+def alert_details(snapshot, condition, policy):
+    """Freeze evidence at the transition, rather than reading newer measurements on delivery."""
+    rule, component = condition['rule'], condition['component']
+    details = {'confirmation_samples': policy['trigger_samples'] if condition['failing'] else policy['recovery_samples']}
+    if rule == 'http_error_rate':
+        http = snapshot.get('http', {})
+        details.update({key: http.get(key) for key in ('requests', 'errors', 'window_minutes', 'error_statuses')})
+        details['threshold_percent'] = policy['http_error_percent']
+    elif rule == 'disk_pressure':
+        details.update(used_percent=snapshot.get('disk_used_percent'), threshold_percent=policy['disk_percent'])
+    elif rule == 'service_error':
+        state = snapshot.get('services', {}).get(component, {}).get('state')
+        if state in ('error', 'stopped', 'running', 'applied', 'succeeded', 'listening', 'waiting'):
+            details['state'] = state
+    elif rule == 'local_health':
+        state = snapshot.get('local_health', {}).get(component)
+        if state in ('critical', 'healthy'): details['state'] = state
+    return details
 
 
 def observe(api):
@@ -148,11 +174,12 @@ def observe(api):
             if failing is True and not alert['active'] and alert['consecutive_samples'] >= policy['trigger_samples']:
                 alert.update(active=True, opened_at=now, observed_since=alert['candidate_since'], fired_rules_revision=policy['revision'], fired_condition=alert['current_condition'])
                 data['history'].append({'id': identity, 'rule': condition['rule'], 'component': condition['component'], 'transition': 'firing', 'at': now,
-                                        'rules_revision': policy['revision'], 'condition': alert['current_condition']})
+                                        'rules_revision': policy['revision'], 'condition': alert['current_condition'], 'details': alert_details(snapshot, condition, policy)})
             elif failing is False and alert['active'] and alert['consecutive_samples'] >= policy['recovery_samples']:
                 alert.update(active=False, recovered_at=now)
                 data['history'].append({'id': identity, 'rule': condition['rule'], 'component': condition['component'], 'transition': 'recovered', 'at': now,
-                                        'observed_duration_s': max(0, now - alert['observed_since']), 'rules_revision': policy['revision'], 'condition': alert['current_condition']})
+                                        'observed_duration_s': max(0, now - alert['observed_since']), 'rules_revision': policy['revision'], 'condition': alert['current_condition'],
+                                        'details': alert_details(snapshot, condition, policy)})
         if eligible:
             data['baseline'] = snapshot
         data['checked_at'] = now

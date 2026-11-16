@@ -91,11 +91,13 @@ async def main():
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     names = {tool.name for tool in (await session.list_tools()).tools}
-                    assert names == {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'}, names
+                    assert names == {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation',
+                                     'mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'}, names
                     assert not names & vps_names
                     for name, arguments in [('mihomo_capabilities', {}), ('mihomo_api', {'method': 'GET', 'path': '/profiles'}),
                                             ('mihomo_compare', {'left_profile_id': 'one', 'right_profile_id': 'two'}),
-                                            ('mihomo_operation', {'operation_id': 'a' * 32})]:
+                                            ('mihomo_operation', {'operation_id': 'a' * 32}), ('mihomo_read', {'view': 'profiles'}),
+                                            ('mihomo_settings', {'section': 'routing'}), ('mihomo_groups', {})]:
                         result = await session.call_tool(name, arguments)
                         assert not result.isError, result
                     assert (await session.call_tool('vps_overview', {})).isError

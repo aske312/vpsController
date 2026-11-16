@@ -22,6 +22,7 @@ import ssl
 import sys
 import tempfile
 import time
+import uuid
 from types import SimpleNamespace
 from typing import Literal
 import urllib.parse
@@ -585,6 +586,170 @@ def native_connections(settings, actor):
     return result
 
 
+def mihomo_identifier(value, field):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', value):
+        raise ToolValidationError([{'field': field, 'issue': 'Укажите ID из результата инструмента чтения'}])
+    return value
+
+
+def mihomo_revision(snapshot, expected):
+    if not isinstance(expected, str) or not re.fullmatch('[0-9a-f]{64}', expected) or snapshot.get('revision') != expected:
+        raise ToolValidationError([{'field': 'expected_revision', 'issue': 'Прочитайте актуальные настройки и передайте их revision; прежние данные могли измениться'}])
+
+
+def validate_mihomo_policy(policy, schema):
+    validate_tool_arguments(policy, schema)
+    groups, rules = policy.get('groups', []), policy.get('rules', [])
+    names = [group['name'] for group in groups]
+    identities = [group.get('id') or group['name'] for group in groups]
+    if len(set(names)) != len(names) or len(set(identities)) != len(identities) or set(names) & {'DIRECT', 'REJECT', 'GLOBAL'}:
+        raise ToolValidationError([{'field': 'groups', 'issue': 'Имена и ID должны быть уникальны; DIRECT/REJECT/GLOBAL зарезервированы'}])
+    graph = {}
+    for group in groups:
+        url = group.get('url')
+        if url is not None:
+            try:
+                parsed = urllib.parse.urlsplit(url)
+                parsed.port
+            except ValueError:
+                raise ToolValidationError([{'field': 'url', 'issue': 'Некорректный адрес или порт URL'}]) from None
+            if re.search(r'[\x00-\x20]', url) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+                raise ToolValidationError([{'field': 'url', 'issue': 'Нужен полный HTTP(S) URL без пароля и фрагмента'}])
+        graph[group['name']] = []
+        if len(set(group['members'])) != len(group['members']):
+            raise ToolValidationError([{'field': 'members', 'issue': 'Участники не должны повторяться'}])
+        for member in group['members']:
+            if member.startswith('group:') and member[6:] in names: graph[group['name']].append(member[6:])
+            elif member != '*' and not re.fullmatch(r'connection:[A-Za-z0-9_-]{1,80}', member):
+                raise ToolValidationError([{'field': 'members', 'issue': 'Укажите *, connection:<id> или group:<имя существующей группы>'}])
+    complete = set()
+    def visit(name, path):
+        if name in path: raise ToolValidationError([{'field': 'members', 'issue': 'Группы не могут ссылаться друг на друга по кругу'}])
+        if name in complete: return
+        for child in graph[name]: visit(child, {*path, name})
+        complete.add(name)
+    for name in names: visit(name, set())
+    if any(rule.get('target', 'GATE.312') not in {*names, 'GATE.312', 'DIRECT', 'REJECT'} for rule in rules):
+        raise ToolValidationError([{'field': 'rules', 'issue': 'Правило ссылается на неизвестную группу'}])
+
+
+async def mihomo_manage(settings, actor, command, **arguments):
+    """Convenience tools use the same scoped, confirmed API as mihomo_api."""
+    async def call(method, path, body=None):
+        return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
+    try:
+        if command == 'read':
+            view = arguments['view']
+            if view in ('status', 'profiles', 'modules', 'stats', 'reconciliation', 'action'):
+                return await call('GET', '/' + view)
+            identity = mihomo_identifier(arguments.get('profile_id'), 'profile_id')
+            path = '/profiles/' + identity + '/' + view
+            if arguments.get('device_id'): path += '?device_id=' + mihomo_identifier(arguments['device_id'], 'device_id')
+            return await call('GET', path)
+        if command == 'settings':
+            section, method = arguments['section'], arguments['method']
+            if section == 'routing': path = '/routing/schema' if method == 'GET' else '/routing/settings'
+            elif section == 'dns': path = '/dns/settings'
+            else: path = '/modules/' + mihomo_identifier(arguments.get('module_id'), 'module_id') + '/settings'
+            if method == 'GET': return await call(method, path)
+            snapshot = await call('GET', '/routing/schema' if section == 'routing' else path)
+            if snapshot.get('error'): return snapshot
+            mihomo_revision(snapshot, arguments.get('expected_revision'))
+            if not isinstance(arguments.get('values'), dict):
+                raise ToolValidationError([{'field': 'values', 'issue': 'Передайте объект изменяемых настроек из прочитанной схемы'}])
+            return await call('PATCH', path, {'values': arguments['values'], 'expected_revision': snapshot['revision']})
+        if command in ('groups', 'group_update', 'group_delete'):
+            snapshot = await call('GET', '/routing/schema')
+            if snapshot.get('error'): return snapshot
+            values = snapshot.get('values')
+            if not isinstance(values, dict):
+                if command == 'groups': return {'groups': snapshot.get('policy_groups', []), 'ungrouped_rule_count': snapshot.get('ungrouped_rule_count'), 'read_only': True}
+                raise PermissionError('Нужны права на общую маршрутизацию')
+            policy = json.loads(values.get('structured_policy') or '{}')
+            groups, rules = policy.get('groups', []), policy.get('rules', [])
+            if command == 'groups':
+                return {'revision': snapshot['revision'], 'policy_schema': snapshot.get('structured_policy_schema'),
+                        'groups': [{**group, 'id': group.get('id') or group['name'],
+                                    'effective_health': {key: group.get(key) if group.get(key) is not None else values.get(shared, default)
+                                        for key, shared, default in [('url', 'test_url', 'https://www.gstatic.com/generate_204'), ('interval', 'interval', 30), ('timeout', 'health_timeout', 3000), ('max_failed_times', 'max_failed_times', 2), ('tolerance', 'tolerance', 0)]} if group.get('type', 'fallback') != 'select' else None,
+                                    'rule_count': sum(rule.get('target') == group['name'] for rule in rules)} for group in groups]}
+            mihomo_revision(snapshot, arguments.get('expected_revision'))
+            identity = arguments.get('group_id')
+            index = next((at for at, group in enumerate(groups) if (group.get('id') or group['name']) == identity), None)
+            if identity is not None and index is None:
+                raise ToolValidationError([{'field': 'group_id', 'issue': 'Группа не найдена; перечитайте mihomo_groups'}])
+            if command == 'group_delete':
+                if index is None: raise ToolValidationError([{'field': 'group_id', 'issue': 'Укажите ID удаляемой группы'}])
+                old = groups[index]['name']
+                if any(rule.get('target') == old for rule in rules) or any('group:' + old in group.get('members', []) for group in groups):
+                    raise ToolValidationError([{'field': 'group_id', 'issue': 'Группа используется правилами или другими группами. Сначала уберите ссылки'}])
+                groups = [group for at, group in enumerate(groups) if at != index]
+            else:
+                group = dict(groups[index]) if index is not None else {'id': uuid.uuid4().hex, 'type': 'fallback', 'members': ['*'], 'strategy': 'consistent-hashing'}
+                old = group.get('name')
+                group['id'] = group.get('id') or old
+                fields = ('name', 'members', 'strategy', 'url', 'interval', 'timeout', 'max_failed_times', 'tolerance')
+                updates = {key: arguments[key] for key in fields if arguments.get(key) is not None}
+                if arguments.get('group_type') is not None: updates['type'] = arguments['group_type']
+                health = ('url', 'interval', 'timeout', 'max_failed_times', 'tolerance')
+                if arguments.get('inherit_health'):
+                    if set(updates) & set(health): raise ToolValidationError([{'field': 'inherit_health', 'issue': 'Сброс наследования нельзя совмещать с новыми параметрами проверки'}])
+                    for key in health: group.pop(key, None)
+                group.update(updates)
+                if not group.get('name'): raise ToolValidationError([{'field': 'name', 'issue': 'Для новой группы нужно имя'}])
+                if any(at != index and other['name'] == group['name'] for at, other in enumerate(groups)):
+                    raise ToolValidationError([{'field': 'name', 'issue': 'Имя уже используется другой группой'}])
+                if old and old != group['name']:
+                    rules = [{**rule, 'target': group['name']} if rule.get('target') == old else rule for rule in rules]
+                    groups = [{**other, 'members': ['group:' + group['name'] if member == 'group:' + old else member for member in other['members']]} for other in groups]
+                if index is None: groups = [*groups, group]
+                else: groups = [group if at == index else other for at, other in enumerate(groups)]
+            policy = {**policy, 'groups': groups, 'rules': rules}
+            schema = snapshot.get('structured_policy_schema')
+            if not isinstance(schema, dict):
+                raise ToolValidationError([{'field': 'policy_schema', 'issue': 'Обновите серверную часть Mihomo: схема групп недоступна'}])
+            validate_mihomo_policy(policy, schema)
+            return await call('PATCH', '/routing/settings', {'values': {'structured_policy': json.dumps(policy, ensure_ascii=False)}, 'expected_revision': snapshot['revision']})
+        if command in ('profile_update', 'group_select'):
+            identity = mihomo_identifier(arguments.get('profile_id'), 'profile_id')
+            profiles = await call('GET', '/profiles')
+            if profiles.get('error'): return profiles
+            profile = next((row for row in profiles.get('items', []) if row['id'] == identity), None)
+            if not profile: raise PermissionError('Профиль недоступен')
+            mihomo_revision(profile, arguments.get('expected_revision'))
+            if command == 'profile_update':
+                body = arguments['changes']
+                if not isinstance(body, dict) or not body or set(body) - {'name', 'routing', 'connections', 'devices', 'limits'}:
+                    raise ToolValidationError([{'field': 'changes', 'issue': 'Допустимы name, routing, connections, devices, limits; передайте хотя бы одно изменение'}])
+            else:
+                selection = arguments.get('selection')
+                if not isinstance(selection, dict) or not selection or any(not isinstance(key, str) or not (key == '@rules' or re.fullmatch(r'[A-Za-z0-9_-]{1,64}', key)) or type(enabled) is not bool for key, enabled in selection.items()):
+                    raise ToolValidationError([{'field': 'selection', 'issue': 'Передайте {ID группы: true/false}; @rules управляет правилами без группы'}])
+                device_id = arguments.get('device_id') or profile.get('common_device_id')
+                device = next((row for row in profile.get('devices', []) if row['id'] == device_id), None)
+                if not device: raise ToolValidationError([{'field': 'device_id', 'issue': 'Устройство не найдено в профиле'}])
+                routing = dict(device.get('routing') or {})
+                raw = routing.get('structured_policy', (profile.get('routing') or {}).get('structured_policy'))
+                if raw and raw != '@inherit': catalog = json.loads(raw).get('groups', [])
+                else:
+                    shared = await call('GET', '/routing/schema')
+                    if shared.get('error'): return shared
+                    catalog = json.loads(shared.get('values', {}).get('structured_policy') or '{}').get('groups', []) if 'values' in shared else shared.get('policy_groups', [])
+                known = {group.get('id') or group['name'] for group in catalog} | {'@rules'}
+                if set(selection) - known:
+                    raise ToolValidationError([{'field': 'selection', 'issue': 'Неизвестный ID группы; перечитайте mihomo_groups'}])
+                key = 'structured_policy_selection'
+                routing[key] = json.dumps({**json.loads(routing.get(key) or '{}'), **selection})
+                fields = ('id', 'name', 'routing', 'manual', 'personal_rule_ids')
+                devices = [{**{key: row[key] for key in fields if key in row}, **({'routing': routing} if row['id'] == device_id else {})} for row in profile['devices']]
+                body = {'devices': devices}
+                if device_id == profile.get('common_device_id'): body['routing'] = {**(profile.get('routing') or {}), **routing}
+            return await call('PATCH', '/profiles/' + identity, {**body, 'expected_revision': profile['revision']})
+        raise ToolValidationError([{'field': 'command', 'issue': 'Неизвестная операция Mihomo'}])
+    except ToolValidationError as exc:
+        return exc.result()
+
+
 def serve_mcp(settings, actor, module):
     from mcp.server.fastmcp import FastMCP
     if not allowed(settings, actor, module):
@@ -784,6 +949,47 @@ def serve_mcp(settings, actor, module):
         async def mihomo_api(method: Literal['GET', 'POST', 'PATCH', 'DELETE'], path: str, body: dict | None = None) -> dict:
             """API Mihomo: мониторинг, подписки, профили, устройства, модули, DNS и маршрутизация. GET читает; POST/PATCH/DELETE готовят изменение для подтверждения. Сначала прочитай mihomo_capabilities."""
             return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
+
+        @server.tool()
+        async def mihomo_read(view: Literal['status', 'profiles', 'modules', 'stats', 'reconciliation', 'action', 'config', 'subscription', 'client-verification'], profile_id: str | None = None, device_id: str | None = None) -> dict:
+            """Чтение Mihomo без ручного пути API. Для config/subscription/client-verification нужен profile_id из profiles; device_id необязателен. Видны только разрешённые профили. Конфиг/ссылка могут содержать секреты подписки — не публикуй их посторонним. Ничего не меняет."""
+            return await mihomo_manage(settings, actor, 'read', view=view, profile_id=profile_id, device_id=device_id)
+
+        @server.tool()
+        async def mihomo_settings(section: Literal['routing', 'dns', 'module'], method: Literal['GET', 'PATCH'] = 'GET', module_id: str | None = None, values: dict | None = None, expected_revision: str | None = None) -> dict:
+            """GET читает схему и текущие настройки routing/DNS/модуля. PATCH готовит изменение values с expected_revision из GET; применяет только человек. Для module нужен module_id из modules. Общие health_timeout — мс, interval — секунды, test_url — полный HTTP(S) URL. Параметры отдельной группы меняет mihomo_group_update."""
+            return await mihomo_manage(settings, actor, 'settings', section=section, method=method, module_id=module_id, values=values, expected_revision=expected_revision)
+
+        @server.tool()
+        async def mihomo_groups() -> dict:
+            """Прочитать группы маршрутизации: постоянные ID, тип, состав, алгоритм, фактические параметры проверок и revision для изменения. Подписчику доступен только каталог ID/имён без общих правил и адресов проверок. Само наличие группы не направляет трафик: нужны правила с её target."""
+            return await mihomo_manage(settings, actor, 'groups')
+
+        @server.tool()
+        async def mihomo_group_update(expected_revision: str, group_id: str | None = None, name: str | None = None,
+                group_type: Literal['select', 'fallback', 'url-test', 'load-balance'] | None = None, members: list[str] | None = None,
+                strategy: Literal['consistent-hashing', 'round-robin', 'sticky-sessions'] | None = None,
+                url: str | None = None, interval: int | None = None, timeout: int | None = None,
+                max_failed_times: int | None = None, tolerance: int | None = None, inherit_health: bool = False) -> dict:
+            """Создать группу (без group_id, name обязателен) или изменить существующую по ID из mihomo_groups. Сохраняет остальные группы, правила и ID; переименование обновляет ссылки. members: *, connection:<id>, group:<имя>. interval 10..3600 СЕКУНД; timeout 1000..10000 МИЛЛИСЕКУНД; max_failed_times 1..10 — порог ошибок до проверки, не retries; tolerance 0..1000 МС только url-test. url — полный HTTP(S) URL. Пропущенные поля сохраняются; inherit_health=true убирает персональные параметры проверки и возвращает общие. select не использует проверки. Только подготовка с отдельным подтверждением человеком."""
+            return await mihomo_manage(settings, actor, 'group_update', expected_revision=expected_revision, group_id=group_id,
+                name=name, group_type=group_type, members=members, strategy=strategy, url=url, interval=interval,
+                timeout=timeout, max_failed_times=max_failed_times, tolerance=tolerance, inherit_health=inherit_health)
+
+        @server.tool()
+        async def mihomo_group_delete(group_id: str, expected_revision: str) -> dict:
+            """Подготовить удаление неиспользуемой группы по ID и revision из mihomo_groups. При ссылках из правил или других групп удаление отклоняется. Нужны права общей маршрутизации и подтверждение человеком."""
+            return await mihomo_manage(settings, actor, 'group_delete', group_id=group_id, expected_revision=expected_revision)
+
+        @server.tool()
+        async def mihomo_profile_update(profile_id: str, expected_revision: str, changes: dict) -> dict:
+            """Подготовить изменение разрешённого профиля по revision из mihomo_read profiles. changes: name/routing/connections/devices/limits; права проверяются отдельно на каждое поле. Для списков передавай полный список, сохраняя остальные записи. Лимиты меняет только роль с соответствующими правами. Не применяется без подтверждения человека."""
+            return await mihomo_manage(settings, actor, 'profile_update', profile_id=profile_id, expected_revision=expected_revision, changes=changes)
+
+        @server.tool()
+        async def mihomo_group_select(profile_id: str, expected_revision: str, selection: dict[str, bool], device_id: str | None = None) -> dict:
+            """Подготовить включение/отключение групп для профиля или устройства. selection: {постоянный ID из mihomo_groups: true/false}; @rules — правила без отдельной группы. Без device_id меняется общая конфигурация профиля. Другие устройства и выбор прочих групп сохраняются. Это не меняет определения групп; вложенная группа может оставаться каналом другой включённой группы. Требует прав на устройства/маршрутизацию и подтверждения человеком."""
+            return await mihomo_manage(settings, actor, 'group_select', profile_id=profile_id, expected_revision=expected_revision, selection=selection, device_id=device_id)
         @server.tool()
         async def mihomo_compare(left_profile_id: str, right_profile_id: str, left_connection_id: str | None = None,
                               right_connection_id: str | None = None) -> dict:

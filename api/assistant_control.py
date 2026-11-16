@@ -273,6 +273,12 @@ class ChatMessage(BaseModel):
         return self
 
 
+class AlertAnalysis(BaseModel):
+    model_config = {'extra': 'forbid'}
+    token: str = Field(pattern=r'^[0-9a-f]{32}$')
+    mode: Literal['brief', 'deep'] = 'brief'
+
+
 class Chat(BaseModel):
     model_config = {'extra': 'forbid'}
     stream: StrictBool = False
@@ -283,10 +289,11 @@ class Chat(BaseModel):
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
     model: str | None = Field(default=None, min_length=1, max_length=128)
     conversation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    alert: AlertAnalysis | None = None
 
     @model_validator(mode='after')
     def bounded_content(self):
-        if not self.prompt.strip() and not self.attachments:
+        if not self.prompt.strip() and not self.attachments and not self.alert:
             raise ValueError('Введите сообщение или добавьте файл')
         if sum(len(item.data) for item in self.attachments + [file for row in self.history for file in row.attachments]) > 8400000:
             raise ValueError('Общий размер вложений превышен')
@@ -647,7 +654,8 @@ def status(api):
                           (['vps_observability'] if agent_version >= (1, 13, 0) else []) +
                           (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []) +
                           (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []),
-                      'mihomo-mcp': ['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] if agent_version >= (1, 15, 0) else []}}
+                      'mihomo-mcp': (['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] +
+                          (['mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'] if agent_version >= (1, 26, 0) else [])) if agent_version >= (1, 15, 0) else []}}
 
 
 def configure(api, payload):
@@ -860,6 +868,10 @@ def chat_request(api, payload, actor='panel', channel='panel', *, settings=None)
 def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None):
     settings = read(api) if settings is None else settings
     if actor != 'panel': roles.require(settings, actor, 'chat')
+    if payload.alert:
+        if channel != 'bot': raise HTTPException(403, 'Кнопка алерта доступна только в Telegram')
+        import telegram_alerts
+        payload = payload.model_copy(update={'prompt': telegram_alerts.analysis_prompt(api, settings, actor, payload.alert.token, payload.alert.mode)})
     if actor != 'panel' and payload.model and payload.model != settings.get('model'):
         roles.require(settings, actor, 'model_select')
     settings = {**settings, 'memory_enabled': settings.get('memory_enabled', True) and roles.allows(settings, actor, 'memory')}

@@ -10,6 +10,8 @@
 .mihomoPolicyMemberPicker { min-width: 0; border: 1px solid var(--line); border-radius: 8px; }
 .mihomoPolicyMemberPicker summary { padding: 10px 12px; cursor: pointer; font-size: 12px; }
 .mihomoPolicyMemberPicker summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.mihomoPolicyHealth { display:grid; gap:10px; min-width:0; padding:12px; border-top:1px solid var(--line); }
+.mihomoPolicyHealth > button { justify-self:start; }
 .mihomoPolicyMemberPicker .mihomoPolicyMembers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); padding: 12px; border-top: 1px solid var(--line); }
 .mihomoStructuredPolicy > button,.mihomoPolicyGroups > button { justify-self: start; }
 .mihomoStructuredPolicy .mihomoPolicyRule > label,.mihomoStructuredPolicy .mihomoPolicyFields > label { display: grid; gap: 6px; min-width: 0; }

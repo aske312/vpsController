@@ -168,6 +168,12 @@ def capabilities(api, actor):
         'connection_fields': {'id': 'optional existing ID', 'component': 'module ID', 'name': 'label', 'device_id': 'device ID', 'settings': 'module connection settings'},
         'device_fields': {'id': 'existing ID or new manual ID', 'name': 'label', 'manual': 'true for new manual device', 'routing': 'device policy', 'personal_rule_ids': 'array of IDs'},
         'settings_fields': ['values', 'expected_revision'],
+        'routing_policy': {'schema_path': '/routing/schema', 'schema_field': 'structured_policy_schema',
+                           'value_key': 'structured_policy', 'selection_key': 'structured_policy_selection',
+                           'units': {'timeout': 'milliseconds', 'interval': 'seconds', 'tolerance': 'milliseconds'},
+                           'inheritance': 'Unset group health fields inherit shared routing settings. Select has no health checks. max_failed_times is a failure threshold, not retries.',
+                           'group_members': ['*', 'connection:<id>', 'group:<name>'],
+                           'strategies': ['consistent-hashing', 'round-robin', 'sticky-sessions']},
         'instructions': 'Сначала прочитайте /profiles и схему настроек. При PATCH передавайте expected_revision из свежего ответа. '
                         'Для устройств передавайте полный список с сохранением остальных устройств; для подключений — полный список без credential. '
                         'Квота, скорость и срок — отдельные административные разрешения, пользователь их не меняет. Изменения требуют подтверждения собеседником.',
@@ -187,7 +193,15 @@ def call(api, actor, method, path, body):
                                'connection_settings': [{key: field[key] for key in ('key', 'label', 'type', 'options', 'min', 'max', 'placeholder', 'required', 'help') if key in field} for field in module.get('connection_settings', [])]}
                               for module in value.get('items', [])]}
         if not administrator(settings, actor) and route == '/routing/schema':
-            return {'schema': value.get('schema', []), 'presets': value.get('presets', [])}
+            try: policy = json.loads(value.get('values', {}).get('structured_policy') or '{}')
+            except (TypeError, ValueError): policy = {}
+            if not isinstance(policy, dict): policy = {}
+            names = {group.get('name') for group in policy.get('groups', [])}
+            return {'schema': value.get('schema', []), 'presets': value.get('presets', []),
+                    'structured_policy_schema': value.get('structured_policy_schema'),
+                    'policy_groups': [{'id': group.get('id') or group['name'], 'name': group['name'], 'type': group.get('type', 'fallback'),
+                                       'rule_count': sum(rule.get('target') == group['name'] for rule in policy.get('rules', []))} for group in policy.get('groups', [])],
+                    'ungrouped_rule_count': sum(rule.get('target', 'GATE.312') not in names for rule in policy.get('rules', []))}
         return {'config': value} if isinstance(value, str) else sanitize(value)
     import assistant_commands
     identity = uuid.uuid4().hex

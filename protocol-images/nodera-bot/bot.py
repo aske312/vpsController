@@ -258,12 +258,13 @@ async def bot_api(settings, method, **payload):
         return response.json()['result']
 
 
-async def agent_request(settings, actor, prompt, attachments=None):
+async def agent_request(settings, actor, prompt, attachments=None, alert=None):
     headers = {'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)}
     request_id = secrets.token_hex(16)
     async with httpx.AsyncClient(timeout=300, trust_env=False) as client:
         payload = {'prompt': prompt, 'request_id': request_id}
         if attachments: payload['attachments'] = attachments
+        if alert: payload['alert'] = alert
         task = asyncio.create_task(client.post('http://127.0.0.1:8000/api/assistant/bot-chat', headers=headers, json=payload))
         notified = False
         try:
@@ -282,6 +283,9 @@ async def agent_request(settings, actor, prompt, attachments=None):
                 task.cancel()
                 with suppress(asyncio.CancelledError): await task
         if response.status_code != 200:
+            if alert and response.status_code in (403, 404, 429):
+                detail = response.json().get('detail')
+                if isinstance(detail, str): return detail[:1000]
             if response.status_code in (429, 503):
                 return 'Очередь AI занята или время ожидания истекло. Дождитесь ответа на предыдущие сообщения и попробуйте позже.'
             if response.status_code == 409:
@@ -502,7 +506,7 @@ async def bot(settings):
     media_groups = {}
     dispatcher = MessageDispatcher()
     notices = {}
-    async def deliver(sender, prompt, messages=None):
+    async def deliver(sender, prompt, messages=None, alert=None):
         actor = sender['id']
         try: access = await identify(settings, sender)
         except Exception: access = False
@@ -515,7 +519,17 @@ async def bot(settings):
                 if len(menus) >= 1000: menus.clear()
                 menus[actor] = role
             except Exception: logging.error('NoderaBot private command menu could not be updated')
-        answer = await attachment_reply(settings, sender, prompt, messages, access) if messages else await reply(settings, sender, prompt, access)
+        if alert:
+            if access is not True:
+                answer = 'Разбор алерта доступен владельцу с доступом к ИИ.'
+            else:
+                try:
+                    async with typing(settings, actor):
+                        answer = await agent_request(settings, actor, '', alert=alert)
+                except Exception:
+                    answer = 'Не удалось запустить разбор алерта. Проверьте доступность AI-ассистента и повторите позже.'
+        else:
+            answer = await attachment_reply(settings, sender, prompt, messages, access) if messages else await reply(settings, sender, prompt, access)
         if access:
             # A request can outlive a permission change.
             try: current_access = await identify(settings, sender)
@@ -553,10 +567,16 @@ async def bot(settings):
                     actor = sender.get('id')
                     if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
                     messages = None
+                    alert = None
                     if callback:
                         await bot_api(settings, 'answerCallbackQuery', callback_query_id=callback['id'])
                         key = callback.get('data', '')
-                        prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
+                        match = re.fullmatch(r'alert:([0-9a-f]{32}):(brief|deep)', key)
+                        if match and message.get('chat', {}).get('id') == actor:
+                            alert = {'token': match[1], 'mode': match[2]}
+                            prompt = 'Разбор алерта с ИИ'
+                        else:
+                            prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
                         if not prompt:
                             await bot_api(settings, 'sendMessage', chat_id=actor, text='Это меню устарело. Откройте раздел кнопкой ниже.')
                             continue
@@ -589,7 +609,7 @@ async def bot(settings):
                         accepted = dispatcher.submit(stream, lambda sender=sender, key=album_key, album=messages: deliver_album(sender, key, album))
                         if not accepted: media_groups.pop(album_key, None)
                     else:
-                        accepted = dispatcher.submit(stream, lambda sender=sender, prompt=prompt, messages=messages: deliver(sender, prompt, messages))
+                        accepted = dispatcher.submit(stream, lambda sender=sender, prompt=prompt, messages=messages, alert=alert: deliver(sender, prompt, messages, alert))
                     if (not accepted or dispatcher.pending.get(stream, 0) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()
                         if len(notices) > 1000: notices = {actor: time.monotonic()}

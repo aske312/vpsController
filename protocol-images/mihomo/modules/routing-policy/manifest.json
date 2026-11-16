@@ -128,7 +128,7 @@
     },
     {
       "key": "max_failed_times",
-      "label": "Ошибок до переключения",
+      "label": "Ошибок до принудительной проверки",
       "type": "number",
       "default": 2,
       "min": 1,

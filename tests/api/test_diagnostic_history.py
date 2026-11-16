@@ -42,6 +42,27 @@ class DiagnosticHistoryTests(unittest.TestCase):
         self.assertEqual([row['transition'] for row in result['history']], ['firing', 'recovered'])
         self.assertEqual(result['history'][-1]['observed_duration_s'], 240)
 
+    def test_transition_keeps_numeric_evidence_and_policy_from_that_sample(self):
+        snapshot = {**copy.deepcopy(self.snapshot), 'http': {'requests': 100, 'errors': 25, 'window_minutes': 5,
+                     'error_statuses': {422: 25}, 'secret': 'do-not-copy'}, 'disk_used_percent': 97,
+                     'services': {'api': {'state': 'error', 'last_error': 'do-not-copy'}}}
+        conditions = {'http': {'rule': 'http_error_rate', 'component': 'application', 'failing': True},
+                      'disk': {'rule': 'disk_pressure', 'component': 'system', 'failing': True},
+                      'service:api': {'rule': 'service_error', 'component': 'api', 'failing': True}}
+        for offset in (0, 60):
+            snapshot['checked_at'] = self.now + offset
+            with patch.object(history, 'sample', return_value=(snapshot, conditions, False)):
+                history.observe(self.env)
+        rows = history.load(self.env)['history']
+        http = next(row for row in rows if row['rule'] == 'http_error_rate')
+        self.assertEqual(http['details'], {'requests': 100, 'errors': 25, 'window_minutes': 5,
+                         'error_statuses': {'422': 25}, 'threshold_percent': 10, 'confirmation_samples': 2})
+        self.assertEqual(next(row for row in rows if row['rule'] == 'disk_pressure')['details']['used_percent'], 97)
+        self.assertEqual(next(row for row in rows if row['rule'] == 'service_error')['details']['state'], 'error')
+        snapshot['http']['errors'] = 0
+        self.assertEqual(history.load(self.env)['history'][0]['details'], rows[0]['details'])
+        self.assertNotIn('do-not-copy', str(rows))
+
     def test_sampling_gap_and_fast_repeat_do_not_count_as_consecutive_evidence(self):
         self.sample(True, 0)
         self.sample(True, 10)
@@ -120,6 +141,16 @@ class DiagnosticHistoryTests(unittest.TestCase):
                 snapshot, _, eligible = history.sample(self.env)
                 self.assertFalse(eligible)
                 self.assertNotIn('provider_url', str(snapshot))
+
+    def test_http_evidence_aggregates_only_status_counts_not_error_payloads(self):
+        report = self.report()
+        report['observations'][4]['data']['groups'] = [
+            {'status': 422, 'count': 3, 'reason': 'secret'}, {'status': 422, 'count': 2},
+            {'status': 503, 'count': 1}, {'status': 200, 'count': 20}]
+        with patch.object(control, 'read', return_value={'revision': 'b' * 32}), patch.object(diagnostics, 'summary', return_value=report):
+            snapshot, _, _ = history.sample(self.env)
+        self.assertEqual(snapshot['http']['error_statuses'], {422: 5, 503: 1})
+        self.assertNotIn('secret', str(snapshot))
 
     def test_diagnostic_tools_are_read_only_and_malformed_history_is_reported(self):
         settings = {'accounts': []}

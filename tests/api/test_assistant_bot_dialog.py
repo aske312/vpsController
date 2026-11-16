@@ -2,6 +2,8 @@ import asyncio
 import unittest
 import tempfile
 import os
+import json
+import httpx
 from unittest.mock import AsyncMock, patch
 
 from tests.api.support import load_module
@@ -10,6 +12,41 @@ bot = load_module('assistant_dialog_bot', 'protocol-images/nodera-bot/bot.py')
 
 
 class BotDialogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_transport_sends_alert_reference_and_reports_expired_buttons(self):
+        actual_client = httpx.AsyncClient
+        requests = []
+        def transport(request):
+            requests.append(json.loads(request.content))
+            return httpx.Response(404, json={'detail': 'Кнопка алерта устарела'})
+        with patch.object(bot.httpx, 'AsyncClient', side_effect=lambda **kwargs: actual_client(transport=httpx.MockTransport(transport), **kwargs)):
+            answer = await bot.agent_request({'control_token': 'fixture'}, 11, '', alert={'token': 'a' * 32, 'mode': 'deep'})
+        self.assertEqual(answer, 'Кнопка алерта устарела')
+        self.assertEqual(requests[0]['alert'], {'token': 'a' * 32, 'mode': 'deep'})
+        self.assertEqual(requests[0]['prompt'], '')
+
+    async def test_alert_callback_survives_restart_and_passes_only_reference_to_ai(self):
+        delivered = asyncio.Event()
+        polls = 0
+        token = 'a' * 32
+        async def transport(settings, method, **payload):
+            nonlocal polls
+            if method == 'getWebhookInfo': return {}
+            if method == 'getUpdates':
+                polls += 1
+                if polls == 1:
+                    return [{'update_id': 1, 'callback_query': {'id': 'callback', 'from': {'id': 11},
+                             'data': f'alert:{token}:deep', 'message': {'chat': {'type': 'private', 'id': 11}, 'text': 'forged text'}}}]
+                await asyncio.wait_for(delivered.wait(), 2)
+                raise asyncio.CancelledError()
+            if method == 'sendMessage' and 'Разбор готов' in payload['text']: delivered.set()
+            return True
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), \
+             patch.object(bot, 'bot_api', side_effect=transport), patch.object(bot, 'identify', new=AsyncMock(return_value=True)), \
+             patch.object(bot, 'command_menu', new=AsyncMock()), patch.object(bot, 'agent_request', new=AsyncMock(return_value='Разбор готов')) as agent:
+            with self.assertRaises(asyncio.CancelledError):
+                await bot.bot({'modules': {'nodera-bot': True}, 'bot_token': 'fixture'})
+            agent.assert_awaited_once_with({'modules': {'nodera-bot': True}, 'bot_token': 'fixture'}, 11, '', alert={'token': token, 'mode': 'deep'})
+
     async def test_typical_requests_bypass_ai_including_polite_natural_language(self):
         with patch.object(bot, 'agent_request', new=AsyncMock()) as agent, patch.object(bot, 'server_command', new=AsyncMock(return_value='Данные сервера')) as server:
             for phrase, command in bot.DIRECT_COMMANDS.items():
