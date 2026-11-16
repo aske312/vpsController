@@ -228,3 +228,22 @@ test("adding a recovery action updates the snapshot and uses the current callbac
   store.getSnapshot()[0].action.run();
   assert.equal(calls, 1);
 });
+
+
+test("human confirmation keeps both live decisions and survives timers and clearing", async () => {
+  let now = 0;
+  const store = createNotificationStore(() => now);
+  const calls = [];
+  const input = { id: "confirmation", source: "nodera", title: "Confirm", message: "restart fixture", state: "info", kind: "confirmation",
+    details: '{"action":"restart"}', action: { label: "Confirm", run: () => calls.push("old") },
+    secondaryAction: { label: "Reject", run: () => calls.push("old reject") } };
+  store.upsert(input);
+  now = 60000; store.tick(); store.clearCompleted();
+  assert.equal(store.getSnapshot().length, 1);
+  store.upsert({ ...input, action: { label: "Confirm", run: () => calls.push("confirm") }, secondaryAction: { label: "Reject", run: () => calls.push("reject") } });
+  await store.getSnapshot()[0].action.run();
+  await store.getSnapshot()[0].secondaryAction.run();
+  assert.deepEqual(calls, ["confirm", "reject"]);
+  store.resolve(input.id);
+  assert.equal(store.getSnapshot().length, 0);
+});

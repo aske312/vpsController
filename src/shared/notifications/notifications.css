@@ -169,3 +169,5 @@
 .operationEvidence { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:12px 0; }
 .operationEvidence dt,.operationTimeline small { color:var(--muted); font-size:10px; }
 .operationEvidence dd { margin:4px 0 0; font-size:12px; overflow-wrap:anywhere; }
+
+.gateConfirmationDetails { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }

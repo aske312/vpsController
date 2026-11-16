@@ -352,6 +352,7 @@ class ServiceConfirmation(BaseModel):
     model_config = {'extra': 'forbid'}
     code: str = Field(pattern=r'^[0-9a-f]{8}$')
     telegram_id: int | None = Field(default=None, strict=True, gt=0, le=2**52)
+    decision: Literal['confirm', 'reject'] = 'confirm'
 
 
 class Action(BaseModel):
@@ -901,14 +902,9 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     body['settings_revision'] = settings['revision']
     output = runtime_request(api, '--chat', body)
     import assistant_commands
-    confirmation_tools = {'vps_service_action', 'mihomo_api', 'vps_access', 'vps_observability', 'diagnostic_alert_rules', 'integration_probe', 'component_check'} | {name for name, row in assistant_telegram.TOOLS.items() if row['profile'] == 'actions'}
-    if any(tool in confirmation_tools for tool in output['result'].get('tools_used', [])):
-        pending = operations.read(assistant_commands.pending_path(api, actor))
-        if pending and not pending.get('submitted') and pending.get('expires', 0) > time.time():
-            output['pending_action'] = {key: pending[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
-            if pending.get('kind') in ('mihomo', 'roles', 'observability', 'telegram', 'diagnostic_rules', 'diagnostic_probe'):
-                import assistant_mihomo
-                output['pending_action']['changes'] = assistant_mihomo.sanitize(pending['body'])
+    pending = assistant_commands.pending_action(api, actor)
+    if pending:
+        output['pending_action'] = pending
     try:
         usage = provider_usage(api, settings, output['result'])
         output['provider_usage'] = {entry['id']: usage[entry['id']] for entry in providers(settings) if entry['id'] in usage}

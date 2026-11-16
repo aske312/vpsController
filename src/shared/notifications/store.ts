@@ -6,7 +6,9 @@ export type NotificationInput = {
   title: string;
   message: string;
   state: NotificationState;
-  kind?: "message" | "operation";
+  kind?: "message" | "operation" | "confirmation";
+  secondaryAction?: NotificationAction;
+  details?: string;
   progress?: number;
   startedAt?: number;
   action?: NotificationAction;
@@ -20,8 +22,8 @@ export function notificationFailure(cause: unknown, fallback: string) {
     network: cause instanceof Error && "kind" in cause && (cause.kind === "network" || cause.kind === "response") };
 }
 
-export const isPending = (item: Pick<Notification, "state">) => item.state === "running" || item.state === "unknown";
-const fingerprint = (item: NotificationInput) => JSON.stringify([item.state, item.title, item.message, item.progress, item.startedAt, item.action?.label, Boolean(item.onCancel)]);
+export const isPending = (item: Pick<Notification, "state" | "kind">) => item.kind === "confirmation" || item.state === "running" || item.state === "unknown";
+const fingerprint = (item: NotificationInput) => JSON.stringify([item.kind, item.state, item.title, item.message, item.progress, item.startedAt, item.action?.label, item.secondaryAction?.label, item.details, Boolean(item.onCancel)]);
 
 /** One store per mounted application. Nothing is shared between SSR requests. */
 export function createNotificationStore(now = Date.now) {
@@ -55,12 +57,13 @@ export function createNotificationStore(now = Date.now) {
     if (previous && fingerprint(previous) === signature) {
       // Callbacks may change while the visible message remains the same.
       previous.action = input.action;
+      previous.secondaryAction = input.secondaryAction;
       previous.onCancel = input.onCancel;
       previous.onDismiss = input.onDismiss;
       return input.id;
     }
     dismissed.delete(input.id);
-    const ttl = input.state === "success" || input.state === "cancelled" ? 8000 : input.state === "info" ? 10000 : 0;
+    const ttl = input.kind === "confirmation" ? 0 : input.state === "success" || input.state === "cancelled" ? 8000 : input.state === "info" ? 10000 : 0;
     const item: Notification = { ...input, count: previous?.count ?? 1, createdAt: previous?.createdAt ?? now(),
       finishedAt: input.kind === "operation" && !isPending(input) ? previous?.finishedAt ?? now() : undefined,
       expiresAt: ttl ? (pausedAt ?? now()) + ttl : undefined };

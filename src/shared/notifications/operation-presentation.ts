@@ -45,6 +45,6 @@ export function notificationDuration(item: Pick<Notification, "createdAt" | "sta
 }
 
 export function orderedNotifications(items: Notification[]) {
-  const pending = (item: Notification) => Number(item.state === "running" || item.state === "unknown");
+  const pending = (item: Notification) => Number(item.kind === "confirmation" || item.state === "running" || item.state === "unknown");
   return [...items].reverse().sort((left, right) => pending(right) - pending(left));
 }

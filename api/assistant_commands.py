@@ -110,6 +110,17 @@ def profile_reply(api, settings, actor, command, args):
     return '\n'.join(rows)
 
 
+def pending_action(api, actor):
+    record = control.operations.read(pending_path(api, actor))
+    if not record or record.get('submitted') or record.get('expires', 0) <= time.time() or record.get('revision') != control.read(api)['revision']:
+        return None
+    result = {key: record[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
+    if 'body' in record:
+        import assistant_mihomo
+        result['changes'] = assistant_mihomo.sanitize(record['body'])
+    return result
+
+
 def execute(api, actor, prompt):
     parts = prompt.strip().split()
     command = parts[0].split('@')[0].lower() if parts else ''
@@ -193,12 +204,14 @@ def execute(api, actor, prompt):
                 raise HTTPException(409, 'Предыдущая команда отправляется. Повторите её /confirm или проверьте панель')
             control.operations.atomic_json(path, record)
         return f"Подтвердите {action} для {identity}. Действие может прервать соединения службы.\n/confirm {record['code']}\nКод действует 60 секунд и только для вас. /cancel — отмена.\nОперация: {record['operation_id']}"
-    if command in ('/confirm', '/cancel') and len(args) == (1 if command == '/confirm' else 0):
+    if command in ('/confirm', '/cancel') and (len(args) == 1 if command == '/confirm' else len(args) in (0, 1)):
         with control.operations.locked(api.DATA_DIR):
             path = pending_path(api, actor)
             record = control.operations.read(path)
             if not record:
                 raise HTTPException(409, 'Нет ожидающей команды. /help — справка')
+            if args and (not re.fullmatch(r'[0-9a-f]{8}', args[0]) or not hmac.compare_digest(args[0], record['code'])):
+                raise HTTPException(409, 'Неверный код подтверждения')
             if command == '/cancel':
                 if record.get('submitted'):
                     operation = control.operations.read(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'))

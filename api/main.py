@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Header
+from fastapi import Depends, FastAPI, HTTPException, Request, Header, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -638,16 +638,22 @@ def assistant_control_tool(payload: assistant_control.ToolCall,
     return assistant_control.control_tool(sys.modules[__name__], payload.name, payload.model_dump(exclude={'name'}, exclude_none=True), actor)
 
 
+@app.get('/api/assistant/pending-action')
+def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0, le=2**52), _: None = Depends(require_token)) -> dict:
+    return {'pending_action': assistant_commands.pending_action(sys.modules[__name__], str(telegram_id) if telegram_id else 'panel')}
+
+
 @app.post('/api/assistant/service-confirm')
 def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _: None = Depends(require_token)) -> dict:
     api = sys.modules[__name__]
     actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
     value = assistant_control.read(api)
     record = assistant_control.operations.read(assistant_commands.pending_path(api, actor))
-    module = 'mihomo-mcp' if record.get('kind') == 'mihomo' else 'vps-controller-mcp'
+    module = 'mihomo-mcp' if record.get('kind') == 'mihomo' else 'telegram-mcp' if record.get('kind') == 'telegram' else 'vps-controller-mcp'
     scoped_token = assistant_control.mcp_transport_token(value['control_token'], module, actor)
-    assistant_control.authorize_control(api, 'Bearer ' + scoped_token, actor, module)
-    text = assistant_commands.execute(api, actor, '/confirm ' + payload.code)
+    if payload.decision == 'confirm':
+        assistant_control.authorize_control(api, 'Bearer ' + scoped_token, actor, module)
+    text = assistant_commands.execute(api, actor, ('/confirm ' if payload.decision == 'confirm' else '/cancel ') + payload.code)
     operation = None
     if record.get('operation_id'):
         try: operation = get_application_operation(record['operation_id'], None)

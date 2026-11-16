@@ -87,10 +87,10 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
   const pending = isPending(item);
   const presentation = notificationPresentation(item);
   const { progress } = presentation;
-  async function runAction() {
-    if (checking || !item.action) return;
+  async function runAction(action = item.action) {
+    if (checking || !action) return;
     setChecking(true);
-    try { await item.action.run(); }
+    try { await action.run(); }
     catch (cause) {
       const current = store.getSnapshot().find(entry => entry.id === item.id);
       if (current && isPending(current)) store.upsert({ ...current, state: "unknown", progress: undefined, onCancel: undefined,
@@ -119,13 +119,17 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
       <button type="button" className="gateNotificationMore" aria-expanded={detailsOpen} aria-label={`Подробности: ${item.title}`} title="Подробности и действия" onClick={() => setDetailsOpen(value => !value)}>···</button>
       {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
     </div>
+    {item.kind === "confirmation" && <div className="gateOperationActions">
+      {item.action && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction()}>{item.action.label}</button>}
+      {item.secondaryAction && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction(item.secondaryAction)}>{item.secondaryAction.label}</button>}
+    </div>}
     {detailsOpen && <div className="gateOperationBody">
-      <p className="gateOperationStage">{presentation.details || presentation.summary}</p>
+      <p className="gateOperationStage">{presentation.details || presentation.summary}</p>{item.details && <pre className="gateConfirmationDetails">{item.details}</pre>}
       {item.kind === "operation" && <div className="gateOperationMeta"><span>{presentation.label}</span><span aria-live="off">{pending ? "Прошло" : "Длительность"}: {notificationDuration(item, now)}</span></div>}
       {item.state === "unknown" && item.kind === "operation" && <small className="gateOperationUnknown">Проверяем прежнюю команду без повторного запуска.</small>}
     </div>}
     {item.kind === "operation" && item.state === "running" && <div className={`gateOperationTrack${progress === undefined ? " indeterminate" : ""}`} role="progressbar" aria-label={`Прогресс: ${item.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={presentation.summary}><i style={{ width: `${progress ?? 34}%` }} /></div>}
-    {detailsOpen && (pending || item.action) && <div className="gateOperationActions">
+    {detailsOpen && item.kind !== "confirmation" && (pending || item.action) && <div className="gateOperationActions">
       {item.action && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking || item.state === "running"} onClick={() => void runAction()}>{checking ? "Проверяем…" : item.action.label}</button>}
       {item.state === "running" && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "Останавливаем…" : "Остановить / откатить"}</button>}
       {pending && <button type="button" className="gateOperationButton" onClick={() => setHidden(true)} aria-label={`Скрыть карточку без остановки: ${item.title}`}>Скрыть</button>}

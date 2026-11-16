@@ -87,6 +87,59 @@ class ServerCommandTests(unittest.TestCase):
                 control.store(api, value)
                 self.assertEqual(self.client.post('/api/assistant/service-confirm', json={'code': pending['code']}).status_code, 403)
 
+    def test_panel_pending_is_authenticated_actor_bound_and_reject_checks_exact_code(self):
+        code = self.prepare()
+        self.assertEqual(self.client.get('/api/assistant/pending-action?telegram_id=11').status_code, 401)
+        with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}), patch.object(api, 'manage_service') as action:
+            self.assertIsNone(self.client.get('/api/assistant/pending-action').json()['pending_action'])
+            pending = self.client.get('/api/assistant/pending-action?telegram_id=11').json()['pending_action']
+            self.assertEqual(pending['code'], code)
+            self.assertNotIn('revision', pending)
+            rejected = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': '0' * 8, 'decision': 'reject'})
+            self.assertEqual(rejected.status_code, 409)
+            self.assertEqual(self.client.get('/api/assistant/pending-action?telegram_id=11').json()['pending_action']['code'], code)
+            rejected = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': code, 'decision': 'reject'})
+            self.assertEqual(rejected.status_code, 200, rejected.text)
+            self.assertIsNone(self.client.get('/api/assistant/pending-action?telegram_id=11').json()['pending_action'])
+            self.assertEqual(self.call('/confirm ' + code).status_code, 409)
+            action.assert_not_called()
+
+    def test_pending_disappears_when_expired_submitted_or_permissions_change(self):
+        code = self.prepare()
+        self.assertEqual(commands.pending_action(api, '11')['code'], code)
+        with patch.object(commands.time, 'time', return_value=commands.time.time() + 61):
+            self.assertIsNone(commands.pending_action(api, '11'))
+        path = commands.pending_path(api, '11')
+        record = control.operations.read(path)
+        control.operations.atomic_json(path, {**record, 'submitted': True})
+        self.assertIsNone(commands.pending_action(api, '11'))
+        control.operations.atomic_json(path, record)
+        self.approve(False)
+        self.assertIsNone(commands.pending_action(api, '11'))
+
+    def test_chat_returns_pending_even_without_a_tool_name_in_the_model_response(self):
+        code = self.prepare()
+        settings = {**control.read(api), 'memory_enabled': False}
+        with patch.object(control, 'runtime_request', return_value={'result': {'answer': 'Confirm the action', 'tools_used': []}}), patch.object(control, 'provider_usage', return_value={}):
+            result = control._chat_request(api, control.Chat(prompt='Continue'), '11', settings=settings)
+        self.assertEqual(result['pending_action']['code'], code)
+        self.assertEqual(result['pending_action']['service'], 'fixture')
+
+    def test_telegram_actions_confirm_with_telegram_scope_when_vps_scope_is_disabled(self):
+        import assistant_telegram
+        value = control.read(api)
+        value['mcp']['vps-controller-mcp'] = False
+        value['mcp']['telegram-mcp'] = True
+        control.store(api, value)
+        record = {'kind': 'telegram', 'service': 'Telegram', 'action': 'fixture', 'code': 'abcdef12',
+                  'operation_id': uuid.uuid4().hex, 'expires': commands.time.time() + 60,
+                  'revision': value['revision'], 'submitted': False}
+        control.operations.atomic_json(commands.pending_path(api, 'panel'), record)
+        with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}), patch.object(assistant_telegram, 'confirm', return_value='done') as confirm:
+            response = self.client.post('/api/assistant/service-confirm', json={'code': record['code']})
+            self.assertEqual(response.status_code, 200, response.text)
+            confirm.assert_called_once()
+
     def test_telegram_buttons_keep_callbacks_scoped_and_long_model_ids_out_of_payload(self):
         model = 'provider/' + 'long-model-' * 10
         actions = {}

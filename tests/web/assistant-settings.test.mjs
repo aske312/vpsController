@@ -225,7 +225,9 @@ test('confirmation pauses follow-ups so another request cannot replace an unconf
   await new Promise(setImmediate);
   const tree = view.render();
   assert.equal(view.writes.length, 1);
-  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Подтвердить действие').length, 1);
+  const confirmation = nodes(tree, n => n.props.role === 'region')[0].node;
+  assert.equal(nodes(confirmation, n => n.type === 'button' && n.props.children === 'Подтвердить').length, 1);
+  assert.equal(nodes(confirmation, n => n.type === 'button' && n.props.children === 'Отказать').length, 1);
   assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 1);
 });
 
