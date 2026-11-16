@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 import json
 from pathlib import Path
 import tempfile
@@ -32,6 +32,7 @@ class BotHistoryTests(unittest.TestCase):
                          'accounts': [{'telegram_id': 11, 'name': 'First', 'role': 'user'},
                                       {'telegram_id': 22, 'name': 'Second', 'role': 'user'}]}
         self.enterContext(patch.object(control, 'read', side_effect=lambda _: dict(self.settings)))
+        self.enterContext(patch.object(control, '_read', side_effect=lambda _: dict(self.settings)))
         self.enterContext(patch.object(control, 'require_installed'))
         self.enterContext(patch.object(api, 'DATA_DIR', self.root))
         self.client = TestClient(api.app)
@@ -137,6 +138,27 @@ class BotHistoryRuntimeTests(unittest.TestCase):
     setUp = fixtures.AssistantTests.setUp
     payload = fixtures.AssistantTests.payload
     save = fixtures.AssistantTests.save
+
+    def test_history_does_not_reenter_the_linux_application_lock(self):
+        payload = self.payload()
+        payload['accounts'] = [{'telegram_id': 11, 'role': 'user'}]
+        self.save(payload)
+        settings = control.read(api)
+        settings['bot_token'] = '123456:' + 'f' * 32
+        control.store(api, settings)
+        original, held = history.operations.locked, False
+        @contextmanager
+        def non_reentrant(root):
+            nonlocal held
+            self.assertFalse(held, 'Linux flock must not be acquired twice in one call')
+            held = True
+            try:
+                with original(root): yield
+            finally: held = False
+        with patch.object(history.operations, 'locked', side_effect=non_reentrant):
+            history.append(api, settings, '11', history.Message(message_id=1, role='assistant', text='Delivered', date=int(time.time())))
+            result = history.read(api, settings, '11', history.Read())
+        self.assertEqual(result['messages'][0]['text'], 'Delivered')
 
     def test_recent_bot_messages_reach_the_provider_settings_and_memory_off_removes_access(self):
         payload = self.payload()

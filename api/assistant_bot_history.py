@@ -81,7 +81,7 @@ def append(api, settings, actor, message):
     row['reply_to_text'] = sanitize(api, row['reply_to_text'], max_chars=3000, max_string=3000).encode()[:3000].decode('utf-8', errors='ignore')
     row['truncated'] = len(message.text) > 8000 or len(row['text']) < len(text)
     with operations.locked(api.DATA_DIR):
-        current = control.read(api)
+        current = control._read(api)  # The application lock is already held.
         if bot_key(current) != bot_key(settings) or not enabled(current, actor): return {'stored': False}
         settings = current
         file = path(api, settings, actor)
@@ -134,7 +134,7 @@ def read(api, settings, actor, request, *, cached=True):
                 'instruction': 'Выбери telegram_id собеседника и вызови nodera_dialog_read. Истории разных пользователей не смешиваются.'}
     if not enabled(settings, selected): raise HTTPException(403, 'История собеседника недоступна')
     with operations.locked(api.DATA_DIR):
-        settings = control.read(api)
+        settings = control._read(api)  # The application lock is already held.
         if not enabled(settings, selected) or not roles.allows(settings, actor, 'memory') or not roles.allows(settings, actor, 'chat'):
             raise HTTPException(403, 'История собеседника недоступна')
         file = path(api, settings, selected)
