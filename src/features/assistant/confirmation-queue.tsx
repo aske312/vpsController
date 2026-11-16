@@ -8,7 +8,7 @@ import { useNotifications, useNotifier } from "../../shared/notifications/notifi
 export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown> };
 type Client = ReturnType<typeof createApiClient>;
 export const confirmationKey = (action: PendingAction) => `${action.actor || "panel"}:${action.code}`;
-type Queue = { actions: PendingAction[]; working: string[]; results: Record<string, string>;
+type Queue = { actions: PendingAction[]; working: string[]; results: Record<string, string>; errors: Record<string, string>;
   decide: (action: PendingAction, decision: "confirm" | "reject") => Promise<string | undefined>;
   ingest: (actor: string, actions: PendingAction[]) => void };
 const Context = createContext<Queue | null>(null);
@@ -24,6 +24,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
   const [actions, setActions] = useState<PendingAction[]>([]);
   const [working, setWorking] = useState<string[]>([]);
   const [results, setResults] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const writing = useRef(new Set<string>());
   const settled = useRef(new Set<string>());
   const generation = useRef(0);
@@ -62,6 +63,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     const key = confirmationKey(action);
     if (activeRequest.current !== request || writing.current.has(key) || settled.current.has(key) || action.expires * 1000 <= Date.now()) return;
     writing.current.add(key); generation.current++;
+    setErrors(current => { const next = { ...current }; delete next[key]; return next; });
     setWorking([...writing.current]);
     try {
       const result = await request<{ text: string; operation?: SystemAction | null }>("/assistant/service-confirm", {
@@ -91,7 +93,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
           operation.current(snapshot);
         }
         else notify.error(text);
-      } else notify.error(cause instanceof Error ? cause.message : "Действие не выполнено");
+      } else setErrors(current => ({ ...current, [key]: cause instanceof Error ? cause.message : "Действие не выполнено" }));
     } finally {
       if (activeRequest.current === request) { writing.current.delete(key); setWorking([...writing.current]); }
     }
@@ -100,7 +102,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     activeRequest.current = request; generation.current++;
     const sessionOperations = tracked.current;
     writing.current.clear(); settled.current.clear(); tracked.current.clear();
-    queueMicrotask(() => { if (activeRequest.current === request) { setActions([]); setWorking([]); setResults({}); } });
+    queueMicrotask(() => { if (activeRequest.current === request) { setActions([]); setWorking([]); setResults({}); setErrors({}); } });
     let stopped = false, reading = false;
     const poll = async () => {
       if (reading || writing.current.size) return;
@@ -132,16 +134,20 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
       const id = `nodera-confirm:${confirmationKey(action)}`;
       ids.add(id);
       notifications.upsert({ id, source: "nodera", title: "Nodera · Подтверждение", state: "info", kind: "confirmation",
-        message: `${action.actor_name || "Администратор"}: ${action.action} · ${action.service}. До ${new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}.`,
+        message: `${errors[confirmationKey(action)] ? errors[confirmationKey(action)] + " · " : ""}${action.actor_name || "Администратор"}: ${action.action} · ${action.service}. До ${new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}.`,
         details: action.changes ? JSON.stringify(action.changes, null, 2) : undefined,
         action: { label: "Подтвердить", run: async () => { await decide(action, "confirm"); } },
         secondaryAction: { label: "Отказать", run: async () => { await decide(action, "reject"); } } });
     }
-    for (const id of registered.current) if (!ids.has(id)) notifications.resolve(id);
+    for (const id of registered.current) if (!ids.has(id)) {
+      const error = errors[id.slice("nodera-confirm:".length)];
+      if (error) notifications.upsert({ id, source: "nodera", title: "Nodera · Подтверждение", kind: "message", state: "error", message: error });
+      else notifications.resolve(id);
+    }
     registered.current = ids;
-  }, [actions, notifications, decide]);
+  }, [actions, errors, notifications, decide]);
   useEffect(() => () => { for (const id of registered.current) notifications.resolve(id); }, [notifications, request]);
-  const value = useMemo(() => ({ actions, working, results, decide, ingest }), [actions, working, results, decide, ingest]);
+  const value = useMemo(() => ({ actions, working, results, errors, decide, ingest }), [actions, working, results, errors, decide, ingest]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -154,6 +160,7 @@ export function ConfirmationCards({ actor }: { actor: string }) {
     {actions.map(action => <article key={confirmationKey(action)} className="mcpConfirmationCard" aria-label={`${action.action} · ${action.service}`}>
       <div><strong>{action.action}</strong><span>{action.service}</span><small>До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</small></div>
       {action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
+      {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}
       <footer><button type="button" className="primaryButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "confirm")}>Подтвердить</button>
         <button type="button" className="ghostButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "reject")}>Отказать</button></footer>
     </article>)}

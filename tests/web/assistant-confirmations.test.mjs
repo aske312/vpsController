@@ -40,6 +40,7 @@ function mount(initial, options={}) {
     assert.equal(path,'/assistant/service-confirm');
     const body=JSON.parse(init.body);calls.push(body);
     await options.beforeDecision?.();
+    if(options.reject)throw Object.assign(new Error('Server busy'),{kind:'http',status:409});
     remote.actions=remote.actions.filter(row=>!(row.code===body.code&&(row.actor||'panel')===(body.telegram_id?String(body.telegram_id):'panel')));
     if(options.unknown)throw Object.assign(new Error('Lost response'),{kind:'network'});
     const result={text:'Accepted '+body.code};
@@ -110,5 +111,18 @@ test('two accepted operations reconcile independently and recover from the serve
       await restored.settle();await restored.tick();
       assert.equal(restored.store.getSnapshot().find(row=>row.id==='operation:system:'+ids[1]).state,'running');
     }finally{restored.dispose();}
+  }finally{app.dispose();}
+});
+
+test('a rejected admission explains the error on its own card and keeps other decisions available',async()=>{
+  const options={reject:true},app=mount([action('aabbccdd'),action('11223344')],options);
+  try{
+    await app.settle();await app.queue.decide(app.queue.actions[0],'confirm');await app.settle();
+    assert.equal(app.queue.actions.length,2);
+    assert.equal(app.queue.errors['panel:aabbccdd'],'Server busy');
+    assert.equal(app.queue.errors['panel:11223344'],undefined);
+    assert.match(app.store.getSnapshot().find(row=>row.id==='nodera-confirm:panel:aabbccdd').message,/Server busy/);
+    options.reject=false;await app.queue.decide(app.queue.actions[0],'confirm');await app.settle();
+    assert.deepEqual(app.queue.actions.map(row=>row.code),['11223344']);assert.equal(app.calls.length,2);
   }finally{app.dispose();}
 });
