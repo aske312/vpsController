@@ -5,10 +5,11 @@ import { createApiClient, mutationFailureState } from "../../shared/lib/api-requ
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "../../control-panel/system-operation";
 import { useNotifications, useNotifier } from "../../shared/notifications/notification-center";
 
-export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown> };
+export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string } };
 type Client = ReturnType<typeof createApiClient>;
 export const confirmationKey = (action: PendingAction) => `${action.actor || "panel"}:${action.code}`;
-type Queue = { actions: PendingAction[]; working: string[]; results: Record<string, string>; errors: Record<string, string>;
+type DecisionContext = { key: string; actor: string; question: string; answer: string };
+type Queue = { context: DecisionContext[]; actions: PendingAction[]; working: string[]; results: Record<string, string>; errors: Record<string, string>;
   decide: (action: PendingAction, decision: "confirm" | "reject") => Promise<string | undefined>;
   ingest: (actor: string, actions: PendingAction[]) => void };
 const Context = createContext<Queue | null>(null);
@@ -21,6 +22,7 @@ export function useAssistantConfirmations() {
 export function AssistantConfirmations({ request, onOperation, children }: { request: Client; onOperation: (operation: SystemAction) => void; children: ReactNode }) {
   const notifications = useNotifications();
   const notify = useNotifier("nodera", "Nodera · Подтверждение");
+  const [context, setContext] = useState<DecisionContext[]>([]);
   const [actions, setActions] = useState<PendingAction[]>([]);
   const [working, setWorking] = useState<string[]>([]);
   const [results, setResults] = useState<Record<string, string>>({});
@@ -70,6 +72,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
         method: "POST", body: JSON.stringify({ code: action.code, decision, telegram_id: action.actor && action.actor !== "panel" ? Number(action.actor) : null }),
       });
       if (activeRequest.current !== request) return;
+      setContext(current => [...current, { key, actor: action.actor || "panel", question: `${decision === "confirm" ? "Подтверждено" : "Отклонено"}: ${action.confirmation_request?.title ? action.confirmation_request.title + ": " : ""}${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: result.text }].slice(-32));
       settled.current.add(key);
       setActions(current => current.filter(item => confirmationKey(item) !== key));
       setResults(current => ({ ...current, [key]: result.text }));
@@ -87,6 +90,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
         setActions(current => current.filter(item => confirmationKey(item) !== key));
         const text = "Результат решения не подтверждён. Проверяем состояние без повторной отправки.";
         setResults(current => ({ ...current, [key]: text }));
+        setContext(current => [...current, { key, actor: action.actor || "panel", question: `Попытка ${decision === "confirm" ? "подтверждения" : "отказа"}: ${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: text }].slice(-32));
         if (decision === "confirm" && action.operation_id) {
           const snapshot = { id: action.operation_id, state: "unknown", message: text };
           trackOperation(snapshot, `Nodera · ${action.action} · ${action.service}`);
@@ -102,7 +106,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     activeRequest.current = request; generation.current++;
     const sessionOperations = tracked.current;
     writing.current.clear(); settled.current.clear(); tracked.current.clear();
-    queueMicrotask(() => { if (activeRequest.current === request) { setActions([]); setWorking([]); setResults({}); setErrors({}); } });
+    queueMicrotask(() => { if (activeRequest.current === request) { setActions([]); setContext([]); setWorking([]); setResults({}); setErrors({}); } });
     let stopped = false, reading = false;
     const poll = async () => {
       if (reading || writing.current.size) return;
@@ -133,8 +137,8 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     for (const action of actions) {
       const id = `nodera-confirm:${confirmationKey(action)}`;
       ids.add(id);
-      notifications.upsert({ id, source: "nodera", title: "Nodera · Подтверждение", state: "info", kind: "confirmation",
-        message: `${errors[confirmationKey(action)] ? errors[confirmationKey(action)] + " · " : ""}${action.actor_name || "Администратор"}: ${action.action} · ${action.service}. До ${new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}.`,
+      notifications.upsert({ id, source: "nodera", title: action.confirmation_request?.title || "Nodera · Подтверждение", state: "info", kind: "confirmation",
+        message: `${errors[confirmationKey(action)] ? errors[confirmationKey(action)] + " · " : ""}${action.action} · ${action.service}. ${action.confirmation_request ? action.confirmation_request.reason + " · " : ""}${action.actor_name || "Администратор"}. До ${new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}.`,
         details: action.changes ? JSON.stringify(action.changes, null, 2) : undefined,
         action: { label: "Подтвердить", run: async () => { await decide(action, "confirm"); } },
         secondaryAction: { label: "Отказать", run: async () => { await decide(action, "reject"); } } });
@@ -147,7 +151,7 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     registered.current = ids;
   }, [actions, errors, notifications, decide]);
   useEffect(() => () => { for (const id of registered.current) notifications.resolve(id); }, [notifications, request]);
-  const value = useMemo(() => ({ actions, working, results, errors, decide, ingest }), [actions, working, results, errors, decide, ingest]);
+  const value = useMemo(() => ({ context, actions, working, results, errors, decide, ingest }), [context, actions, working, results, errors, decide, ingest]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -158,6 +162,7 @@ export function ConfirmationCards({ actor }: { actor: string }) {
   return <section className="mcpConfirmations" role="region" aria-label="Подтверждение действий">
     <header><strong>Ожидают подтверждения · {actions.length}</strong><small>Каждое действие подтверждается отдельно</small></header>
     {actions.map(action => <article key={confirmationKey(action)} className="mcpConfirmationCard" aria-label={`${action.action} · ${action.service}`}>
+      {action.confirmation_request && <div><strong>{action.confirmation_request.title}</strong><p>{action.confirmation_request.reason}</p></div>}
       <div><strong>{action.action}</strong><span>{action.service}</span><small>До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</small></div>
       {action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
       {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}

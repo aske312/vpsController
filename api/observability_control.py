@@ -107,7 +107,7 @@ def call(api, arguments, actor):
                   'revision': settings['revision'], 'submitted': False}
         with control.operations.locked(api.DATA_DIR):
             assistant_commands.enqueue(api, actor, record)
-        return {'confirmation_required': True, 'message': 'Подтвердите тест доставки сохранённому владельцу.'}
+        return {'confirmation_required': True, 'operation_id': record['operation_id'], 'message': 'Подтвердите тест доставки сохранённому владельцу.'}
     if method == 'GET':
         if path == '/restarts':
             roles.require(settings, actor, 'server_read')
@@ -139,7 +139,7 @@ def call(api, arguments, actor):
               'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
         assistant_commands.enqueue(api, actor, record)
-    return {'confirmation_required': True, 'changes': record['body'], 'message': 'Настройки ещё не изменены. Подтвердите действие в чате.'}
+    return {'confirmation_required': True, 'operation_id': record['operation_id'], 'changes': record['body'], 'message': 'Настройки ещё не изменены. Подтвердите действие в чате.'}
 
 
 def confirm(api, actor, record):

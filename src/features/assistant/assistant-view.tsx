@@ -112,6 +112,13 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const confirmations = useAssistantConfirmations();
   const ingestConfirmations = confirmations.ingest;
   const nextTurn = useRef(0);
+  const decisionContext = useRef(new Set<string>());
+  useEffect(() => {
+    const incoming = (confirmations.context ?? []).filter(item => item.actor === (actor || "panel") && !decisionContext.current.has(item.key));
+    if (!incoming.length) return;
+    for (const item of incoming) decisionContext.current.add(item.key);
+    setTurns(current => [...current, ...incoming.filter(item => !current.some(turn => /^\/(confirm|cancel)\s+/i.test(turn.question) && turn.question.trim().endsWith(item.key.split(":").at(-1)!))).map(item => ({ id: ++nextTurn.current, question: item.question, answer: item.answer, files: [], model: "", context_safe: true }))]);
+  }, [confirmations.context, actor]);
   const [checks, setChecks] = useState<Partial<Record<ModuleId, { ok: boolean; text: string; revision: string; actor: string; username?: string }>>>({});
   const version = useRef(0);
   const client = useRef(request);
@@ -408,9 +415,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         setTurns(current => current.map(item => item.id === id ? { ...item, queue_state: "running" } : item));
         try {
           const identity = chatRequestId.current;
+          const decisions = (confirmations.context ?? []).filter(item => item.actor === (actor || "panel") && !context.some(turn => turn.question === item.question && turn.answer === item.answer));
           const payload = { prompt: question, telegram_id: actor ? Number(actor) : null, model: next.model,
             request_id: identity, stream: streaming && status?.chat_streaming === true,
-            attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history: status?.chat_attachments ? chatHistory(context, attached) : [], conversation_id: conversation };
+            attachments: attached.map(({ name, mime, data }) => ({ name, mime, data })), history: status?.chat_attachments ? chatHistory([...context, ...decisions], attached) : [], conversation_id: conversation };
           if (!status?.chat_jobs) throw new Error("Обновите панель для защищённого выполнения чата");
           rememberChat(request, actor, identity); setHasPendingChat(true);
           try {

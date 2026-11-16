@@ -183,6 +183,8 @@ def pending_actions(api, actor, *, settings=None):
         if 'body' in record:
             import assistant_mihomo
             row['changes'] = assistant_mihomo.sanitize(record['body'])
+        if record.get('confirmation_request'):
+            row['confirmation_request'] = {key: record['confirmation_request'][key] for key in ('title', 'reason')}
         row['has_changes'] = 'body' in record
         result.append(row)
     return result
@@ -320,6 +322,8 @@ def execute(api, actor, prompt, *, source='bot'):
                 if record['action'] not in controls(record['service'], definition):
                     path.unlink()
                     raise HTTPException(403, 'Действие больше недоступно через Nodera')
+            import assistant_confirmations
+            assistant_confirmations.validate(record)
             record['submitted'] = True
             control.operations.atomic_json(path, record)
         # Use the panel's durable, idempotent service worker and admission lock.

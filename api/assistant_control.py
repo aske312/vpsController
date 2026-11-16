@@ -895,7 +895,25 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
             recent = assistant_memory.listing(api, settings, actor, channel)['items']
             identity = recent[0]['id'] if recent else None
         if identity:
-            body['history'] = assistant_memory.context(assistant_memory.get(api, identity, actor, channel, settings=settings), files)
+            stored = assistant_memory.context(assistant_memory.get(api, identity, actor, channel, settings=settings), files)
+            if channel == 'panel' and payload.history:
+                # Keep stored AI turns authoritative; add command output missing from that cache.
+                import assistant_chat_commands
+                from assistant_diagnostics import sanitize
+                names = {row['command'] for row in assistant_chat_commands.catalog(api, actor)} - {'/subscription', '/id'}
+                extra = []
+                for index in range(0, len(body['history']) - 1, 2):
+                    question, answer = body['history'][index:index + 2]
+                    text = question['content'].strip()
+                    if question['role'] != 'user' or answer['role'] != 'assistant': continue
+                    if not text: continue
+                    if text.split()[0].lower() not in names and not text.startswith(('Подтверждено:', 'Отклонено:', 'Попытка подтверждения:', 'Попытка отказа:')): continue
+                    if any(row['role'] == 'user' and row['content'] == question['content'] for row in stored): continue
+                    extra.extend([{'role': 'user', 'content': sanitize(api, question['content'], max_chars=8000, max_string=8000)},
+                                  {'role': 'assistant', 'content': sanitize(api, answer['content'], max_chars=8000, max_string=8000)}])
+                stored = (stored + extra)[-40:]
+                while sum(len(row['content']) for row in stored) > 48000: del stored[:2]
+            body['history'] = stored
         else:
             identity = uuid.uuid4().hex
     body['context_conversation'] = identity
@@ -1015,6 +1033,10 @@ def _runtime_request(api, mode, body):
             value['context_permits']['remember'] = assistant_personalization.permit(value, str(body.get('actor', 'panel')), 'remember')
         if re.search(r'(?iu)\b(забудь|forget)\b|(?:удали|delete).{0,30}(?:памят|контекст|факт|memory)', prompt):
             value['context_permits']['forget'] = assistant_personalization.permit(value, str(body.get('actor', 'panel')), 'forget')
+    if mode == '--chat' and 'chat' in grants:
+        import assistant_confirmations
+        value['confirmation_request_token'] = mcp_transport_token(value['control_token'], 'nodera-confirmations', str(body.get('actor', 'panel')))
+        value['pending_confirmations'] = assistant_confirmations.for_model(api, str(body.get('actor', 'panel')))
     body.pop('context_conversation', None)
     if mode == '--chat' and value.get('memory_enabled', True) and {'memory', 'chat'} <= grants and value.get('bot_token'):
         import assistant_bot_history

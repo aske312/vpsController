@@ -189,6 +189,37 @@ class BotHistoryRuntimeTests(unittest.TestCase):
 
 
 class BotHistoryTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_requests_exact_confirmation_and_waits_for_the_user(self):
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example', 'model': 'model', 'api_key': 'fixture',
+                    'mcp': {}, 'accounts': [], 'web_enabled': False, 'personalization_enabled': False,
+                    'confirmation_request_token': 'scoped-confirmation'}
+        identity = 'a' * 32
+        @asynccontextmanager
+        async def connections(*_): yield runner.native_connections(settings, 'panel')
+        calls, seen = [], []
+        async def provider(_settings, messages, tools):
+            seen.append(messages)
+            if len(seen) == 1:
+                self.assertIn('request_confirmation', [row['function']['name'] for row in tools])
+                return {'tool_calls': [{'id': 'present', 'type': 'function', 'function': {'name': 'request_confirmation',
+                    'arguments': json.dumps({'operation_id': identity, 'title': 'Apply routing', 'reason': 'Reconnect clients'})}}]}
+            self.assertIn('awaiting_user', messages[-1]['content'])
+            return {'content': 'Waiting for your decision'}
+        def transport(request):
+            calls.append(request)
+            return httpx.Response(200, json={'operation_id': identity, 'status': 'awaiting_user', 'confirmation_required': True})
+        client = httpx.AsyncClient
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider), \
+                patch.object(runner.httpx, 'AsyncClient', side_effect=lambda **kw: client(**kw, transport=httpx.MockTransport(transport))):
+            result = await runner.chat(settings, 'panel', 'Request confirmation for the prepared action')
+        self.assertEqual(result['tools_used'], ['request_confirmation'])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].url.path, '/api/assistant/confirmation-request')
+        self.assertEqual(calls[0].headers['Authorization'], 'Bearer scoped-confirmation')
+        self.assertEqual(calls[0].headers['X-MCP-Actor'], 'panel')
+        self.assertEqual(json.loads(calls[0].content)['operation_id'], identity)
+        self.assertNotIn('request_confirmation', runner.native_connections({**settings, 'confirmation_request_token': ''}, 'panel'))
+
     async def test_successful_send_is_recorded_once_and_history_failure_never_replays_delivery(self):
         requests = []
         async def transport(request):

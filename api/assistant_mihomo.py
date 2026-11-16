@@ -219,7 +219,7 @@ def call(api, actor, method, path, body):
               'operation_id': identity, 'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
     with control.operations.locked(api.DATA_DIR):
         assistant_commands.enqueue(api, actor, record)
-    return {'confirmation_required': True, 'method': method, 'path': path, 'changes': sanitize(body),
+    return {'confirmation_required': True, 'operation_id': identity, 'method': method, 'path': path, 'changes': sanitize(body),
             'message': 'Подтвердите действие кнопкой в чате. Запрос ещё не выполнен.'}
 
 

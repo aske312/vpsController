@@ -8,6 +8,26 @@ import * as operations from '../../src/control-panel/system-operation.ts';
 import {mutationFailureState} from '../../src/shared/lib/api-request.ts';
 
 const action = (code, actor='panel') => ({actor,actor_name:actor,code,expires:Date.now()/1000+600,operation_id:code.repeat(4),action:'restart',service:code});
+
+test('model presentation retains the exact action, human decision and actor context', async()=>{
+  const first={...action('aabbccdd'),confirmation_request:{title:'Apply new routing',reason:'Reconnect clients to load settings'}};
+  const second={...action('11223344','11'),confirmation_request:{title:'Repair connection',reason:'Restart the tunnel'}};
+  const app=mount([first,second]);
+  try{
+    await app.settle();
+    const card=app.store.getSnapshot().find(row=>row.id==='nodera-confirm:panel:aabbccdd');
+    assert.equal(card.title,first.confirmation_request.title);
+    assert(card.message.includes(first.confirmation_request.reason));
+    assert(card.message.includes(first.service));assert(card.message.includes(first.action));
+    assert.equal(app.calls.length,0);
+    await card.action.run();await app.settle();
+    assert.deepEqual(app.calls,[{code:first.code,decision:'confirm',telegram_id:null}]);
+    assert.equal(app.queue.context.length,1);assert.equal(app.queue.context[0].actor,'panel');
+    assert(app.queue.context[0].question.includes(first.operation_id));
+    assert.equal(app.queue.context[0].answer,'Accepted '+first.code);
+    assert.equal(app.queue.actions[0].operation_id,second.operation_id);
+  }finally{app.dispose();}
+});
 function mount(initial, options={}) {
   const previousWindow=globalThis.window,slots=[],effects=[],timers=[],calls=[],messages=[];
   let cursor=0,queue,heldRead,hold=false;

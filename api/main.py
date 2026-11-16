@@ -53,6 +53,7 @@ import assistant_contacts
 import assistant_commands
 import assistant_chat_commands
 import assistant_bot_history
+import assistant_confirmations
 import observability
 import diagnostic_tools
 import network_routes
@@ -597,6 +598,16 @@ def nodera_history_message(payload: assistant_bot_history.Message, settings: dic
 
 def require_nodera_history_reader(authorization: str | None = Header(default=None), actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
     return assistant_bot_history.authorize(sys.modules[__name__], authorization, actor)
+
+
+def require_confirmation_requester(authorization: str | None = Header(default=None), actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_confirmations.authorize(sys.modules[__name__], authorization, actor)
+
+
+@app.post('/api/assistant/confirmation-request')
+def assistant_confirmation_request(payload: assistant_confirmations.Request, settings: dict = Depends(require_confirmation_requester),
+                                   actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_confirmations.present(sys.modules[__name__], actor, payload)
 
 
 @app.post('/api/assistant/bot-history/read')
