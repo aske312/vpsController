@@ -31,10 +31,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /atomic_json\(ROUTING_SETTINGS_FILE, routing_defaults\(\)\)/);
   assert.match(manager, /ensure_policy_settings\(\)[\s\S]+value\["modules"\]\[module_id\] = True/);
   assert.match(manager, /@app\.patch\("\/api\/mihomo\/routing\/settings"/);
-  assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*profile_routing\}/);
+  assert.match(manager, /routing = routing_policy\.merge_routing\(routing_settings\(\), profile_routing\)/);
   assert.match(manager, /routing: dict\[str, Any\] = Field\(default_factory=dict\)/);
   assert.match(manager, /profile_routing = device_routing\(normalized, selected_device\)/);
-  assert.match(manager, /result = \{\*\*base, \*\*values\} if isinstance\(values, dict\) else dict\(base\)/);
+  assert.match(manager, /result = routing_policy\.merge_routing\(base, values if isinstance\(values, dict\) else \{\}\)/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /DEFAULT_TUNNEL_GAMES = tuple\(TUNNEL_GAME_PROCESSES\)/);
