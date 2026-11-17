@@ -117,7 +117,7 @@ function mount(initial, options={}) {
     if(options.reject)throw Object.assign(new Error('Server busy'),{kind:'http',status:409});
     remote.actions=remote.actions.filter(row=>!(row.code===body.code&&(row.actor||'panel')===(body.telegram_id?String(body.telegram_id):'panel')));
     if(options.unknown)throw Object.assign(new Error('Lost response'),{kind:'network'});
-    const result={text:'Accepted '+body.code};
+    const result={text:'Accepted '+body.code,...(options.displayText?{display_text:options.displayText}:{})};
     if(options.jobs){const id=body.code.repeat(4);remote.jobs[id]={id,state:options.jobState||'queued',action:'fixture'};result.operation=remote.jobs[id];}
     return result;
   };
@@ -133,6 +133,19 @@ function mount(initial, options={}) {
     dispose(){for(const slot of slots)slot?.cleanup?.();globalThis.window=previousWindow;},
   };
 }
+
+test('confirmation display uses formatted text while notifications keep plain text',async()=>{
+  const formatted='⏸ **Действие отклонено**\n\nЗапрос закрыт.';
+  const app=mount([action('aabbccdd')],{displayText:formatted});
+  try{
+    await app.settle();
+    assert.equal(await app.queue.decide(app.queue.actions[0],'reject'),formatted);
+    await app.settle();
+    assert.equal(app.queue.context[0].answer,formatted);
+    assert(app.messages.includes('Accepted aabbccdd'));
+    assert.equal(app.calls.length,1);
+  }finally{app.dispose();}
+});
 
 test('routing confirmation summaries show groups and rules and preserve destructive action labels',()=>{
   const app=mount([]);

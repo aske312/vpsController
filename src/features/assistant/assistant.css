@@ -58,6 +58,7 @@
 .mcpUserMessage { align-self:flex-end; max-width:85%; padding:10px 12px; border:1px solid rgba(97,207,216,.25); border-radius:15px 15px 4px 15px; background:rgba(36,73,85,.62); backdrop-filter:blur(6px); white-space:pre-wrap; overflow-wrap:anywhere; }
 .mcpAnswer { align-self:flex-start; width:100%; min-width:0; padding:12px; border:1px solid rgba(116,145,176,.22); border-radius:4px 15px 15px 15px; background:rgba(8,23,34,.76); backdrop-filter:blur(6px); }
 .mcpAnswer > small { color:var(--cyan); overflow-wrap:anywhere; }
+.mcpActionResult { padding:10px 14px; border-left:2px solid var(--cyan); border-radius:0 8px 8px 0; background:rgba(8,23,34,.55); }
 .mcpAnswerContent { min-width:0; padding-top:6px; overflow-wrap:anywhere; }
 .mcpWorkspace .mcpAnswerContent p { margin:5px 0; color:var(--text); line-height:1.65; }
 .mcpAnswerContent h3 { margin:10px 0 6px; font-size:14px; font-weight:650; }

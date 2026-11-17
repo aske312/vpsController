@@ -611,6 +611,8 @@ class AssistantTests(unittest.TestCase):
                 if configured: start.assert_called_once_with(api, 'start', restoring=True)
                 else: start.assert_not_called()
                 self.assertTrue((control.runtime_directory('nodera-bot') / 'version').is_file())
+                self.assertEqual((control.runtime_directory('nodera-bot') / 'assistant_messages.py').read_bytes(),
+                                 (project / 'api/assistant_messages.py').read_bytes())
 
 
 class AgentRuntimeTests(unittest.TestCase):

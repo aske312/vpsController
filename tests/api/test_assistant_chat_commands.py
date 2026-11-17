@@ -54,6 +54,8 @@ class ChatCommandTests(unittest.TestCase):
             response = self.command('/status')
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn('Direct web command', response.json()['text'])
+        self.assertIn('**Сервер**', response.json()['display_text'])
+        self.assertIn('`Direct web command`', response.json()['display_text'])
         self.assertTrue(response.json()['context_safe'])
         model.assert_not_called()
 

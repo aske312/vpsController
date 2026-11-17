@@ -7,6 +7,7 @@ from pydantic import Field
 import assistant_control as control
 import assistant_commands as commands
 import assistant_roles as roles
+from assistant_messages import styled_message
 
 
 class Request(commands.Command):
@@ -104,4 +105,5 @@ def execute(api, payload):
         if result['text'].startswith('Неизвестная команда или неверные аргументы.'):
             raise HTTPException(422, 'Неверный формат команды. Используйте /help')
     result['pending_actions'] = commands.pending_actions(api, actor)
+    result['display_text'] = styled_message(name, result.get('text', ''))
     return result

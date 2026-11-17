@@ -715,7 +715,8 @@ def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _:
     if record.get('operation_id'):
         try: operation = get_application_operation(record['operation_id'], None)
         except HTTPException: pass
-    return {'text': text, 'operation': operation}
+    from assistant_messages import styled_message
+    return {'text': text, 'display_text': styled_message('/confirm' if payload.decision == 'confirm' else '/cancel', text), 'operation': operation}
 
 
 

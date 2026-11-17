@@ -92,14 +92,14 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
     setErrors(current => { const next = { ...current }; delete next[key]; return next; });
     setWorking([...writing.current, ...batching.current]);
     try {
-      const result = await request<{ text: string; operation?: SystemAction | null }>("/assistant/service-confirm", {
+      const result = await request<{ text: string; display_text?: string; operation?: SystemAction | null }>("/assistant/service-confirm", {
         method: "POST", body: JSON.stringify({ code: action.code, decision, telegram_id: action.actor && action.actor !== "panel" ? Number(action.actor) : null }),
       });
       if (activeRequest.current !== request) return;
-      setContext(current => [...current, { key, actor: action.actor || "panel", question: `${decision === "confirm" ? "Подтверждено" : "Отклонено"}: ${action.confirmation_request?.title ? action.confirmation_request.title + ": " : ""}${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: result.text }].slice(-32));
+      setContext(current => [...current, { key, actor: action.actor || "panel", question: `${decision === "confirm" ? "Подтверждено" : "Отклонено"}: ${action.confirmation_request?.title ? action.confirmation_request.title + ": " : ""}${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: result.display_text || result.text }].slice(-32));
       settled.current.add(key);
       setActions(current => current.filter(item => confirmationKey(item) !== key));
-      setResults(current => ({ ...current, [key]: result.text }));
+      setResults(current => ({ ...current, [key]: result.display_text || result.text }));
       if (result.operation) {
         const snapshot = systemActionSnapshot(result.operation);
         trackOperation(snapshot, `Nodera · ${action.action} · ${action.service}`);
@@ -130,7 +130,7 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
       if (activeRequest.current === request) { writing.current.delete(key); setWorking([...writing.current, ...batching.current]); }
     }
   }, [request, notify, trackOperation]);
-  const decide = useCallback(async (action: PendingAction, decision: "confirm" | "reject") => (await decideOne(action, decision))?.text, [decideOne]);
+  const decide = useCallback(async (action: PendingAction, decision: "confirm" | "reject") => { const result = await decideOne(action, decision); return result?.display_text || result?.text; }, [decideOne]);
   const decideGroup = useCallback(async (group: ConfirmationGroup, decision: "confirm" | "reject") => {
     if (!group.presentation || batching.current.has(group.key) || activeRequest.current !== request) return;
     const selected = group.actions.filter(item => !settled.current.has(confirmationKey(item)));

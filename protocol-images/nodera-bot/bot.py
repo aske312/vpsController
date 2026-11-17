@@ -19,6 +19,10 @@ import time
 
 import httpx
 
+if not Path(__file__).with_name('assistant_messages.py').is_file():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'api'))
+from assistant_messages import notice, styled_message
+
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
 
@@ -310,7 +314,7 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
                     try:
                         queue = await client.get('http://127.0.0.1:8000/api/assistant/bot-queue', headers=headers, params={'request_id': request_id}, timeout=5)
                         if queue.status_code == 200 and queue.json().get('state') == 'queued':
-                            await bot_api(settings, 'sendMessage', chat_id=actor, text='Запрос в очереди AI. Дождитесь ответа; повторять сообщение не нужно.')
+                            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Запрос в очереди AI', 'Дождитесь ответа; повторять сообщение не нужно.', '⏳')), parse_mode='HTML')
                             notified = True
                     except Exception: pass
             response = await task
@@ -333,9 +337,11 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
         answer = value['result']['answer']
         pending_items = value.get('pending_actions') or ([value['pending_action']] if value.get('pending_action') else [])
         for pending in pending_items:
+            action = {'start': 'Запуск', 'stop': 'Остановка', 'restart': 'Перезапуск'}.get(pending['action'], pending['action'])
+            answer += '\n\n' + notice('Нужно ваше решение', f"**Действие:** {action}\n**Объект:** `{pending['service']}`\n\nИзменения ожидают подтверждения.", '✋')
             if pending.get('changes'):
-                answer += '\n\nИзменения:\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
-            answer += f"\n\nПодтвердите {pending['action']} для {pending['service']}:\n/confirm {pending['code']}"
+                answer += '\n\n**Детали изменений**\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
+            answer += f"\n\n`/confirm {pending['code']}` — подтвердить\n`/cancel {pending['code']}` — отклонить"
         return answer
 
 
@@ -417,11 +423,11 @@ def public_reply(sender, command):
 
 
 def assistant_help(admin=False, subscription=False):
-    text = ('Привет! Я Нодера, ваш AI-ассистент 👋\n' +
+    text = ('Привет! Я Нодера, ваш AI-ассистент.\n\n' +
             ('Отвечаю на вопросы, помогаю с вашей подпиской Mihomo и доступными настройками. ' if subscription else 'Отвечаю на вопросы и помогаю с доступными вам задачами. ') +
-            'Типовые запросы выполняю без AI: можно писать «мой трафик», «моя подписка» или выбирать кнопки. Для вопроса к AI используйте /ai <вопрос>.\n\n'
-            'Можно прислать фото или документ с вопросом в подписи: до 4 файлов, 2 МБ каждый и 6 МБ суммарно. Для изображений нужна модель с поддержкой зрения.\n\n'
-            'Информация:\n/id — ваш Telegram ID\n/models — доступные модели\n/model — текущая модель')
+            '\n\n**Как общаться**\nТиповые запросы выполняю без AI: можно писать «мой трафик», «моя подписка» или выбирать кнопки. Для вопроса к AI используйте `/ai <вопрос>`.\n\n'
+            '**Фото и документы**\nДобавьте вопрос в подпись к файлу. Можно прислать до 4 файлов: 2 МБ каждый, 6 МБ суммарно. Для изображений нужна модель с поддержкой зрения.\n\n'
+            'Команды:\n/id — ваш Telegram ID\n/models — доступные модели\n/model — текущая модель')
     if subscription: text += '\n/subscription — ваша подписка Mihomo\n/profile — параметры и лимиты\n/devices — устройства\n/traffic — трафик\n/connect — как подключиться'
     if admin:
         text += '\n/status — состояние сервера\n/resources — ресурсы\n/services — состояние служб\n/components — компоненты\n/profiles — профили Mihomo\n/network — сеть\n/security — безопасность\n/logs [служба] — последние логи\n/diagnostics — пассивная диагностика'
@@ -580,10 +586,11 @@ async def bot(settings):
         actions = {}
         markup = inline_keyboard(answer, prompt or 'Вложения', access, actions)
         if actions: callbacks[actor] = actions
+        answer = styled_message(direct_prompt(prompt or '') or '', answer)
         for chunk in telegram_chunks(answer):
             await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=reply_keyboard(access))
         if markup:
-            await bot_api(settings, 'sendMessage', chat_id=actor, text='Выберите действие:', reply_markup=markup)
+            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Выберите действие', 'Нажмите на подходящий вариант ниже.', '👇')), parse_mode='HTML', reply_markup=markup)
     async def deliver_album(sender, key, album):
         # Telegram sends an album as separate updates. Coalesce a short burst
         # before downloading, so the album consumes one AI turn and one queue slot.
@@ -620,7 +627,7 @@ async def bot(settings):
                         else:
                             prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
                         if not prompt:
-                            await bot_api(settings, 'sendMessage', chat_id=actor, text='Это меню устарело. Откройте раздел кнопкой ниже.')
+                            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Обновите меню', 'Это меню устарело. Откройте раздел кнопкой ниже.', '↻')), parse_mode='HTML')
                             continue
                     else:
                         messages = [message] if message.get('photo') or message.get('document') else None
@@ -636,7 +643,7 @@ async def bot(settings):
                     if not is_command and time.monotonic() - last.get(actor, 0) < 3:
                         if time.monotonic() - notices.get(actor, 0) >= 10:
                             notices[actor] = time.monotonic()
-                            await bot_api(settings, 'sendMessage', chat_id=actor, text=BUSY_NOTICE)
+                            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Очередь заполнена', BUSY_NOTICE, '⏳')), parse_mode='HTML')
                         continue
                     if len(last) >= 1000:
                         last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
@@ -655,7 +662,7 @@ async def bot(settings):
                     if (not accepted or dispatcher.pending.get(stream, 0) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()
                         if len(notices) > 1000: notices = {actor: time.monotonic()}
-                        await bot_api(settings, 'sendMessage', chat_id=actor, text=QUEUE_NOTICE if accepted else BUSY_NOTICE)
+                        await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
             except Exception:
                 logging.error('NoderaBot polling or delivery failed')
                 await asyncio.sleep(5)
