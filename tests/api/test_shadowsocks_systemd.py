@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 from tests.api.support import manager, free_port
 from component_registry import ComponentRegistry, RegistryError, fingerprint, inventory
+import profile_recovery
 
 
 def stop_process(process):
@@ -49,12 +50,15 @@ class ShadowsocksSystemdTests(unittest.TestCase):
     def test_transaction_restores_real_instance_states(self):
         self.check_transaction(traffic=False)
 
+    def test_snell_transaction_restores_real_instance_states(self):
+        self.check_transaction(traffic=False, module='transport-snell')
+
     def test_rollback_restores_proxy_traffic_and_keeps_unaffected_stream(self):
         if not shutil.which("ss-server") or not shutil.which("ss-local"):
             self.skipTest("Requires Shadowsocks server and client")
         self.check_transaction(traffic=True)
 
-    def check_transaction(self, traffic):
+    def check_transaction(self, traffic, module='transport-shadowsocks'):
         if os.geteuid() != 0 or not Path("/run/systemd/system").is_dir():
             self.skipTest("Requires root and running systemd")
         name = "vps-control-ss-test-" + uuid.uuid4().hex
@@ -175,12 +179,13 @@ class ShadowsocksSystemdTests(unittest.TestCase):
                     patch.object(manager, "CONFIG_ROOT", config),
                     patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
                     patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
-                    patch.object(manager, "SERVICE_BY_MODULE", {"transport-shadowsocks": target}),
+                    patch.object(manager, "SERVICE_BY_MODULE", {module: target}),
+                    patch.dict(profile_recovery.INSTANCE_MODULES, {module: (prefix, 'shadowsocks')}),
                     patch.object(manager.ss_runtime, "PREFIX", prefix),
                     patch.object(manager.ss_runtime, "UNIT", re.compile(re.escape(prefix) + r"[A-Za-z0-9_-]+\.service")),
                 ):
                     with self.assertRaisesRegex(RuntimeError, "injected"):
-                        with manager.profile_runtime_transaction({"transport-shadowsocks"}):
+                        with manager.profile_runtime_transaction({module}):
                             command("disable", "--runtime", "--now", instances[0])
                             (ss / "old.json").unlink()
                             write_config("created")

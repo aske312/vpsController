@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import socketserver
@@ -70,6 +71,14 @@ class SnellTests(unittest.TestCase):
         self.assertEqual(set(result), {'ss', 'snell'})
         self.assertEqual(snapshot.call_args.kwargs['prefix'], snell.PREFIX)
         self.assertEqual(snapshot.call_args.kwargs['directory'], manager.CONFIG_ROOT / 'snell')
+
+    def test_recovery_uses_the_same_unit_boundary_as_the_shadowsocks_snapshot(self):
+        import profile_recovery
+        with patch.object(manager.ss_runtime, 'UNIT', re.compile(r'disposable-ss@[A-Za-z0-9_-]+\.service')):
+            self.assertTrue(profile_recovery.valid_instance_unit(manager, {'transport-shadowsocks'}, 'disposable-ss@old.service'))
+            self.assertFalse(profile_recovery.valid_instance_unit(manager, {snell.MODULE}, 'disposable-ss@old.service'))
+            self.assertTrue(profile_recovery.valid_instance_unit(manager, {snell.MODULE}, 'vps-control-mihomo-snell@phone.service'))
+            self.assertFalse(profile_recovery.valid_instance_unit(manager, {snell.MODULE}, 'vps-control-mihomo-snell@../bad.service'))
 
     def test_native_config_and_export_share_credential_and_safe_modes(self):
         for mode in ('default', 'unshaped'):

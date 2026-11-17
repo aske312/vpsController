@@ -27,6 +27,15 @@ def instance_snapshot(api, modules, *, strict=True):
     return result
 
 
+def valid_instance_unit(api, modules, unit):
+    for module in set(modules) & INSTANCE_MODULES.keys():
+        pattern = api.ss_runtime.UNIT if module == 'transport-shadowsocks' else re.compile(
+            re.escape(INSTANCE_MODULES[module][0]) + r'[A-Za-z0-9_-]+\.service')
+        if pattern.fullmatch(unit):
+            return True
+    return False
+
+
 def marker(api):
     return api.PROFILE_FILE.parent / "profile-recovery" / "manifest.json"
 
@@ -189,7 +198,7 @@ def recover(api):
             raise ValueError("Invalid Shadowsocks snapshot")
         instances = {}
         for unit, saved in value["instances"].items():
-            valid_unit = any(re.fullmatch(re.escape(INSTANCE_MODULES[module][0]) + r'[A-Za-z0-9_-]+\.service', unit) for module in modules & INSTANCE_MODULES.keys())
+            valid_unit = valid_instance_unit(api, modules, unit)
             if not valid_unit or not isinstance(saved, list) or len(saved) != 3 or type(saved[0]) is not bool or saved[1] not in {"enabled", "enabled-runtime", "disabled", "masked", "masked-runtime"}:
                 raise ValueError("Invalid Shadowsocks instance")
             instances[unit] = (saved[0], saved[1], base64.b64decode(saved[2], validate=True) if saved[2] is not None else None)
