@@ -79,7 +79,7 @@ test("profile cards toggle one reference without copying or editing definitions"
   assert.equal(cards[1].props["aria-pressed"], false);
   cards[1].props.onClick();
   assert.deepEqual(next, { "media-id": true });
-  nodes(tree, node => node.type === "button" && node.props.children === "Настроить на странице «Правила»")[0].props.onClick();
+  nodes(tree, node => node.type === "button" && node.props["aria-label"] === "Настроить на странице «Правила»")[0].props.onClick();
   assert.equal(edited, 1);
   const html = renderToStaticMarkup(createElement(ProfilePolicyGroups, props));
   assert.doesNotMatch(html, /<(input|select|textarea)\b/);
