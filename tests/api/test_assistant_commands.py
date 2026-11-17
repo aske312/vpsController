@@ -47,7 +47,8 @@ class ServerCommandTests(unittest.TestCase):
             for command, tool in [('/network', 'vps_network'), ('/security', 'vps_security'), ('/logs fixture', 'vps_logs'), ('/diagnostics', 'vps_diagnostics')]:
                 response = self.call(command)
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertIn('unknown', response.json()['text'])
+                self.assertIn('неизвестно', response.json()['text'])
+                self.assertNotIn('```json', response.json()['text'])
                 self.assertNotIn('private-key', response.text)
                 self.assertNotIn(secret, response.text)
                 self.assertEqual(diagnostic.call_args.args[1], tool)

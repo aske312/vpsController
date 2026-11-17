@@ -257,29 +257,11 @@
 .noderaContactFacts dd { margin:0; overflow-wrap:anywhere; }
 .mcpServiceConfirmation details { max-width:100%; }
 .mcpServiceConfirmation pre { overflow:auto; max-height:180px; padding:8px; font-size:10px; }
-.mcpConfirmations { display:grid; gap:10px; min-width:0; width:100%; }
-.mcpDecisionDock { flex:0 1 auto; min-height:0; max-height:52%; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
-.mcpDecisionDock:has(.mcpConfirmations) { padding:12px 16px; border-top:1px solid var(--line); }
-.mcpConfirmations > header { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; color:var(--amber); }
-.mcpConfirmations > header small { color:var(--muted); }
-.mcpConfirmationCard { display:grid; gap:10px; min-width:0; border:1px solid var(--line-strong); border-radius:12px; padding:12px; background:var(--panel); }
-.mcpConfirmationCard > div { min-width:0; overflow-wrap:anywhere; }
-.mcpConfirmationHead { display:flex; justify-content:space-between; align-items:start; gap:12px; }
-.mcpConfirmationHead > div { display:grid; gap:5px; min-width:0; overflow-wrap:anywhere; }
-.mcpConfirmationHead small,.mcpConfirmationHead > span { color:var(--muted); font-size:11px; }
-.mcpConfirmationHead > span { flex-shrink:0; }
-.mcpConfirmationBody { max-height:24dvh; overflow:auto; padding-right:8px; overscroll-behavior:contain; }
-.mcpConfirmationBody > p { margin:0 0 12px; line-height:1.5; color:var(--muted); }
+.mcpConfirmations { display:grid; gap:6px; min-width:0; width:100%; }
+.mcpDecisionDock { flex:0 0 auto; min-height:0; max-height:30%; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .mcpConfirmationChange { display:grid; gap:8px; min-width:0; }
 .mcpConfirmationChange ul { margin:0; padding-left:18px; font-size:12px; line-height:1.6; }
 .mcpConfirmationChange summary { cursor:pointer; color:var(--muted); font-size:11px; }
-.mcpConfirmationCard > p.error,.mcpConfirmationItems p.error { padding:9px 10px; margin:0; border-left:3px solid var(--amber); background:var(--panel-inset); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
-.mcpConfirmationCard > div small { margin-left:auto; color:var(--muted); }
-.mcpConfirmationCard details { min-width:0; }
-.mcpConfirmationCard pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
-.mcpConfirmationCard footer { position:sticky; bottom:-1px; display:flex; flex-wrap:wrap; gap:8px; padding:10px 0 0; border-top:1px solid var(--line); background:var(--panel); }
-.mcpConfirmationCard footer button { min-height:40px; flex:1 1 140px; }
-@media (max-width:600px) { .mcpConfirmationHead { flex-wrap:wrap; } .mcpDecisionDock:has(.mcpConfirmations) { padding:8px; } .mcpConfirmationBody { max-height:22dvh; } }
 .mcpCommandButton { display:flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid var(--line); border-radius:9px; background:transparent; color:var(--muted); font-size:11px; }
 .mcpCommandMenu { position:absolute; z-index:8; left:0; right:0; bottom:calc(100% + 6px); max-height:min(340px,45dvh); overflow:auto; border:1px solid var(--line-strong); border-radius:12px; background:var(--panel); box-shadow:0 12px 35px #0008; }
 .mcpCommandMenu > header { position:sticky; top:0; display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; padding:10px 12px; background:var(--panel); border-bottom:1px solid var(--line); }
@@ -468,3 +450,43 @@ button.noderaTag { cursor:pointer; }
 }
 
 .mcpConfirmationItems { list-style:decimal; display:grid; gap:10px; margin:0; padding-left:22px; overflow-wrap:anywhere; }
+
+/* Keep decisions and live work beside the composer, independent of the transcript. */
+.mcpDecisionDock:has(.mcpConfirmations),.mcpDecisionDock:has(.mcpChatWork) { padding:8px 12px; border-top:1px solid var(--line); }
+.mcpConfirmationCompact,.mcpOperationCompact { display:flex; align-items:center; gap:8px; padding:7px 9px; min-width:0; border:1px solid var(--line); border-radius:9px; background:var(--panel-inset); }
+.mcpConfirmationCompact { border-color:color-mix(in srgb,var(--amber) 35%,transparent); }
+.mcpDecisionSummary { display:grid; flex:1; gap:2px; min-width:0; }
+.mcpDecisionSummary strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500; }
+.mcpDecisionSummary small { font-size:10px; overflow-wrap:anywhere; }
+.mcpDecisionButtons { display:flex; flex-shrink:0; gap:5px; }
+.mcpWorkspace :is(.mcpConfirmationCompact,.mcpOperationCompact,.mcpDecisionButtons) button { height:30px; min-height:30px; padding:5px 9px; font-size:11px; white-space:nowrap; }
+.mcpChatWork { display:flex; align-items:center; gap:9px; min-height:28px; color:var(--muted); font-size:12px; }
+.mcpChatWork:has(+ .mcpConfirmations) { margin-bottom:6px; }
+.mcpWorkSpinner { display:inline-block; flex-shrink:0; width:14px; height:14px; border:2px solid color-mix(in srgb,var(--cyan) 20%,transparent); border-top-color:var(--cyan); border-radius:50%; animation:mcpWorkSpin .9s linear infinite; }
+@keyframes mcpWorkSpin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .mcpWorkSpinner { animation:none; border-style:dotted; } }
+.confirmBackdrop.mcpDecisionBackdrop { z-index:12000 !important; padding:16px !important; }
+.mcpDecisionModal,.mcpDecisionModal * { box-sizing:border-box; }
+.mcpDecisionModal { display:flex; flex-direction:column; width:min(680px,100%); max-height:85dvh; overflow:hidden; border:1px solid var(--line-strong); border-radius:16px; background:var(--panel); color:var(--text); font:13px/1.5 var(--ui-font); box-shadow:0 24px 90px #0009; }
+.mcpDecisionModal > header { display:flex; align-items:start; justify-content:space-between; gap:12px; padding:18px; border-bottom:1px solid var(--line); }
+.mcpDecisionModal > header > div { min-width:0; flex:1; }
+.mcpDecisionModal > header > button { flex-shrink:0; }
+.mcpDecisionModal h2 { margin:4px 0 0; font-size:18px; overflow-wrap:anywhere; }
+.mcpDecisionModal small { color:var(--muted); }
+.mcpDecisionModalBody { padding:18px; overflow:auto; overscroll-behavior:contain; }
+.mcpDecisionModalBody > p { margin:0 0 14px; }
+.mcpDecisionModal .mcpConfirmationItems { gap:18px; }
+.mcpDecisionModal .mcpConfirmationChange pre { max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.mcpDecisionModal dd { margin:4px 0 0; overflow-wrap:anywhere; }
+.mcpDecisionModal > footer { display:flex; justify-content:end; padding:12px 18px; border-top:1px solid var(--line); }
+.mcpDecisionModal button { display:inline-flex; align-items:center; justify-content:center; min-height:34px; padding:6px 12px; border:1px solid var(--line); border-radius:8px; color:var(--text); background:var(--panel-inset); font:inherit; cursor:pointer; }
+.mcpDecisionModal .primaryButton { background:var(--cyan); color:#041319; }
+.mcpDecisionModal .dangerButton { color:var(--red); border-color:var(--red); }
+.mcpDecisionModal button:disabled { opacity:.45; cursor:not-allowed; }
+.mcpDecisionModal button:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+@media(max-width:600px) {
+  .mcpDecisionDock:has(.mcpConfirmations),.mcpDecisionDock:has(.mcpChatWork) { padding:6px 8px; }
+  .mcpConfirmationCompact { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 8px; }
+  .mcpConfirmationCompact .mcpDecisionButtons { grid-column:1/-1; justify-content:end; }
+  .mcpDecisionModal > header,.mcpDecisionModalBody { padding:14px; }
+}

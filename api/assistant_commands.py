@@ -230,10 +230,10 @@ def execute(api, actor, prompt, *, source='bot'):
         arguments = {'service': args[0] if args else 'application', 'lines': 40} if command == '/logs' else {}
         result = assistant_diagnostics.call(api, {'/network': 'vps_network', '/security': 'vps_security', '/diagnostics': 'vps_diagnostics', '/logs': 'vps_logs'}[command], arguments, actor)
         titles = {'/network': 'Состояние сети', '/security': 'Состояние безопасности', '/diagnostics': 'Пассивная диагностика', '/logs': 'Последние логи'}
-        # Reuse the existing bounded, secret-scrubbed diagnostics, without MCP
-        # or a model roundtrip. JSON also preserves unknown and partial states.
+        # Reuse bounded, secret-scrubbed observations without a model roundtrip.
         safe = assistant_diagnostics.sanitize(api, result, max_chars=7000)
-        return titles[command] + '\n```json\n' + json.dumps(safe, ensure_ascii=False, indent=2)[:8500] + '\n```'
+        from assistant_messages import diagnostic_text
+        return titles[command] + '\n\n' + diagnostic_text(safe)
     if command in BLOCKED_COMMANDS:
         raise HTTPException(403, 'Nodera не может выключать VPS или переключать режим доступа к панели')
     if command == '/models' and (not args or len(args) == 1 and args[0].isdigit()):

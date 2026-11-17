@@ -26,7 +26,7 @@ export function useNotifications() {
 
 export function useNotificationList() {
   const store = useNotifications();
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, serverSnapshot);
+  return useSyncExternalStore(store.subscribe, store.getVisibleSnapshot, serverSnapshot);
 }
 
 export function useNotifier(source: string, title: string) {

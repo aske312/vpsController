@@ -10,6 +10,20 @@ import {mutationFailureState} from '../../src/shared/lib/api-request.ts';
 const action = (code, actor='panel') => ({actor,actor_name:actor,code,expires:Date.now()/1000+600,operation_id:code.repeat(4),action:'restart',service:code});
 const plan = (codes, actor='panel', id='f'.repeat(32)) => codes.map(code=>({...action(code,actor),confirmation_request:{request_id:id,title:'Repair connections',reason:'Apply prepared actions in order',operation_ids:codes.map(code=>code.repeat(4))}}));
 
+test('chat operation activity retains its actor and follows live terminal state without another decision',async()=>{
+  const pending=action('aabbccdd','11');
+  const app=mount([pending],{jobs:true});
+  try{
+    await app.settle();await app.queue.decide(pending,'confirm');await app.settle();
+    assert.equal(app.queue.activities.length,1);
+    assert.equal(app.queue.activities[0].actor,'11');
+    assert.equal(app.queue.activities[0].snapshot.state,'queued');
+    app.remote.jobs[pending.operation_id].state='succeeded';await app.tick();
+    assert.equal(app.queue.activities[0].snapshot.state,'succeeded');
+    assert.equal(app.calls.length,1);
+  }finally{app.dispose();}
+});
+
 test('one group button confirms five operations in the presented order and preserves other plans',async()=>{
   const codes=['aabbccdd','11223344','eeff0011','22334455','66778899'];
   const app=mount([...plan(codes).reverse(),...plan(['abcdef01'],'11')]);
@@ -100,7 +114,7 @@ function mount(initial, options={}) {
   const actual=createRequire(import.meta.url),exports={};
   const source=readFileSync(new URL('../../src/features/assistant/confirmation-queue.tsx',import.meta.url),'utf8');
   const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}});
-  const require=name=>name==='react'?hooks:name.endsWith('/notification-center')?{useNotifications:()=>store,useNotifier:()=>notify}:name.endsWith('/system-operation')?operations:name.endsWith('/api-request')?{mutationFailureState}:actual(name);
+  const require=name=>name==='react'?hooks:name.endsWith('/use-dialog-focus')?{useDialogFocus:()=>({current:null})}:name.endsWith('/notification-center')?{useNotifications:()=>store,useNotifier:()=>notify}:name.endsWith('/system-operation')?operations:name.endsWith('/api-request')?{mutationFailureState}:actual(name);
   new Function('require','exports',compiled.outputText)(require,exports);
   const request=async(path,init)=>{
     if(path.startsWith('/assistant/pending-action')){

@@ -118,7 +118,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     const incoming = (confirmations.context ?? []).filter(item => item.actor === (actor || "panel") && !decisionContext.current.has(item.key));
     if (!incoming.length) return;
     for (const item of incoming) decisionContext.current.add(item.key);
-    setTurns(current => [...current, ...incoming.filter(item => !current.some(turn => /^\/(confirm|cancel)\s+/i.test(turn.question) && turn.question.trim().endsWith(item.key.split(":").at(-1)!))).map(item => ({ id: ++nextTurn.current, question: item.question, answer: item.answer, files: [], model: "", context_safe: true }))]);
+    setTurns(current => [...current, ...incoming.filter(item => !current.some(turn => /^\/(confirm|cancel)\s+/i.test(turn.question) && turn.question.trim().endsWith(item.key.split(":").at(-1)!))).map(item => ({ id: ++nextTurn.current, question: item.question, answer: item.answer, files: [], model: "", context_safe: true, system_event: true }))]);
   }, [confirmations.context, actor]);
   const [checks, setChecks] = useState<Partial<Record<ModuleId, { ok: boolean; text: string; revision: string; actor: string; username?: string }>>>({});
   const version = useRef(0);
@@ -305,16 +305,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     });
     return () => { controller.abort(); chatRunning.current = false; setChatBusy(false); };
   }, [request, actor, status?.chat_jobs, streaming, recoveryKey, ingestConfirmations, sessionReady]);
-  useEffect(() => {
-    setTurns(current => {
-      const next = current.map(turn => {
-      const actions = turn.pending_actions ?? (turn.pending_action ? [turn.pending_action] : []);
-      const text = actions.map(action => confirmations.results[`${action.actor || actor || "panel"}:${action.code}`]).filter(Boolean).join("\n");
-      return text && text !== turn.action_result ? { ...turn, action_result: text } : turn;
-      });
-      return next.some((turn, index) => turn !== current[index]) ? next : current;
-    });
-  }, [confirmations.results, actor]);
   useEffect(() => { followTranscript.current = true; }, [actor, conversationId, panel]);
   useEffect(() => {
     if (!followTranscript.current || panel !== "chat" || typeof requestAnimationFrame === "undefined") return;
@@ -456,7 +446,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       if (!action) { await runCommand(prompt.trim()); return; }
       const question = prompt.trim(), id = ++nextTurn.current;
       setPrompt("");
-      setTurns(current => [...current, { id, question, files: [], model: "", answer: "Отправляем решение…" }]);
+      setTurns(current => [...current, { id, question, files: [], model: "", answer: "Отправляем решение…", context_safe: true, system_event: true }]);
       const text = await confirmations.decide(action, command[1].toLowerCase() === "confirm" ? "confirm" : "reject");
       if (client.current !== request || activeActor.current !== actor) return;
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: text || "Результат решения не подтверждён. Проверьте уведомление." } : turn));
@@ -627,9 +617,9 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
       }}>
         {!turns.length && !confirmations.actions.some(item => (item.actor || "panel") === (actor || "panel")) && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{commands.some(item => ["/status", "/services"].includes(item.command)) && <div>{commands.some(item => item.command === "/status") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/status", false)}>Состояние сервера</button>}{commands.some(item => item.command === "/services") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/services", false)}>Службы</button>}</div>}</div>}
-        {turns.map(turn => <ChatTurnRow key={turn.id} turn={turn} waiting={turn.answer || turn.error ? "" : pendingLabel(turn)} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}/>)}
+        {turns.filter(turn => !turn.system_event).map(turn => <ChatTurnRow key={turn.id} turn={turn} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}/>)}
       </div>
-      <div className="mcpDecisionDock"><ConfirmationCards actor={actor}/></div>
+      <div className="mcpDecisionDock">{chatBusy && <div className="mcpChatWork" role="status"><span className="mcpWorkSpinner" aria-hidden="true"/><span>{turns.some(turn => turn.queue_state === "running") ? pendingLabel(turns.find(turn => turn.queue_state === "running")!) : chatStageText || "Nodera"}</span></div>}<ConfirmationCards key={actor} actor={actor} active={active && isChat}/></div>
       <div className="mcpComposer">
         {commandMenu && <ChatCommandMenu items={matchingCommands} loading={commandLoading} error={commandError} activeIndex={activeCommandIndex} onSelect={chooseCommand} onRetry={() => void loadCommands()}/>}
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={composerBlocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}

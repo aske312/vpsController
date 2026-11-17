@@ -29,6 +29,8 @@ const fingerprint = (item: NotificationInput) => JSON.stringify([item.kind, item
 /** One store per mounted application. Nothing is shared between SSR requests. */
 export function createNotificationStore(now = Date.now) {
   let items: Notification[] = [];
+  let visible: Notification[] = [];
+  const inline = new Map<symbol, Set<string>>();
   let sequence = 0;
   let pausedAt: number | undefined;
   let networkSince: number | undefined;
@@ -36,7 +38,12 @@ export function createNotificationStore(now = Date.now) {
   const dismissed = new Map<string, string>();
   const finishedOperations = new Set<string>();
   const failures = new Map<string, { title: string; values: Record<string, NotificationFailure>; reconnecting: boolean; action?: NotificationAction }>();
-  const emit = () => listeners.forEach((listener) => listener());
+  const emit = () => {
+    const hidden = new Set([...inline.values()].flatMap(ids => [...ids]));
+    const next = items.filter(item => !hidden.has(item.id));
+    if (next.length !== visible.length || next.some((item, index) => item !== visible[index])) visible = next;
+    listeners.forEach((listener) => listener());
+  };
 
   function resolve(id: string) {
     dismissed.delete(id);
@@ -120,6 +127,15 @@ export function createNotificationStore(now = Date.now) {
 
   return {
     getSnapshot: () => items,
+    getVisibleSnapshot: () => visible,
+    setInline: (owner: symbol, ids: string[]) => {
+      const previous = inline.get(owner);
+      const next = new Set(ids);
+      if (previous && previous.size === next.size && [...next].every(id => previous.has(id))) return;
+      if (!previous && !next.size) return;
+      if (next.size) inline.set(owner, next); else inline.delete(owner);
+      emit();
+    },
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     upsert, notify, resolve, dismiss,
     finishOperation: (input: NotificationInput) => {

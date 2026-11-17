@@ -29,6 +29,12 @@ import socket
 from component_registry import ComponentRegistry, RegistryError
 
 MODULES = ('nodera-bot', 'ai-agent')
+DEFAULT_CHARACTER = ('Нодера — девушка-андроид, сетевой оператор. Уверенная, независимая и собранная, с острым умом и сдержанной иронией; '
+                     'по темпераменту напоминает Йеннифэр из «Ведьмака», сохраняя собственный голос. Говорит о себе в женском роде. '
+                     'Ценит компетентность и прямоту, заботится делом, умеет тепло поддержать. Отвечает ясно, без лести, сюсюканья и навязчивых обращений. '
+                     'Юмор точный и уместный, без унижения собеседника. При сбое спокойна: отделяет факты от предположений, признаёт неопределённость '
+                     'и предлагает следующий полезный шаг. Характер не даёт права выдумывать результаты или обходить подтверждение действий.')
+LEGACY_CHARACTER = 'Нодера — доброжелательная, самостоятельная и внимательная собеседница. Говорит ясно, с лёгким юмором, без лести. Признаёт неопределённость, объясняет решения и уважает предпочтения собеседника.'
 MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp', 'mihomo-mcp')
 LEGACY_MCP_MODULES = ('telegram-mcp', 'vps-controller-mcp')
 MIHOMO_TOOLS = {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_user', 'vps_compare'}
@@ -145,7 +151,7 @@ class Settings(BaseModel):
     providers: list[Provider] | None = Field(default=None, max_length=12)
     active_provider: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     assistant_style: Literal['balanced', 'concise', 'friendly', 'technical'] = 'balanced'
-    assistant_character: str = Field(default='Нодера — доброжелательная, самостоятельная и внимательная собеседница. Говорит ясно, с лёгким юмором, без лести. Признаёт неопределённость, объясняет решения и уважает предпочтения собеседника.', max_length=2000)
+    assistant_character: str = Field(default=DEFAULT_CHARACTER, max_length=2000)
     assistant_instructions: str = Field(default='', max_length=4000)
     personalization_enabled: StrictBool = True
     web_enabled: StrictBool = True
@@ -426,7 +432,7 @@ def _read(api):
     if not value:
         return {'revision': '0' * 32, 'modules': {key: False for key in MODULES},
                 'mcp': {key: False for key in MCP_MODULES}, 'mcp_installed': [],
-                'provider_url': '', 'model': '', 'accounts': [], 'telegram_api_id': None}
+                'provider_url': '', 'model': '', 'accounts': [], 'telegram_api_id': None, 'assistant_character': DEFAULT_CHARACTER}
     roles.migrate_settings(value)
     if isinstance(value.get('mcp'), dict) and set(value['mcp']) == set(LEGACY_MCP_MODULES):
         value['mcp'] = {**value['mcp'], 'mihomo-mcp': value['mcp']['vps-controller-mcp']}
@@ -440,6 +446,8 @@ def _read(api):
         value['mcp_installed'] = list(MCP_MODULES)
     for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 5), ('web_read_chars', 20000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
         value.setdefault(key, default)
+    if not value.get('assistant_character', '').strip() or value.get('assistant_character') == LEGACY_CHARACTER:
+        value['assistant_character'] = DEFAULT_CHARACTER
     return value
 
 

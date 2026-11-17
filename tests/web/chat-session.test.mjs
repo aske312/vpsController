@@ -5,6 +5,18 @@ import {saveChatSession,readChatSession,savedActor,rememberActor,clearChatSessio
 
 function storage(){const entries=new Map();return {get length(){return entries.size;},key:i=>[...entries.keys()][i]??null,getItem:k=>entries.get(k)??null,setItem:(k,v)=>entries.set(k,v),removeItem:k=>entries.delete(k),entries};}
 const snapshot={provider:'provider-one',model:'selected-model',streaming:true,conversation_id:'a'.repeat(32),prompt:'Unsent draft',turns:[{id:1,question:'Question',answer:'Answer',model:'selected-model',context_safe:true,files:[]}]};
+
+test('hidden decisions retain model context across reload without becoming visible dialogue turns',()=>{
+  const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();
+  try{
+    const decision={id:2,question:'Confirmed routing change',answer:'Operation queued',model:'',context_safe:true,system_event:true,files:[]};
+    saveChatSession({sessionKey:'scope'},'11',{...snapshot,turns:[...snapshot.turns,decision]});
+    const restored=readChatSession({sessionKey:'scope'},'11');
+    assert.equal(restored.turns[1].system_event,true);
+    assert.equal(restored.turns[1].context_safe,true);
+    assert.equal(restored.turns.filter(turn=>!turn.system_event).length,1);
+  }finally{globalThis.sessionStorage=previous;}
+});
 test('typing batches history writes, reload flushes the latest draft, and logout cancels buffered data',t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const previous=globalThis.sessionStorage,store=storage();globalThis.sessionStorage=store;

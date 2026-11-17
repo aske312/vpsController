@@ -15,6 +15,18 @@ runner = load_module('assistant_image_runner', 'protocol-images/ai-agent/runner.
 
 
 class AssistantTests(unittest.TestCase):
+    def test_default_android_character_replaces_only_the_retired_default(self):
+        self.assertEqual(control.DEFAULT_CHARACTER, runner.DEFAULT_CHARACTER)
+        self.assertIn(control.DEFAULT_CHARACTER, runner.persona({'accounts': []}, 'panel'))
+        self.assertEqual(control.read(api)['assistant_character'], control.DEFAULT_CHARACTER)
+        payload = self.payload()
+        payload['assistant_character'] = control.LEGACY_CHARACTER
+        saved = self.save(payload)['settings']
+        self.assertEqual(saved['assistant_character'], control.DEFAULT_CHARACTER)
+        payload.update(expected_revision=saved['revision'], assistant_character='Custom operator voice')
+        self.save(payload)
+        self.assertEqual(control.read(api)['assistant_character'], 'Custom operator voice')
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(patch.object(api, 'DATA_DIR', self.root))

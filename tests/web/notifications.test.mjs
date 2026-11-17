@@ -6,6 +6,18 @@ import { notificationDuration, notificationPresentation, notificationText, order
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
 
+test('inline chat work stays tracked and returns to notifications when leaving the chat',()=>{
+  const store=createNotificationStore(),owner=Symbol('chat');
+  store.upsert(operation('chat-operation'));store.upsert(operation('other-user'));
+  store.setInline(owner,['chat-operation']);
+  assert.equal(store.getSnapshot().length,2);
+  assert.deepEqual(store.getVisibleSnapshot().map(item=>item.id),['other-user']);
+  store.upsert(operation('chat-operation','success'));
+  assert.deepEqual(store.getVisibleSnapshot().map(item=>item.id),['other-user']);
+  store.setInline(owner,[]);
+  assert.equal(store.getVisibleSnapshot().find(item=>item.id==='chat-operation').state,'success');
+});
+
 test("pending human decisions stay ahead of newer operation notifications", () => {
   const decision = { ...operation("decision", "info"), kind: "confirmation" };
   assert.equal(orderedNotifications([decision, operation("newer"), operation("unknown", "unknown")])[0].id, "decision");

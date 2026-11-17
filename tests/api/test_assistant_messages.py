@@ -2,10 +2,22 @@
 import unittest
 
 from tests.api.test_assistant_commands import bot
-from assistant_messages import styled_message
+from assistant_messages import styled_message, diagnostic_text
 
 
 class MessagePresentationTests(unittest.TestCase):
+    def test_diagnostics_are_readable_and_preserve_unknown_and_partial_states(self):
+        text = diagnostic_text({'state': 'unknown', 'partial': True, 'message': 'Collector timed out',
+                                'findings': [{'id': 'admin_password_strong', 'state': 'passed', 'risk': 'Weak password', 'recommendation': 'Change password'},
+                                             {'id': 'panel_access', 'state': 'risk', 'risk': 'Firewall mismatch', 'recommendation': 'Review rules'}]})
+        self.assertIn('Состояние: неизвестно', text)
+        self.assertIn('Неполные данные: да', text)
+        self.assertIn('проверка пройдена', text)
+        self.assertNotIn('Weak password', text)
+        self.assertIn('Firewall mismatch', text)
+        self.assertNotIn('{', text)
+        self.assertNotIn('```', text)
+        self.assertLess(len(diagnostic_text({'logs': ['x' * 1000] * 100})), 6600)
     def test_operation_states_do_not_claim_success_before_completion(self):
         identity = 'a' * 32
         for state, title in [('в очереди', 'Операция принята'), ('выполняется', 'Операция выполняется'),

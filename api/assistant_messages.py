@@ -5,6 +5,60 @@ Raw command replies remain the protocol contract. Only display text is styled.
 import re
 
 
+def diagnostic_text(value):
+    """Present already scrubbed observations as bounded prose, without a model call."""
+    labels = {'state': 'Состояние', 'status': 'Статус', 'service': 'Служба', 'services': 'Службы', 'name': 'Название',
+              'message': 'Сообщение', 'reason': 'Причина', 'recommendation': 'Рекомендация', 'risk': 'На что обратить внимание',
+              'findings': 'Проверки', 'summary': 'Итог', 'lines': 'События', 'logs': 'Журнал', 'errors': 'Ошибки',
+              'warnings': 'Предупреждения', 'checks': 'Проверки', 'details': 'Подробности', 'items': 'Записи',
+              'available': 'Доступно', 'enabled': 'Включено', 'active': 'Активно', 'healthy': 'Исправность',
+              'server': 'Сервер', 'hostname': 'Имя сервера', 'network': 'Сеть', 'dns': 'DNS', 'domains': 'Домены',
+              'listeners': 'Открытые порты', 'routes': 'Маршруты', 'endpoints': 'Точки подключения', 'address': 'Адрес',
+              'port': 'Порт', 'protocol': 'Протокол', 'firewall': 'Межсетевой экран', 'ssh': 'SSH', 'tls': 'TLS',
+              'application_security': 'Защита приложения', 'panel_access': 'Доступ к панели', 'consistent': 'Соответствие настройкам',
+              'admin_password_strong': 'Надёжность пароля панели', 'cors_restricted': 'Ограничение CORS', 'secrets_protected': 'Защита секретов',
+              'password_authentication': 'Вход по паролю', 'ssh_password': 'Защита входа SSH', 'updated_at': 'Обновлено',
+              'observed_at': 'Время наблюдения', 'source': 'Источник', 'partial': 'Неполные данные', 'truncated': 'Сокращено',
+              'id': 'Идентификатор', 'url': 'Адрес', 'method': 'Метод', 'transport': 'Транспорт', 'error': 'Ошибка'}
+    states = {'unknown': 'неизвестно', 'unavailable': 'недоступно', 'running': 'работает', 'stopped': 'остановлено',
+              'healthy': 'исправно', 'passed': 'проверка пройдена', 'failed': 'ошибка', 'risk': 'требует внимания',
+              'pending': 'ожидается', 'disabled': 'отключено', 'enabled': 'включено', 'active': 'активно', 'inactive': 'неактивно'}
+    rows, remaining = [], 6500
+    def add(text):
+        nonlocal remaining
+        if remaining <= 0: return
+        rows.append(text[:remaining]); remaining -= len(rows[-1]) + 1
+    def scalar(item):
+        if item is None: return 'нет данных'
+        if type(item) is bool: return 'да' if item else 'нет'
+        return states.get(item, item) if isinstance(item, str) else str(item)
+    def walk(item, level=0):
+        if level > 6 or remaining <= 0: return
+        if isinstance(item, dict):
+            if {'state', 'risk', 'recommendation'} <= item.keys():
+                title = labels.get(item.get('id'), str(item.get('id', 'Проверка')).replace('_', ' '))
+                add(f'• {title}: {scalar(item["state"])}')
+                if item['state'] != 'passed':
+                    add(('Проблема: ' if item['state'] == 'risk' else 'Возможный риск: ') + str(item['risk']))
+                    add('Рекомендация: ' + str(item['recommendation']))
+                return
+            for key, entry in item.items():
+                label = labels.get(key, str(key).replace('_', ' '))
+                if isinstance(entry, (dict, list)):
+                    add(label + (':' if entry else ': нет записей'))
+                    walk(entry, level + 1)
+                else: add(f'• {label}: {scalar(entry)}')
+        elif isinstance(item, list):
+            for index, entry in enumerate(item[:30]):
+                if isinstance(entry, (dict, list)):
+                    add(f'— Запись {index + 1} —'); walk(entry, level + 1)
+                else: add('• ' + str(scalar(entry)))
+            if len(item) > 30: add(f'Ещё записей: {len(item) - 30}')
+        else: add(str(scalar(item)))
+    walk(value)
+    return '\n'.join(rows) + ('\nОтчёт сокращён.' if remaining <= 0 else '')
+
+
 def code(value):
     return '`' + str(value).replace('`', "'").replace('\n', ' ') + '`'
 
