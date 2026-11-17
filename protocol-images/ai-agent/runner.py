@@ -1108,7 +1108,7 @@ async def stream_message(response):
             **({'tool_calls': [calls[key] for key in sorted(calls)]} if calls else {}), '_usage': usage}
 
 
-async def provider_request(settings, messages, tools, *, completion_limit=None):
+async def provider_request(settings, messages, tools, *, completion_limit=None, tool_choice=None):
     """Pin a public DNS answer while retaining the provider hostname for TLS."""
     parsed = urllib.parse.urlsplit(settings['provider_url'])
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
@@ -1123,6 +1123,7 @@ async def provider_request(settings, messages, tools, *, completion_limit=None):
     if completion_limit is not None: payload['max_completion_tokens'] = completion_limit
     if tools:
         payload['tools'] = tools
+        if tool_choice is not None: payload['tool_choice'] = tool_choice
     progress('waiting_model', '')
     streaming = settings.get('streaming', False)
     if streaming: payload.update(stream=True, stream_options={'include_usage': True})
@@ -1229,10 +1230,19 @@ def user_content(prompt, attachments):
 
 def ungrounded_operation_claim(answer):
     """Catch operational reports when no tool was called in this turn."""
-    text = re.sub(r'[*`_#]', '', answer).lower()
+    text = re.sub(r'[*`#]', '', answer).lower()
     return bool(re.search(r'(?<!не )\b(?:применила|применил|создала|создал|сохранила|сохранил|подготовила|подготовил|проверила|проверил)\b|'
                           r'\bопераци[яи]\s+(?:завершена|подтверждена|выполнена)|\bподтверждение\s+принято|'
-                          r'\boperation[_ ]id\b|/confirm\s+[0-9a-f-]{8,}|<tool_call>', text))
+                          r'\b(?:созданы|создана|подготовлены|подготовлена|применены|применено|сохранены)\b|'
+                          r'\boperation[_ ]?id\b|mihomo:op:|/confirm\s+\S+|<tool_call>|'
+                          r'\b(?:подтверди|подтвердите|отклони|отклоните)\b|'
+                          r'(?:форм[аыу]|кнопк[аи]).{0,100}(?:появ|показ|подтвержден)|'
+                          r'(?:появ|показ).{0,100}(?:форм[аыу]|кнопк[аи])', text))
+
+
+def operation_request(prompt):
+    """Panel operation requests must consult a tool before reporting a result."""
+    return bool(re.search(r'(?iu)\b(?:mihomo|маршрутиз\w*|правил\w*|групп\w*|операци\w*|подтвержд\w*|форм[ауы]|служб\w*)\b', prompt))
 
 
 async def chat(settings, actor, prompt, attachments=None, history=None):
@@ -1257,6 +1267,10 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         if row['role'] != 'user' and row.get('attachments'):
             raise ValueError('Недопустимое вложение в истории')
         value = user_content(row['content'], row.get('attachments', [])) if row['role'] == 'user' else row['content']
+        if row['role'] == 'assistant' and ungrounded_operation_claim(row['content']):
+            # Chat history contains prose, not the underlying tool receipts.
+            # Replaying an invented result can make the model invent more results.
+            value = 'Предыдущий ответ ИИ об операциях не подтверждает состояние сервера. Для продолжения прочитай актуальные настройки и pending_confirmations доступными инструментами. Не восстанавливай ID операций или результаты по прежнему тексту ИИ.'
         history_length += len(value) if isinstance(value, str) else sum(len(part.get('text', '')) for part in value)
         if history_length > 96000:
             raise AttachmentError('В истории слишком много текста документов. Начните новый чат.')
@@ -1272,8 +1286,13 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         complete_usage = True
         corrected_claim = False
+        evidence_required = operation_request(prompt)
         for _ in range(MAX_ROUNDS):
-            message = await provider_request(settings, messages, tools)
+            required_call = not used and tools and (corrected_claim or evidence_required)
+            if required_call:
+                message = await provider_request(settings, messages, tools, tool_choice='required')
+            else:
+                message = await provider_request(settings, messages, tools)
             measured = message.get('_usage')
             if isinstance(measured, dict) and all(type(measured.get(key)) is int and 0 <= measured[key] <= 10**8 for key in usage):
                 for key in usage:
@@ -1285,9 +1304,9 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 answer = message.get('content')
                 if not isinstance(answer, str) or not answer.strip():
                     raise RuntimeError('AI-провайдер вернул пустой ответ')
-                if not used and ungrounded_operation_claim(answer):
+                if not used and (required_call or corrected_claim or ungrounded_operation_claim(answer)):
                     progress('waiting_model', '')
-                    if not corrected_claim:
+                    if not corrected_claim and tools and not required_call:
                         corrected_claim = True
                         messages.append({'role': 'system', 'content': 'В этом запросе ты не вызвала ни одного инструмента. Описания операций и ID из истории не являются результатами выполнения. Если пользователь просит действие, вызови доступный профильный инструмент настоящим tool_calls, затем request_confirmation. Не подтверждай за человека. Если выполнить запрос инструментами нельзя, честно сообщи об этом; не утверждай, что что-то проверено, подготовлено или выполнено.'})
                         continue

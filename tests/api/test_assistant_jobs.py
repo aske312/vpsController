@@ -174,4 +174,21 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(Client.calls),1);self.assertNotIn('stream',Client.calls[0]['json'])
         self.assertNotIn('private',runner.safe_error(httpx.ReadTimeout('private url key')))
 
+    async def test_required_tool_choice_reaches_the_provider_only_when_tools_are_available(self):
+        settings={'provider_url':'https://provider.example/v1','api_key':'key','model':'m'}
+        response=types.SimpleNamespace(status_code=200,json=lambda:{'choices':[{'message':{'content':'ok'}}]})
+        calls=[]
+        class Client:
+            def __init__(self,**kwargs):pass
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):pass
+            async def post(self,*args,**kwargs):calls.append(kwargs['json']);return response
+        tool={'type':'function','function':{'name':'read_status','parameters':{'type':'object'}}}
+        with patch.object(runner.httpx,'AsyncClient',Client),patch.object(asyncio.get_running_loop(),'getaddrinfo',return_value=[(2,1,6,'',('8.8.8.8',443))]):
+            await runner.provider_request(settings,[],[tool],tool_choice='required')
+            await runner.provider_request(settings,[],[],tool_choice='required')
+        self.assertEqual(calls[0]['tool_choice'],'required')
+        self.assertEqual(calls[0]['tools'],[tool])
+        self.assertNotIn('tool_choice',calls[1])
+
 if __name__=='__main__':unittest.main()
