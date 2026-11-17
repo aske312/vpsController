@@ -44,6 +44,24 @@ class FlowAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool.await_count, 1)
         self.assertEqual(result['status'], 'awaiting_confirmation')
 
+    async def test_creative_reply_is_not_treated_as_a_server_mutation(self):
+        answer = 'Я создала короткую сказку: однажды маленький робот нашёл звезду.'
+        result, tool, _ = await self.run_chat([{'content': answer}], [], prompt='Придумай короткую сказку про робота')
+        self.assertEqual(result['answer'], answer)
+        self.assertNotIn('status', result)
+        tool.assert_not_awaited()
+
+    async def test_one_completed_operation_does_not_confirm_an_entire_plan(self):
+        result, _, _ = await self.run_chat([
+            {'tool_calls': [call('mihomo_settings', {'method': 'PATCH'})]},
+            {'tool_calls': [call('mihomo_operation', {'id': OPERATION}, 'poll')]},
+            {'content': 'Все изменения применены.'}], [
+                receipt({'confirmation_required': True, 'operation_ids': [OPERATION, 'b'*32]}),
+                receipt({'id': OPERATION, 'state': 'succeeded', 'result': 'passed'})],
+            names=('mihomo_settings', 'mihomo_operation'))
+        self.assertNotIn('Все изменения применены', result['answer'])
+        self.assertEqual(result['prepared_operation_ids'], [OPERATION, 'b'*32])
+
     async def test_read_polling_can_observe_a_changed_operation(self):
         result, tool, _ = await self.run_chat(
             [{'tool_calls': [call('mihomo_operation')]}, {'tool_calls': [call('mihomo_operation', identity='second')]}, {'content': 'Операция завершилась.'}],

@@ -1262,8 +1262,8 @@ def completed_change_claim(answer):
                           r'\b(?:changes|settings|profile|group|rules)\s+(?:(?:were|was)\s+|(?:have|has)\s+been\s+)?(?:applied|created|saved)\b', text))
 
 
-def grounded_answer(answer, successful, prepared, execution_confirmed, failures):
-    if completed_change_claim(answer) and not execution_confirmed:
+def grounded_answer(answer, successful, prepared, execution_confirmed, failures, *, operation_scope=True):
+    if operation_scope and completed_change_claim(answer) and not execution_confirmed:
         if prepared:
             return 'Изменения подготовлены и ожидают вашего решения. Проверьте карточку подтверждения.'
         return 'Выполнение нового изменения не подтверждено. ' + (tool_failure(failures[-1]['error_code'])['message'] if failures else 'Доступные результаты не подтверждают его выполнение.')
@@ -1550,9 +1550,13 @@ def user_content(prompt, attachments):
     return [{'type': 'text', 'text': text or 'Проанализируй приложенные изображения.'}, *parts]
 
 
-def ungrounded_operation_claim(answer):
+def ungrounded_operation_claim(answer, *, operation_scope=True):
     """Catch operational reports when no tool was called in this turn."""
     text = re.sub(r'[*`#]', '', answer).lower()
+    if not operation_scope and not re.search(
+            r'mihomo|\bvps\b|сервер|служб|правил|профил|маршрут|подписк|групп|настройк|'
+            r'операци|operation|revision|ревизи|/confirm|<tool_call>|подтвержден|подтверди|отклони', text):
+        return False
     return bool(re.search(r'(?<!не )\b(?:применила|применил|создала|создал|сохранила|сохранил|подготовила|подготовил|проверила|проверил)\b|'
                           r'\bопераци[яи]\s+(?:завершена|подтверждена|выполнена)|\bподтверждение\s+принято|'
                           r'\bопераци[яи]\b.{0,80}\b(?:завершил\w*|отклон\w*|упал\w*|ошибк\w*)\b|'
@@ -1567,7 +1571,7 @@ def ungrounded_operation_claim(answer):
 
 
 def historical_answer(text):
-    if ungrounded_operation_claim(text) or text.startswith((
+    if ungrounded_operation_claim(text, operation_scope=False) or text.startswith((
             'Предыдущий ответ ИИ об операциях не подтверждает', 'ИИ не вызвал инструменты',
             'Не удалось завершить запрос. Подготовка изменений не подтверждена.')):
         return 'Предыдущий ответ ИИ не подтверждает состояние сервера. ID, ревизии и результаты операций в нём не являются фактами. Активная операция или необходимость повторить действие из этого ответа не следуют.'
@@ -1697,7 +1701,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 answer = message.get('content')
                 if not isinstance(answer, str) or not answer.strip():
                     raise RuntimeError('AI-провайдер вернул пустой ответ')
-                if not used and (required_call or ungrounded_operation_claim(answer)):
+                if not used and (required_call or ungrounded_operation_claim(answer, operation_scope=evidence_required)):
                     progress('waiting_model', '')
                     if not corrected_claim and tools and not required_call:
                         corrected_claim = True
@@ -1706,7 +1710,8 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                     answer = 'ИИ не вызвал инструменты, поэтому актуальные данные для ответа на этот вопрос не проверены. Текущее состояние и причины ошибки не подтверждены; по прежней переписке установить их нельзя.'
                     failures.append({'tool': 'ai_provider', 'error_code': 'tools_not_called', 'fields': []})
                 grounded = grounded_answer(answer, successful, prepared_operation,
-                    bool(executed_ids & prepared_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures)
+                    bool(prepared_ids <= executed_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures,
+                    operation_scope=evidence_required or bool(mutation_names))
                 if grounded != answer and not prepared_operation:
                     failures.append({'tool': 'ai_provider', 'error_code': 'ungrounded_report', 'fields': []})
                 answer = grounded
@@ -1838,7 +1843,8 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
             diagnostic('model_error', error_code=error_code(exc))
             answer, complete_usage = fallback, False
         answer = grounded_answer(answer, successful, prepared_operation,
-            bool(executed_ids & prepared_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures)
+            bool(prepared_ids <= executed_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures,
+            operation_scope=evidence_required or bool(mutation_names))
         diagnostic('summary_result', status='incomplete', answer_chars=len(answer))
         result = {'answer': heading + '\n\n' + answer[:18000], 'tools_used': used, 'status': 'partial' if prepared_operation else 'incomplete', 'diagnostics': failures[-16:], 'prepared_operation_ids': sorted(prepared_ids)}
         if complete_usage: result['usage'] = usage
