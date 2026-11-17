@@ -190,7 +190,7 @@ test('a shortcut requiring arguments fills the composer and service preparation 
   assert.equal(nodes(tree,n=>n.props.role==='region'&&n.props['aria-label']==='Подтверждение действий').length,1);
 });
 
-test('AI-prepared operations expose confirmation buttons outside the scrolling transcript',async()=>{
+test('AI-prepared operations expose human decisions in the conversation',async()=>{
   const status=fixture();Object.assign(status.settings,{model:'fixture-model',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
   const pending={code:'aabbccdd',service:'Mihomo /routing/settings',action:'PATCH',expires:Date.now()/1000+600};
   const view=mount(status,[],{chat:()=>({result:{answer:'Review routing changes',tools_used:['mihomo_settings']},pending_actions:[pending]})});
@@ -198,9 +198,7 @@ test('AI-prepared operations expose confirmation buttons outside the scrolling t
   nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'Prepare routing changes',style:{},scrollHeight:48}});tree=view.render();
   nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);tree=view.render();
   const transcript=nodes(tree,n=>n.props.role==='log')[0].node;
-  assert.equal(nodes(transcript,n=>n.props['aria-label']==='Подтверждение действий').length,0);
-  const dock=nodes(tree,n=>n.props.className==='mcpDecisionDock')[0].node;
-  for(const label of ['Подтвердить','Отказать'])assert.equal(nodes(dock,n=>n.type==='button'&&n.props.children===label).length,1);
+  for(const label of ['Подтвердить','Отказать'])assert.equal(nodes(transcript,n=>n.type==='button'&&n.props.children===label).length,1);
   assert.equal(nodes(tree,n=>n.props.className==='mcpQuickCommands').length,0);
 });
 

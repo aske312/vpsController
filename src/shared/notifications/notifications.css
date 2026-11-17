@@ -76,7 +76,7 @@
 .gateOperationButton:disabled { opacity:.6; cursor:wait; }
 .gateNotificationDock :is(button, [tabindex]):focus-visible { outline:2px solid #97b9dc; outline-offset:2px; }
 @media (max-width:760px) {
-  .gateNotificationDock { top:auto; right:10px; left:10px; bottom:calc(76px + env(safe-area-inset-bottom)); width:auto; }
+  .gateNotificationDock { top:auto; right:10px; left:auto; bottom:calc(76px + env(safe-area-inset-bottom)); width:min(350px, calc(100vw - 24px)); }
   .gateNotificationList { max-height:45dvh; }
   .gateNotificationDock:not(.is-expanded) .gateNotificationList { max-height:45dvh; }
   .gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+2) { display:none; }

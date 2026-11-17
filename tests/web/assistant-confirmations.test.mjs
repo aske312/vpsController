@@ -24,6 +24,27 @@ test('chat operation activity retains its actor and follows live terminal state 
   }finally{app.dispose();}
 });
 
+test('only a confirmed terminal activity can be closed and polling never restores it',async()=>{
+  const pending=action('aabbccdd');
+  const app=mount([pending],{jobs:true});
+  try {
+    await app.settle();await app.queue.decide(pending,'confirm');await app.settle();
+    app.queue.dismissActivity(pending.operation_id);await app.settle();
+    assert.notEqual(app.queue.activities[0].dismissed,true);
+    app.remote.jobs[pending.operation_id].state='unknown';await app.tick();
+    app.queue.dismissActivity(pending.operation_id);await app.settle();
+    assert.notEqual(app.queue.activities[0].dismissed,true);
+    app.remote.jobs[pending.operation_id].state='succeeded';await app.tick();
+    app.queue.dismissActivity(pending.operation_id);await app.settle();
+    assert.equal(app.queue.activities[0].dismissed,true);
+    assert.equal(app.store.getSnapshot().some(item=>item.id===`operation:system:${pending.operation_id}`),false);
+    app.remote.operations=[{id:pending.operation_id,action:pending.action,service:pending.service}];
+    await app.tick();
+    assert.equal(app.queue.activities[0].dismissed,true);
+    assert.equal(app.calls.length,1);
+  } finally { app.dispose(); }
+});
+
 test('one group button confirms five operations in the presented order and preserves other plans',async()=>{
   const codes=['aabbccdd','11223344','eeff0011','22334455','66778899'];
   const app=mount([...plan(codes).reverse(),...plan(['abcdef01'],'11')]);
