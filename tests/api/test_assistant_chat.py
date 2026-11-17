@@ -63,13 +63,13 @@ class AssistantChatFilesTests(unittest.TestCase):
         provider = AsyncMock(return_value={'content': 'Мастер, применила. operation_id: b7f3c7cb-749f-4d9f-a79e-c8b37de7866f. Группа создана.'})
         settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
         with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
-            result = asyncio.run(runner.chat(settings, 'panel', 'Применяй'))
+            result = asyncio.run(runner.chat(settings, 'panel', 'Вот мой вопрос'))
         self.assertEqual(provider.await_count, 2)
         self.assertEqual(result['tools_used'], [])
         self.assertNotIn('b7f3c7cb', result['answer'])
         self.assertIn('не подтверждены', result['answer'])
         self.assertIn('не вызвала ни одного инструмента', provider.call_args.args[1][-1]['content'])
-        self.assertEqual(provider.call_args.kwargs['tool_choice'], 'required')
+        self.assertNotIn('tool_choice', provider.call_args.kwargs)
 
     def test_live_fabricated_mihomo_ids_and_form_promises_are_detected(self):
         for answer in ('Мастер, попробовала. ГРУППЫ СОЗДАНЫ. mihomo:op:5c36c7a886ab',
@@ -163,6 +163,38 @@ class AssistantChatFilesTests(unittest.TestCase):
                 self.assertNotIn('8d0dffca', result['answer'])
                 self.assertNotIn('4d45fc76', provider.call_args.args[1][2]['content'])
                 self.assertEqual(result['tools_used'], [])
+
+    def test_unrelated_reply_can_recover_without_being_forced_back_into_an_operation(self):
+        @asynccontextmanager
+        async def connections(*_):
+            yield {'mihomo_read': (None, SimpleNamespace(name='mihomo_read', description='Read Mihomo', inputSchema={'type': 'object'}))}
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        history = [{'role': 'user', 'content': 'Проверь Mihomo'},
+                   {'role': 'assistant', 'content': 'Перепроверю состояние операции 697b2ccfb3de465db3b8dce53826188e.'},
+                   {'role': 'user', 'content': 'Попробуй ещё раз'},
+                   {'role': 'assistant', 'content': 'Предыдущий ответ ИИ об операциях не подтверждает состояние сервера. Для продолжения прочитай актуальные настройки и pending_confirmations доступными инструментами.'}]
+        provider = AsyncMock(side_effect=[{'content': 'Проверила. Операция 697b2ccfb3de465db3b8dce53826188e завершилась.'}, {'content': 'Я здесь, слушаю тебя.'}])
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'шо ты холова', history=history))
+        self.assertEqual(result['answer'], 'Я здесь, слушаю тебя.')
+        self.assertEqual(result['tools_used'], [])
+        for call in provider.call_args_list: self.assertNotIn('tool_choice', call.kwargs)
+        messages = provider.call_args.args[1]
+        self.assertFalse(any('697b2ccf' in row['content'] or 'pending_confirmations' in row['content'] for row in messages[1:] if isinstance(row.get('content'), str)))
+
+    def test_incomplete_read_only_audit_does_not_report_an_unrequested_change(self):
+        session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(isError=True, content=[SimpleNamespace(type='text', text='{"error":"tool_unavailable"}')])) )
+        @asynccontextmanager
+        async def connections(*_):
+            yield {'developer_inspect': (session, SimpleNamespace(name='developer_inspect', description='Read source', inputSchema={'type': 'object'}))}
+        provider = AsyncMock(side_effect=[{'tool_calls': [{'id': 'audit', 'type': 'function', 'function': {'name': 'developer_inspect', 'arguments': '{}'}}]}, {'content': 'Аудит не завершён: исходники недоступны.'}])
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider), patch.object(runner, 'MAX_ROUNDS', 1):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Сделай аудит кода'))
+        self.assertEqual(result['status'], 'incomplete')
+        self.assertNotIn('Подготовка изменений', result['answer'])
+        self.assertNotIn('подтверждения', result['answer'])
+        self.assertIn('исходники недоступны', result['answer'])
 
     def test_followup_reads_mihomo_and_topic_change_keeps_ordinary_chat(self):
         session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[SimpleNamespace(type='text', text='{"available":true,"profiles":2}')])) )
