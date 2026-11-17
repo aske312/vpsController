@@ -90,6 +90,12 @@ def parse(raw):
             elif not re.fullmatch(r'[a-zA-Z0-9_.@+ -]{1,160}', rule.value): raise ValueError('Недопустимое имя процесса')
         return policy
     except (ValueError, ValidationError) as exc:
+        if isinstance(exc, ValidationError):
+            fields = []
+            known = {'groups', 'rules', 'id', 'name', 'type', 'members', 'strategy', 'url', 'interval', 'timeout', 'max_failed_times', 'tolerance', 'kind', 'value', 'target'}
+            for error in exc.errors()[:8]:
+                fields.append('.'.join(str(part) if isinstance(part, int) or part in known else '?' for part in error['loc']))
+            raise HTTPException(422, {'code': 'invalid_routing_policy', 'message': 'Проверьте поля правил и групп: ' + ', '.join(fields), 'fields': fields}) from None
         raise HTTPException(422, 'Некорректная политика маршрутизации: ' + (str(exc)[:180] if not isinstance(exc, ValidationError) else 'проверьте поля правил и групп')) from None
 
 

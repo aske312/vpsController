@@ -201,7 +201,7 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
         ids.add(id);
         notifications.upsert({ id, source: "nodera", title: group.presentation.title, state: "info", kind: "confirmation",
           message: `${errors[group.key] ? errors[group.key] + " " : ""}${busy ? "Выполняем план. " : ""}${group.presentation.reason}`,
-          confirmationItems: group.actions.map(item => `${item.action} · ${item.service}${errors[confirmationKey(item)] ? " — " + errors[confirmationKey(item)] : ""}`),
+          confirmationItems: group.actions.map(item => `${confirmationSummary(item).title}${confirmationSummary(item).lines.length ? " · " + confirmationSummary(item).lines.slice(0, 2).join(" · ") : ""}${errors[confirmationKey(item)] ? " — " + errors[confirmationKey(item)] : ""}`),
           details: group.actions.filter(item => item.changes).map(item => `${item.action} · ${item.service}\n${JSON.stringify(item.changes, null, 2)}`).join("\n\n") || undefined,
           action: busy ? undefined : { label: `Подтвердить все (${group.actions.length})`, run: async () => { await decideGroup(group, "confirm"); } },
           secondaryAction: busy ? undefined : { label: `Отклонить все (${group.actions.length})`, run: async () => { await decideGroup(group, "reject"); } } });
@@ -211,7 +211,7 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
       const id = `nodera-confirm:${confirmationKey(action)}`;
       ids.add(id);
       notifications.upsert({ id, source: "nodera", title: action.confirmation_request?.title || "Nodera · Подтверждение", state: "info", kind: "confirmation",
-        message: `${errors[confirmationKey(action)] ? errors[confirmationKey(action)] + " · " : ""}${action.action} · ${action.service}. ${action.confirmation_request ? action.confirmation_request.reason + " · " : ""}${action.actor_name || "Администратор"}. До ${new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}.`,
+        message: `${errors[confirmationKey(action)] ? errors[confirmationKey(action)] + " · " : ""}${confirmationSummary(action).title}. ${action.confirmation_request ? action.confirmation_request.reason + " · " : ""}${action.actor_name || "Администратор"}. До ${new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}.`,
         details: action.changes ? JSON.stringify(action.changes, null, 2) : undefined,
         action: { label: "Подтвердить", run: async () => { await decide(action, "confirm"); } },
         secondaryAction: { label: "Отказать", run: async () => { await decide(action, "reject"); } } });
@@ -228,30 +228,58 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
+export function confirmationSummary(action: PendingAction) {
+  const path = action.service.replace(/^Mihomo\s+/, "");
+  const titles: Record<string, string> = { "/routing/settings": "Изменить правила и группы маршрутизации", "/dns/settings": "Изменить настройки DNS", "/routing/presets": "Изменить пресеты маршрутизации" };
+  const title = titles[path] || (path.startsWith("/profiles/") ? (action.action === "DELETE" ? (path.includes("/devices/") ? "Удалить устройство Mihomo" : "Удалить профиль Mihomo") : "Изменить профиль Mihomo") : `${({ start: "Запустить", stop: "Остановить", restart: "Перезапустить", POST: "Создать", DELETE: "Удалить", PATCH: "Изменить" } as Record<string, string>)[action.action] || action.action} · ${action.service}`);
+  const lines: string[] = [];
+  const values = action.changes?.values;
+  if (values && typeof values === "object" && !Array.isArray(values)) {
+    const raw = (values as Record<string, unknown>).structured_policy;
+    if (raw) {
+      try {
+        const policy = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (Array.isArray(policy.groups)) lines.push(`Группы (${policy.groups.length}): ${policy.groups.map((group: { name?: string }) => group.name || "Без имени").join(", ") || "нет"}`);
+        if (Array.isArray(policy.rules)) {
+          lines.push(`Правила: ${policy.rules.length}`);
+          for (const rule of policy.rules.slice(0, 5)) lines.push(`${rule.value} → ${rule.target || "GATE.312"}`);
+          if (policy.rules.length > 5) lines.push(`Ещё правил: ${policy.rules.length - 5}`);
+        }
+      } catch { /* The validated payload remains available in technical details. */ }
+    }
+  }
+  return { title, lines };
+}
+
+function confirmationChanges(action: PendingAction) {
+  const summary = confirmationSummary(action);
+  return <div className="mcpConfirmationChange"><strong>{summary.title}</strong>
+    {summary.lines.length > 0 && <ul>{summary.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}
+    {action.changes && <details><summary>Технические данные</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
+  </div>;
+}
+
 export function ConfirmationCards({ actor }: { actor: string }) {
   const queue = useAssistantConfirmations();
   const actions = queue.actions.filter(item => (item.actor || "panel") === (actor || "panel"));
   if (!actions.length) return null;
   return <section className="mcpConfirmations" role="region" aria-label="Подтверждение действий">
-    <header><strong>Ожидают подтверждения · {actions.length}</strong><small>Выберите действие или подтвердите весь план</small></header>
+    <header><strong>Требуется ваше решение</strong><small>Действий: {actions.length} · Изменения ещё не применены</small></header>
     {confirmationGroups(actions).map(group => group.presentation ? <article key={group.key} className="mcpConfirmationCard" aria-label={group.presentation.title}>
-      <div><strong>{group.presentation.title}</strong><span>{group.actions[0].actor_name}</span></div>
-      <p>{group.presentation.reason}</p>
+      <header className="mcpConfirmationHead"><div><strong>{group.presentation.title}</strong><small>{group.actions[0].actor_name} · По порядку, {group.actions.length} действий</small></div><span>До {new Date(Math.min(...group.actions.map(item => item.expires)) * 1000).toLocaleTimeString("ru-RU")}</span></header>
+      <div className="mcpConfirmationBody"><p>{group.presentation.reason}</p>
       <ol className="mcpConfirmationItems">{group.actions.map(action => <li key={confirmationKey(action)}>
-        <strong>{action.action} · {action.service}</strong>
-        {action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
+        {confirmationChanges(action)}
         {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}
-      </li>)}</ol>
-      <small>По порядку, пока приложение открыто · До {new Date(Math.min(...group.actions.map(item => item.expires)) * 1000).toLocaleTimeString("ru-RU")}</small>
+      </li>)}</ol></div>
       {queue.errors[group.key] && <p className="error" role="alert">{queue.errors[group.key]}</p>}
       <footer><button type="button" className="primaryButton" disabled={queue.working.includes(group.key) || group.actions.some(item => queue.working.includes(confirmationKey(item)))} onClick={() => void queue.decideGroup(group, "confirm")}>{queue.working.includes(group.key) ? "Выполняем план…" : `Подтвердить все (${group.actions.length})`}</button>
         <button type="button" className="ghostButton" disabled={queue.working.includes(group.key) || group.actions.some(item => queue.working.includes(confirmationKey(item)))} onClick={() => void queue.decideGroup(group, "reject")}>Отклонить все ({group.actions.length})</button></footer>
     </article> : group.actions.map(action => <article key={confirmationKey(action)} className="mcpConfirmationCard" aria-label={`${action.action} · ${action.service}`}>
-      {action.confirmation_request && <div><strong>{action.confirmation_request.title}</strong><p>{action.confirmation_request.reason}</p></div>}
-      <div><strong>{action.action}</strong><span>{action.service}</span><small>До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</small></div>
-      {action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
+      <header className="mcpConfirmationHead"><div><strong>{action.confirmation_request?.title || confirmationSummary(action).title}</strong><small>{action.actor_name || "Администратор"}</small></div><span>До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</span></header>
+      <div className="mcpConfirmationBody">{action.confirmation_request && <p>{action.confirmation_request.reason}</p>}{confirmationChanges(action)}</div>
       {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}
-      <footer><button type="button" className="primaryButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "confirm")}>Подтвердить</button>
+      <footer><button type="button" className="primaryButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "confirm")}>{queue.working.includes(confirmationKey(action)) ? "Отправляем решение…" : "Подтвердить"}</button>
         <button type="button" className="ghostButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "reject")}>Отказать</button></footer>
     </article>))}
   </section>;

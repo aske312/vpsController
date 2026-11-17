@@ -40,6 +40,16 @@ class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
 
     def writes(self): return [call for call in self.calls if call['method'] != 'GET']
 
+    async def test_settings_normalize_policy_objects_and_reject_invalid_rule_kinds_before_preparing(self):
+        result = await self.call('settings', section='routing', method='PATCH', values={'structured_policy': self.policy}, expected_revision='a' * 64)
+        self.assertTrue(result['confirmation_required'])
+        self.assertEqual(json.loads(self.writes()[0]['body']['values']['structured_policy']), self.policy)
+        self.calls.clear()
+        self.policy['rules'][0]['kind'] = 'DOMAIN-KEYWORD'
+        rejected = await self.call('settings', section='routing', method='PATCH', values={'structured_policy': self.policy}, expected_revision='a' * 64)
+        self.assertEqual(rejected['error'], 'tool_validation_error')
+        self.assertEqual(self.writes(), [])
+
     async def test_group_list_explains_effective_inherited_checks(self):
         result = await self.call('groups')
         self.assertEqual(result['groups'][0]['effective_health']['timeout'], 3000)

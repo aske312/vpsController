@@ -64,8 +64,18 @@ def request(method, path, body=None, operation_id=None, *, timeout=35):
     except urllib.error.HTTPError as exc:
         tracing.failure('mihomo_rejected')
         # Do not forward manager diagnostics, credentials or arbitrary response bodies.
+        message = 'Mihomo отклонил запрос. Проверьте профиль, ревизию настроек и состояние операции.'
+        if exc.code == 409:
+            message = 'Настройки Mihomo изменились. Попросите ИИ перечитать их и подготовить новое подтверждение.'
+        if exc.code == 422:
+            message = 'Mihomo: неверные параметры. Попросите ИИ исправить запрос и подготовить новое подтверждение.'
+            try: detail = json.loads(exc.read(16000)).get('detail')
+            except (ValueError, OSError, AttributeError): detail = None
+            if isinstance(detail, dict) and detail.get('code') == 'invalid_routing_policy':
+                fields = [field for field in detail.get('fields', []) if isinstance(field, str) and re.fullmatch(r'(?:groups|rules)(?:\.[0-9]{1,3})?(?:\.(?:id|name|type|members|strategy|url|interval|timeout|max_failed_times|tolerance|kind|value|target))?(?:\.[0-9]{1,3})?', field)]
+                message = 'Mihomo: проверьте поля правил и групп' + (': ' + ', '.join(fields[:8]) if fields else '') + '. Исправьте запрос перед новым подтверждением.'
         raise HTTPException(exc.code if exc.code in (404, 409, 422, 503) else 502,
-                            'Mihomo отклонил запрос. Проверьте профиль, ревизию настроек и состояние операции.') from None
+                            message) from None
     except (OSError, ValueError):
         tracing.failure('mihomo_unavailable')
         raise HTTPException(503, 'API Mihomo недоступен. Проверьте компонент и результат прежней операции перед повтором.') from None
@@ -206,6 +216,12 @@ def call(api, actor, method, path, body):
     import assistant_commands
     identity = uuid.uuid4().hex
     body = dict(body)
+    if method == 'PATCH' and route == '/routing/settings':
+        try: preview = request('POST', '/routing/validate', body)
+        except HTTPException as exc:
+            if exc.status_code == 404: raise HTTPException(409, 'Обновите компонент Mihomo: проверка маршрутизации перед подтверждением недоступна') from None
+            raise
+        if not isinstance(preview, dict) or preview.get('valid') is not True: raise HTTPException(502, 'Mihomo не подтвердил проверку маршрутизации; запрос подтверждения не создан')
     if method == 'PATCH' and re.fullmatch(rf'/profiles/{ID}', route):
         current = next((entry for entry in profiles(api, actor)['items'] if route == '/profiles/' + entry['id']), None)
         if not current:

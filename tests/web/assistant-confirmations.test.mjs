@@ -16,7 +16,7 @@ test('one group button confirms five operations in the presented order and prese
   try{
     await app.settle();const cards=app.store.getSnapshot().filter(row=>row.kind==='confirmation');assert.equal(cards.length,2);
     const card=cards.find(row=>row.id.includes('plan:panel:'));
-    assert.deepEqual(card.confirmationItems,codes.map(code=>'restart · '+code));
+    assert.deepEqual(card.confirmationItems,codes.map(code=>'Перезапустить · '+code));
     assert.equal(app.calls.length,0);await card.action.run();await app.settle();
     assert.deepEqual(app.calls.map(row=>row.code),codes);assert(app.calls.every(row=>row.decision==='confirm'&&row.telegram_id===null));
     assert.equal(app.queue.context.length,5);assert.equal(app.queue.actions.length,1);assert.equal(app.queue.actions[0].actor,'11');
@@ -72,7 +72,7 @@ test('model presentation retains the exact action, human decision and actor cont
     const card=app.store.getSnapshot().find(row=>row.id==='nodera-confirm:panel:aabbccdd');
     assert.equal(card.title,first.confirmation_request.title);
     assert(card.message.includes(first.confirmation_request.reason));
-    assert(card.message.includes(first.service));assert(card.message.includes(first.action));
+    assert(card.message.includes(first.service));assert(card.message.includes('Перезапустить'));
     assert.equal(app.calls.length,0);
     await card.action.run();await app.settle();
     assert.deepEqual(app.calls,[{code:first.code,decision:'confirm',telegram_id:null}]);
@@ -127,12 +127,23 @@ function mount(initial, options={}) {
   const render=()=>{cursor=0;queue=exports.AssistantConfirmations({request,onOperation,onChanged,children:null}).props.value;while(effects.length)effects.shift()();return queue;};
   const settle=async()=>{await new Promise(resolve=>setImmediate(resolve));render();await new Promise(resolve=>setImmediate(resolve));render();};
   render();
-  return {store,remote,calls,messages,render,settle,get queue(){return queue;},
+  return {store,remote,calls,messages,render,settle,summary:exports.confirmationSummary,get queue(){return queue;},
     async tick(){for(const fn of timers)fn();await settle();},
     hold(){hold=true;},release(){hold=false;heldRead?.();},
     dispose(){for(const slot of slots)slot?.cleanup?.();globalThis.window=previousWindow;},
   };
 }
+
+test('routing confirmation summaries show groups and rules and preserve destructive action labels',()=>{
+  const app=mount([]);
+  try{
+    const summary=app.summary({...action('aabbccdd'),service:'Mihomo /routing/settings',action:'PATCH',changes:{values:{structured_policy:JSON.stringify({groups:[{name:'Media'}],rules:[{value:'example.test',target:'Media'}]})}}});
+    assert.equal(summary.title,'Изменить правила и группы маршрутизации');
+    assert(summary.lines.includes('Группы (1): Media'));assert(summary.lines.includes('example.test → Media'));
+    assert.equal(app.summary({...action('aabbccdd'),service:'Mihomo /profiles/own',action:'DELETE'}).title,'Удалить профиль Mihomo');
+    assert.equal(app.summary({...action('aabbccdd'),service:'Mihomo /profiles/own/devices/phone',action:'DELETE'}).title,'Удалить устройство Mihomo');
+  }finally{app.dispose();}
+});
 
 test('routing refresh follows confirmed saves and completed jobs, never rejection or uncertain results', async()=>{
   for(const scenario of ['saved','rejected','unknown','job']){

@@ -22,6 +22,17 @@ class PolicyEditRevisionTests(unittest.TestCase):
     def rule_input(self, **changes):
         return manager.PersonalRuleInput(code="WORK", title="Work", entries=["example.com"], **changes)
 
+    def test_structured_policy_changes_advance_revision_and_reject_stale_full_replacements(self):
+        with patch.object(manager, 'profiles', return_value=[]):
+            original = manager.get_routing_schema()['revision']
+            first = {'groups': [{'name': 'Media', 'members': ['*']}], 'rules': []}
+            saved = manager.patch_routing_settings(manager.ModuleSettingsPatch(values={'structured_policy': json.dumps(first)}, expected_revision=original))
+            self.assertNotEqual(saved['revision'], original)
+            with self.assertRaises(manager.HTTPException) as stale:
+                manager.preview_routing_settings(manager.ModuleSettingsPatch(values={'structured_policy': '{}'}, expected_revision=original))
+            self.assertEqual(stale.exception.status_code, 409)
+            self.assertEqual(json.loads(manager.get_routing_schema()['values']['structured_policy'])['groups'][0]['name'], 'Media')
+
     def test_created_rule_is_confirmable_and_identical_replay_does_not_duplicate(self):
         payload = self.rule_input(operation_id="a" * 32)
         saved = manager.create_personal_rule(payload)

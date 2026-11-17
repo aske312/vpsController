@@ -8,6 +8,11 @@ afterEach(() => { globalThis.fetch = originalFetch; Date.now = originalNow; inva
 const client = (options = {}) => createApiClient("test-token", { retryDelaysMs: [0, 0], ...options });
 const ok = () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
 
+test("structured policy validation messages stay readable", async () => {
+  globalThis.fetch = async () => Response.json({detail:{code:"invalid_routing_policy",message:"Проверьте поля правил и групп: rules.0.kind",fields:["rules.0.kind"]}}, {status:422});
+  await assert.rejects(client()("/mihomo/routing/validate", {method:"POST",body:"{}"}), {message:"Проверьте поля правил и групп: rules.0.kind",status:422});
+});
+
 test("HTTP errors expose a valid request ID for correlation without accepting arbitrary header text", async () => {
   const identity = "a".repeat(32);
   globalThis.fetch = async () => Response.json({ detail: "Failure" }, { status: 409, headers: { "X-Request-ID": identity } });

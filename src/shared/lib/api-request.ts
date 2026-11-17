@@ -209,6 +209,7 @@ export function createApiClient(token: string, options: RequestOptions = {}): Ap
             const body = JSON.parse(raw);
             const value = body?.detail || body?.message;
             if (typeof value === "string") detail = value;
+            else if (value && typeof value.message === "string") detail = value.message;
             else if (Array.isArray(value)) {
               detail = value.map((item) => typeof item?.msg === "string" ? item.msg : "").filter(Boolean).join("; ") || detail;
             }

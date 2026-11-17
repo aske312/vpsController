@@ -851,6 +851,11 @@ def module_settings_revision(module_id: str, values: dict[str, Any] | None = Non
     schema = dns_schema() if module_id == DNS_MODULE_ID else routing_schema() if module_id == ROUTING_MODULE_ID else manifest(module_id).get("settings", [])
     editable = {field["key"]: values.get(field["key"], field.get("default"))
                 for field in schema}
+    if module_id == ROUTING_MODULE_ID:
+        # The structured editor has fields outside the legacy scalar manifest.
+        # They must participate in optimistic locking too.
+        for key in ('structured_policy', routing_policy.SELECTION_KEY, 'load_balance_strategy', 'connection_mode', 'routing_scope', 'vpn_services'):
+            editable[key] = values.get(key)
     return hashlib.sha256(json.dumps({"module": module_id, "values": editable}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
@@ -2017,16 +2022,28 @@ def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
     return {"presets": next_presets, "revision": collection_revision("presets", next_presets), "last_operation_id": patch.operation_id}
 
 
-@app.patch("/api/mihomo/routing/settings", dependencies=[Depends(require_mihomo_mutation)])
-@serialized_profile_mutation
-def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
-    if mutation_replayed(load_json(ROUTING_SETTINGS_FILE, {}), "routing", patch):
-        return get_routing_schema()
+def validated_routing_patch(patch: ModuleSettingsPatch) -> dict[str, Any]:
     check_module_settings_revision(ROUTING_MODULE_ID, patch.expected_revision)
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
     if next_values.get('structured_policy') == '@inherit': next_values.pop('structured_policy')
     if any(key in patch.values for key in ('structured_policy', routing_policy.SELECTION_KEY, 'strategy', 'load_balance_strategy')):
         for item in profiles(): validate_client_capabilities(normalize_profile(deepcopy(item)), defaults=next_values)
+    return next_values
+
+
+@app.post("/api/mihomo/routing/validate", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
+def preview_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
+    validated_routing_patch(patch)
+    return {"valid": True}
+
+
+@app.patch("/api/mihomo/routing/settings", dependencies=[Depends(require_mihomo_mutation)])
+@serialized_profile_mutation
+def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
+    if mutation_replayed(load_json(ROUTING_SETTINGS_FILE, {}), "routing", patch):
+        return get_routing_schema()
+    next_values = validated_routing_patch(patch)
     atomic_json(ROUTING_SETTINGS_FILE, {**next_values, **mutation_metadata("routing", patch)})
     return get_routing_schema()
 

@@ -3,6 +3,7 @@ import copy
 import json
 import unittest
 import uuid
+import io
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -11,6 +12,19 @@ from tests.api.support import api
 import assistant_commands as commands
 import assistant_control as control
 import assistant_mihomo as bridge
+
+
+class MihomoRequestErrors(unittest.TestCase):
+    def test_policy_errors_expose_only_allowlisted_fields_and_never_upstream_secrets(self):
+        detail = {'detail': {'code': 'invalid_routing_policy', 'fields': ['rules.0.kind', 'groups.1.members.0', 'private_key', 'secret-value'], 'message': 'password=private-secret'}}
+        error = bridge.urllib.error.HTTPError('http://127.0.0.1', 422, 'invalid', {}, io.BytesIO(json.dumps(detail).encode()))
+        with patch.dict('os.environ', {'ADMIN_PASSWORD': 'fixture'}), patch.object(bridge.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(api.HTTPException) as caught: bridge.request('POST', '/routing/validate', {})
+        self.assertIn('rules.0.kind', caught.exception.detail)
+        self.assertIn('groups.1.members.0', caught.exception.detail)
+        self.assertNotIn('private', caught.exception.detail)
+        self.assertNotIn('secret', caught.exception.detail)
 
 
 class MihomoOperatorTests(unittest.TestCase):
@@ -38,6 +52,7 @@ class MihomoOperatorTests(unittest.TestCase):
     def transport(self, method, path, body=None, operation_id=None):
         self.calls.append((method, path, copy.deepcopy(body), operation_id))
         if method == 'GET' and path == '/profiles': return {'items': copy.deepcopy(self.rows)}
+        if method == 'POST' and path == '/routing/validate': return {'valid': True}
         if method == 'GET': return {'ok': True}
         return {'id': operation_id, 'state': 'queued'}
 
@@ -55,6 +70,7 @@ class MihomoOperatorTests(unittest.TestCase):
         writes = []
         def transport(method, path, body=None, operation_id=None):
             if method == 'GET' and path == '/routing/schema': return manager.get_routing_schema()
+            if method == 'POST' and path == '/routing/validate': return manager.preview_routing_settings(manager.ModuleSettingsPatch.model_validate(body))
             self.assertEqual((method, path), ('PATCH', '/routing/settings'))
             writes.append(body)
             return manager.patch_routing_settings(manager.ModuleSettingsPatch.model_validate(body))
@@ -73,6 +89,23 @@ class MihomoOperatorTests(unittest.TestCase):
             self.assertEqual(actual['rules'], policy['rules'])
             self.assertEqual(actual['groups'][0]['name'], 'Media')
             self.assertEqual(len(writes), 1)
+
+            before = manager.ROUTING_SETTINGS_FILE.read_bytes()
+            policy['rules'][0]['kind'] = 'DOMAIN-KEYWORD'
+            with self.assertRaises(api.HTTPException) as rejected:
+                bridge.call(api, 'panel', 'PATCH', '/routing/settings', {'values': {'structured_policy': json.dumps(policy)}, 'expected_revision': manager.get_routing_schema()['revision']})
+            self.assertEqual(rejected.exception.status_code, 422)
+            self.assertEqual(rejected.exception.detail['fields'], ['rules.0.kind'])
+            self.assertEqual(manager.ROUTING_SETTINGS_FILE.read_bytes(), before)
+            self.assertEqual(commands.pending_actions(api, 'panel'), [])
+
+    def test_old_manager_cannot_queue_unvalidated_routing_changes(self):
+        with patch.object(bridge, 'request', side_effect=api.HTTPException(404, 'not found')):
+            with self.assertRaises(api.HTTPException) as rejected:
+                bridge.call(api, 'panel', 'PATCH', '/routing/settings', {'values': {'structured_policy': '{}'}})
+        self.assertEqual(rejected.exception.status_code, 409)
+        self.assertIn('Обновите компонент Mihomo', rejected.exception.detail)
+        self.assertEqual(commands.pending_actions(api, 'panel'), [])
 
     def tool(self, **payload):
         return self.client.post('/api/assistant/control-tool', headers=self.headers, json=payload)

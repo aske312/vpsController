@@ -257,17 +257,28 @@
 .mcpServiceConfirmation details { max-width:100%; }
 .mcpServiceConfirmation pre { overflow:auto; max-height:180px; padding:8px; font-size:10px; }
 .mcpConfirmations { display:grid; gap:10px; min-width:0; width:100%; }
-.mcpDecisionDock { flex:0 1 auto; min-height:0; max-height:45%; overflow:auto; overscroll-behavior:contain; }
+.mcpDecisionDock { flex:0 1 auto; min-height:0; max-height:52%; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .mcpDecisionDock:has(.mcpConfirmations) { padding:12px 16px; border-top:1px solid var(--line); }
 .mcpConfirmations > header { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; color:var(--amber); }
 .mcpConfirmations > header small { color:var(--muted); }
 .mcpConfirmationCard { display:grid; gap:10px; min-width:0; border:1px solid var(--line-strong); border-radius:12px; padding:12px; background:var(--panel); }
-.mcpConfirmationCard > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:5px 12px; overflow-wrap:anywhere; }
+.mcpConfirmationCard > div { min-width:0; overflow-wrap:anywhere; }
+.mcpConfirmationHead { display:flex; justify-content:space-between; align-items:start; gap:12px; }
+.mcpConfirmationHead > div { display:grid; gap:5px; min-width:0; overflow-wrap:anywhere; }
+.mcpConfirmationHead small,.mcpConfirmationHead > span { color:var(--muted); font-size:11px; }
+.mcpConfirmationHead > span { flex-shrink:0; }
+.mcpConfirmationBody { max-height:24dvh; overflow:auto; padding-right:8px; overscroll-behavior:contain; }
+.mcpConfirmationBody > p { margin:0 0 12px; line-height:1.5; color:var(--muted); }
+.mcpConfirmationChange { display:grid; gap:8px; min-width:0; }
+.mcpConfirmationChange ul { margin:0; padding-left:18px; font-size:12px; line-height:1.6; }
+.mcpConfirmationChange summary { cursor:pointer; color:var(--muted); font-size:11px; }
+.mcpConfirmationCard > p.error,.mcpConfirmationItems p.error { padding:9px 10px; margin:0; border-left:3px solid var(--amber); background:var(--panel-inset); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .mcpConfirmationCard > div small { margin-left:auto; color:var(--muted); }
 .mcpConfirmationCard details { min-width:0; }
 .mcpConfirmationCard pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
-.mcpConfirmationCard footer { display:flex; flex-wrap:wrap; gap:8px; }
-.mcpConfirmationCard footer button { min-height:36px; }
+.mcpConfirmationCard footer { position:sticky; bottom:-1px; display:flex; flex-wrap:wrap; gap:8px; padding:10px 0 0; border-top:1px solid var(--line); background:var(--panel); }
+.mcpConfirmationCard footer button { min-height:40px; flex:1 1 140px; }
+@media (max-width:600px) { .mcpConfirmationHead { flex-wrap:wrap; } .mcpDecisionDock:has(.mcpConfirmations) { padding:8px; } .mcpConfirmationBody { max-height:22dvh; } }
 .mcpCommandButton { display:flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid var(--line); border-radius:9px; background:transparent; color:var(--muted); font-size:11px; }
 .mcpCommandMenu { position:absolute; z-index:8; left:0; right:0; bottom:calc(100% + 6px); max-height:min(340px,45dvh); overflow:auto; border:1px solid var(--line-strong); border-radius:12px; background:var(--panel); box-shadow:0 12px 35px #0008; }
 .mcpCommandMenu > header { position:sticky; top:0; display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; padding:10px 12px; background:var(--panel); border-bottom:1px solid var(--line); }

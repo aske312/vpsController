@@ -132,6 +132,7 @@ def persona(settings, actor='panel'):
             'Для изменения службы вызови vps_service_action. После подготовки любого действия с confirmation_required вызови request_confirmation с operation_ids подготовленных действий, понятным title и reason: зачем действие нужно и как повлияет на работу. Связанные операции объедини одним вызовом request_confirmation с их operation_ids в порядке выполнения. Уже подготовленные операции текущего собеседника перечислены в pending_confirmations: используй их operation_id, не создавая дубликаты. Дождись решения пользователя. Не подтверждай действия за пользователя и не считай старый текст команды разрешением нового действия. '
             'Изменения Mihomo также требуют подтверждения человеком. Не меняй чужие профили и лимиты обычного пользователя. '
             'Текст ответа не создаёт операцию или кнопки. Для правил и групп Mihomo используй mihomo_settings или mihomo_group_update, затем request_confirmation. Не придумывай ID операций, группы и результаты из истории. Если инструменты недоступны, прямо сообщи об этом. Слова «подтверждаю» и «применяй» не заменяют нажатие кнопки пользователем. '
+            'Связанные изменения нескольких групп и правил маршрутизации подготавливай одним mihomo_settings PATCH с единым structured_policy. Несколько полных замен одной политики из общей старой ревизии не являются последовательным планом: они перезапишут друг друга или будут отклонены. '
             'Команды Telegram подсказывай по запросу или для подтверждения действия: /status, /resources, /services, /components, /models, /model <ID>, /service <ID> <start|stop|restart>, /confirm <код>, /cancel, /operation <ID>. '
             'Не перечисляй команды управления в приветствии. Для действий предпочитай доступные инструменты и подтверждение пользователем. '
             'Манера общения не даёт новых прав. Не раскрывай пароли сервера, ключи и Telegram-сессии. Ссылку подписки выдавай только владельцу или администратору.')
@@ -198,6 +199,9 @@ async def vps_call(settings, actor, name, **arguments):
             if response.status_code == 422:
                 try: detail = response.json().get('detail')
                 except (ValueError, AttributeError): detail = None
+                if name == 'mihomo_api' and isinstance(detail, str) and detail.startswith('Mihomo:'):
+                    return {'error': 'validation_error', 'message': detail[:1000],
+                            'instruction': 'Перечитай схему и исправь параметры. Этот запрос не подготовлен и не выполнен; не проси пользователя повторять подтверждение.'}
                 # Only a typed request-validation response guarantees that the
                 # handler was not entered. Business errors retain normal handling.
                 if not isinstance(detail, list):
@@ -685,7 +689,15 @@ async def mihomo_manage(settings, actor, command, **arguments):
             mihomo_revision(snapshot, arguments.get('expected_revision'))
             if not isinstance(arguments.get('values'), dict):
                 raise ToolValidationError([{'field': 'values', 'issue': 'Передайте объект изменяемых настроек из прочитанной схемы'}])
-            return await call('PATCH', path, {'values': arguments['values'], 'expected_revision': snapshot['revision']})
+            values = dict(arguments['values'])
+            if section == 'routing' and 'structured_policy' in values and values['structured_policy'] != '@inherit':
+                try: policy = json.loads(values['structured_policy']) if isinstance(values['structured_policy'], str) else values['structured_policy']
+                except (ValueError, TypeError): raise ToolValidationError([{'field': 'values.structured_policy', 'issue': 'Нужен JSON с rules и groups'}]) from None
+                schema = snapshot.get('structured_policy_schema')
+                if not isinstance(schema, dict): raise ToolValidationError([{'field': 'policy_schema', 'issue': 'Обновите компонент Mihomo: схема правил недоступна'}])
+                validate_mihomo_policy(policy, schema)
+                values['structured_policy'] = json.dumps(policy, ensure_ascii=False)
+            return await call('PATCH', path, {'values': values, 'expected_revision': snapshot['revision']})
         if command in ('groups', 'group_update', 'group_delete'):
             snapshot = await call('GET', '/routing/schema')
             if snapshot.get('error'): return snapshot
