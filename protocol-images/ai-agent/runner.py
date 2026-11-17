@@ -121,6 +121,7 @@ def persona(settings, actor='panel'):
             'Роли: owner — владелец, administrator — администратор, moderator — модератор, user — пользователь, guest — гость. Ориентируйся на permissions собеседника, а не на предполагаемый статус по имени. Управление ролями доступно только владельцу через vps_access и подтверждение человеком. '
             'Администратор управляет сервером и всеми подписками. Пользователь управляет только привязанной подпиской; права проверяет API. '
             'Контуры MCP независимы: VPS Controller — сервер, службы и системная диагностика; Mihomo — профили, подключения, модули и маршрутизация движка. '
+            'Короткие продолжения вроде «что не так?» относятся к последней задаче. Перед сообщением о текущей ошибке, ревизии или результате операции прочитай актуальные данные профильным инструментом. Коды ошибок и ID из прежних ответов ИИ не являются результатами проверки. '
             'При вопросах о подписке используй Mihomo MCP: mihomo_capabilities, mihomo_api, mihomo_compare; при вопросах о собеседнике — mihomo_user. '
             'Для создания YAML-подписки есть mihomo_profile_create: прочитай mihomo_read(view="profile-schema") и modules, подготовь подключения и routing со structured_policy. '
             'Существующий профиль меняет mihomo_profile_update; удаление готовит mihomo_profile_delete, перевыпуск URL с сохранением настроек — mihomo_subscription_rotate. '
@@ -1485,6 +1486,9 @@ def ungrounded_operation_claim(answer):
     text = re.sub(r'[*`#]', '', answer).lower()
     return bool(re.search(r'(?<!не )\b(?:применила|применил|создала|создал|сохранила|сохранил|подготовила|подготовил|проверила|проверил)\b|'
                           r'\bопераци[яи]\s+(?:завершена|подтверждена|выполнена)|\bподтверждение\s+принято|'
+                          r'\bопераци[яи]\b.{0,80}\b(?:завершил\w*|отклон\w*|упал\w*|ошибк\w*)\b|'
+                          r'\b(?:ревизи[яи]|revision)\s+[0-9a-f]{8,64}\b|'
+                          r'\b(?:снова|опять|сейчас|упираемся)\b.{0,80}\b[45]\d{2}\b|'
                           r'\b(?:созданы|создана|подготовлены|подготовлена|применены|применено|сохранены)\b|'
                           r'\boperation[_ ]?id\b|mihomo:op:|/confirm\s+\S+|<tool_call>|'
                           r'\b(?:подтверди|подтвердите|отклони|отклоните)\b|'
@@ -1492,9 +1496,34 @@ def ungrounded_operation_claim(answer):
                           r'(?:появ|показ).{0,100}(?:форм[аыу]|кнопк[аи])', text))
 
 
-def operation_request(prompt):
+def operation_followup(prompt):
+    text = re.sub(r'\s+', ' ', prompt.strip().lower())
+    if len(text) > 180:
+        return False
+    return bool(re.match(r'^(?:(?:ну|и|а)\s+)*(?:что(?:\s+не\s+так|\s+теперь|\s+делать)?|'
+                         r'в\s+ч[её]м\s+(?:проблема|дело)|почему(?:\s+так)?)(?:\s*[?!.]|$)', text)
+                or re.fullmatch(r'(?:продолжай|попробуй|повтори|делай|примени|применяй|проверь|исправь)'
+                                r'(?:\s+(?:снова|ещ[её](?:\s+раз)?|теперь|это))?[?!.]*|'
+                                r'(?:ничего\s+не\s+изменилось|вс[её]\s+ещ[её]\s+не\s+работает)[?!.]*', text))
+
+
+def operation_request(prompt, history=None):
     """Panel operation requests must consult a tool before reporting a result."""
-    return bool(re.search(r'(?iu)\b(?:mihomo|маршрутиз\w*|правил\w*|групп\w*|операци\w*|подтвержд\w*|форм[ауы]|служб\w*)\b', prompt))
+    if re.search(r'(?iu)\b(?:mihomo|маршрутиз\w*|правил\w*|групп\w*|операци\w*|подтвержд\w*|форм[ауы]|служб\w*|профил\w*|подписк\w*|подключени\w*)\b', prompt):
+        return True
+    if not operation_followup(prompt):
+        return False
+    # Follow the latest topic through short continuations; a new explicit topic
+    # ends this chain. Old unrelated Mihomo mentions must not force tools.
+    for row in reversed((history or [])[-8:]):
+        if row.get('role') != 'user':
+            continue
+        text = row.get('content', '')
+        if operation_request(text):
+            return True
+        if not operation_followup(text):
+            return False
+    return False
 
 
 async def chat(settings, actor, prompt, attachments=None, history=None):
@@ -1538,7 +1567,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         complete_usage = True
         corrected_claim = False
-        evidence_required = operation_request(prompt)
+        evidence_required = operation_request(prompt, history)
         prepared_operation = False
         failures, failed_calls = [], set()
         stopped = False

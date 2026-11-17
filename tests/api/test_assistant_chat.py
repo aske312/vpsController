@@ -145,6 +145,45 @@ class AssistantChatFilesTests(unittest.TestCase):
                 self.assertEqual(asyncio.run(runner.chat(settings, 'panel', 'Вопрос'))['answer'], answer)
             self.assertEqual(provider.await_count, 1)
 
+    def test_short_mihomo_followup_cannot_replay_an_invented_revision_failure(self):
+        @asynccontextmanager
+        async def connections(*_):
+            yield {'mihomo_read': (None, SimpleNamespace(name='mihomo_read', description='Read Mihomo', inputSchema={'type': 'object'}))}
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        history = [{'role': 'user', 'content': 'Создай новый профиль с правилами маршрутизации'},
+                   {'role': 'assistant', 'content': 'Операция завершилась с ошибкой 412 precondition_failed: ревизия 4d45fc76 устарела.'}]
+        for prompt in ('что не так?', 'что не так? нам не хватает опций?', 'Ну и что?', 'Попробуй снова'):
+            with self.subTest(prompt=prompt):
+                provider = AsyncMock(return_value={'content': 'Операция снова завершилась с ошибкой 412 precondition_failed: ревизия 8d0dffca устарела.'})
+                with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+                    result = asyncio.run(runner.chat(settings, 'panel', prompt, history=history))
+                self.assertEqual(provider.await_count, 1)
+                self.assertEqual(provider.call_args.kwargs.get('tool_choice'), 'required')
+                self.assertNotIn('412', result['answer'])
+                self.assertNotIn('8d0dffca', result['answer'])
+                self.assertNotIn('4d45fc76', provider.call_args.args[1][2]['content'])
+                self.assertEqual(result['tools_used'], [])
+
+    def test_followup_reads_mihomo_and_topic_change_keeps_ordinary_chat(self):
+        session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[SimpleNamespace(type='text', text='{"available":true,"profiles":2}')])) )
+        @asynccontextmanager
+        async def connections(*_):
+            yield {'mihomo_read': (session, SimpleNamespace(name='mihomo_read', description='Read Mihomo', inputSchema={'type': 'object'}))}
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        history = [{'role': 'user', 'content': 'Создай профиль Mihomo'}, {'role': 'assistant', 'content': 'Нужна проверка состояния.'}]
+        provider = AsyncMock(side_effect=[{'tool_calls': [{'id': 'read', 'type': 'function', 'function': {'name': 'mihomo_read', 'arguments': '{"view":"profiles"}'}}]}, {'content': 'Mihomo доступен, профилей два.'}])
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'В чём проблема?', history=history))
+        self.assertEqual(provider.call_args_list[0].kwargs.get('tool_choice'), 'required')
+        session.call_tool.assert_awaited_once()
+        self.assertEqual(result['tools_used'], ['mihomo_read'])
+        history += [{'role': 'user', 'content': 'Расскажи про музыку'}, {'role': 'assistant', 'content': 'Музыка бывает разной.'}]
+        provider = AsyncMock(return_value={'content': 'У каждого жанра свои особенности.'})
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Почему?', history=history))
+        self.assertNotIn('tool_choice', provider.call_args.kwargs)
+        self.assertEqual(result['tools_used'], [])
+
     def test_text_docx_and_pdf_reach_the_provider_as_untrusted_text(self):
         docx = io.BytesIO()
         with zipfile.ZipFile(docx, 'w') as archive:
