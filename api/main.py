@@ -680,7 +680,8 @@ def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0,
     operations = [{'id': record['operation_id'], 'service': record['service'], 'action': record['action'], 'actor': identity,
                    'created_at': record.get('created_at', record.get('expires', 0) - 600)}
                   for identity in actors for _, record in assistant_commands.pending_records(api, identity)
-                  if record.get('submitted') and record.get('created_at', record.get('expires', 0) - 600) > time.time() - 86400]
+                  if record.get('submitted') and record.get('created_at', record.get('expires', 0) - 600) > time.time() - 86400
+                  and not (record.get('kind') == 'mihomo' and (record.get('completion_state') == 'saved' or record.get('completed_text') == 'Изменения Mihomo сохранены.'))]
     operations.sort(key=lambda row: row['created_at'], reverse=True)
     return {'pending_action': pending[-1] if pending else None, 'pending_actions': pending, 'operations': operations[:64]}
 

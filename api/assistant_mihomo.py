@@ -268,5 +268,6 @@ def confirm(api, actor, record):
         path = assistant_commands.pending_path(api, actor, code=record['code'])
         current = control.operations.read(path)
         if current.get('operation_id') == record['operation_id']:
-            control.operations.atomic_json(path, {**current, 'completed_text': text})
+            control.operations.atomic_json(path, {**current, 'completed_text': text,
+                                                   'completion_state': 'operation' if isinstance(result, dict) and result.get('id') else 'saved'})
     return text

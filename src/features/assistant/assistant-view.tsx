@@ -12,6 +12,7 @@ import { ChatIcon } from "./chat-icon";
 import { AssistantAnswer } from "./assistant-answer";
 import { conversationMarkdown } from "./answer-format";
 import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
+import { readChatSession, saveChatSession, savedActor, rememberActor, chatProvider } from "./chat-session";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
 import { ChatCommandMenu } from "./chat-command-menu";
@@ -36,9 +37,6 @@ function shortTitle(title: string) {
   const characters = Array.from(title);
   return characters.length > 20 ? characters.slice(0, 19).join("") + "…" : title;
 }
-function rememberConversation(actor: string, identity: string | null) {
-  try { window.sessionStorage.setItem(`nodera-conversation:${actor}`, identity ?? 'new'); } catch { /* Storage may be unavailable. */ }
-}
 
 export function AssistantView({ active, onOpenChat, request, refreshKey, busy, onDirtyChange, confirmAction, admitOperation, onOperation }: Props) {
   const [panel, setPanel] = useState<Panel>('chat');
@@ -47,7 +45,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const [hasPendingChat, setHasPendingChat] = useState(false);
   const [chatStageText, setChatStageText] = useState("");
   const observation = useRef<AbortController | null>(null);
-  useEffect(() => { try { setStreaming(sessionStorage.getItem("nodera-streaming") === "true"); } catch {} }, []);
   useEffect(() => () => { observation.current?.abort(); pendingTurns.current = []; writing.current = false; chatRunning.current = false; }, [request]);
   const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
   const sectionMenu = useRef<HTMLDetailsElement>(null);
@@ -74,6 +71,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const [working, setWorking] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [actor, setActor] = useState("");
+  const [sessionReady, setSessionReady] = useState(!request.sessionKey);
+  const selectedConversation = useRef<string | null | undefined>(undefined);
   const [prompt, setPrompt] = useState("");
   const [commands, setCommands] = useState<ChatCommand[]>([]);
   const [commandMenu, setCommandMenu] = useState(false);
@@ -137,6 +136,25 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const savedProviderId = status?.settings.active_provider ?? null;
   const cacheEnabled = status?.settings.memory_enabled ?? true;
   const agentInstalled = status?.modules.some(item => item.id === 'ai-agent' && item.installed) === true;
+  useEffect(() => {
+    if (!status || sessionReady) return;
+    const previousActor = savedActor(request);
+    const identity = status.settings.accounts.some(item => String(item.telegram_id) === previousActor) ? previousActor : "";
+    const saved = readChatSession(request, identity);
+    activeActor.current = identity; setActor(identity);
+    if (saved) {
+      selectedConversation.current = saved.conversation_id;
+      setConversationId(saved.conversation_id); setPrompt(saved.prompt); setStreaming(saved.streaming); setTurns(saved.turns);
+      nextTurn.current = Math.max(0, ...saved.turns.map(turn => turn.id));
+      if (saved.provider === chatProvider(status.settings)) setModel(saved.model);
+    }
+    setSessionReady(true);
+  }, [status, request, sessionReady]);
+  useEffect(() => {
+    if (!sessionReady || !status || activeActor.current !== actor) return;
+    rememberActor(request, actor);
+    saveChatSession(request, actor, { model, provider: chatProvider(status.settings), streaming, conversation_id: conversationId, prompt, turns });
+  }, [request, sessionReady, status, actor, model, streaming, conversationId, prompt, turns]);
   useEffect(() => { client.current = request; }, [request]);
   useEffect(() => { dirtyRef.current = dirty; if (active) onDirtyChange(dirty); }, [dirty, active, onDirtyChange]);
   useEffect(() => () => { version.current += 1; onDirtyChange(false); }, [onDirtyChange]);
@@ -155,6 +173,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   }, [request]);
   useEffect(() => { void load(); }, [load, refreshKey]);
   const loadCommands = useCallback(async () => {
+    if (!sessionReady) return;
     const generation = ++commandVersion.current;
     setCommandLoading(true);
     try {
@@ -164,7 +183,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     } catch (cause) {
       if (generation === commandVersion.current && client.current === request) setCommandError(cause instanceof Error ? cause.message : "Команды недоступны");
     } finally { if (generation === commandVersion.current) setCommandLoading(false); }
-  }, [request, actor]);
+  }, [request, actor, sessionReady]);
   useEffect(() => { void loadCommands(); }, [loadCommands, status?.settings.revision]);
   const loadModels = useCallback(async () => { await apiMonitor.current?.refresh(); }, []);
   useEffect(() => {
@@ -190,16 +209,28 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     };
   }, [catalogRevision, savedProviderUrl, savedProviderId, request]);
   useEffect(() => { if (modelMenu) modelMenuPanel.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus(); }, [modelMenu]);
-  const loadConversation = useCallback(async (identity: string) => {
+  const loadConversation = useCallback(async (identity: string, restore = false) => {
     if (writing.current || fileRead.current) return;
     const generation = ++memoryGeneration.current;
     setMemoryBusy(true); setMemoryError('');
     try {
       const value = await request<{ id: string; turns: Turn[] }>(`/assistant/conversations/${identity}${actor ? `?telegram_id=${actor}` : ''}`);
       if (generation !== memoryGeneration.current || client.current !== request || activeActor.current !== actor) return;
-      setConversationId(value.id); setTurns(value.turns); setFiles([]); setPrompt('');
-      setModel(value.turns.at(-1)?.model ?? ''); interacted.current = true; rememberConversation(actor, value.id);
-      nextTurn.current = Math.max(0, ...value.turns.map(turn => turn.id));
+      setConversationId(value.id);
+      if (restore) {
+        setTurns(current => {
+          if (!current.length) return value.turns;
+          const available = [...value.turns].reverse();
+          return [...current].reverse().map(turn => {
+            const index = available.findIndex(item => item.question === turn.question && item.answer === turn.answer);
+            const server = index >= 0 ? available.splice(index, 1)[0] : undefined;
+            return server ? { ...turn, files: server.files, files_expired: server.files_expired } : turn;
+          }).reverse();
+        });
+        setModel(current => current || value.turns.at(-1)?.model || '');
+      } else { setTurns(value.turns); setFiles([]); setPrompt(''); setModel(value.turns.at(-1)?.model ?? ''); }
+      interacted.current = true; selectedConversation.current = value.id;
+      nextTurn.current = Math.max(nextTurn.current, ...value.turns.map(turn => turn.id));
     } catch (cause) { if (generation === memoryGeneration.current) setMemoryError(cause instanceof Error ? cause.message : 'Не удалось загрузить диалог'); }
     finally { if (generation === memoryGeneration.current) setMemoryBusy(false); }
   }, [request, actor]);
@@ -209,20 +240,21 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       if (client.current !== request || activeActor.current !== actor) return;
       setConversations(value.items ?? []);
       if (restore && value.items?.length && !writing.current && !interacted.current) {
-        let previous: string | null = null;
-        try { previous = window.sessionStorage.getItem(`nodera-conversation:${actor}`); } catch { /* Optional hint only. */ }
-        if (previous !== 'new') await loadConversation(value.items.find(item => item.id === previous)?.id ?? value.items[0].id);
+        const previous = selectedConversation.current;
+        const identity = previous === undefined ? value.items[0].id : value.items.find(item => item.id === previous)?.id;
+        if (identity) await loadConversation(identity, true);
       }
     } catch (cause) { if (client.current === request && activeActor.current === actor) setMemoryError(cause instanceof Error ? cause.message : 'Кеш диалогов недоступен'); }
   }, [request, actor, loadConversation]);
   const invalidateMemory = useCallback(() => { memoryGeneration.current++; }, []);
   useEffect(() => {
+    if (!sessionReady) return;
     if (agentInstalled && cacheEnabled) void loadConversations(true);
     else { setConversations([]); setMemoryBusy(false); }
     return invalidateMemory;
-  }, [agentInstalled, cacheEnabled, loadConversations, invalidateMemory]);
+  }, [agentInstalled, cacheEnabled, loadConversations, invalidateMemory, sessionReady]);
   useEffect(() => {
-    if (!status?.chat_jobs || chatRunning.current) return;
+    if (!sessionReady || !status?.chat_jobs || chatRunning.current) return;
     const identity = savedChat(request, actor);
     setHasPendingChat(Boolean(identity));
     if (!identity) return;
@@ -244,7 +276,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       if (controller.signal.aborted) return;
       setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action, pending_actions: result.pending_actions } : turn));
       ingestConfirmations(actor || "panel", result.pending_actions ?? (result.pending_action ? [result.pending_action] : []));
-      setConversationId(result.conversation_id ?? null); rememberConversation(actor, result.conversation_id ?? null);
+      setConversationId(result.conversation_id ?? null); selectedConversation.current = result.conversation_id ?? null;
     }).catch(cause => {
       if (controller.signal.aborted) return;
       if (cause instanceof ChatJobError) rememberChat(request, actor, null);
@@ -255,7 +287,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       chatRunning.current = false; setChatBusy(false); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor)));
     });
     return () => { controller.abort(); chatRunning.current = false; setChatBusy(false); };
-  }, [request, actor, status?.chat_jobs, streaming, recoveryKey, ingestConfirmations]);
+  }, [request, actor, status?.chat_jobs, streaming, recoveryKey, ingestConfirmations, sessionReady]);
   useEffect(() => {
     setTurns(current => current.map(turn => {
       const actions = turn.pending_actions ?? (turn.pending_action ? [turn.pending_action] : []);
@@ -440,7 +472,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
             conversation = result.conversation_id ?? null;
             setTurns(current => current.map(turn => turn.id === id ? completed : turn));
             ingestConfirmations(actor || "panel", result.pending_actions ?? (result.pending_action ? [result.pending_action] : []));
-            setConversationId(conversation); rememberConversation(actor, conversation); setMemoryError(result.cache_error ?? '');
+            setConversationId(conversation); selectedConversation.current = conversation; setMemoryError(result.cache_error ?? '');
             if (result.provider_usage) setStatus(current => current ? { ...current, provider_usage: result.provider_usage } : current);
             if (cacheEnabled) void loadConversations();
             if (!visible.current || typeof document !== "undefined" && document.hidden) notifications.upsert({
@@ -469,16 +501,16 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   if (!status || !draft) return <section hidden={!active} className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
   const selectedComponent = status.modules.find(item => item.id === "ai-agent");
   const botComponent = status.modules.find(item => item.id === "nodera-bot");
-  const availableModels = chatModels(status.settings, catalog);
+  const availableModels = chatModels(status.settings, catalog.length ? catalog : model ? [model] : []);
   const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : availableModels.includes(status.settings.model) ? status.settings.model : "") : status.settings.model;
   const managedComponent = selectedComponent?.installed ? selectedComponent : botComponent;
   if (!managedComponent?.installed) return <section hidden={!active} className="mcpWorkspace"><p>Установите Nodera в разделе «Обзор → Компоненты».</p></section>;
   const readOnly = managedComponent.management?.state !== "managed" || managedComponent.management?.retained;
   const editingBlocked = working === "save" || Boolean(readOnly);
   const settingsBlocked = busy || Boolean(working) || Boolean(loadError) || Boolean(readOnly);
-  const blocked = settingsBlocked || chatBusy || readingFiles || memoryBusy || commandBusy;
-  const composerBlocked = hasPendingChat && !chatBusy || settingsBlocked || readingFiles || memoryBusy || commandBusy;
-  const commandBlocked = commandBusy || readingFiles || Boolean(working) || Boolean(loadError);
+  const blocked = !sessionReady || settingsBlocked || chatBusy || readingFiles || memoryBusy || commandBusy;
+  const composerBlocked = !sessionReady || hasPendingChat && !chatBusy || settingsBlocked || readingFiles || memoryBusy || commandBusy;
+  const commandBlocked = !sessionReady || commandBusy || readingFiles || Boolean(working) || Boolean(loadError);
   const isDirectCommand = directCommand(prompt);
   const promptBlocked = isDirectCommand ? commandBlocked : composerBlocked;
   const agentReady = selectedComponent?.installed && selectedComponent.enabled && selectedComponent.configured;
@@ -486,10 +518,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const matchingCommands = commandMatches(commands, prompt);
   const activeCommandIndex = Math.min(commandIndex, Math.max(0, matchingCommands.length - 1));
   const conflict = status.settings.revision !== draft.expected_revision;
-  const chooseActor = (value: string) => { setCommandMenu(false); setCommandIndex(0); setCommands([]); memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(""); setTurns([]); setFiles([]); setConversationId(null); setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
+  const chooseActor = (value: string) => { const saved = readChatSession(request, value); setCommandMenu(false); setCommandIndex(0); setCommands([]); memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(saved?.provider === chatProvider(status.settings) ? saved.model : ""); setTurns(saved?.turns ?? []); nextTurn.current = Math.max(0, ...(saved?.turns ?? []).map(turn => turn.id)); setFiles([]); setPrompt(saved?.prompt ?? ""); setStreaming(saved?.streaming ?? streaming); setConversationId(saved?.conversation_id ?? null); selectedConversation.current = saved ? saved.conversation_id : undefined; setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
   const actorName = status.settings.accounts.find(item => String(item.telegram_id) === actor)?.name || actor || "Администратор";
   const actorSelect = <label className="mcpActor">Контур<select aria-label="Контур" title={actorName} value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id}</option>)}</select></label>;
-  const newChat = () => { memoryGeneration.current++; interacted.current = true; rememberConversation(actor, null); setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setCopied(undefined); setMemoryError(''); };
+  const newChat = () => { memoryGeneration.current++; interacted.current = true; selectedConversation.current = null; setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setCopied(undefined); setMemoryError(''); };
   async function removeConversation() {
     if (!conversationId || !await confirmAction({ title: 'Удалить диалог?', message: 'Диалог и его вложения будут удалены из кеша на сервере.', confirmLabel: 'Удалить', danger: true })) return;
     try { await request(`/assistant/conversations/${conversationId}${actor ? `?telegram_id=${actor}` : ''}`, { method: 'DELETE' }); newChat(); await loadConversations(); }
@@ -587,7 +619,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     </section>
     {chatSettingsOpen && <SettingsDialog title="Настройки чата" close={() => setChatSettingsOpen(false)}>
         <label className="mcpToggle"><input type="checkbox" checked={streaming} disabled={chatBusy || !status.chat_streaming} onChange={event => {
-          setStreaming(event.target.checked); try { sessionStorage.setItem("nodera-streaming", String(event.target.checked)); } catch {}
+          setStreaming(event.target.checked);
         }}/>Потоковый ответ</label>
         <p>{status.chat_streaming ? "Показывать текст по мере получения. При выключении ответ появится целиком." : "Для потоковых ответов обновите компонент Nodera."}</p>
         {status.settings.accounts.length > 0 && actorSelect}

@@ -69,6 +69,10 @@ class AttachmentError(ValueError):
     pass
 
 
+class ToolRoundLimit(RuntimeError):
+    pass
+
+
 def persona(settings, actor='panel'):
     styles = {'balanced': 'Объясняй ясно и по делу.', 'concise': 'Отвечай кратко, сначала результат.',
               'friendly': 'Общайся тепло и дружелюбно, без лести и навязчивости.',
@@ -1299,6 +1303,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         complete_usage = True
         corrected_claim = False
         evidence_required = operation_request(prompt)
+        prepared_operation = False
         for _ in range(MAX_ROUNDS):
             required_call = not used and tools and (corrected_claim or evidence_required)
             if required_call:
@@ -1344,12 +1349,22 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                     result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=30)
                     text = '\n'.join(item.text for item in result.content if item.type == 'text')[:24000]
                     used.append(name)
+                    if name == 'request_confirmation' or name.startswith('mihomo_') or name in ('vps_service_action', 'relay_prepare', 'telegram_prepare'):
+                        try: receipt = json.loads(text)
+                        except (ValueError, TypeError): receipt = None
+                        if isinstance(receipt, dict) and not receipt.get('error') and receipt.get('confirmation_required') is True:
+                            identities = receipt.get('operation_ids', [receipt.get('operation_id')])
+                            if isinstance(identities, list) and identities and all(isinstance(identity, str) and re.fullmatch(r'[0-9a-f]{32}', identity) for identity in identities): prepared_operation = True
                 except ToolValidationError as exc:
                     text = json.dumps(exc.result(), ensure_ascii=False)
                 except Exception:
                     text = json.dumps({'error': 'Инструмент не выполнил запрос. Данные не подтверждены.'}, ensure_ascii=False)
                 messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': text})
-        raise RuntimeError('Достигнут лимит шагов AI; сузьте запрос')
+        if prepared_operation:
+            result = {'answer': 'Изменения подготовлены и ожидают вашего решения. Проверьте карточку подтверждения. Лимит шагов ИИ достигнут; дополнительных операций автоматически не запускаем.', 'tools_used': used}
+            if complete_usage: result['usage'] = usage
+            return result
+        raise ToolRoundLimit('Достигнут лимит шагов ИИ. Уточните запрос; подготовка изменений не подтверждена.')
 
 
 async def check(settings, module, actor):
@@ -1375,7 +1390,7 @@ async def check(settings, module, actor):
 def safe_error(exc):
     # Neither transport URLs (which contain bot tokens), provider payloads nor
     # Telethon exception text are returned to a browser or Telegram user.
-    if isinstance(exc, ProviderFailure): return str(exc)
+    if isinstance(exc, (ProviderFailure, ToolRoundLimit)): return str(exc)
     if isinstance(exc, socket.gaierror): return 'Не удалось разрешить DNS-имя AI-провайдера'
     if tls_failure(exc): return 'Не удалось установить защищённое TLS-соединение с AI-провайдером'
     if isinstance(exc, httpx.ConnectTimeout): return 'Не удалось подключиться к AI-провайдеру за 10 секунд'
@@ -1404,6 +1419,7 @@ def tls_failure(exc):
 
 def error_code(exc):
     if isinstance(exc, ProviderFailure): return exc.code
+    if isinstance(exc, ToolRoundLimit): return 'tool_round_limit'
     if isinstance(exc, socket.gaierror): return 'provider_dns_error'
     if tls_failure(exc): return 'provider_tls_error'
     for kind, code in ((httpx.ConnectTimeout, 'provider_connect_timeout'), (httpx.ReadTimeout, 'provider_read_timeout'),

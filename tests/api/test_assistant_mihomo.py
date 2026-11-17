@@ -89,6 +89,13 @@ class MihomoOperatorTests(unittest.TestCase):
             self.assertEqual(actual['rules'], policy['rules'])
             self.assertEqual(actual['groups'][0]['name'], 'Media')
             self.assertEqual(len(writes), 1)
+            with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
+                self.assertEqual(self.client.get('/api/assistant/pending-action?all_actors=true').json()['operations'], [])
+                saved_path = commands.pending_path(api, 'panel', code=row['code'])
+                legacy = control.operations.read(saved_path)
+                legacy.pop('completion_state', None)
+                control.operations.atomic_json(saved_path, legacy)
+                self.assertEqual(self.client.get('/api/assistant/pending-action?all_actors=true').json()['operations'], [])
 
             before = manager.ROUTING_SETTINGS_FILE.read_bytes()
             policy['rules'][0]['kind'] = 'DOMAIN-KEYWORD'

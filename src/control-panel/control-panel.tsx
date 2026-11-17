@@ -26,6 +26,7 @@ import { ApplicationView } from "../features/application/application-view";
 import { LoginView } from "../features/auth/login-view";
 import { AssistantConfirmations } from "../features/assistant/confirmation-queue";
 import { AssistantView } from "../features/assistant/assistant-view";
+import { clearChatSessions } from "../features/assistant/chat-session";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, ConfirmationRequest, LoggingSettings, Overview, ProtocolImage, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
 import { actionLabels, bytes, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionSucceeded, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "./system-operation";
@@ -72,6 +73,7 @@ export function ControlPanel() {
   const [mcpRefreshKey, setMcpRefreshKey] = useState(0);
   const [mihomoRefreshKey, setMihomoRefreshKey] = useState(0);
   const [token, setToken] = useState("");
+  const chatSessionScope = useRef<string | undefined>(undefined);
   const loginInFlight = useRef(false);
   const [loginUser, setLoginUser] = useState("admin");
   const [loginPassword, setLoginPassword] = useState("");
@@ -147,6 +149,8 @@ export function ControlPanel() {
   const clearSession = useCallback(() => {
     applicationObservationVersion.current += 1;
     sessionStorage.removeItem("312-token");
+    sessionStorage.removeItem("312-active-tab");
+    clearChatSessions({ sessionKey: chatSessionScope.current });
     pendingConfirmation.current?.resolve(false);
     pendingConfirmation.current = null;
     setConfirmation(null);
@@ -175,7 +179,7 @@ export function ControlPanel() {
 
     // Restore browser-only credentials after hydration.
     setToken(sessionStorage.getItem("312-token") || "");
-    const savedTab = sessionStorage.getItem("312-reload-tab");
+    const savedTab = sessionStorage.getItem("312-reload-tab") || sessionStorage.getItem("312-active-tab");
     if (savedTab && ["overview", "mihomo", "dns", "network", "security", "application", "services", "nodera", "ai-agent", "telegram-bot"].includes(savedTab)) setTab((savedTab === "dns" ? "network" : ["ai-agent", "telegram-bot"].includes(savedTab) ? "nodera" : savedTab) as Tab);
     sessionStorage.removeItem("312-reload-tab");
     sessionStorage.removeItem("312-reload-channel");
@@ -198,6 +202,10 @@ export function ControlPanel() {
   const request = useMemo(() => observedServicesRequest(observedApplicationRequest(createApiClient(token, {
     formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
   }), (value) => applicationStatusSnapshot(value, systemActionSnapshot, cdnSecuritySnapshot))), [token]);
+  useEffect(() => { chatSessionScope.current = request.sessionKey; }, [request]);
+  useEffect(() => {
+    if (token) try { sessionStorage.setItem("312-active-tab", tab); } catch { /* Navigation remains usable without storage. */ }
+  }, [tab, token]);
 
   const acceptSystemOperation = useCallback((operation: SystemAction) => {
     if (acceptedOperation.current?.id !== operation.id || acceptedOperation.current?.state !== operation.state) {

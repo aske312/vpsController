@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as chatCommands from '../../src/features/assistant/chat-commands.ts';
+import * as chatSession from '../../src/features/assistant/chat-session.ts';
 import * as chatJobs from '../../src/features/assistant/chat-jobs.ts';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
@@ -41,7 +42,7 @@ function mount(status, catalog = [], overrides = {}) {
   const settings = {}, alerts = {};
   const confirmationModule = {}, commandMenuModule = {};
   const confirmations = { actions: [], working: [], results: {}, errors: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
-  const require = name => name === 'react' ? hooks : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name === 'react' ? hooks : name === './chat-session' ? chatSession : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const alertsSource = readFileSync(new URL('../../src/features/assistant/telegram-alerts.tsx', import.meta.url), 'utf8');
   const compiledAlerts = ts.transpileModule(alertsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
@@ -56,8 +57,9 @@ function mount(status, catalog = [], overrides = {}) {
   const commandMenuCompiled = ts.transpileModule(commandMenuSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', commandMenuCompiled.outputText)(require, commandMenuModule);
   new Function('require', 'exports', outputText)(require, exported);
-  const jobs = new Map();
+  const jobs = overrides.jobs ?? new Map();
   const request = async (path, options) => {
+    if (path.startsWith('/assistant/conversations')) return overrides.conversations ? overrides.conversations(path) : {enabled:true,items:[]};
     if (path.startsWith('/assistant/commands')) {
       if (options?.method === 'POST') { const body = JSON.parse(options.body); writes.push(body); return overrides.command ? overrides.command(body) : {text:'Command output',context_safe:true,pending_actions:[]}; }
       return { items: overrides.commands ?? [] };
@@ -80,6 +82,7 @@ function mount(status, catalog = [], overrides = {}) {
     if (path.startsWith('/assistant/requests/')) return jobs.get(path.split('/')[3].split('?')[0]);
     return status;
   };
+  request.sessionKey = overrides.sessionKey;
   const props = { active: true, onOpenChat: overrides.onOpenChat || (() => {}), request, busy: overrides.busy ?? false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
   return { writes, notifications, setActive(value) { props.active = value; }, setBusy(value) { props.busy = value; }, render() {
     cursor = 0;
@@ -190,6 +193,55 @@ function fixture() {
     modules: ['ai-agent', 'nodera-bot'].map(id => ({ id, installed: true, configured: id === 'nodera-bot', management: { state: 'managed' } })),
     mcp_modules: [], tools: {}, bot: { active: true }, legacy_bot: {} };
 }
+
+test('a browser reload restores actor, model, draft, streaming and transcript even with server history disabled',async()=>{
+  const previous=globalThis.sessionStorage,entries=new Map();
+  globalThis.sessionStorage={getItem:key=>entries.get(key)??null,setItem:(key,value)=>entries.set(key,value),removeItem:key=>entries.delete(key)};
+  try{
+    const status=fixture();Object.assign(status.settings,{memory_enabled:false,model_mode:'catalog',model:'default-model',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
+    status.settings.accounts=[{telegram_id:11,name:'Selected actor',excluded_dialogs:[],bot_access:false,telegram_access:false,vps_access:false,session_configured:false}];
+    const client={sessionKey:'reload-fixture'};
+    chatSession.rememberActor(client,'11');chatSession.saveChatSession(client,'11',{provider:chatSession.chatProvider(status.settings),model:'chosen-model',streaming:true,conversation_id:null,prompt:'Draft before reload',turns:[{id:4,question:'Earlier question',answer:'Earlier answer',model:'chosen-model',files:[]}]});
+    async function restored(){const view=mount(status,[],{sessionKey:client.sessionKey});for(let index=0;index<4;index++){view.render();await new Promise(setImmediate);}return view;}
+    const first=await restored();let tree=first.render();
+    assert.match(JSON.stringify(tree),/Earlier answer/);assert.match(JSON.stringify(nodes(tree,n=>n.props.className==='noderaChatScope')[0].node),/Selected actor/);
+    assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Draft before reload');
+    assert.match(JSON.stringify(nodes(tree,n=>n.props['aria-label']==='Модель для запроса')[0].node),/chosen-model/);
+    nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'Draft edited before next reload',style:{},scrollHeight:48}});first.render();
+    const second=await restored();tree=second.render();assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Draft edited before next reload');assert.equal(second.writes.length,0);
+    nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);second.render();
+    assert.equal(second.writes[0].telegram_id,11);assert.equal(second.writes[0].model,'chosen-model');assert.equal(second.writes[0].stream,true);
+  }finally{globalThis.sessionStorage=previous;}
+});
+
+test('restoring a running job reads its saved result once without resubmitting generation',async()=>{
+  const previous=globalThis.sessionStorage,entries=new Map();globalThis.sessionStorage={getItem:k=>entries.get(k)??null,setItem:(k,v)=>entries.set(k,v),removeItem:k=>entries.delete(k)};
+  try{
+    const status=fixture();Object.assign(status.settings,{memory_enabled:false,model:'m',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
+    const identity='b'.repeat(32),client={sessionKey:'restored-job'};
+    chatSession.saveChatSession(client,'',{provider:chatSession.chatProvider(status.settings),model:'m',streaming:false,conversation_id:null,prompt:'',turns:[{id:1,question:'Old',answer:'Previous',model:'m',files:[]},{id:2,question:'In progress',model:'m',files:[],queue_state:'running'}]});
+    chatJobs.rememberChat(client,'',identity);
+    const jobs=new Map([[identity,Promise.resolve({id:identity,seq:1,state:'done',stage:'complete',question:'In progress',model:'m',stream:false,output:{result:{answer:'Recovered result',tools_used:[]}}})]]);
+    const view=mount(status,[],{sessionKey:client.sessionKey,jobs});for(let index=0;index<5;index++){view.render();await new Promise(setImmediate);}
+    const tree=view.render();assert.equal(view.writes.length,0);assert.match(JSON.stringify(tree),/Recovered result/);
+    assert.equal(nodes(tree,n=>n.props.className==='mcpUserMessage'&&n.props.children.includes('In progress')).length,1);
+  }finally{globalThis.sessionStorage=previous;}
+});
+
+test('server history restores the selected conversation without overwriting a newer draft, model or command output',async()=>{
+  const previous=globalThis.sessionStorage,entries=new Map();globalThis.sessionStorage={getItem:k=>entries.get(k)??null,setItem:(k,v)=>entries.set(k,v),removeItem:k=>entries.delete(k)};
+  try{
+    const status=fixture();Object.assign(status.settings,{model_mode:'catalog',model:'default-model'});
+    const client={sessionKey:'history-restoration'},identity='c'.repeat(32),reads=[];
+    const turn={id:1,question:'Saved question',answer:'Saved answer',model:'old-model',files:[]};
+    chatSession.saveChatSession(client,'',{provider:chatSession.chatProvider(status.settings),model:'chosen-model',streaming:false,conversation_id:identity,prompt:'Keep my draft',turns:[turn,{id:2,question:'/status',answer:'Command output',model:'',context_safe:true,files:[]}]});
+    const view=mount(status,[],{sessionKey:client.sessionKey,conversations:path=>{reads.push(path);return path.split('?')[0].endsWith(identity)?{id:identity,turns:[turn]}:{enabled:true,items:[{id:'d'.repeat(32),title:'Newer different conversation'},{id:identity,title:'Selected conversation'}]};}});
+    for(let index=0;index<6;index++){view.render();await new Promise(setImmediate);}
+    const tree=view.render();assert(reads.some(path=>path.endsWith(identity)));assert(!reads.some(path=>path.endsWith('d'.repeat(32))));
+    assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Keep my draft');assert.match(JSON.stringify(tree),/Command output/);
+    assert.match(JSON.stringify(nodes(tree,n=>n.props['aria-label']==='Модель для запроса')[0].node),/chosen-model/);
+  }finally{globalThis.sessionStorage=previous;}
+});
 
 test('saved connection data is visible in AI settings before a manual check and unavailable fields are omitted', async () => {
   const status = fixture(), identity = 'b'.repeat(32);

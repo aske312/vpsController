@@ -18,6 +18,25 @@ def attachment(name, mime, data):
 
 
 class AssistantChatFilesTests(unittest.TestCase):
+    def test_last_tool_round_with_a_prepared_operation_returns_a_pending_decision_instead_of_failing_chat(self):
+        session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[SimpleNamespace(type='text', text='{"confirmation_required":true,"operation_id":"' + 'a'*32 + '"}')])) )
+        tool = SimpleNamespace(name='mihomo_settings', description='Prepare settings', inputSchema={'type': 'object'})
+        @asynccontextmanager
+        async def connections(*_): yield {'mihomo_settings': (session, tool)}
+        provider = AsyncMock(return_value={'tool_calls':[{'id':'prepare','type':'function','function':{'name':'mihomo_settings','arguments':'{}'}}]})
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider), patch.object(runner, 'MAX_ROUNDS', 1):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Создай группу'))
+        self.assertIn('ожидают вашего решения', result['answer'])
+        self.assertEqual(result['tools_used'], ['mihomo_settings'])
+        self.assertEqual(provider.await_count, 1)
+        session.call_tool.assert_awaited_once()
+
+    def test_tool_round_limit_without_a_prepared_operation_remains_a_specific_error(self):
+        error = runner.ToolRoundLimit('Достигнут лимит шагов ИИ.')
+        self.assertEqual(runner.error_code(error), 'tool_round_limit')
+        self.assertEqual(runner.safe_error(error), str(error))
+
     def test_no_tool_operational_report_is_corrected_and_never_returned_as_success(self):
         @asynccontextmanager
         async def connections(*_):
