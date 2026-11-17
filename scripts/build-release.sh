@@ -59,11 +59,11 @@ MIHOMO_VERSION="1.19.34"
 case "$(uname -m)" in
   x86_64|amd64)
     mihomo_asset="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"
-    mihomo_sha256="04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc"
+    mihomo_sha256="2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06"
     ;;
   aarch64|arm64)
     mihomo_asset="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
-    mihomo_sha256="9e0f11afbf38426b8bd88fdc594678f8161c57eccb4e1b77acb12b493904f1d4"
+    mihomo_sha256="daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f"
     ;;
   *)
     echo "Unsupported Mihomo release architecture: $(uname -m)" >&2
