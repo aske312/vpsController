@@ -20,6 +20,7 @@ assert metadata['commit'] == sys.argv[1]
 assert metadata['architecture'] == architecture
 assert metadata['platform'] == 'linux'
 PY
+node scripts/harden-picomatch.mjs --check
 node --input-type=module -e "await import('rolldown'); await import('vinext'); await import('react')"
 ./api/bin/xray version | grep -F 'vpsController-trojan-fragment-v1' >/dev/null
 ./api/bin/mihomo -v | grep -F 'Mihomo Meta v' >/dev/null

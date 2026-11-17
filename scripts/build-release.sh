@@ -124,6 +124,7 @@ esac
   if [[ "${RELEASE_SKIP_INSTALL:-0}" != "1" ]]; then
     npm ci --include=dev --include=optional --ignore-scripts
   fi
+  node scripts/harden-picomatch.mjs
   npm run build
 )
 
@@ -140,6 +141,7 @@ cp -- "${ROOT_DIR}/scripts/runtime/package.json" "${ROOT_DIR}/scripts/runtime/pa
     npm ci --include=optional --ignore-scripts --no-audit --no-fund
     printf '%s\n' "${runtime_key}" >install.key
   fi
+  node "${ROOT_DIR}/scripts/harden-picomatch.mjs"
 )
 cp -- "${RUNTIME_DIR}/package.json" "${RUNTIME_DIR}/package-lock.json" "${STAGE}/"
 cp -a "${RUNTIME_DIR}/node_modules" "${STAGE}/node_modules"

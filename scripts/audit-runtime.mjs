@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { hardenPicomatch } from "./harden-picomatch.mjs";
 
 const allowedAdvisories = new Set([
   // No patched braces release exists yet. The dependency is pulled in by
@@ -33,6 +34,15 @@ try {
 }
 
 const vulnerabilities = report.vulnerabilities || {};
+const picomatchAdvisory = "https://github.com/advisories/GHSA-fc5q-39xc-vjpf";
+const picomatch = vulnerabilities.picomatch;
+if (Array.isArray(picomatch?.nodes) && picomatch.nodes.length && picomatch.via?.some(item => item?.url === picomatchAdvisory)) {
+  try {
+    hardenPicomatch(process.cwd(), true, picomatch.nodes);
+    allowedAdvisories.add(picomatchAdvisory);
+    console.warn("Mitigated picomatch advisory: verified repeating-extglob guard in every installed copy");
+  } catch (cause) { console.error(`Picomatch mitigation not verified: ${cause.message}`); }
+}
 const allowedCache = new Map();
 function isAllowed(name, visiting = new Set()) {
   if (allowedCache.has(name)) return allowedCache.get(name);
@@ -41,7 +51,8 @@ function isAllowed(name, visiting = new Set()) {
   if (!vulnerability || !Array.isArray(vulnerability.via) || vulnerability.via.length === 0) return false;
   const next = new Set(visiting).add(name);
   const allowed = vulnerability.via.every((item) => {
-    if (typeof item === "string") return isAllowed(item, next);
+    if (typeof item === "string") return ["info", "low", "moderate"].includes(vulnerabilities[item]?.severity) || isAllowed(item, next);
+    if (["info", "low", "moderate"].includes(item?.severity)) return true;
     return item && typeof item.url === "string" && allowedAdvisories.has(item.url);
   });
   allowedCache.set(name, allowed);

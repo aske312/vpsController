@@ -25,5 +25,6 @@ runs:
         if [[ "$CACHE_HIT" != 'true' ]] || ! npm ls --depth=0 --include=dev || ! node --input-type=module -e "await import('rolldown')"; then
           npm ci --include=dev --include=optional --ignore-scripts --no-audit --no-fund
         fi
+        node scripts/harden-picomatch.mjs
         node --input-type=module -e "await import('rolldown')"
         node scripts/runtime-manifest.mjs
