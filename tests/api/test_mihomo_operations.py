@@ -22,6 +22,17 @@ class MihomoOperationTests(unittest.TestCase):
         self.enterContext(patch.object(manager, "observe_service", return_value={"unit_present": None}))
         self.launch = self.enterContext(patch.object(manager.subprocess, "run", return_value=SimpleNamespace(returncode=0)))
 
+    def test_subscription_rotation_worker_keeps_identity_and_does_not_replay(self):
+        identity = 'd' * 32
+        payload = {'profile_id': 'own', 'expected_revision': 'a' * 64}
+        started = manager.start_profile_operation('subscription-rotate', payload, identity)
+        command = self.launch.call_args.args[0]
+        path, digest = Path(command[-2]), command[-1]
+        with patch.object(manager, 'rotate_profile_subscription') as rotate:
+            self.assertTrue(manager.execute_profile_operation('subscription-rotate', path, digest, identity, started['unit']))
+            self.assertTrue(manager.execute_profile_operation('subscription-rotate', path, digest, identity, started['unit']))
+            rotate.assert_called_once_with('own', 'a' * 64, identity)
+
     def test_admission_replay_worker_progress_and_terminal_replay(self):
         identity = "c" * 32
         started = manager.start_module_operation("transport-wg", "install", identity)

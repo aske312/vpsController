@@ -62,6 +62,8 @@ def call(api, actor, arguments):
     record = {'kind': 'roles', 'service': 'Роли Nodera', 'action': 'Изменить доступ', 'body': body,
               'code': secrets.token_hex(4), 'operation_id': uuid.uuid4().hex, 'expires': time.time() + 60,
               'revision': settings['revision'], 'submitted': False}
+    if 'mihomo_profile_id' in body and set(body) <= {'telegram_id', 'mihomo_profile_id', 'products'}:
+        record.update(service='Подписка пользователя ' + str(body['telegram_id']), action='Привязать' if body['mihomo_profile_id'] else 'Отвязать')
     with control.operations.locked(api.DATA_DIR):
         assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'changes': body, 'operation_id': record['operation_id'],
@@ -74,7 +76,7 @@ def confirm(api, actor, record):
     if settings['revision'] != record['revision']: raise HTTPException(409, 'Права изменились; подготовьте подтверждение заново')
     control.configure(api, payload(settings, record['body']))
     import assistant_commands
-    text = 'Роли и права Nodera обновлены.'
+    text = 'Привязка подписки пользователя обновлена.' if 'mihomo_profile_id' in record['body'] and set(record['body']) <= {'telegram_id', 'mihomo_profile_id', 'products'} else 'Роли и права Nodera обновлены.'
     with control.operations.locked(api.DATA_DIR):
         control.operations.atomic_json(assistant_commands.pending_path(api, actor, code=record['code']), {**record, 'completed_text': text})
         control.operations.atomic_json(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'), {

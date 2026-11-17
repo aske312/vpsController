@@ -40,6 +40,32 @@ class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
 
     def writes(self): return [call for call in self.calls if call['method'] != 'GET']
 
+    async def test_create_prepares_connections_and_rules_together_with_explicit_default_device(self):
+        result = await self.call('profile_create', name='For user', connections=[{'component': 'transport-wg', 'settings': {'mtu': 1400}}],
+                                 routing={'structured_policy': self.policy})
+        self.assertTrue(result['confirmation_required'])
+        write = self.writes()[0]
+        self.assertEqual((write['method'], write['path']), ('POST', '/profiles'))
+        self.assertEqual(write['body']['connections'][0]['device_id'], write['body']['devices'][0]['id'])
+        self.assertEqual(json.loads(write['body']['routing']['structured_policy']), self.policy)
+
+    async def test_delete_and_rotate_require_fresh_profile_revision(self):
+        for command, method, path in [('profile_delete', 'DELETE', '/profiles/own'),
+                                      ('subscription_rotate', 'POST', '/profiles/own/subscription/rotate')]:
+            self.calls.clear()
+            self.assertEqual((await self.call(command, profile_id='own', expected_revision='f' * 64))['error'], 'tool_validation_error')
+            self.assertEqual(self.writes(), [])
+            result = await self.call(command, profile_id='own', expected_revision='b' * 64)
+            self.assertTrue(result['confirmation_required'])
+            self.assertEqual(self.writes()[0], {'method': method, 'path': path, 'body': {'expected_revision': 'b' * 64}})
+
+    async def test_account_assignment_uses_owner_scoped_api_without_changing_roles(self):
+        await self.call('accounts')
+        self.assertEqual(self.calls[0]['path'], '/accounts')
+        await self.call('profile_assign', telegram_id=123, profile_id='own')
+        self.assertEqual(self.writes()[0], {'method': 'PATCH', 'path': '/accounts/123/profile', 'body': {'profile_id': 'own'}})
+        self.assertEqual((await self.call('profile_assign', telegram_id=True, profile_id='own'))['error'], 'tool_validation_error')
+
     async def test_settings_normalize_policy_objects_and_reject_invalid_rule_kinds_before_preparing(self):
         result = await self.call('settings', section='routing', method='PATCH', values={'structured_policy': self.policy}, expected_revision='a' * 64)
         self.assertTrue(result['confirmation_required'])

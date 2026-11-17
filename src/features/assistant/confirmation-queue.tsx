@@ -231,9 +231,14 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
 export function confirmationSummary(action: PendingAction) {
   const path = action.service.replace(/^Mihomo\s+/, "");
   const titles: Record<string, string> = { "/routing/settings": "Изменить правила и группы маршрутизации", "/dns/settings": "Изменить настройки DNS", "/routing/presets": "Изменить пресеты маршрутизации" };
-  const title = titles[path] || (path.startsWith("/profiles/") ? (action.action === "DELETE" ? (path.includes("/devices/") ? "Удалить устройство Mihomo" : "Удалить профиль Mihomo") : "Изменить профиль Mihomo") : `${({ start: "Запустить", stop: "Остановить", restart: "Перезапустить", POST: "Создать", DELETE: "Удалить", PATCH: "Изменить" } as Record<string, string>)[action.action] || action.action} · ${action.service}`);
+  const title = titles[path] || (path === "/profiles" && action.action === "POST" ? "Создать подписку Mihomo" : path.endsWith("/subscription/rotate") ? "Перевыпустить ссылку подписки" : path.startsWith("/profiles/") ? (action.action === "DELETE" ? (path.includes("/devices/") ? "Удалить устройство Mihomo" : "Удалить профиль Mihomo") : "Изменить профиль Mihomo") : `${({ start: "Запустить", stop: "Остановить", restart: "Перезапустить", POST: "Создать", DELETE: "Удалить", PATCH: "Изменить" } as Record<string, string>)[action.action] || action.action} · ${action.service}`);
   const lines: string[] = [];
-  const values = action.changes?.values;
+  if (path.endsWith("/subscription/rotate")) lines.push("Старый URL и прежние ссылки устройств перестанут работать.", "Подключения, устройства, правила и лимиты сохранятся. Импортируйте новую ссылку в клиент.");
+  if (typeof action.changes?.name === "string") lines.push(`Название: ${action.changes.name}`);
+  if (Array.isArray(action.changes?.connections)) lines.push(`Подключения (${action.changes.connections.length}): ${action.changes.connections.map((row: { name?: string; component?: string }) => row.name || row.component || "Без имени").join(", ")}`);
+  if (typeof action.changes?.telegram_id === "number") lines.push(`Пользователь: ${action.changes.telegram_id}`);
+  if (action.changes && "mihomo_profile_id" in action.changes) lines.push(`Подписка: ${action.changes.mihomo_profile_id || "отвязать"}`);
+  const values = action.changes?.values || action.changes?.routing;
   if (values && typeof values === "object" && !Array.isArray(values)) {
     const raw = (values as Record<string, unknown>).structured_policy;
     if (raw) {

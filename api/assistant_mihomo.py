@@ -18,12 +18,12 @@ import assistant_roles as roles
 
 ID = r'[a-zA-Z0-9_-]{1,64}'
 READ_ROUTES = (
-    r'/status', r'/modules', rf'/modules/{ID}/settings', r'/profiles',
+    r'/status', r'/modules', rf'/modules/{ID}/settings', r'/profiles', r'/profiles/schema',
     rf'/profiles/{ID}/(?:stats|subscription|config|client-verification|client-reports)',
     r'/stats', r'/routing/schema', r'/dns/settings', r'/reconciliation', r'/action',
 )
 WRITE_ROUTES = {
-    'POST': (r'/profiles', rf'/modules/{ID}/(?:install|update)', r'/routing/personal-rules', r'/reconciliation', r'/recovery'),
+    'POST': (r'/profiles', rf'/profiles/{ID}/subscription/rotate', rf'/modules/{ID}/(?:install|update)', r'/routing/personal-rules', r'/reconciliation', r'/recovery'),
     'PATCH': (rf'/profiles/{ID}', rf'/modules/{ID}/settings', r'/dns/settings',
               r'/routing/settings', r'/routing/presets', rf'/routing/personal-rules/{ID}'),
     'DELETE': (rf'/profiles/{ID}', rf'/profiles/{ID}/devices/{ID}', rf'/modules/{ID}', rf'/routing/personal-rules/{ID}'),
@@ -85,7 +85,7 @@ def sanitize(value):
     if isinstance(value, list):
         return [sanitize(item) for item in value]
     if isinstance(value, dict):
-        hidden = {'credential', 'subscription_token', 'subscriptions', 'retiring_connections', 'private_key', 'password',
+        hidden = {'credential', 'subscription_token', 'device_identity_secret', 'subscriptions', 'retiring_connections', 'private_key', 'password',
                   'secret', 'api_key', 'bot_token', 'session', 'control_token', 'logs', 'log_path', 'command', 'payload'}
         return {key: sanitize(item) for key, item in value.items() if key not in hidden}
     return value
@@ -119,9 +119,13 @@ def authorize(settings, actor, method, path, body):
                 for key, permission in {'traffic_gb': 'subscription_quota', 'speed_mbps': 'subscription_speed', 'days': 'subscription_expiry'}.items():
                     if limits is None or key in limits: roles.require(settings, actor, permission)
         elif method == 'DELETE' and re.fullmatch(rf'/profiles/{ID}/devices/{ID}', parsed.path): roles.require(settings, actor, 'subscription_devices')
-        elif method == 'DELETE' and re.fullmatch(rf'/profiles/{ID}', parsed.path): roles.require(settings, actor, 'subscriptions_delete')
+        elif method == 'DELETE' and re.fullmatch(rf'/profiles/{ID}', parsed.path):
+            roles.require(settings, actor, 'subscriptions_delete')
+            if set(body) - {'expected_revision'}: raise HTTPException(422, 'Для удаления допустим только expected_revision')
         elif method == 'POST' and parsed.path == '/profiles':
             for permission in ('subscriptions_create', 'subscription_quota', 'subscription_speed', 'subscription_expiry'): roles.require(settings, actor, permission)
+        elif method == 'POST' and re.fullmatch(rf'/profiles/{ID}/subscription/rotate', parsed.path):
+            if set(body) != {'expected_revision'}: raise HTTPException(422, 'Для перевыпуска ссылки нужен только expected_revision профиля')
         elif parsed.path.startswith('/modules/'): roles.require(settings, actor, 'modules_manage')
         elif parsed.path.startswith('/routing/'): roles.require(settings, actor, 'routing_manage')
         elif parsed.path.startswith('/dns/'): roles.require(settings, actor, 'dns_manage')
@@ -135,7 +139,7 @@ def authorize(settings, actor, method, path, body):
     own = '/profiles/' + linked
     if method == 'GET' and parsed.path == '/profiles':
         return parsed.path
-    if method == 'GET' and parsed.path in ('/modules', '/routing/schema'):
+    if method == 'GET' and parsed.path in ('/modules', '/routing/schema', '/profiles/schema'):
         return parsed.path
     if method == 'GET' and re.fullmatch(re.escape(own) + r'/(stats|subscription|config|client-verification|client-reports)', parsed.path):
         return parsed.path
@@ -149,6 +153,8 @@ def authorize(settings, actor, method, path, body):
                 raise HTTPException(403, 'Метаданные устройства определяет сервер')
         return parsed.path
     if method == 'DELETE' and re.fullmatch(re.escape(own) + rf'/devices/{ID}', parsed.path):
+        return parsed.path
+    if method == 'POST' and parsed.path == own + '/subscription/rotate':
         return parsed.path
     raise HTTPException(403, 'Доступна только привязанная подписка и её устройства')
 
@@ -170,9 +176,14 @@ def capabilities(api, actor):
     linked = profile_for(settings, actor).get('mihomo_profile_id')
     return {
         'role': 'administrator' if admin else 'subscriber', 'profile_id': linked,
-        'reads': list(READ_ROUTES) if admin else ['/profiles', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config', f'/profiles/{linked}/client-reports'],
-        'writes': WRITE_ROUTES if admin else {'PATCH': [f'/profiles/{linked}'], 'DELETE': [f'/profiles/{linked}/devices/<id>']},
+        'reads': list(READ_ROUTES) if admin else ['/profiles', '/profiles/schema', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config', f'/profiles/{linked}/client-reports'],
+        'writes': WRITE_ROUTES if admin else {'PATCH': [f'/profiles/{linked}'], 'DELETE': [f'/profiles/{linked}/devices/<id>'], 'POST': [f'/profiles/{linked}/subscription/rotate']},
         'confirmation_required': True,
+        'profile_schema_path': '/profiles/schema',
+        'account_assignment': {'read': '/accounts', 'assign': '/accounts/<telegram_id>/profile',
+                               'permission': 'roles_manage', 'body': {'profile_id': 'existing profile ID or null to unlink'}} if roles.allows(settings, actor, 'roles_manage') else None,
+        'subscription_rotation': {'method': 'POST', 'path': '/profiles/<id>/subscription/rotate', 'body': ['expected_revision'],
+                                  'effect': 'Отзывает общую и все ссылки устройств. Сохраняет подключения, устройства, HWID, правила и лимиты. Получите новый URL через GET /profiles/<id>/subscription.'},
         'permissions': sorted(roles.effective(settings, actor)),
         'profile_fields': ['name', 'channels', 'connections', 'devices', 'routing'] + (['limits'] if admin else []),
         'connection_fields': {'id': 'optional existing ID', 'component': 'module ID', 'name': 'label', 'device_id': 'device ID', 'settings': 'module connection settings'},
@@ -184,7 +195,11 @@ def capabilities(api, actor):
                            'inheritance': 'Unset group health fields inherit shared routing settings. Select has no health checks. max_failed_times is a failure threshold, not retries.',
                            'group_members': ['*', 'connection:<id>', 'group:<name>'],
                            'strategies': ['consistent-hashing', 'round-robin', 'sticky-sessions']},
-        'instructions': 'Сначала прочитайте /profiles и схему настроек. При PATCH передавайте expected_revision из свежего ответа. '
+        'instructions': 'Для создания прочитайте /profiles/schema и /modules: POST /profiles принимает name, connections, devices, routing, limits. '
+                        'Профиль можно создать с подключениями и правилами сразу. Для другого пользователя: владелец читает /accounts, создаёт профиль, '
+                        'после подтверждения и успешного завершения находит его по create_operation_id и отдельно подтверждает PATCH /accounts/<telegram_id>/profile. '
+                        'Привязка существующего профиля не требует его пересоздания. DELETE /profiles/<id> удаляет подписку только после подтверждения. '
+                        'Сначала прочитайте /profiles и схему настроек. При PATCH и перевыпуске ссылки передавайте expected_revision из свежего ответа. '
                         'Для устройств передавайте полный список с сохранением остальных устройств; для подключений — полный список без credential. '
                         'Квота, скорость и срок — отдельные административные разрешения, пользователь их не меняет. Изменения требуют подтверждения собеседником.',
     }
@@ -192,6 +207,24 @@ def capabilities(api, actor):
 
 def call(api, actor, method, path, body):
     settings = control.read(api)
+    if path == '/accounts' or isinstance(path, str) and re.fullmatch(r'/accounts/[1-9][0-9]{0,15}/profile', path):
+        import assistant_role_actions
+        roles.require(settings, actor, 'roles_manage')
+        if method == 'GET' and path == '/accounts':
+            return {'accounts': assistant_role_actions.call(api, actor, {'method': 'GET'})['accounts']}
+        if method != 'PATCH' or path == '/accounts' or not isinstance(body, dict) or set(body) != {'profile_id'}:
+            raise HTTPException(422, 'Для привязки передайте PATCH /accounts/<telegram_id>/profile и profile_id (null для отвязки)')
+        telegram_id = int(path.split('/')[2])
+        account = next((row for row in settings['accounts'] if row['telegram_id'] == telegram_id), None)
+        if account is None: raise HTTPException(404, 'Учётная запись не найдена; сначала добавьте пользователя в Nodera')
+        identity = body['profile_id']
+        if identity is not None and (not isinstance(identity, str) or not re.fullmatch(ID, identity)):
+            raise HTTPException(422, 'Некорректный ID профиля')
+        if identity is not None and not any(row['id'] == identity for row in profiles(api, actor)['items']):
+            raise HTTPException(404, 'Профиль не найден; дождитесь завершения его создания')
+        changes = {'telegram_id': telegram_id, 'mihomo_profile_id': identity}
+        if identity is not None: changes['products'] = sorted(roles.products(account) | {'mihomo'})
+        return assistant_role_actions.call(api, actor, {'method': 'PATCH', 'body': changes})
     route = authorize(settings, actor, method, path, body)
     if method == 'GET':
         if route == '/profiles':
@@ -216,16 +249,27 @@ def call(api, actor, method, path, body):
     import assistant_commands
     identity = uuid.uuid4().hex
     body = dict(body)
+    if method == 'POST' and route == '/profiles':
+        if set(body) - {'name', 'channels', 'connections', 'devices', 'routing', 'limits', 'operation_id'}:
+            raise HTTPException(422, 'Проверьте поля создания профиля по /profiles/schema')
+        try: preview = request('POST', '/profiles/validate', body)
+        except HTTPException as exc:
+            if exc.status_code == 404: raise HTTPException(409, 'Обновите компонент Mihomo: проверка создания профиля недоступна') from None
+            raise
+        if not isinstance(preview, dict) or preview.get('valid') is not True:
+            raise HTTPException(502, 'Mihomo не подтвердил проверку профиля; запрос подтверждения не создан')
     if method == 'PATCH' and route == '/routing/settings':
         try: preview = request('POST', '/routing/validate', body)
         except HTTPException as exc:
             if exc.status_code == 404: raise HTTPException(409, 'Обновите компонент Mihomo: проверка маршрутизации перед подтверждением недоступна') from None
             raise
         if not isinstance(preview, dict) or preview.get('valid') is not True: raise HTTPException(502, 'Mihomo не подтвердил проверку маршрутизации; запрос подтверждения не создан')
-    if method == 'PATCH' and re.fullmatch(rf'/profiles/{ID}', route):
-        current = next((entry for entry in profiles(api, actor)['items'] if route == '/profiles/' + entry['id']), None)
+    profile_mutation = (method in ('PATCH', 'DELETE') and re.fullmatch(rf'/profiles/{ID}', route)) or (method == 'POST' and re.fullmatch(rf'/profiles/{ID}/subscription/rotate', route))
+    if profile_mutation:
+        current = next((entry for entry in profiles(api, actor)['items'] if route.split('/')[2] == entry['id']), None)
         if not current:
             raise HTTPException(404, 'Профиль не найден')
+        if method == 'DELETE': body.setdefault('expected_revision', current.get('revision'))
         if body.get('expected_revision') != current.get('revision') or not body.get('expected_revision'):
             raise HTTPException(409, 'Сначала прочитайте актуальный профиль и укажите его expected_revision')
     if method == 'PATCH' or method == 'POST' and route == '/profiles':

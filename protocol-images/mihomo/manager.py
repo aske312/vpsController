@@ -471,6 +471,11 @@ class ProfileUpdate(BaseModel):
     expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
+class ProfileRevisionInput(BaseModel):
+    model_config = {"extra": "forbid"}
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 def run(*args: str, check: bool = False, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
     import operation_log
     with operation_log.command(DATA_ROOT.parent, args, 'mihomo') as completed:
@@ -754,6 +759,7 @@ def profile_revision(item: dict[str, Any]) -> str:
     device_keys = ("id", "name", "scope", "manual", "routing", "personal_rule_ids", "os", "client_name", "import_client")
     connection_keys = ("id", "name", "component", "device_id", "settings")
     editable = {"id": value["id"], "name": value.get("name"), "routing": value.get("routing", {}), "limits": subscription_limits.normalized(value.get("limits")),
+                "subscription_generation": value.get("subscription_generation", 0),
                 "common_device_id": value["common_device_id"],
                 "devices": [{key: device.get(key) for key in device_keys} for device in value["devices"]],
                 "connections": [{key: connection.get(key) for key in connection_keys} for connection in value["connections"]]}
@@ -766,7 +772,7 @@ def check_profile_revision(item: dict[str, Any], expected: str | None) -> None:
 
 
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
-    result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "retiring_connections", "last_operation_revision"}}
+    result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "device_identity_secret", "retiring_connections", "last_operation_revision"}}
     result["revision"] = profile_revision(item)
     result["limits_status"] = subscription_limits.status(item, DATA_ROOT / "subscription-limits")
     if item.get("last_operation_revision") and item["last_operation_revision"] != result["revision"]:
@@ -2738,8 +2744,21 @@ def submit_profile_update(profile_id: str, payload: ProfileUpdate, operation_id:
 
 
 @app.delete("/api/mihomo/profiles/{profile_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
-def submit_profile_delete(profile_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
-    return start_profile_operation("delete", {"profile_id": profile_id}, operation_id)
+def submit_profile_delete(profile_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID"), payload: ProfileRevisionInput | None = None):
+    if payload is not None:
+        item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
+        if item is not None: check_profile_revision(item, payload.expected_revision)
+    return start_profile_operation("delete", {"profile_id": profile_id, **({"expected_revision": payload.expected_revision} if payload else {})}, operation_id)
+
+
+@app.post("/api/mihomo/profiles/{profile_id}/subscription/rotate", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_subscription_rotation(profile_id: str, payload: ProfileRevisionInput, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
+    if item is None:
+        raise HTTPException(404, "Профиль не найден")
+    if not operation_id or item.get("subscription_rotation_operation_id") != operation_id:
+        check_profile_revision(item, payload.expected_revision)
+    return start_profile_operation("subscription-rotate", {"profile_id": profile_id, "expected_revision": payload.expected_revision}, operation_id)
 
 
 @app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
@@ -4324,6 +4343,15 @@ def list_profiles() -> dict[str, Any]:
     return {"items": [profile_response(item) for item in profiles()]}
 
 
+@app.get("/api/mihomo/profiles/schema", dependencies=[Depends(auth_required)])
+def profile_schema() -> dict[str, Any]:
+    return {"create": ProfileCreate.model_json_schema(), "update": ProfileUpdate.model_json_schema(),
+            "routing": routing_schema(), "structured_policy_schema": routing_policy.Policy.model_json_schema(),
+            "instructions": "Первое устройство — общая конфигурация профиля. device_id каждого подключения должен входить в devices. "
+                            "Для connections используйте component и settings из /modules; секреты создаёт сервер. "
+                            "structured_policy передавайте JSON-строкой в routing; группы без правил не направляют трафик."}
+
+
 # Application signatures precede generic core names: Hiddify advertises
 # "like ClashMeta v2ray sing-box" in its User-Agent. Recognition is separate
 # from application verification in client-verification.json.
@@ -4512,12 +4540,7 @@ def validate_profile_devices(devices: list[dict[str, Any]], common_id: str, exis
             raise HTTPException(status_code=422, detail="Индивидуальные устройства регистрируются автоматически по HWID")
 
 
-@serialized_profile_mutation
-def create_profile(payload: ProfileCreate) -> dict[str, Any]:
-    if payload.operation_id:
-        existing = next((entry for entry in profiles() if entry.get("create_operation_id") == payload.operation_id), None)
-        if existing:
-            return profile_response(existing)
+def validate_profile_inputs(payload: ProfileCreate):
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     validate_cdn_delivery(definitions)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
@@ -4531,6 +4554,22 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     if len(device_ids) != len(devices) or any(definition.get("device_id", "device-1") not in device_ids for definition in definitions):
         raise HTTPException(status_code=422, detail="Profile devices are invalid or a connection references a missing device")
     routing = validate_routing(payload.routing, current={})
+    return definitions, devices, routing
+
+
+@app.post("/api/mihomo/profiles/validate", dependencies=[Depends(auth_required)])
+def preview_profile(payload: ProfileCreate) -> dict[str, Any]:
+    validate_profile_inputs(payload)
+    return {"valid": True}
+
+
+@serialized_profile_mutation
+def create_profile(payload: ProfileCreate) -> dict[str, Any]:
+    if payload.operation_id:
+        existing = next((entry for entry in profiles() if entry.get("create_operation_id") == payload.operation_id), None)
+        if existing:
+            return profile_response(existing)
+    definitions, devices, routing = validate_profile_inputs(payload)
     profile_id = uuid.uuid4().hex[:12]
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
@@ -4741,11 +4780,12 @@ def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
 
 @serialized_profile_mutation
 @transactional_profile_mutation
-def delete_profile(profile_id: str) -> dict[str, Any]:
+def delete_profile(profile_id: str, expected_revision: str | None = None) -> dict[str, Any]:
     data = profiles()
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         return {"removed": profile_id, "already_removed": True}
+    check_profile_revision(item, expected_revision)
     require_subscription_panel_path([entry for entry in data if entry.get('id') != profile_id])
     write_action(f"profile-delete:{profile_id}", f"Удаление профиля «{item.get('name', '')}»…", progress=20)
     errors: list[str] = []
@@ -5434,6 +5474,29 @@ def device_subscription_token(token: str, device_id: str) -> str:
     return hmac.new(token.encode(), f"device-config:{device_id}".encode(), hashlib.sha256).hexdigest()
 
 
+@serialized_profile_mutation
+def rotate_profile_subscription(profile_id: str, expected_revision: str, operation_id: str) -> dict[str, Any]:
+    data = profiles()
+    item = next((entry for entry in data if entry.get("id") == profile_id), None)
+    if item is None:
+        raise HTTPException(404, "Профиль не найден")
+    if item.get("subscription_rotation_operation_id") == operation_id:
+        return profile_response(item)
+    check_profile_revision(item, expected_revision)
+    # HWID identity must outlive delivery URLs: rotating a link must not register
+    # every existing client as a new device or lose its personal routing.
+    item.setdefault("device_identity_secret", item.get("subscription_token") or secrets.token_urlsafe(32))
+    item["subscription_token"] = secrets.token_urlsafe(32)
+    item["subscriptions"] = {}
+    item["subscription_generation"] = int(item.get("subscription_generation", 0)) + 1
+    item["subscription_rotation_operation_id"] = operation_id
+    item["last_operation_id"] = operation_id
+    item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    item["last_operation_revision"] = profile_revision(item)
+    save_profiles(data)
+    return profile_response(item)
+
+
 def subscription_device_metadata(request: Request) -> dict[str, str]:
     def clean(value: str | None, limit: int) -> str:
         return " ".join((value or "").split())[:limit]
@@ -5518,7 +5581,8 @@ def record_common_subscription_access(profile: dict[str, Any], metadata: dict[st
 
 
 def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, metadata: dict[str, str], *, read_only=False) -> tuple[dict[str, Any], str]:
-    hwid_hash = hmac.new(token.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
+    identity_secret = str(profile.get("device_identity_secret") or token)
+    hwid_hash = hmac.new(identity_secret.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
     normalized = normalize_profile(profile)
     existing = next((device for device in normalized["devices"] if hmac.compare_digest(str(device.get("hwid_hash") or ""), hwid_hash) and device_matches_client(device, metadata)), None)
     if read_only or not component_is_managed():
@@ -5536,7 +5600,7 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
         save_subscription_profile(normalized)
         return normalized, str(existing["id"])
     template_id = str(normalized["common_device_id"])
-    identity_hash = hmac.new(token.encode(), f"{hwid_hash}:{client_identity_key(metadata)}".encode(), hashlib.sha256).hexdigest()
+    identity_hash = hmac.new(identity_secret.encode(), f"{hwid_hash}:{client_identity_key(metadata)}".encode(), hashlib.sha256).hexdigest()
     device_id = f"hwid-{identity_hash[:16]}"
     definitions = []
     for connection in normalized["connections"]:
@@ -5663,7 +5727,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                             request.state.evidence_reason = 'subscription_client_mismatch'
                             raise HTTPException(status_code=403, detail="Ссылка привязана к другому приложению. Добавьте общую ссылку профиля")
                         saved_hash = device.get("hwid_hash")
-                        hwid_hash = hmac.new(str(latest["subscription_token"]).encode(), raw_hwid.encode(), hashlib.sha256).hexdigest() if raw_hwid else None
+                        hwid_hash = hmac.new(str(latest.get("device_identity_secret") or latest["subscription_token"]).encode(), raw_hwid.encode(), hashlib.sha256).hexdigest() if raw_hwid else None
                         if saved_hash and (not hwid_hash or not hmac.compare_digest(str(saved_hash), hwid_hash)):
                             raise HTTPException(status_code=403, detail="Ссылка привязана к другому HWID или клиент не передал HWID")
                         if hwid_hash and not saved_hash:
@@ -5682,11 +5746,15 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                 save_subscription_profile(selected_profile)
     elif raw_hwid:
         with profile_mutation_lock:
-            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
+            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), None)
+            if latest is None or not hmac.compare_digest(str(latest.get("subscription_token", "")), token):
+                raise HTTPException(404, "Subscription not found")
             selected_profile, selected_device = subscription_device(latest, raw_hwid, token, subscription_device_metadata(request), read_only=allow_changes is False)
     else:
         with profile_mutation_lock:
-            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
+            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), None)
+            if latest is None or not hmac.compare_digest(str(latest.get("subscription_token", "")), token):
+                raise HTTPException(404, "Subscription not found")
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request), read_only=allow_changes is False)
     try:
         config, extension = render_client_profile(selected_profile, selected_device)
@@ -6048,8 +6116,10 @@ def execute_profile_operation(action: str, path: Path, digest: str, identity: st
             create_profile(ProfileCreate.model_validate(payload["settings"]))
         elif action == "update":
             update_profile(payload["profile_id"], ProfileUpdate.model_validate(payload["settings"]))
+        elif action == "subscription-rotate":
+            rotate_profile_subscription(payload["profile_id"], payload["expected_revision"], identity)
         elif action == "delete":
-            delete_profile(payload["profile_id"])
+            delete_profile(payload["profile_id"], expected_revision=payload.get("expected_revision"))
         elif action == "device-delete":
             delete_profile_device(payload["profile_id"], payload["device_id"])
         elif action == "personal-delete":

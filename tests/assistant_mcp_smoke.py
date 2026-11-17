@@ -32,6 +32,8 @@ class Endpoint(BaseHTTPRequestHandler):
         assert self.headers['Authorization'] == 'Bearer ' + expected
         self.seen.append(body)
         value = {'server': {'name': 'isolated-fixture'}, 'resources': {'cpu_percent': 12}}
+        if body['name'] == 'mihomo_api' and body.get('path') == '/profiles' and body.get('method') == 'GET':
+            value = {'items': [{'id': 'own', 'revision': 'a' * 64}]}
         encoded = json.dumps(value).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -95,12 +97,18 @@ async def main():
                     await session.initialize()
                     names = {tool.name for tool in (await session.list_tools()).tools}
                     assert names == {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation',
-                                     'mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'}, names
+                                     'mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select',
+                                     'mihomo_profile_create', 'mihomo_profile_delete', 'mihomo_subscription_rotate', 'mihomo_accounts', 'mihomo_profile_assign'}, names
                     assert not names & vps_names
                     for name, arguments in [('mihomo_capabilities', {}), ('mihomo_api', {'method': 'GET', 'path': '/profiles'}),
                                             ('mihomo_compare', {'left_profile_id': 'one', 'right_profile_id': 'two'}),
                                             ('mihomo_operation', {'operation_id': 'a' * 32}), ('mihomo_read', {'view': 'profiles'}),
-                                            ('mihomo_settings', {'section': 'routing'}), ('mihomo_groups', {})]:
+                                            ('mihomo_settings', {'section': 'routing'}), ('mihomo_groups', {}),
+                                            ('mihomo_read', {'view': 'profile-schema'}), ('mihomo_accounts', {}),
+                                            ('mihomo_profile_create', {'name': 'For user', 'connections': [{'component': 'transport-wg'}]}),
+                                            ('mihomo_profile_assign', {'telegram_id': 123, 'profile_id': 'own'}),
+                                            ('mihomo_profile_delete', {'profile_id': 'own', 'expected_revision': 'a' * 64}),
+                                            ('mihomo_subscription_rotate', {'profile_id': 'own', 'expected_revision': 'a' * 64})]:
                         result = await session.call_tool(name, arguments)
                         assert not result.isError, result
                     assert (await session.call_tool('vps_overview', {})).isError

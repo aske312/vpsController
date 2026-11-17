@@ -1,7 +1,7 @@
 {
   "id": "mihomo",
   "name": "Mihomo",
-  "version": "1.19.32",
+  "version": "1.19.33",
   "installable": true,
   "description": "Mihomo Manager: профили, собственные каналы, DNS и маршрутизация.",
   "category": "connection-manager",

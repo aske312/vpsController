@@ -12,6 +12,27 @@ from tests.api.support import manager, ROOT, managed_mihomo_fixture
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_reissued_url_delivers_yaml_to_the_same_hwid_without_reprovisioning(self):
+        self.fetch('ClashMeta/1.0')
+        device_id = self.store[0]['devices'][1]['id']
+        self.store[0]['devices'][1]['routing'] = {'structured_policy_selection': '{"media":false}'}
+        connections = deepcopy(self.store[0]['connections'])
+        manager.rotate_profile_subscription('profile', manager.profile_revision(self.store[0]), 'a' * 32)
+        with self.assertRaises(manager.HTTPException) as revoked: self.fetch('ClashMeta/1.0')
+        self.assertEqual(revoked.exception.status_code, 404)
+        token = self.store[0]['subscription_token']
+        headers = [(b'user-agent', b'ClashMeta/1.0'), (b'x-hwid', b'phone')]
+        for link in (token, manager.device_subscription_token(token, device_id)):
+            request = manager.Request({'type': 'http', 'method': 'GET', 'path': '/s/' + link, 'query_string': b'', 'headers': headers})
+            response = manager.public_profile_subscription(link, request)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'password:', response.body)
+        self.assertEqual(len(self.store[0]['devices']), 2)
+        self.assertEqual(self.store[0]['devices'][1]['id'], device_id)
+        self.assertEqual(self.store[0]['devices'][1]['routing'], {'structured_policy_selection': '{"media":false}'})
+        self.assertEqual(self.store[0]['connections'], connections)
+        self.assertEqual(self.provision.call_count, 1)
+
     def test_readonly_legacy_subscriptions_keep_existing_devices_without_writes(self):
         self.fetch("ClashMeta/1.0")
         device_id = self.store[0]["devices"][1]["id"]

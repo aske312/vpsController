@@ -656,7 +656,8 @@ def status(api):
                           (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []) +
                           (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []) + (['relay_read', 'relay_prepare'] if agent_version >= (1, 29, 0) else []),
                       'mihomo-mcp': (['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] +
-                          (['mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'] if agent_version >= (1, 26, 0) else [])) if agent_version >= (1, 15, 0) else []}}
+                          (['mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'] if agent_version >= (1, 26, 0) else []) +
+                          (['mihomo_profile_create', 'mihomo_profile_delete', 'mihomo_subscription_rotate', 'mihomo_accounts', 'mihomo_profile_assign'] if agent_version >= (1, 36, 0) else [])) if agent_version >= (1, 15, 0) else []}}
 
 
 def configure(api, payload):

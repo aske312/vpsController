@@ -117,6 +117,62 @@ class MihomoOperatorTests(unittest.TestCase):
     def tool(self, **payload):
         return self.client.post('/api/assistant/control-tool', headers=self.headers, json=payload)
 
+    def test_own_url_rotation_waits_for_human_confirmation_and_checks_scope(self):
+        response = self.tool(name='mihomo_api', method='POST', path='/profiles/own/subscription/rotate', body={'expected_revision': 'a' * 64})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['confirmation_required'])
+        self.assertFalse(any(method != 'GET' for method, *_ in self.calls))
+        record = control.operations.read(commands.pending_path(api, '11'))
+        commands.execute(api, '11', '/confirm ' + record['code'])
+        commands.execute(api, '11', '/confirm ' + record['code'])
+        writes = [call for call in self.calls if call[0] != 'GET']
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][:3], ('POST', '/profiles/own/subscription/rotate', {'expected_revision': 'a' * 64}))
+        for path in ('/profiles/other/subscription/rotate', '/profiles/own/subscription/rotate?format=yaml'):
+            self.assertEqual(self.tool(name='mihomo_api', method='POST', path=path, body={'expected_revision': 'c' * 64}).status_code, 403)
+
+    def test_owner_can_create_profile_only_after_validation_and_confirmation(self):
+        body = {'name': 'New user', 'connections': [{'component': 'transport-wg', 'device_id': 'common'}],
+                'devices': [{'id': 'common', 'name': 'Common'}], 'routing': {'structured_policy': '{"groups":[],"rules":[]}'}}
+        calls = []
+        def transport(method, path, payload=None, operation_id=None):
+            calls.append((method, path, copy.deepcopy(payload)))
+            if path == '/profiles/validate': return {'valid': True}
+            return {'id': operation_id, 'state': 'queued'}
+        with patch.object(bridge, 'request', side_effect=transport):
+            prepared = bridge.call(api, 'panel', 'POST', '/profiles', body)
+            self.assertEqual([row[1] for row in calls], ['/profiles/validate'])
+            pending = next(row for row in commands.pending_actions(api, 'panel') if row['operation_id'] == prepared['operation_id'])
+            commands.execute(api, 'panel', '/confirm ' + pending['code'])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][1], '/profiles')
+        self.assertEqual(calls[1][2]['routing'], body['routing'])
+        self.assertEqual(calls[1][2]['operation_id'], prepared['operation_id'])
+        self.assertEqual(self.tool(name='mihomo_api', method='POST', path='/profiles', body=body).status_code, 403)
+
+    def test_invalid_profile_never_creates_a_confirmation(self):
+        with patch.object(bridge, 'request', side_effect=api.HTTPException(422, 'Invalid profile')):
+            with self.assertRaises(api.HTTPException): bridge.call(api, 'panel', 'POST', '/profiles', {'name': 'Bad'})
+        self.assertEqual(commands.pending_actions(api, 'panel'), [])
+
+    def test_owner_assignment_keeps_account_role_and_requires_its_own_confirmation(self):
+        settings = control.read(api)
+        settings['accounts'][0].update(role='user', products=['assistant'], mihomo_profile_id=None, permission_overrides={'web': False})
+        control.store(api, settings)
+        prepared = bridge.call(api, 'panel', 'PATCH', '/accounts/11/profile', {'profile_id': 'own'})
+        self.assertIsNone(control.read(api)['accounts'][0]['mihomo_profile_id'])
+        pending = next(row for row in commands.pending_actions(api, 'panel') if row['operation_id'] == prepared['operation_id'])
+        with patch.object(control, 'require_installed'):
+            commands.execute(api, 'panel', '/confirm ' + pending['code'])
+        account = control.read(api)['accounts'][0]
+        self.assertEqual(account['mihomo_profile_id'], 'own')
+        self.assertEqual(account['role'], 'user')
+        self.assertEqual(account['permission_overrides'], {'web': False})
+        self.assertEqual(set(account['products']), {'assistant', 'mihomo'})
+        for method, path, body in [('GET', '/accounts', {}), ('PATCH', '/accounts/11/profile', {'profile_id': 'other'})]:
+            with self.assertRaises(api.HTTPException) as denied: bridge.call(api, '11', method, path, body)
+            self.assertEqual(denied.exception.status_code, 403)
+
     def prepare(self, body=None):
         return self.tool(name='mihomo_api', method='PATCH', path='/profiles/own',
                          body=body or {'name': 'Renamed', 'expected_revision': 'a' * 64})

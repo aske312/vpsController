@@ -338,7 +338,15 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
         pending_items = value.get('pending_actions') or ([value['pending_action']] if value.get('pending_action') else [])
         for pending in pending_items:
             action = {'start': 'Запуск', 'stop': 'Остановка', 'restart': 'Перезапуск'}.get(pending['action'], pending['action'])
-            answer += '\n\n' + notice('Нужно ваше решение', f"**Действие:** {action}\n**Объект:** `{pending['service']}`\n\nИзменения ожидают подтверждения.", '✋')
+            path = pending['service'].removeprefix('Mihomo ')
+            impact = 'Изменения ожидают подтверждения.'
+            if path == '/profiles' and pending['action'] == 'POST': action = 'Создание подписки Mihomo'
+            elif path.endswith('/subscription/rotate'):
+                action = 'Перевыпуск ссылки подписки'
+                impact = 'После подтверждения старый URL и ссылки устройств перестанут работать. Подключения, устройства, правила и лимиты сохранятся. Новую ссылку нужно импортировать в клиент.'
+            elif re.fullmatch(r'/profiles/[A-Za-z0-9_-]+', path):
+                action = 'Удаление подписки Mihomo' if pending['action'] == 'DELETE' else 'Изменение подписки Mihomo'
+            answer += '\n\n' + notice('Нужно ваше решение', f"**Действие:** {action}\n**Объект:** `{pending['service']}`\n\n{impact}", '✋')
             if pending.get('changes'):
                 answer += '\n\n**Детали изменений**\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
             answer += f"\n\n`/confirm {pending['code']}` — подтвердить\n`/cancel {pending['code']}` — отклонить"

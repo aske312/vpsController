@@ -285,7 +285,7 @@ test("Mihomo profiles expose one subscription and register optional HWID devices
   assert.match(manager, /request\.headers\.get\("x-device-id"\)/);
   assert.match(manager, /request\.headers\.get\("x-hwid"\)/);
   assert.match(manager, /request\.query_params\.get\("hwid"\)/);
-  assert.match(manager, /hmac\.new\(token\.encode\(\), raw_hwid\.encode\(\), hashlib\.sha256\)/);
+  assert.match(manager, /hmac\.new\(identity_secret\.encode\(\), raw_hwid\.encode\(\), hashlib\.sha256\)/);
   assert.match(manager, /def subscription_device/);
   assert.match(manager, /provision_connections\(str\(profile\["id"\]\), definitions, privacy_enabled=bool\(inherited_routing/);
   assert.doesNotMatch(view, /subscription\?device_id=/);

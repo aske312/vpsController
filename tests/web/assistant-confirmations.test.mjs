@@ -158,6 +158,21 @@ test('routing confirmation summaries show groups and rules and preserve destruct
   }finally{app.dispose();}
 });
 
+test('subscription confirmations describe creation, URL revocation and user assignment',()=>{
+  const app=mount([]);
+  try{
+    const created=app.summary({...action('aabbccdd'),service:'Mihomo /profiles',action:'POST',changes:{name:'For user',connections:[{component:'transport-wg'}],routing:{structured_policy:JSON.stringify({groups:[{name:'Media'}],rules:[{value:'media.test',target:'Media'}]})}}});
+    assert.equal(created.title,'Создать подписку Mihomo');
+    assert(created.lines.includes('Название: For user'));
+    assert(created.lines.includes('media.test → Media'));
+    const rotated=app.summary({...action('aabbccdd'),service:'Mihomo /profiles/own/subscription/rotate',action:'POST'});
+    assert.equal(rotated.title,'Перевыпустить ссылку подписки');
+    assert(rotated.lines.some(line=>line.includes('прежние ссылки устройств перестанут работать')));
+    const assigned=app.summary({...action('aabbccdd'),service:'Подписка пользователя 123',action:'Привязать',changes:{telegram_id:123,mihomo_profile_id:'own'}});
+    assert(assigned.lines.includes('Пользователь: 123'));assert(assigned.lines.includes('Подписка: own'));
+  }finally{app.dispose();}
+});
+
 test('routing refresh follows confirmed saves and completed jobs, never rejection or uncertain results', async()=>{
   for(const scenario of ['saved','rejected','unknown','job']){
     let changes=0;
