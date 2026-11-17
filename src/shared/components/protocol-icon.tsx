@@ -4,7 +4,7 @@ const protocolAssets: Record<string, string> = {
   wg: "WG", awg: "AWG", shadowsocks: "SS", hysteria2: "HY2", tuic: "TUIC",
   trojan: "TRJ", openvpn: "OVPN", ikev2: "IKE", mihomo: "Mi",
   "vless-reality-xhttp": "VLESS", "transport-wg": "WG", "transport-awg": "AWG",
-  "transport-shadowsocks": "SS", "transport-hysteria2": "HY2", "transport-tuic": "TUIC",
+  "transport-shadowsocks": "SS", "transport-hysteria2": "HY2", "transport-tuic": "TUIC", "transport-snell": "snell.svg",
   "transport-reality": "VLESS",
 };
 

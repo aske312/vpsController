@@ -92,10 +92,15 @@ def main():
     from pathlib import Path
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("capture", "restore"))
-    parser.add_argument("--direct", action="store_true")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--direct", action="store_true")
+    scope.add_argument("--snell", action="store_true")
     args = parser.parse_args()
     directory = Path("/etc/vps-control/shadowsocks/clients" if args.direct else "/etc/vps-control/mihomo/shadowsocks")
     prefix = "vps-control-shadowsocks@" if args.direct else PREFIX
+    if args.snell:
+        directory = Path('/etc/vps-control/mihomo/snell')
+        prefix = 'vps-control-mihomo-snell@'
     path = directory / ".retained-services.json"
     def run(*command, check=False):
         return subprocess.run(command, capture_output=True, text=True, timeout=30, check=check)

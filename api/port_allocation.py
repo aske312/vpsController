@@ -179,6 +179,8 @@ def reservations() -> dict[str, set[tuple[str, int]]]:
                 entries = {("tcp", int(credential[key])) for key in ("port", "cdn_port", "tls_port") if credential.get(key)}
             elif component == "transport-shadowsocks":
                 entries = {(protocol, int(credential["port"])) for protocol in ("tcp", "udp") if credential.get("port")}
+            elif component == "transport-snell":
+                entries = {('tcp', int(credential['port']))} if credential.get('port') else set()
             elif component in MIHOMO_DEFAULTS:
                 entries = {("udp", int(credential["port"]))} if credential.get("port") else set()
                 result.setdefault(f"mihomo:{component}", set()).update(entries)
@@ -194,6 +196,11 @@ def reservations() -> dict[str, set[tuple[str, int]]]:
                 continue  # The installer can repair a legacy invalid port.
             if 1 <= port <= 65535:
                 result[f"config:{path}"] = {("tcp", port), ("udp", port)}
+    for path in (CONFIG_ROOT / "mihomo/snell").glob("*.json"):
+        for listener in read_json(path).get("listeners", []):
+            port = listener.get("port")
+            if type(port) is int and 1 <= port <= 65535:
+                result[f"config:{path}"] = {("tcp", port)}
     for module, base in (("vless-reality-xhttp", CONFIG_ROOT), ("transport-reality", CONFIG_ROOT / "mihomo")):
         path = base / ("reality" if module == "transport-reality" else module) / "config.json"
         for inbound in read_json(path).get("inbounds", []):

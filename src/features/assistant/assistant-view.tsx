@@ -593,7 +593,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const connectionLabel = chatConnection === "failed" ? "Ошибка последнего запроса к AI" : providerStatusText(apiConnection);
   const pendingLabel = (turn: Turn) => turn.queue_state === "queued"
     ? `В очереди · ${turns.filter(item => item.queue_state === "queued" && item.id <= turn.id).length}`
-    : chatQueue?.state === "queued" ? `В очереди AI · ${chatQueue.position}` : chatStageText || "Обрабатывает запрос…";
+    : chatQueue?.state === "queued" ? `В очереди AI · ${chatQueue.position}` : chatStageText || "Думает…";
   const messageTurns = turns.filter(turn => !turn.system_event);
   const commandOwnerFor = (ids: string[]) => commandMessageOwner(messageTurns, ids);
   const commandTurns = new Set([
@@ -625,12 +625,12 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
       }}>
         {!turns.length && !confirmations.actions.some(item => (item.actor || "panel") === (actor || "panel")) && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{commands.some(item => ["/status", "/services"].includes(item.command)) && <div>{commands.some(item => item.command === "/status") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/status", false)}>Состояние сервера</button>}{commands.some(item => item.command === "/services") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/services", false)}>Службы</button>}</div>}</div>}
-        {messageTurns.map(turn => <ChatTurnRow key={turn.id} turn={turn} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}>
+        {messageTurns.map(turn => <ChatTurnRow key={turn.id} turn={turn} activityLabel={turn.queue_state ? pendingLabel(turn) : undefined} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}>
           {commandTurns.has(turn.id) && <ConfirmationCards actor={actor} active={active && isChat} embedded turnId={turn.id} ownerFor={commandOwnerFor}/>}
         </ChatTurnRow>)}
         <ConfirmationCards key={actor} actor={actor} active={active && isChat} ownerFor={commandOwnerFor}/>
+        {chatBusy && !turns.some(turn => turn.queue_state === "running") && <div className="mcpTurn"><article className="mcpAnswer"><small>Nodera</small><div className="mcpThinking" role="status"><span className="mcpThinkingDots" aria-hidden="true"><i/><i/><i/></span><span>{chatStageText || "Думает…"}</span></div></article></div>}
       </div>
-      <div className="mcpDecisionDock">{chatBusy && <div className="mcpChatWork" role="status"><span className="mcpWorkSpinner" aria-hidden="true"/><span>{turns.some(turn => turn.queue_state === "running") ? pendingLabel(turns.find(turn => turn.queue_state === "running")!) : chatStageText || "Nodera"}</span></div>}</div>
       <div className="mcpComposer">
         {commandMenu && <ChatCommandMenu items={matchingCommands} loading={commandLoading} error={commandError} activeIndex={activeCommandIndex} onSelect={chooseCommand} onRetry={() => void loadCommands()}/>}
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={composerBlocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}

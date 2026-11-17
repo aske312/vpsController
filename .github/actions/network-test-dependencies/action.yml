@@ -3,6 +3,17 @@ description: Install required network tools using a reachable Ubuntu archive mir
 runs:
   using: composite
   steps:
+    - name: Verify native Snell v6 forwarding
+      shell: bash
+      run: |
+        mkdir -p .runtime/snell-test-core
+        curl --fail --location --retry 3 --connect-timeout 15 --max-time 120 \
+          'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-compatible-v1.19.34.gz' \
+          -o .runtime/snell-test-core/mihomo.gz
+        echo '2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06  .runtime/snell-test-core/mihomo.gz' | sha256sum --check
+        gzip -dc .runtime/snell-test-core/mihomo.gz > .runtime/snell-test-core/mihomo
+        chmod +x .runtime/snell-test-core/mihomo
+        PRIVACY_MIHOMO_BIN="$PWD/.runtime/snell-test-core/mihomo" python -m unittest -v tests.api.test_snell
     - name: Install WireGuard and nftables
       shell: bash
       run: |

@@ -8,7 +8,7 @@ PERMISSIONS = ('chat', 'model_select', 'web', 'memory', 'telegram_read', 'server
                'modules_manage', 'routing_manage', 'dns_manage', 'recovery', 'roles_manage')
 OWN_EDIT = ('subscription_name', 'subscription_connections', 'subscription_devices', 'subscription_routing')
 USER_ALLOWED = {'chat', 'model_select', 'web', 'memory', 'telegram_read', 'subscription_read', 'subscription_manage', *OWN_EDIT}
-FIXED = {'owner', 'administrator', 'guest'}
+FIXED = {'owner', 'guest'}
 MIHOMO = {key for key in PERMISSIONS if key.startswith('subscription')} | {'modules_manage', 'routing_manage', 'dns_manage', 'recovery'}
 VPS_PERMISSIONS = set(PERMISSIONS) - {'chat', 'model_select', 'web', 'memory', 'telegram_read'}
 SERVER_PERMISSIONS = VPS_PERMISSIONS - MIHOMO
@@ -30,25 +30,27 @@ def migrate_settings(settings):
     # Only the exact previous fixed policy is upgraded; custom roles and
     # malformed/incomplete policies must still go through strict validation.
     policies = settings.get('role_permissions', {})
-    if isinstance(policies, dict):
+    if settings.get('role_policy_version', 1) < 3 and isinstance(policies, dict):
         for name in ('owner', 'administrator'):
             grants = policies.get(name)
             if (isinstance(grants, list) and all(isinstance(key, str) for key in grants)
                     and len(grants) == len(set(grants))
                     and set(grants) == set(DEFAULTS[name]) - {'terminal_read'}):
                 policies[name] = list(DEFAULTS[name])
-    if settings.get('role_policy_version', 1) >= 2: return
+    if settings.get('role_policy_version', 1) >= 2:
+        settings['role_policy_version'] = 3
+        return
     policies = settings.get('role_permissions', {})
     accounts = settings.get('accounts', [])
     if not isinstance(policies, dict) or not isinstance(accounts, list) or any(not isinstance(row, dict) for row in accounts):
-        settings['role_policy_version'] = 2
+        settings['role_policy_version'] = 3
         return
     for name, grants in list(policies.items()):
         if not isinstance(grants, list) or any(not isinstance(key, str) for key in grants): continue
         expanded = set(grants)
         for key, children in EXPANSIONS.items():
             if key in expanded: expanded.update(children)
-        if name in FIXED: expanded = set(DEFAULTS[name])
+        if name in FIXED or name == 'administrator': expanded = set(DEFAULTS[name])
         if name == 'user': expanded &= USER_ALLOWED
         policies[name] = [key for key in PERMISSIONS if key in expanded]
     for account in settings.get('accounts', []):
@@ -57,14 +59,14 @@ def migrate_settings(settings):
         for key, children in EXPANSIONS.items():
             if key in overrides:
                 for child in children: overrides.setdefault(child, overrides[key])
-        if account.get('role') in FIXED:
+        if account.get('role') in FIXED or account.get('role') == 'administrator':
             overrides = {}
             account['products'] = [] if account['role'] == 'guest' else ['assistant', 'mihomo']
         if account.get('role') == 'user': overrides = {key: enabled for key, enabled in overrides.items() if key in USER_ALLOWED}
         account['permission_overrides'] = overrides
         if account.get('role') == 'guest':
             account.update(products=[], bot_access=False, bot_chat_access=False, telegram_access=False, vps_access=False)
-    settings['role_policy_version'] = 2
+    settings['role_policy_version'] = 3
 
 
 def products(account):

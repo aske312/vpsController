@@ -9,8 +9,8 @@ import type { PendingAction } from "./confirmation-queue";
 
 export type ChatTurn = { command_ids?: string[]; system_event?: boolean; request_id?: string; queue_state?: "queued" | "running"; pending_action?: PendingAction; pending_actions?: PendingAction[]; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string; context_safe?: boolean };
 
-export const ChatTurnRow = memo(function ChatTurnRow({ turn, canRetry, onRetry, onCancel, onError, onTrace, children }: {
-  turn: ChatTurn; canRetry: boolean; children?: ReactNode;
+export const ChatTurnRow = memo(function ChatTurnRow({ turn, canRetry, onRetry, onCancel, onError, onTrace, children, activityLabel }: {
+  turn: ChatTurn; canRetry: boolean; children?: ReactNode; activityLabel?: string;
   onRetry: (turn: ChatTurn) => void; onCancel: (id: number) => void; onError: (message: string) => void;
   onTrace: (id: string) => void;
 }) {
@@ -19,11 +19,12 @@ export const ChatTurnRow = memo(function ChatTurnRow({ turn, canRetry, onRetry, 
     <div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>
       {file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name} loading="lazy" decoding="async"/> : <ChatIcon name="file"/>}<span>{file.name}</span>
     </span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div>
-    {(turn.answer || turn.error || children) && <article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small>
+    {(turn.answer || turn.error || children || activityLabel) && <article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small>
       <AssistantAnswer text={turn.error ? "⚠️ **Нужна проверка**\n\n" + turn.error : turn.answer || ""}/>
       {turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}
       {turn.error && <button type="button" className="ghostButton" disabled={!canRetry} onClick={() => onRetry(turn)}>Повторить</button>}
       {children}
+      {activityLabel && <div className="mcpThinking" role="status"><span className="mcpThinkingDots" aria-hidden="true"><i/><i/><i/></span><span>{activityLabel}</span></div>}
     </article>}
     {turn.queue_state === "queued" && <button type="button" className="ghostButton" onClick={() => onCancel(turn.id)}>Убрать из очереди</button>}
     <div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied ? "Скопировано" : "Скопировать ответ"} onClick={() => {

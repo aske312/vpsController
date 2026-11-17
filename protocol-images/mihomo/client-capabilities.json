@@ -1,7 +1,7 @@
 {
   "mihomo": {
     "label": "Mihomo YAML",
-    "components": ["transport-reality", "transport-shadowsocks", "transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"],
+    "components": ["transport-reality", "transport-shadowsocks", "transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic", "transport-snell"],
     "transports": ["raw", "tcp", "xhttp", "grpc", "websocket", "httpupgrade"],
     "features": ["tunnel_privacy", "tunnel_ech"],
     "strategies": ["", "fallback", "url-test", "select", "load-balance"],

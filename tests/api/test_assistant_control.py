@@ -107,6 +107,7 @@ class AssistantTests(unittest.TestCase):
         saved = self.save(payload)['settings']
         extension = control.directory(api) / 'ai-agent' / (saved['revision'] + '.nodera.json')
         value = json.loads(extension.read_text(encoding='utf-8'))
+        value['role_policy_version'] = 2
         for name in ('owner', 'administrator'):
             value['role_permissions'][name].remove('terminal_read')
         control.operations.atomic_json(extension, value)

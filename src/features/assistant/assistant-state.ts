@@ -13,7 +13,7 @@ export type Permission = keyof typeof permissionNames;
 export type Product = "assistant" | "mihomo";
 export const productNames: Record<Product, string> = { assistant: "AI-ассистент", mihomo: "Подписка Mihomo" };
 export const userPermissions: Permission[] = ["chat", "model_select", "web", "memory", "telegram_read", "subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing"];
-export const fixedRoles: Role[] = ["owner", "administrator", "guest"];
+export const fixedRoles: Role[] = ["owner", "guest"];
 export const roleDefaults: Record<Role, Permission[]> = {
   owner: Object.keys(permissionNames) as Permission[], administrator: (Object.keys(permissionNames) as Permission[]).filter(key => key !== "roles_manage"),
   moderator: [...userPermissions, "server_read"], user: userPermissions, guest: [],
@@ -72,7 +72,7 @@ export type ProviderUsage = { requests: number; prompt_tokens: number; completio
 export type Settings = {
   web_extract_enabled?: boolean; web_max_sources?: number; web_read_chars?: number;
   telegram_tool_catalog?: {name: string; title: string; profile: "read" | "actions"}[];
-  role_policy_version?: 2; role_permissions?: Partial<Record<Role, Permission[]>>;
+  role_policy_version?: 2 | 3; role_permissions?: Partial<Record<Role, Permission[]>>;
   revision: string; modules: Record<AppModuleId, boolean>; mcp: Record<McpId, boolean>; provider_url: string; model: string;
   model_mode?: "single" | "catalog";
   providers?: Provider[]; active_provider?: string | null;
@@ -116,7 +116,7 @@ export function makeDraft(settings: Settings): Draft {
 }
 export function settingsPayload(draft: Draft) {
   return {
-    role_policy_version: 2, role_permissions: draft.role_permissions, expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
+    role_policy_version: 3, role_permissions: draft.role_permissions, expected_revision: draft.expected_revision, modules: draft.modules, mcp: draft.mcp, mcp_installed: draft.mcp_installed ?? Object.keys(draft.mcp),
     assistant_style: draft.assistant_style, assistant_character: draft.assistant_character, assistant_instructions: draft.assistant_instructions, personalization_enabled: draft.personalization_enabled ?? true, web_extract_enabled: draft.web_extract_enabled ?? true, web_max_sources: draft.web_max_sources ?? 5, web_read_chars: draft.web_read_chars ?? 20000, web_domains: draft.web_domains ?? [], web_enabled: draft.web_enabled ?? true, memory_enabled: draft.memory_enabled, memory_days: draft.memory_days,
     provider_url: draft.provider_url, model: draft.model, model_mode: draft.model_mode ?? "single", api_key: draft.api_key,
     providers: draft.providers?.map(({ id, name, provider_url, model, model_mode, api_key }) => ({ id, name, provider_url, model, model_mode, api_key })),

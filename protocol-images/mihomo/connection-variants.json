@@ -204,5 +204,9 @@
   {
     "id": "transport-tuic",
     "label": "TUIC v5"
+  },
+  {
+    "id": "transport-snell",
+    "label": "Snell v6"
   }
 ]

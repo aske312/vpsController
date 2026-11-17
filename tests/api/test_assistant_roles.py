@@ -13,6 +13,18 @@ class AssistantRoleTests(unittest.TestCase):
     payload = fixtures.AssistantTests.payload
     save = fixtures.AssistantTests.save
 
+    def test_administrator_template_and_overrides_survive_reload(self):
+        payload = self.payload()
+        payload['role_permissions'] = {'administrator': ['chat', 'server_read']}
+        payload['accounts'][0].update(role='administrator', permission_overrides={'server_read': False, 'web': True})
+        self.save(payload)
+        for _ in range(2):
+            fresh = control.read(api)
+            self.assertEqual(set(fresh['role_permissions']['administrator']), {'chat', 'server_read'})
+            self.assertEqual(roles.effective(fresh, '11'), {'chat', 'web'})
+            self.assertFalse(roles.allows(fresh, '11', 'terminal_read'))
+            self.assertFalse(roles.allows(fresh, '11', 'roles_manage'))
+
     def test_explicit_role_is_authoritative_and_owner_rights_cannot_be_delegated(self):
         settings = {'accounts': [{'telegram_id': 11, 'role': 'guest', 'bot_access': True, 'vps_access': True}]}
         self.assertEqual(roles.effective(settings, '11'), set())
@@ -96,7 +108,7 @@ class AssistantRoleTests(unittest.TestCase):
     def test_policy_upgrade_preserves_custom_scopes_and_locks_guest_and_admin(self):
         value = {'role_permissions': {'owner': list(roles.EXPANSIONS), 'administrator': ['chat'], 'guest': ['chat', 'web'], 'moderator': ['diagnostics'], 'user': ['chat', 'server_manage']}, 'accounts': [{'telegram_id': 11, 'role': 'guest', 'permission_overrides': {'chat': True}, 'bot_chat_access': True}]}
         roles.migrate_settings(value)
-        self.assertEqual(value['role_policy_version'], 2)
+        self.assertEqual(value['role_policy_version'], 3)
         self.assertEqual(value['role_permissions']['guest'], [])
         self.assertEqual(set(value['role_permissions']['administrator']), set(roles.PERMISSIONS) - {'roles_manage'})
         self.assertIn('logs_read', value['role_permissions']['moderator'])

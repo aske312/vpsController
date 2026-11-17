@@ -45,6 +45,12 @@ class ModulePortsTests(unittest.TestCase):
             # TCP and UDP can share a number without a bind conflict.
             self.assertEqual(manager.free_module_port(31001, {"tcp"}), 31001)
 
+    def test_stopped_snell_listener_reserves_tcp_without_reserving_udp(self):
+        manager.atomic_json(manager.CONFIG_ROOT / 'snell/stopped.json', {'listeners': [{'type': 'snell', 'port': 33000}]})
+        with self.listeners():
+            self.assertEqual(manager.free_module_port(33000, {'tcp'}), 33001)
+            self.assertEqual(manager.free_module_port(33000, {'udp'}), 33000)
+
     def test_install_reassigns_conflicting_port_and_persists_reservation_for_next_module(self):
         for module in ("transport-hysteria2", "transport-tuic"):
             manager.atomic_json(manager.SETTINGS_ROOT / f"{module}.json", {"port": 20000})

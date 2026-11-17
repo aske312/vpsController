@@ -55,7 +55,7 @@ find "${STAGE}/protocol-images" -type f \( -name 'install.sh' -o -name 'uninstal
 # Mihomo is bundled into the prepared release. The server module uses the same
 # pinned binary for config validation; client profiles never download an
 # unverified core from the VPS.
-MIHOMO_VERSION="1.19.31"
+MIHOMO_VERSION="1.19.34"
 case "$(uname -m)" in
   x86_64|amd64)
     mihomo_asset="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"

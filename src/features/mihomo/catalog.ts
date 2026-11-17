@@ -19,6 +19,7 @@ export const channelShort: Record<string, string> = {
   "transport-shadowsocks": "SS",
   "transport-hysteria2": "HY2",
   "transport-tuic": "TU",
+  "transport-snell": "SN6",
 };
 
 export const devicePlatform: Record<string, { code: string; label: string }> = {
@@ -49,6 +50,7 @@ export const moduleCapabilities: Record<string, string[]> = {
   "transport-shadowsocks": ["Shadowsocks", "TCP", "UDP"],
   "transport-hysteria2": ["Hysteria2", "QUIC", "UDP", "Salamander"],
   "transport-tuic": ["TUIC v5", "QUIC", "UDP"],
+  "transport-snell": ["Snell v6", "TCP", "UDP через TCP"],
 };
 
 export const directGameCatalog = [

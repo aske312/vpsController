@@ -44,13 +44,13 @@ class ConnectionSettingsTests(unittest.TestCase):
         checked = manager.validate_profile_presets(presets)
         self.assertEqual([row["id"] for row in checked], ["direct-bundle", "cdn-bundle"])
         matrix = json.loads((ROOT / "protocol-images/mihomo/connection-variants.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(matrix), 32)
+        self.assertEqual(len({json.dumps(row, sort_keys=True) for row in matrix}), len(matrix))
         for protocol in ("vless", "vmess", "trojan"):
             for mode in ("tls", "cdn"):
                 transports = {row["transport"] for row in matrix if row.get("xray_protocol") == protocol and row.get(mode)}
                 self.assertEqual(transports, {"xhttp", "websocket", "httpupgrade", "grpc"})
         self.assertEqual({row["id"] for row in matrix if row["id"] != "transport-reality"},
-                         {"transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"})
+                         {"transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic", "transport-snell"})
         invalid = {"id": "bad", "name": "Invalid", "components": [{"id": "transport-reality", "xray_protocol": "vmess"}]}
         with self.assertRaises(manager.HTTPException):
             manager.validate_profile_presets([invalid])

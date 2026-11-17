@@ -25,8 +25,8 @@ export function savedChat(client: Client, actor: string) {
   try { const id = sessionStorage.getItem(pendingChatKey(client, actor)); return id && /^[0-9a-f]{32}$/.test(id) ? id : null; }
   catch { return null; }
 }
-export const chatStage = (stage: string) => ({ queued: "В очереди AI", waiting_provider: "Ожидает свободного провайдера", starting: "Подготавливает запрос…",
-  waiting_model: "Ожидает ответ модели…", receiving: "Получает ответ…", tools: "Выполняет инструменты…", reconnecting: "Восстанавливает связь…" }[stage] ?? "Обрабатывает запрос…");
+export const chatStage = (stage: string) => ({ queued: "В очереди AI", waiting_provider: "Ожидает свободного провайдера", starting: "Думает…",
+  waiting_model: "Думает…", receiving: "Печатает…", tools: "Думает…", reconnecting: "Восстанавливает связь…" }[stage] ?? "Думает…");
 
 export async function observeChatJob(client: Client, id: string, actor: string, streaming: boolean,
   publish: (job: ChatJob) => void, signal: AbortSignal): Promise<ChatOutput> {

@@ -7,7 +7,8 @@ test("two ready connection bundles use the full catalog without per-protocol pre
   const presets = JSON.parse(await read("protocol-images/mihomo/default-profile-presets.json"));
   const identity = row => JSON.stringify([row.id, row.xray_protocol || "vless", Boolean(row.tls), Boolean(row.cdn), row.transport || ""]);
   const matrix = new Set(variants.map(identity));
-  assert.equal(matrix.size, 32);
+  assert.equal(matrix.size, variants.length);
+  assert.ok(variants.some(row => row.id === "transport-snell"));
   for (const preset of presets) for (const component of preset.components) assert.ok(matrix.has(identity(component)), preset.id);
   assert.deepEqual(presets.map(row => row.id), ["direct-bundle", "cdn-bundle"]);
   for (const preset of presets) {

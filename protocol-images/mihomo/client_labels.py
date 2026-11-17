@@ -14,7 +14,7 @@ def _protocol_label(connection, index, variant, direct_settings):
     component = connection["component"]
     protocols = {"transport-wg": "WireGuard · UDP", "transport-awg": "AmneziaWG · UDP",
                  "transport-shadowsocks": "Shadowsocks · TCP/UDP", "transport-hysteria2": "Hysteria2 · QUIC",
-                 "transport-tuic": "TUIC · QUIC"}
+                 "transport-tuic": "TUIC · QUIC", "transport-snell": "Snell v6 · TCP/UDP"}
     if component != "transport-reality":
         return f"{index} · {protocols.get(component, component)}"
     credential = connection.get("credential", {})

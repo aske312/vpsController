@@ -1,0 +1,23 @@
+{
+  "id": "transport-snell",
+  "name": "Snell v6",
+  "version": "1.0.0",
+  "installable": true,
+  "description": "Snell v6 с передачей TCP и UDP. Для сервера и клиента требуется Mihomo 1.19.34 или новее.",
+  "category": "transport",
+  "category_name": "Каналы",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "service": "vps-control-mihomo-snell.target",
+  "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["curl", "python3"],
+  "minimum_free_mb": 128,
+  "settings": [
+    {"key": "port_start", "label": "Начальный TCP-порт", "type": "number", "default": 33000, "min": 1024, "max": 63000}
+  ],
+  "connection_settings": [
+    {"key": "mode", "label": "Режим Snell v6", "type": "select", "default": "default", "options": [{"value": "default", "label": "Обычный"}, {"value": "unshaped", "label": "Без формирования трафика"}]},
+    {"key": "udp", "label": "UDP через туннель", "type": "boolean", "default": true},
+    {"key": "reuse", "label": "Повторное использование соединений", "type": "boolean", "default": false}
+  ]
+}

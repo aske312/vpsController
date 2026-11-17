@@ -39,8 +39,8 @@ def payload(settings, body):
         target['role'] = change.role or previous_role
         if change.role is not None:
             target['permission_overrides'] = {}
-            if target['role'] in roles.FIXED: target['products'] = [] if target['role'] == 'guest' else ['assistant', 'mihomo']
-            elif previous_role in roles.FIXED: target['products'] = ['assistant']
+            if target['role'] in roles.FIXED or target['role'] == 'administrator': target['products'] = [] if target['role'] == 'guest' else ['assistant', 'mihomo']
+            elif previous_role in roles.FIXED or previous_role == 'administrator': target['products'] = ['assistant']
         if change.products is not None: target['products'] = change.products
         if 'mihomo_profile_id' in change.model_fields_set: target['mihomo_profile_id'] = change.mihomo_profile_id
         value['accounts'] = accounts

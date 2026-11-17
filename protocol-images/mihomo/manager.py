@@ -212,6 +212,7 @@ BUILTIN_TRANSPORTS = {
     "transport-reality",
     "transport-hysteria2",
     "transport-tuic",
+    "transport-snell",
 }
 TRANSPORTS = {
     path.name for path in SUBMODULE_ROOT.glob("transport-*")
@@ -254,6 +255,7 @@ SERVICE_BY_MODULE = {
     "transport-reality": "vps-control-mihomo-reality.service",
     "transport-hysteria2": "vps-control-mihomo-hysteria2.service",
     "transport-tuic": "vps-control-mihomo-tuic.service",
+    "transport-snell": "vps-control-mihomo-snell.target",
 }
 for _module_id in TRANSPORTS:
     try:
@@ -2267,6 +2269,12 @@ def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -
         installed_version = singbox_installed_version() if installed else ""
         available_version = github_latest_tag(SINGBOX_GITHUB_REPO)
         update_available_override = newer_release(installed_version, available_version)
+    elif module_id == "transport-snell":
+        # The component ships with the application; its engine is the managed
+        # Mihomo core, updated through the existing core update workflow.
+        available_version = str(info.get("version", ""))
+        installed_version = available_version if installed else ""
+        update_available_override = False
     else:
         installed_version = available_version = ""
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
@@ -2463,6 +2471,7 @@ def call_module_script(module_id: str, action: str, extra_env: dict[str, str] | 
         raise RuntimeError(f"Missing {script.name} for {module_id}")
     env = os.environ.copy()
     env["MIHOMO_SETTINGS_FILE"] = str(SETTINGS_ROOT / f"{module_id}.json")
+    env["MIHOMO_CORE_BIN"] = str(core_binary())
     if extra_env:
         env.update(extra_env)
     result = subprocess.run(
@@ -2564,6 +2573,7 @@ def get_modules() -> dict[str, Any]:
         "transport-shadowsocks",
         "transport-hysteria2",
         "transport-tuic",
+        "transport-snell",
     ]
     return {"items": [module_payload(module_id) for module_id in order]}
 
@@ -2643,7 +2653,7 @@ def apply_module_settings(module_id: str, next_values: dict[str, Any], runtime_c
     # SS allocation starts affect only future listeners. Updating that setting
     # must not install packages, rewrite units or restart existing instances.
     should_apply = (module_id in {"transport-reality", "transport-hysteria2", "transport-tuic"} and runtime_candidate is not None) or (
-        module_id not in {"transport-reality", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"} and module_id in TRANSPORTS and module_is_ready(module_id))
+        module_id not in {"transport-reality", "transport-shadowsocks", "transport-snell", "transport-hysteria2", "transport-tuic"} and module_id in TRANSPORTS and module_is_ready(module_id))
     if should_apply:
         write_action(f"module-settings:{module_id}", f"Применение настроек {manifest(module_id)['name']}…")
         try:
@@ -3958,6 +3968,9 @@ def collect_profile_stats(item: dict[str, Any], *, collect_latency: bool = True)
             connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), dict(unknown_peer)) if awg_dump is not None else dict(unknown_peer)
         elif module_id == "transport-shadowsocks":
             connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)), credential.get("instance_id"))
+        elif module_id == "transport-snell":
+            import snell_runtime
+            connections[connection_id] = snell_runtime.stats(sys.modules[__name__], credential)
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
         elif module_id in {"transport-hysteria2", "transport-tuic"}:
@@ -4013,6 +4026,9 @@ def provision(profile_id: str, module_id: str, connection_id: str = "default", s
         return {**add_wg_credential(profile_id, module_id, connection_id), "server_address": address}
     if module_id == "transport-shadowsocks":
         return {**add_ss_credential(profile_id, connection_id, settings), "server_address": address}
+    if module_id == "transport-snell":
+        import snell_runtime
+        return {**snell_runtime.add(sys.modules[__name__], profile_id, connection_id, settings), "server_address": address}
     if module_id == "transport-reality":
         return {**add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart, privacy_enabled=privacy_enabled), "server_address": address}
     if module_id in {"transport-hysteria2", "transport-tuic"}:
@@ -4025,6 +4041,9 @@ def deprovision(profile_id: str, module_id: str, credential: dict[str, Any], def
         remove_wg_credential(profile_id, module_id, credential)
     elif module_id == "transport-shadowsocks":
         remove_ss_credential(profile_id, credential)
+    elif module_id == "transport-snell":
+        import snell_runtime
+        snell_runtime.remove(sys.modules[__name__], credential)
     elif module_id == "transport-reality":
         remove_reality_credential(profile_id, credential, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart)
     elif module_id in {"transport-hysteria2", "transport-tuic"}:
@@ -4830,6 +4849,7 @@ def client_connection_keys(component: str) -> set[str]:
         "transport-reality": {"fingerprint"},
         "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},
         "transport-tuic": {"congestion_control", "heartbeat", "udp_relay_mode", "sni", "skip_cert_verify", "zero_rtt"},
+        "transport-snell": {"udp", "reuse"},
     }.get(component, set())
 
 
@@ -4957,6 +4977,9 @@ def relay_client_lines(connection, lines):
 
 def _render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
     server = str(credential.get("server_address") or public_endpoint())
+    if module_id == "transport-snell":
+        import snell_runtime
+        return snell_runtime.render(credential, proxy_name or 'Snell v6', server)
     if module_id in ("transport-wg", "transport-awg"):
         name = "AWG" if module_id == "transport-awg" else "WG"
         lines = [
@@ -5117,6 +5140,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         "transport-shadowsocks": "SS",
         "transport-hysteria2": "HY2",
         "transport-tuic": "TUIC",
+        "transport-snell": "Snell v6",
     }
     normalized = normalize_profile(deepcopy(item))
     normalized["connections"] = subscription_limits.client_connections(normalized, effective_client_connections(normalized.get("connections", [])))

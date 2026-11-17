@@ -98,7 +98,7 @@ class Account(BaseModel):
     @model_validator(mode='after')
     def role_bounds(self):
         if self.products is not None and len(set(self.products)) != len(self.products): raise ValueError('Продукты не должны повторяться')
-        if self.role in roles.FIXED and self.permission_overrides: raise ValueError('Права владельца, администратора и гостя фиксированы')
+        if self.role in roles.FIXED and self.permission_overrides: raise ValueError('Права владельца и гостя фиксированы')
         if self.role in ('owner', 'administrator') and self.products is not None and set(self.products) != {'assistant', 'mihomo'}: raise ValueError('Владельцу и администратору доступны оба продукта')
         if self.role == 'guest' and self.products: raise ValueError('Гостю доступна только команда /id')
         if self.role == 'user' and any(enabled and key not in roles.USER_ALLOWED for key, enabled in self.permission_overrides.items()): raise ValueError('Пользователю недоступны административные и сервисные права')
@@ -163,7 +163,7 @@ class Settings(BaseModel):
     memory_days: int = Field(default=30, strict=True, ge=1, le=90)
     telegram_api_id: int | None = Field(default=None, strict=True, gt=0)
     telegram_api_hash: str | None = Field(default=None, max_length=32)
-    role_policy_version: Literal[2] = 2
+    role_policy_version: Literal[2, 3] = 3
     role_permissions: dict[str, list[str]] = Field(default_factory=dict)
     accounts: list[Account] = Field(default_factory=list, max_length=30)
 
@@ -173,7 +173,7 @@ class Settings(BaseModel):
         if set(value) - set(roles.ROLES): raise ValueError('Неизвестная роль')
         for role, grants in value.items():
             if len(grants) != len(set(grants)) or set(grants) - set(roles.PERMISSIONS): raise ValueError('Неизвестное разрешение')
-            if role in roles.FIXED and set(grants) != set(roles.DEFAULTS[role]): raise ValueError('Права владельца, администратора и гостя фиксированы')
+            if role in roles.FIXED and set(grants) != set(roles.DEFAULTS[role]): raise ValueError('Права владельца и гостя фиксированы')
             if role == 'user' and set(grants) - roles.USER_ALLOWED: raise ValueError('Пользователь может работать только с AI и своей подпиской')
             if role != 'owner' and 'roles_manage' in grants: raise ValueError('Управлять ролями может только владелец')
         return value

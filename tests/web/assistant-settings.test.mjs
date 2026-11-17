@@ -824,6 +824,28 @@ test('role modal stages edits across roles, cancels without changing settings, a
   assert.equal(status.settings.role_permissions,undefined);
 });
 
+test('administrator permissions can be edited and saved while ownership stays protected', async () => {
+  const view=mount(fixture());view.render();await Promise.resolve();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Настроить роли')[0].node.props.onClick();
+  const dialog=()=>nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Роли и права')[0].node;
+  nodes(dialog(),n=>n.props['aria-label']==='Роль: Администратор')[0].node.props.onClick();
+  const search=value=>nodes(dialog(),n=>n.type==='input'&&n.props.type==='search')[0].node.props.onChange({target:{value}});
+  search('Терминал');
+  const terminal=nodes(dialog(),n=>n.props.role==='switch'&&n.props['aria-label']==='Терминал: только чтение')[0];
+  assert.equal(terminal.disabled,false);
+  terminal.node.props.onChange({target:{checked:false}});
+  search('Управление ролями');
+  const ownership=nodes(dialog(),n=>n.props.role==='switch'&&n.props['aria-label']==='Управление ролями и правами')[0];
+  assert.equal(ownership.disabled,true);
+  dialog().props.submit();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Сохранить')[0].node.props.onClick();
+  await Promise.resolve();
+  assert.equal(view.writes.length,1);
+  assert.ok(!view.writes[0].role_permissions.administrator.includes('terminal_read'));
+  assert.ok(!view.writes[0].role_permissions.administrator.includes('roles_manage'));
+});
+
 test('streaming defaults off and can be enabled independently in chat settings', async () => {
   const status=fixture();Object.assign(status.settings,{model:'m',modules:{'ai-agent':true,'nodera-bot':true}});
   Object.assign(status.modules[0],{enabled:true,configured:true});

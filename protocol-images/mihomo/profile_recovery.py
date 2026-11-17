@@ -4,11 +4,27 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
 from application_operation import atomic_json
+
+INSTANCE_MODULES = {'transport-shadowsocks': ('vps-control-mihomo-ss@', 'shadowsocks'),
+                    'transport-snell': ('vps-control-mihomo-snell@', 'snell')}
+
+
+def instance_snapshot(api, modules, *, strict=True):
+    result = {}
+    for module in sorted(set(modules) & INSTANCE_MODULES.keys()):
+        prefix, directory = INSTANCE_MODULES[module]
+        if module == 'transport-shadowsocks':
+            result.update(api.ss_runtime.snapshot(api.run, api.CONFIG_ROOT, strict=strict))
+        else:
+            result.update(api.ss_runtime.snapshot(api.run, api.CONFIG_ROOT, strict=strict,
+                                                 prefix=prefix, directory=api.CONFIG_ROOT / directory))
+    return result
 
 
 def marker(api):
@@ -87,7 +103,7 @@ def prepare(api, modules, *, include_personal_rules=False, settings_modules=()):
     settings_modules = set(settings_modules)
     if not modules.issubset(api.TRANSPORTS) or not settings_modules.issubset(modules):
         raise ValueError("Unknown recovery modules")
-    instances = api.ss_runtime.snapshot(api.run, api.CONFIG_ROOT) if "transport-shadowsocks" in modules else None
+    instances = instance_snapshot(api, modules) if set(modules) & INSTANCE_MODULES.keys() else None
     states = {module: runtime(api, service) for module in modules if (service := api.SERVICE_BY_MODULE.get(module))}
     enabled = {module: enablement(api, api.SERVICE_BY_MODULE[module]) for module in settings_modules if module in states}
     allowed = allowed_files(api, modules, include_personal_rules=include_personal_rules, settings_modules=settings_modules)
@@ -169,11 +185,12 @@ def recover(api):
     current_config = config_files(api.CONFIG_ROOT)
     instances = None
     if value.get("instances") is not None:
-        if "transport-shadowsocks" not in modules or not isinstance(value["instances"], dict):
+        if not modules & INSTANCE_MODULES.keys() or not isinstance(value["instances"], dict):
             raise ValueError("Invalid Shadowsocks snapshot")
         instances = {}
         for unit, saved in value["instances"].items():
-            if not api.ss_runtime.UNIT.fullmatch(unit) or not isinstance(saved, list) or len(saved) != 3 or type(saved[0]) is not bool or saved[1] not in {"enabled", "enabled-runtime", "disabled", "masked", "masked-runtime"}:
+            valid_unit = any(re.fullmatch(re.escape(INSTANCE_MODULES[module][0]) + r'[A-Za-z0-9_-]+\.service', unit) for module in modules & INSTANCE_MODULES.keys())
+            if not valid_unit or not isinstance(saved, list) or len(saved) != 3 or type(saved[0]) is not bool or saved[1] not in {"enabled", "enabled-runtime", "disabled", "masked", "masked-runtime"}:
                 raise ValueError("Invalid Shadowsocks instance")
             instances[unit] = (saved[0], saved[1], base64.b64decode(saved[2], validate=True) if saved[2] is not None else None)
     failures = []
@@ -185,7 +202,7 @@ def recover(api):
     ss_current = {}
     if instances is not None:
         try:
-            ss_current = api.ss_runtime.snapshot(api.run, api.CONFIG_ROOT, strict=False)
+            ss_current = instance_snapshot(api, modules, strict=False)
             api.ss_runtime.remove_created(api.run, instances, ss_current)
         except Exception as error:
             failures.append(str(error))
@@ -219,10 +236,9 @@ def recover(api):
                 if state == "absent":
                     if observed != "absent":
                         raise RuntimeError("Unexpected service appeared during profile recovery")
-                elif module == "transport-shadowsocks":
+                elif module in INSTANCE_MODULES:
                     if observed != state:
                         api.run("systemctl", "start" if state == "running" else "stop", unit, check=True)
-                    api.ss_runtime.restore(api.run, instances, ss_current)
                 elif state == "running":
                     api.run("systemctl", "reset-failed", unit)
                     api.run("systemctl", "restart", unit, check=True)
@@ -231,6 +247,8 @@ def recover(api):
                 if runtime(api, unit) != state:
                     raise RuntimeError("Profile runtime recovery not confirmed")
             attempt(restore_runtime)
+        if instances is not None:
+            attempt(lambda: api.ss_runtime.restore(api.run, instances, ss_current))
         if states.get("transport-reality") == "running":
             attempt(api.rebuild_vless_cdn_snippet)
             firewall_policy = Path("/opt/vps-control/api/cdn_security.py")

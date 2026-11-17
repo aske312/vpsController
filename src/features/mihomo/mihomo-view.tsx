@@ -11,7 +11,6 @@ import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { AdvancedRouting, BalanceStrategy, ProfilePolicyGroups, libraryRoute } from "./advanced-routing";
-import { SavedRoutingOrder } from "./saved-routing-order";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { mergeProfileRouting, policySelectionKey, profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
 import { aggregateUsage, usageBytes, usagePeriodLabel, subscriptionTraffic, unlimitedSubscription } from "./subscription-limits";
@@ -1829,7 +1828,6 @@ export function MihomoPage({
                 onChange={value => setProfileRoutingValue(policySelectionKey, value)} onReset={inheritPolicySelection}
                 onEdit={() => { void closeProfile(() => setView("rules")); }} legacy={Boolean(activeProfileRouting.structured_policy && activeProfileRouting.structured_policy !== "@inherit")}
                 onUseShared={inheritStructuredPolicy} disabled={Boolean(busy) || Boolean(pendingProfileSave)}/>
-              {profileDialog && profileDialog !== "new" && <SavedRoutingOrder key={`${profileDialog.id}:${activeDeviceId}`} request={request} profileId={profileDialog.id} deviceId={activeDeviceId} disabled={profileDirty || Boolean(busy) || Boolean(pendingProfileSave)}/>}
             </>}
             <section className="mihomoPresetPicker">
               <header><div><b>Пресеты</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => void closeProfile(() => setView("routing"))}>Настроить пресеты</button></header>

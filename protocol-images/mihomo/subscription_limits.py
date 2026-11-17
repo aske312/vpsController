@@ -93,11 +93,15 @@ def plan(profiles):
                 row["xray_users"].append(str(credential.get("email") or f"mihomo-{identity}-{connection['id']}"))
             elif component in {"transport-hysteria2", "transport-tuic"}:
                 row["quic_users"].setdefault(component.removeprefix("transport-"), []).append(instance)
-            elif component == "transport-shadowsocks":
+            elif component in {"transport-shadowsocks", "transport-snell"}:
                 port = credential.get("port")
                 if type(port) is not int or not 1024 <= port <= 65535:
                     raise ValueError("Invalid Shadowsocks accounting port")
-                row["shadowsocks"].append({"unit": f"vps-control-mihomo-ss@{instance}.service", "port": port})
+                prefix = 'ss' if component == 'transport-shadowsocks' else 'snell'
+                # Historical policy key: isolated stream-core processes share
+                # the same cgroup accounting and quota/rate enforcement.
+                row["shadowsocks"].append({"unit": f"vps-control-mihomo-{prefix}@{instance}.service", "port": port,
+                                           **({'wire_transport': 'tcp'} if component == 'transport-snell' else {})})
             elif component in {"transport-wg", "transport-awg"}:
                 address = ipaddress.ip_interface(credential["ip"])
                 row["peers"].append({"interface": "mh-wg0" if component == "transport-wg" else "mh-awg0", "ip": str(address.ip)})
@@ -287,7 +291,8 @@ def nft_rules(policy, state, groups, *, existing=False):
                     if any(character in path for character in ('"', '\n', '\r', '\x00')):
                         raise ValueError("Invalid subscription cgroup path")
                     group_path = '"' + path + '"'
-                    output.insert(0, f"socket cgroupv2 level {group['level']} {group_path} {transport} sport != {instance['port']} ct mark set {mark}")
+                    selector = f"meta l4proto {transport}" if instance.get('wire_transport') == 'tcp' and transport == 'udp' else f"{transport} sport != {instance['port']}"
+                    output.insert(0, f"socket cgroupv2 level {group['level']} {group_path} {selector} ct mark set {mark}")
         for peer in profile["peers"]:
             family = "ip6" if ":" in peer["ip"] else "ip"
             interface = json.dumps(peer["interface"])
