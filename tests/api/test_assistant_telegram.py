@@ -75,10 +75,11 @@ class TelegramPolicyTests(unittest.TestCase):
 
     def test_chat_response_includes_the_real_confirmation_payload(self):
         self.prepare()
+        identity = assistant_commands.pending_action(api, '11')['operation_id']
         settings = control.read(api)
         settings['memory_enabled'] = False
         settings['accounts'][0]['bot_chat_access'] = True
-        with patch.object(control, 'runtime_request', return_value={'ok': True, 'result': {'answer': 'Fixture', 'tools_used': ['tg_send_message']}}):
+        with patch.object(control, 'runtime_request', return_value={'ok': True, 'result': {'answer': 'Fixture', 'tools_used': ['tg_send_message'], 'prepared_operation_ids': [identity]}}):
             output = control.chat_request(api, control.Chat(prompt='Fixture'), '11', settings=settings)
         self.assertEqual(output['pending_action']['changes']['arguments']['group'], '42')
         self.assertEqual(output['pending_action']['changes']['arguments']['message_text'], 'approved fixture')

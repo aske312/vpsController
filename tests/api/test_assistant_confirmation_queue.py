@@ -53,12 +53,14 @@ class ConfirmationQueueTests(unittest.TestCase):
             self.assertEqual({(row['actor'], row['code']) for row in rows}, {('panel', 'aabbccdd'), ('11', second)})
             action.assert_not_called()
 
-    def test_chat_output_exposes_all_pending_requests_without_giving_model_a_confirm_tool(self):
+    def test_old_requests_remain_available_without_attaching_to_a_new_chat_reply(self):
         codes = {self.prepare(), self.prepare()}
         settings = {**control.read(api), 'memory_enabled': False}
         with patch.object(control, 'runtime_request', return_value={'result': {'answer': 'Review both actions', 'tools_used': []}}), patch.object(control, 'provider_usage', return_value={}):
             result = control._chat_request(api, control.Chat(prompt='Continue'), '11', settings=settings)
-        self.assertEqual({row['code'] for row in result['pending_actions']}, codes)
+        self.assertEqual(result['pending_actions'], [])
+        self.assertNotIn('pending_action', result)
+        self.assertEqual({row['code'] for row in commands.pending_actions(api, '11')}, codes)
         self.assertNotIn('vps_confirm', control.ToolCall.model_fields['name'].annotation.__args__)
 
     def test_legacy_record_and_new_queue_item_remain_independently_addressable(self):

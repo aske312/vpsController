@@ -120,8 +120,9 @@ class ServerCommandTests(unittest.TestCase):
 
     def test_chat_returns_pending_even_without_a_tool_name_in_the_model_response(self):
         code = self.prepare()
+        identity = commands.pending_action(api, '11')['operation_id']
         settings = {**control.read(api), 'memory_enabled': False}
-        with patch.object(control, 'runtime_request', return_value={'result': {'answer': 'Confirm the action', 'tools_used': []}}), patch.object(control, 'provider_usage', return_value={}):
+        with patch.object(control, 'runtime_request', return_value={'result': {'answer': 'Confirm the action', 'tools_used': [], 'prepared_operation_ids': [identity]}}), patch.object(control, 'provider_usage', return_value={}):
             result = control._chat_request(api, control.Chat(prompt='Continue'), '11', settings=settings)
         self.assertEqual(result['pending_action']['code'], code)
         self.assertEqual(result['pending_action']['service'], 'fixture')
