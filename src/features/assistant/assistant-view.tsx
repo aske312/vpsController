@@ -242,7 +242,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           return [...current].reverse().map(turn => {
             const index = available.findIndex(item => item.question === turn.question && item.answer === turn.answer);
             const server = index >= 0 ? available.splice(index, 1)[0] : undefined;
-            return server ? { ...turn, files: server.files, files_expired: server.files_expired } : turn;
+            return server ? { ...turn, request_id: turn.request_id || server.request_id, status: server.status ?? turn.status, files: server.files, files_expired: server.files_expired } : turn;
           }).reverse();
         });
         setModel(current => current || value.turns.at(-1)?.model || '');
@@ -292,14 +292,14 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       if (streaming) setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, answer: job.partial || undefined } : turn));
     }, controller.signal).then(result => {
       if (controller.signal.aborted) return;
-      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action, pending_actions: result.pending_actions } : turn));
+      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, status: result.result.status, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action, pending_actions: result.pending_actions } : turn));
       ingestConfirmations(actor || "panel", result.pending_actions ?? (result.pending_action ? [result.pending_action] : []));
       setConversationId(result.conversation_id ?? null); selectedConversation.current = result.conversation_id ?? null;
     }).catch(cause => {
       if (controller.signal.aborted) return;
       if (cause instanceof ChatJobError) rememberChat(request, actor, null);
       setMemoryError(cause instanceof Error ? cause.message : "Результат AI не подтверждён");
-      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, error: cause instanceof Error ? cause.message : "Результат AI не подтверждён" } : turn));
+      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, answer: undefined, error: cause instanceof Error ? cause.message : "Результат AI не подтверждён" } : turn));
     }).finally(() => {
       if (controller.signal.aborted) return;
       chatRunning.current = false; setChatBusy(false); setChatStageText(""); setHasPendingChat(Boolean(savedChat(request, actor)));
@@ -499,7 +499,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           }, controller.signal);
           if (client.current === request) {
             if (apiMonitor.current === connection) setChatConnection("responding");
-            const completed = { ...next, queue_state: undefined, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action, pending_actions: result.pending_actions };
+            const completed = { ...next, queue_state: undefined, status: result.result.status, answer: result.result.answer, tools: result.result.tools_used, pending_action: result.pending_action, pending_actions: result.pending_actions };
             context.push(completed);
             conversation = result.conversation_id ?? null;
             setTurns(current => current.map(turn => turn.id === id ? completed : turn));
@@ -509,13 +509,15 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
             if (cacheEnabled) void loadConversations();
             if (!visible.current || typeof document !== "undefined" && document.hidden) notifications.upsert({
               id: `nodera-answer:${chatRequestId.current}`, source: "nodera", title: "Nodera ответила", message: question || "Ответ на сообщение с вложениями",
-              state: "success", kind: "message", action: { label: "Открыть чат", run: () => { setPanel('chat'); openChat.current(); } },
+              state: result.result.status === "incomplete" || result.result.status === "partial" ? "info" : "success", kind: "message", action: { label: "Открыть чат", run: () => { setPanel('chat'); openChat.current(); } },
             });
-            if (result.pending_actions?.length || result.pending_action) {
+            if (result.pending_actions?.length || result.pending_action || result.result.status) {
               const waiting = new Set(pendingTurns.current.map(item => item.id));
               pendingTurns.current = [];
               setTurns(current => current.map(item => waiting.has(item.id) ? { ...item, queue_state: undefined,
-                error: "Не отправлено: предыдущий ответ требует подтверждения действия. Повторите вопрос вручную после его проверки." } : item));
+                error: result.result.status === "incomplete" || result.result.status === "partial"
+                  ? "Не отправлено: предыдущий ответ получен не полностью. Проверьте его перед продолжением."
+                  : "Не отправлено: предыдущий ответ требует подтверждения действия. Повторите вопрос вручную после его проверки." } : item));
               break;
             }
           }
@@ -523,7 +525,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           if (apiMonitor.current === connection) { setChatConnection("failed"); void loadModels(); }
           const waiting = new Set(pendingTurns.current.map(item => item.id));
           pendingTurns.current = [];
-          setTurns(current => current.map(turn => turn.id === id ? { ...turn, queue_state: undefined, error: cause instanceof Error ? cause.message : "AI не ответил" }
+          setTurns(current => current.map(turn => turn.id === id ? { ...turn, queue_state: undefined, answer: undefined, error: cause instanceof Error ? cause.message : "AI не ответил" }
             : waiting.has(turn.id) ? { ...turn, queue_state: undefined, error: "Не отправлено: предыдущий запрос завершился ошибкой. Можно повторить вручную." } : turn));
           break;
         }

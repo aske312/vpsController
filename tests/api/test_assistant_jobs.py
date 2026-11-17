@@ -62,6 +62,23 @@ class ChatJobsTests(unittest.TestCase):
         value=jobs.get(api,self.payload.request_id)
         self.assertEqual(value['error']['code'],'internal_error');self.assertNotIn('sk-private',json.dumps(value))
         self.assertIn('duration_ms',value)
+
+    def test_terminal_failure_discards_unconfirmed_stream_text(self):
+        jobs.submit(api, self.payload)
+        jobs.update(api, self.payload.request_id, partial='Unconfirmed draft', stage='receiving')
+        jobs.update(api, self.payload.request_id, state='failed', error={'code': 'provider_error'})
+        self.assertEqual(jobs.get(api, self.payload.request_id).get('partial', ''), '')
+
+    def test_incomplete_delivery_is_not_recorded_as_a_successful_generation(self):
+        jobs.submit(api, self.payload)
+        result = {'ok': True, 'result': {'answer': 'Partial audit', 'tools_used': [], 'status': 'incomplete'}}
+        with patch.object(control, 'chat_request', return_value=result): jobs.execute(api, self.payload.request_id)
+        self.assertEqual(jobs.get(api, self.payload.request_id)['state'], 'done')
+        from observability import Store
+        rows = Store(self.root).read(60, limit=20)['events']
+        event = next(row for row in rows if row.get('request_id') == self.payload.request_id)
+        self.assertEqual(event['status'], 502)
+        self.assertEqual(event['error_code'], 'chat_incomplete')
     def test_settings_change_prevents_generation(self):
         jobs.submit(api,self.payload)
         with patch.object(control,'read',return_value={'revision':'changed'}),patch.object(control,'chat_request') as chat:

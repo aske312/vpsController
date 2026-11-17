@@ -89,13 +89,17 @@ def listing(api, settings, actor='panel', channel='panel'):
     return {'enabled': True, 'items': sorted(items, key=lambda item: item['updated_at'], reverse=True)}
 
 
-def append(api, identity, actor, channel, question, files, result, model, settings):
+def append(api, identity, actor, channel, question, files, result, model, settings, *, request_id=None):
     with operations.locked(api.DATA_DIR):
         file = path(api, identity, actor, channel)
         record = _read(file) or {'schema': 1, 'id': identity, 'title': (question.strip().splitlines() or [files[0]['name'] if files else 'Новый диалог'])[0][:80], 'turns': []}
         attachments = [{**item, 'id': uuid.uuid4().hex, 'size': len(item['data']) * 3 // 4 - (len(item['data']) - len(item['data'].rstrip('=')))} for item in files]
         identity_turn = max((turn['id'] for turn in record['turns']), default=0) + 1
         record['turns'].append({'id': identity_turn, 'question': question, 'at': operations.timestamp(), 'files': attachments, 'answer': result['answer'], 'tools': result.get('tools_used', []), 'model': model})
+        if isinstance(request_id, str) and re.fullmatch(r'[a-f0-9]{32}', request_id):
+            record['turns'][-1]['request_id'] = request_id
+        if result.get('status') in ('incomplete', 'partial', 'awaiting_confirmation'):
+            record['turns'][-1]['status'] = result['status']
         record['turns'] = record['turns'][-40:]
         file_bytes = 0
         for turn in reversed(record['turns']):
@@ -122,12 +126,66 @@ def context(record, current_files):
         question, answer = turn['question'][:8000] or 'Файлы', turn['answer'][:8000]
         files = turn.get('files', [])
         amount = sum(len(item['data']) for item in files)
-        if length + len(question) + len(answer) > 48000 or encoded + amount > 8400000:
+        if encoded + amount > 8400000:
+            files, amount = [], 0
+            question += '\n[Вложения предыдущего сообщения не включены в контекст по лимиту.]'
+        if turn.get('status') in ('incomplete', 'partial', 'awaiting_confirmation'):
+            answer = ('Предыдущий ответ получен не полностью и не подтверждает текущее состояние.'
+                      if turn['status'] != 'awaiting_confirmation' else 'В предыдущем запросе было подготовлено действие; его текущее состояние требует отдельной проверки.')
+            if isinstance(turn.get('request_id'), str) and re.fullmatch(r'[a-f0-9]{32}', turn['request_id']):
+                answer += ' Журнал запроса ИИ: ' + turn['request_id'] + '.'
+        if length + len(question) + len(answer) > 48000:
             break
         length += len(question) + len(answer)
         encoded += amount
         result[0:0] = [{'role': 'user', 'content': question, 'attachments': [{key: item[key] for key in ('name', 'mime', 'data')} for item in files]}, {'role': 'assistant', 'content': answer}]
     return result
+
+
+def merge_command_context(stored, provided, names, sanitize):
+    """Insert command events between trusted AI turns, never after newer turns."""
+    records = [stored[index:index + 2] for index in range(0, len(stored) - 1, 2)]
+    client = [provided[index:index + 2] for index in range(0, len(provided) - 1, 2)
+              if provided[index]['role'] == 'user' and provided[index + 1]['role'] == 'assistant']
+    def command(pair):
+        text = pair[0]['content'].strip()
+        return bool(text and (text.split()[0].lower() in names or text.startswith((
+            'Подтверждено:', 'Отклонено:', 'Попытка подтверждения:', 'Попытка отказа:'))))
+    anchors, cursor = {}, len(records) - 1
+    for index in reversed(range(len(client))):
+        if command(client[index]): continue
+        question = client[index][0]['content']
+        match = next((position for position in range(cursor, -1, -1)
+                      if records[position][0]['content'] == question
+                      or records[position][0]['content'].startswith(question + '\n[Вложения')), None)
+        if match is not None:
+            anchors[index], cursor = match, match - 1
+    buckets = [[] for _ in range(len(records) + 1)]
+    seen = {(pair[0]['content'], pair[1]['content']) for pair in records}
+    for index, pair in enumerate(client):
+        if not command(pair): continue
+        signature = (pair[0]['content'], pair[1]['content'])
+        if signature in seen: continue
+        following = next((anchors[position] for position in range(index + 1, len(client)) if position in anchors), None)
+        preceding = next((anchors[position] for position in range(index - 1, -1, -1) if position in anchors), None)
+        # Undated references precede the known server timeline, rather than
+        # presenting a possibly old confirmation as the newest user intent.
+        unanchored = following is None and preceding is None and records
+        target = following if following is not None else preceding + 1 if preceding is not None else 0
+        question = pair[0]['content']
+        if question.strip().split()[0].lower() in ('/confirm', '/cancel'):
+            question = question.strip().split()[0] + ' [код скрыт]'
+        if unanchored:
+            question = '[Справочный результат команды; её время относительно диалога не подтверждено.]\n' + question
+        buckets[target].extend([{'role': 'user', 'content': sanitize(question)},
+                                {'role': 'assistant', 'content': sanitize(pair[1]['content'])}])
+        seen.add(signature)
+    merged = []
+    for index, record in enumerate(records): merged.extend([*buckets[index], *record])
+    merged.extend(buckets[-1])
+    merged = merged[-40:]
+    while sum(len(row['content']) for row in merged) > 48000: del merged[:2]
+    return merged
 
 
 def remove(api, identity, actor='panel'):

@@ -926,29 +926,29 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
                 import assistant_chat_commands
                 from assistant_diagnostics import sanitize
                 names = {row['command'] for row in assistant_chat_commands.catalog(api, actor)} - {'/subscription', '/id'}
-                extra = []
-                for index in range(0, len(body['history']) - 1, 2):
-                    question, answer = body['history'][index:index + 2]
-                    text = question['content'].strip()
-                    if question['role'] != 'user' or answer['role'] != 'assistant': continue
-                    if not text: continue
-                    if text.split()[0].lower() not in names and not text.startswith(('Подтверждено:', 'Отклонено:', 'Попытка подтверждения:', 'Попытка отказа:')): continue
-                    if any(row['role'] == 'user' and row['content'] == question['content'] for row in stored): continue
-                    extra.extend([{'role': 'user', 'content': sanitize(api, question['content'], max_chars=8000, max_string=8000)},
-                                  {'role': 'assistant', 'content': sanitize(api, answer['content'], max_chars=8000, max_string=8000)}])
-                stored = (stored + extra)[-40:]
-                while sum(len(row['content']) for row in stored) > 48000: del stored[:2]
+                stored = assistant_memory.merge_command_context(stored, body['history'], names,
+                    lambda text: sanitize(api, text, max_chars=8000, max_string=8000))
             body['history'] = stored
         else:
             identity = uuid.uuid4().hex
     body['context_conversation'] = identity
     body['settings_revision'] = settings['revision']
-    output = runtime_request(api, '--chat', body)
     import assistant_commands
-    pending = assistant_commands.pending_actions(api, actor)
+    previous_pending = {row['operation_id'] for row in assistant_commands.pending_actions(api, actor)}
+    output = runtime_request(api, '--chat', body)
+    current_pending = assistant_commands.pending_actions(api, actor)
+    prepared = output['result'].get('prepared_operation_ids')
+    # New runtimes identify this request's preparations explicitly. For older
+    # runtimes associate only newly created actions, never every actor action.
+    related = set(prepared) if isinstance(prepared, list) else {
+        row['operation_id'] for row in current_pending if row['operation_id'] not in previous_pending}
+    pending = [row for row in current_pending if row['operation_id'] in related]
     output['pending_actions'] = pending
+    output.pop('pending_action', None)
     if pending:
         output['pending_action'] = pending[-1]
+    elif output['result'].get('status') == 'awaiting_confirmation':
+        output['result'].update(status='incomplete', answer='Подтверждение уже не активно. Это не определяет результат операции; проверьте её текущее состояние перед новым действием.')
     try:
         usage = provider_usage(api, settings, output['result'])
         output['provider_usage'] = {entry['id']: usage[entry['id']] for entry in providers(settings) if entry['id'] in usage}
@@ -956,7 +956,7 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
         pass  # A statistics write must not discard a completed response.
     if settings.get('memory_enabled', True):
         try:
-            assistant_memory.append(api, identity, actor, channel, payload.prompt, files, output['result'], body['model'] or settings.get('model', ''), settings)
+            assistant_memory.append(api, identity, actor, channel, payload.prompt, files, output['result'], body['model'] or settings.get('model', ''), settings, request_id=payload.request_id)
             output['conversation_id'] = identity
         except (OSError, HTTPException, operations.OperationConflict):
             output['cache_error'] = 'Ответ получен, но кеш диалога сохранить не удалось'
@@ -1020,6 +1020,22 @@ def runtime_request(api, mode, body):
     except Exception:
         operation.stage('complete', 'failed')
         raise
+
+
+def checked_chat_result(output):
+    result = output.get('result')
+    if (not isinstance(result, dict) or not isinstance(result.get('answer'), str)
+            or not isinstance(result.get('tools_used', []), list)
+            or any(not isinstance(name, str) for name in result.get('tools_used', []))
+            or ('prepared_operation_ids' in result and (not isinstance(result['prepared_operation_ids'], list)
+                or len(result['prepared_operation_ids']) > 96
+                or any(not isinstance(identity, str) or not re.fullmatch(r'[a-f0-9]{32}', identity) for identity in result['prepared_operation_ids'])))
+            or result.get('status') not in (None, 'incomplete', 'partial', 'awaiting_confirmation')):
+        error = HTTPException(502, 'Модуль AI вернул некорректный результат; повторной отправки не было')
+        error.error_code = 'invalid_runtime_response'
+        raise error
+    result.setdefault('tools_used', [])
+    return output
 
 
 def _runtime_request(api, mode, body):
@@ -1160,7 +1176,9 @@ def _runtime_request(api, mode, body):
         raise HTTPException(502, 'Модуль не вернул корректный результат; проверьте его установку') from None
     finally:
         _runtime_slots.release()
-    if code or not output.get('ok'):
+    if not isinstance(output, dict):
+        raise HTTPException(502, 'Модуль AI вернул неверный формат ответа')
+    if code or output.get('ok') is not True:
         diagnostic = output.get('diagnostic', {})
         error = HTTPException(502, output.get('error', 'Модуль завершился с ошибкой'))
         diagnostic = diagnostic if isinstance(diagnostic, dict) else {}
@@ -1173,6 +1191,8 @@ def _runtime_request(api, mode, body):
             bot_identity(api, value['bot_token'], output.get('result', {}).get('username'))
         except (OSError, operations.OperationConflict):
             pass
+    if mode == '--chat':
+        return checked_chat_result(output)
     return output
 
 
@@ -1253,7 +1273,7 @@ def control_tool(api, name, arguments=None, actor='panel'):
         if not own: roles.require(settings, actor, 'subscriptions_admin')
         result = api.get_application_operation(identity, None)
         if not str(result.get('action', '')).startswith('mihomo-'): raise HTTPException(403, 'Доступны только операции Mihomo')
-        return {key: result.get(key) for key in ('id', 'action', 'state', 'updated_at')}
+        return {key: result.get(key) for key in ('id', 'action', 'state', 'result', 'stage', 'stage_result', 'updated_at')}
     if name == 'mihomo_compare':
         import diagnostic_tools
         result = diagnostic_tools.call(api, 'vps_compare', arguments, actor)

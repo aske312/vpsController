@@ -79,6 +79,39 @@ class AssistantMemoryTests(unittest.TestCase):
             self.assertEqual(value['result']['answer'], 'A')
             self.assertIn('cache_error', value)
 
+    def test_server_cache_preserves_trace_and_marks_incomplete_context(self):
+        result = {'ok': True, 'result': {'answer': 'Неполный вывод: профиль создан.', 'tools_used': ['mihomo_read'], 'status': 'incomplete'}}
+        with patch.object(control, 'read', return_value=self.settings), patch.object(control, 'runtime_request', return_value=result):
+            saved = control.chat_request(self.env, control.Chat(prompt='Проверь профиль', request_id='b' * 32))
+        record = memory.get(self.env, saved['conversation_id'])
+        self.assertEqual(record['turns'][0]['request_id'], 'b' * 32)
+        self.assertEqual(record['turns'][0]['status'], 'incomplete')
+        context = memory.context(record, [])
+        self.assertNotIn('профиль создан', context[1]['content'])
+        self.assertIn('b' * 32, context[1]['content'])
+
+    def test_attachment_budget_does_not_erase_the_text_of_previous_turns(self):
+        record = self.save(files=[{'name': 'old.txt', 'mime': 'text/plain', 'data': 'dGV4dA=='}])
+        context = memory.context(record, [{'data': 'x' * 8400000}])
+        self.assertEqual(len(context), 2)
+        self.assertIn('Question <&>', context[0]['content'])
+        self.assertEqual(context[0]['attachments'], [])
+
+    def test_command_events_keep_their_position_without_replacing_server_answers(self):
+        pair = lambda question, answer: [{'role': 'user', 'content': question}, {'role': 'assistant', 'content': answer}]
+        stored = [*pair('First', 'Server first'), *pair('Second', 'Server second')]
+        client = [*pair('/status', 'Old status'), *pair('First', 'Tampered first'),
+                  *pair('Подтверждено: old action', 'Queued earlier'), *pair('Second', 'Tampered second'),
+                  *pair('/status', 'New status')]
+        merged = memory.merge_command_context(stored, client, {'/status'}, lambda value: value)
+        self.assertEqual([row['content'] for row in merged], ['/status', 'Old status',
+            'First', 'Server first', 'Подтверждено: old action', 'Queued earlier', 'Second', 'Server second', '/status', 'New status'])
+        stale = memory.merge_command_context(stored, pair('/status', 'Unanchored old result'), {'/status'}, lambda value: value)
+        self.assertEqual(stale[2:], stored)
+        self.assertIn('время относительно диалога не подтверждено', stale[0]['content'])
+        safe = memory.merge_command_context([], pair('/confirm private-code', 'Queued'), {'/confirm'}, lambda value: value)
+        self.assertNotIn('private-code', json.dumps(safe))
+
     def test_cache_routes_require_admin(self):
         client = TestClient(api.app)
         self.assertEqual(client.get('/api/assistant/conversations').status_code, 401)

@@ -28,5 +28,13 @@ test('conversation history carries prior documents and respects shared byte and 
   assert.equal(history[0].attachments[0].data, file.data);
   assert.deepEqual(history.map(row => row.role), ['user', 'assistant', 'user', 'assistant']);
   assert.equal(chatHistory(Array.from({ length: 4 }, () => ({ question: 'x'.repeat(8000), answer: 'y'.repeat(8000) }))).length, 6);
-  assert.equal(chatHistory([{ question: 'Previous', answer: 'Answer', files: [{ ...file, size: 4 * 1024 * 1024 }] }], [{ ...file, size: 3 * 1024 * 1024 }]).length, 0);
+  const withoutFile=chatHistory([{ question: 'Previous', answer: 'Answer', files: [{ ...file, size: 4 * 1024 * 1024 }] }], [{ ...file, size: 3 * 1024 * 1024 }]);
+  assert.equal(withoutFile.length,2);assert.match(withoutFile[0].content,/Previous/);assert.equal(withoutFile[0].attachments,undefined);
+});
+
+test('failed drafts and incomplete conclusions cannot become evidence in the next prompt',()=>{
+ const history=chatHistory([{question:'failed',answer:'Draft says applied',error:'connection lost'},
+   {question:'audit',answer:'Unverified conclusion',status:'incomplete',request_id:'a'.repeat(32)}]);
+ assert.equal(history.length,2);assert.doesNotMatch(JSON.stringify(history),/Draft says applied|Unverified conclusion/);
+ assert.match(history[1].content,new RegExp('a'.repeat(32)));
 });

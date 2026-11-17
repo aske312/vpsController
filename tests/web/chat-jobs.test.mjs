@@ -48,6 +48,23 @@ test('provider failure stays a structured failure even after partial text',async
  globalThis.fetch=async()=>Response.json(job({state:'failed',partial:'partial',error:{code:'provider_read_timeout',message:'timed out'}}));
  await assert.rejects(observeChatJob(createApiClient('sse-test'),id,'',true,()=>{},new AbortController().signal),e=>e instanceof ChatJobError&&e.job.error.code==='provider_read_timeout');
 });
+
+test('malformed result snapshots stop observation without starting or replaying a generation',async()=>{
+ for(const value of [job({state:'unexpected'}),job({seq:-1}),job({state:'done',output:{result:{answer:7,tools_used:[]}}})]) {
+  const methods=[];globalThis.fetch=async(_url,options)=>{methods.push(options.method??'GET');return Response.json(value);};
+  await assert.rejects(observeChatJob(createApiClient('sse-test'),id,'',false,()=>{},new AbortController().signal),/Некорректный ответ/);
+  assert.deepEqual(methods,['GET']);
+ }
+});
+
+test('older streamed snapshots cannot roll the visible job backwards',async()=>{
+ globalThis.fetch=async url=>url.endsWith('/stream')?response([
+  'data: '+JSON.stringify(job({seq:1,partial:'old'}))+'\n\n',
+  'data: '+JSON.stringify({...complete,seq:3})+'\n\n']):Response.json(job({seq:2,partial:'current'}));
+ const updates=[];
+ await observeChatJob(createApiClient('sse-test'),id,'',true,value=>updates.push(value),new AbortController().signal);
+ assert.deepEqual(updates.map(value=>value.seq),[2,3]);
+});
 test('pending references are scoped to login and actor and contain no prompts or tokens',()=>{
  const map=new Map();const previous=globalThis.sessionStorage;globalThis.sessionStorage={setItem:(k,v)=>map.set(k,v),getItem:k=>map.get(k),removeItem:k=>map.delete(k)};
  try{const first=createApiClient('sse-test');const second=createApiClient('independent-session');rememberChat(first,'11',id);

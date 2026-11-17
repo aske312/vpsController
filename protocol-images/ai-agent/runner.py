@@ -102,7 +102,10 @@ def persona(settings, actor='panel'):
     context['name'] = address
 
     context['personal_context'] = settings.get('personal_context', {})
-    context['nodera_bot_dialog'] = settings.get('bot_dialog_context', {})
+    dialog = settings.get('bot_dialog_context', {})
+    context['nodera_bot_dialog'] = ({**dialog, 'messages': [
+        {**row, 'text': historical_answer(row.get('text', '')) if row.get('role') == 'assistant' else row.get('text', '')}
+        for row in dialog.get('messages', []) if isinstance(row, dict)]} if isinstance(dialog, dict) else {})
     context['pending_confirmations'] = settings.get('pending_confirmations', [])
     return ('Ты Нодера (Nodera), девушка и AI-ассистент. Помогаешь собеседнику с вопросами и доступными ему задачами. '
             'Говори о себе в женском роде, отвечай по-русски. Представляйся как ассистент Нодера. Не называй себя модулем сервера или системной службой; технические детали объясняй по запросу. '
@@ -207,6 +210,8 @@ def tool_failure(code, *, http_status=None, request_id=None):
                 'validation_error': 'Параметры запроса не соответствуют схеме.', 'not_found': 'Запрошенный объект или маршрут не найден.',
                 'tool_timeout': 'Инструмент не ответил вовремя; результат не подтверждён.', 'tool_unavailable': 'Нет связи с инструментом; результат не подтверждён.',
                 'tool_rejected': 'API отклонил запрос инструмента.', 'tool_error': 'Не удалось получить подтверждённый результат инструмента.',
+                'batch_stopped': 'Оставшиеся вызовы пакета не запускались после остановки.',
+                'mutation_unconfirmed': 'Итог предыдущего изменяющего вызова неизвестен. Новые изменения в этом запросе не запускались; сначала проверьте операции.',
                 'repeat_blocked': 'Повтор ранее неудачного вызова с теми же параметрами заблокирован.'}
     code = code if code in messages else 'tool_error'
     value = {'error': code, 'message': messages[code], 'execution_state': 'unknown', 'retryable': False,
@@ -1187,7 +1192,7 @@ def argument_types(arguments):
 
 
 def failure_evidence(name, receipt):
-    known = {'tool_validation_error', 'validation_error', 'permission_denied', 'revision_conflict', 'not_found', 'tool_timeout', 'tool_unavailable', 'tool_rejected', 'tool_error', 'repeat_blocked'}
+    known = {'tool_validation_error', 'validation_error', 'permission_denied', 'revision_conflict', 'not_found', 'tool_timeout', 'tool_unavailable', 'tool_rejected', 'tool_error', 'repeat_blocked', 'batch_stopped', 'mutation_unconfirmed'}
     code = receipt.get('error') if isinstance(receipt.get('error'), str) and receipt['error'] in known else 'tool_error'
     allowed = set(control_tool_schema()['properties']) | {'arguments', 'values', 'expected_revision', 'structured_policy', 'structured_policy_selection', 'groups', 'rules', 'members', 'kind', 'value', 'target', 'connections', 'devices', 'settings', 'limits', 'routing', 'id', 'component', 'device_id', 'timeout', 'interval', 'strategy', 'max_failed_times', 'tolerance'}
     rows = receipt.get('fields') if isinstance(receipt.get('fields'), list) else []
@@ -1206,6 +1211,65 @@ class ProviderFailure(RuntimeError):
     def __init__(self, code, message):
         super().__init__(message)
         self.code = code
+
+
+def provider_message(value, finish_reason=None):
+    """Validate a whole model turn before executing any of its calls."""
+    if finish_reason not in (None, 'stop', 'tool_calls'):
+        raise ProviderFailure('invalid_response', 'Ответ AI не завершён; вызовы инструментов не запускались')
+    if not isinstance(value, dict) or value.get('content') is not None and not isinstance(value['content'], str):
+        raise ProviderFailure('invalid_response', 'Неверный формат ответа AI')
+    calls = value.get('tool_calls')
+    if calls is None: calls = []
+    if not isinstance(calls, list) or len(calls) > 8:
+        raise ProviderFailure('invalid_response', 'Неверный список вызовов инструментов AI')
+    identities, checked = set(), []
+    for call in calls:
+        if not isinstance(call, dict) or call.get('type', 'function') != 'function' or not isinstance(call.get('function'), dict):
+            raise ProviderFailure('invalid_response', 'Неверный формат вызова инструмента AI')
+        identity, function = call.get('id'), call['function']
+        name, arguments = function.get('name'), function.get('arguments', '{}')
+        if (not isinstance(identity, str) or not re.fullmatch(r'[^\s]{1,256}', identity) or identity in identities
+                or not isinstance(name, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,159}', name)
+                or not isinstance(arguments, str) or len(arguments) > 24000):
+            raise ProviderFailure('invalid_response', 'Незавершённый или повторяющийся вызов инструмента AI')
+        identities.add(identity)
+        checked.append({'id': identity, 'type': 'function', 'function': {'name': name, 'arguments': arguments}})
+    if not checked and (not isinstance(value.get('content'), str) or not value['content'].strip()):
+        raise ProviderFailure('invalid_response', 'AI-провайдер вернул пустой ответ')
+    if finish_reason == 'tool_calls' and not checked:
+        raise ProviderFailure('invalid_response', 'AI не завершил вызов инструмента')
+    return {**value, 'content': value.get('content'), **({'tool_calls': checked} if checked else {})}
+
+
+def changing_tool(name, arguments):
+    if str(arguments.get('method', 'GET')).upper() != 'GET':
+        return True
+    if name.startswith('tg_'):
+        return not name.startswith(('tg_get_', 'tg_search_', 'tg_list_', 'tg_resolve_', 'tg_download_', 'tg_auth_status'))
+    return name in {'request_confirmation', 'context_remember', 'context_forget', 'vps_service_action',
+                    'relay_prepare', 'telegram_prepare', 'mihomo_profile_create', 'mihomo_profile_update',
+                    'mihomo_profile_delete', 'mihomo_subscription_rotate', 'mihomo_profile_assign',
+                    'mihomo_group_update', 'mihomo_group_delete', 'mihomo_group_select'}
+
+
+def completed_change_claim(answer):
+    text = re.sub(r'[*`#]', '', answer).lower()
+    return bool(re.search(r'(?<!не )\b(?:применила|применил|создала|создал|сохранила|сохранил)\b|'
+                          r'\b(?:изменения|настройки|правила|группы|профиль|подписка)\s+(?:успешно\s+)?'
+                          r'(?:применены|применено|созданы|создан|создана|сохранены|сохранена)\b|'
+                          r'\bi\s+(?:have\s+)?(?:applied|created|saved)\b|'
+                          r'\b(?:changes|settings|profile|group|rules)\s+(?:(?:were|was)\s+|(?:have|has)\s+been\s+)?(?:applied|created|saved)\b', text))
+
+
+def grounded_answer(answer, successful, prepared, execution_confirmed, failures):
+    if completed_change_claim(answer) and not execution_confirmed:
+        if prepared:
+            return 'Изменения подготовлены и ожидают вашего решения. Проверьте карточку подтверждения.'
+        return 'Выполнение нового изменения не подтверждено. ' + (tool_failure(failures[-1]['error_code'])['message'] if failures else 'Доступные результаты не подтверждают его выполнение.')
+    if not successful and failures and ungrounded_operation_claim(answer):
+        return 'Актуальные данные не удалось подтвердить. ' + tool_failure(failures[-1]['error_code'])['message']
+    return answer
 
 
 def exception_chain(exc):
@@ -1343,8 +1407,8 @@ async def stream_message(response):
         raise ProviderFailure('stream_interrupted', 'Поток AI оборвался до завершения. Автоматического повтора не было')
     if calls and any(not call['id'] or not call['function']['name'] for call in calls.values()):
         raise ProviderFailure('invalid_response', 'AI не завершил вызов инструмента')
-    return {'role': 'assistant', 'content': content or None,
-            **({'tool_calls': [calls[key] for key in sorted(calls)]} if calls else {}), '_usage': usage}
+    return provider_message({'role': 'assistant', 'content': content or None,
+            **({'tool_calls': [calls[key] for key in sorted(calls)]} if calls else {}), '_usage': usage})
 
 
 async def provider_request(settings, messages, tools, *, completion_limit=None, tool_choice=None):
@@ -1387,7 +1451,10 @@ async def provider_request(settings, messages, tools, *, completion_limit=None, 
             raise ProviderFailure('provider_http_' + str(response.status_code), 'AI-провайдер вернул HTTP ' + str(response.status_code))
         network.start('response_parse')
         data = response.json()
-        result = {**data['choices'][0]['message'], '_usage': data.get('usage')}
+        if not isinstance(data, dict) or not isinstance(data.get('choices'), list) or not data['choices'] or not isinstance(data['choices'][0], dict):
+            raise ProviderFailure('invalid_response', 'AI-провайдер вернул неверный формат ответа')
+        choice = data['choices'][0]
+        result = {**provider_message(choice.get('message'), choice.get('finish_reason')), '_usage': data.get('usage')}
         network.complete()
         return result
     except (Exception, asyncio.CancelledError) as exc:
@@ -1499,6 +1566,14 @@ def ungrounded_operation_claim(answer):
                           r'(?:появ|показ).{0,100}(?:форм[аыу]|кнопк[аи])', text))
 
 
+def historical_answer(text):
+    if ungrounded_operation_claim(text) or text.startswith((
+            'Предыдущий ответ ИИ об операциях не подтверждает', 'ИИ не вызвал инструменты',
+            'Не удалось завершить запрос. Подготовка изменений не подтверждена.')):
+        return 'Предыдущий ответ ИИ не подтверждает состояние сервера. ID, ревизии и результаты операций в нём не являются фактами. Активная операция или необходимость повторить действие из этого ответа не следуют.'
+    return text
+
+
 def operation_followup(prompt):
     text = re.sub(r'\s+', ' ', prompt.strip().lower())
     if len(text) > 180:
@@ -1512,6 +1587,9 @@ def operation_followup(prompt):
 
 def operation_request(prompt, history=None):
     """Panel operation requests must consult a tool before reporting a result."""
+    if (re.match(r'(?iu)^\s*(?:что такое|как устроен\w*|как работает|в ч[её]м разница|объясни(?:те)?)\b', prompt)
+            and not re.search(r'(?iu)\b(?:сейчас|текущ\w*|у нас|наш\w*|мо[яиюеё]\w*|на сервере)\b', prompt)):
+        return False
     if re.search(r'(?iu)\b(?:mihomo|routing|маршрутиз\w*|правил\w*|групп\w*|операци\w*|подтвержд\w*|форм[ауы]|служб\w*|профил\w*|подписк\w*|подключени\w*)\b', prompt):
         return True
     if re.fullmatch(r'(?iu)(?:примени|применяй|выполни|выполняй)[.!?]*', prompt.strip()):
@@ -1549,20 +1627,24 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
     content = user_content(prompt, attachments or [])
     previous = []
     history_length = 0
-    for row in history:
+    for row in reversed(history):
         if row['role'] != 'user' and row.get('attachments'):
             raise ValueError('Недопустимое вложение в истории')
         value = user_content(row['content'], row.get('attachments', [])) if row['role'] == 'user' else row['content']
-        if row['role'] == 'assistant' and (ungrounded_operation_claim(row['content']) or row['content'].startswith((
-                'Предыдущий ответ ИИ об операциях не подтверждает', 'ИИ не вызвал инструменты',
-                'Не удалось завершить запрос. Подготовка изменений не подтверждена.'))):
+        if row['role'] == 'assistant':
             # Chat history contains prose, not the underlying tool receipts.
             # Replaying an invented result can make the model invent more results.
-            value = 'Предыдущий ответ ИИ не подтверждает состояние сервера. ID, ревизии и результаты операций в нём не являются фактами. Активная операция или необходимость повторить действие из этого ответа не следуют.'
-        history_length += len(value) if isinstance(value, str) else sum(len(part.get('text', '')) for part in value)
-        if history_length > 96000:
-            raise AttachmentError('В истории слишком много текста документов. Начните новый чат.')
-        previous.append({'role': row['role'], 'content': value})
+            value = historical_answer(row['content'])
+        amount = len(value) if isinstance(value, str) else sum(len(part.get('text', '')) for part in value)
+        if history_length + amount > 96000 and row['role'] == 'user' and row.get('attachments'):
+            value = row['content'] + '\n[Вложения этого прежнего сообщения не включены в контекст по лимиту.]'
+            amount = len(value)
+        if history_length + amount > 96000:
+            break
+        history_length += amount
+        previous.insert(0, {'role': row['role'], 'content': value})
+    if len(previous) < len(history) and previous and previous[0]['role'] == 'assistant':
+        previous.pop(0)
     async with mcp_connections(settings, actor) as connections:
         tools = [{'type': 'function', 'function': {'name': tool.name,
                  'description': tool.description or '', 'parameters': tool.inputSchema}}
@@ -1576,7 +1658,10 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         corrected_claim = False
         evidence_required = operation_request(prompt, history)
         prepared_operation = False
-        failures, failed_calls = [], set()
+        failures, failed_calls, completed_calls, attempts = [], {}, {}, {}
+        successful, mutation_uncertain = 0, False
+        prepared_ids, executed_ids = set(), set()
+        mutation_names, immediate_successes = set(), set()
         stopped = False
         for round_index in range(MAX_ROUNDS):
             diagnostic('model_start', round=round_index + 1)
@@ -1584,11 +1669,18 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
             required_call = not used and tools and evidence_required
             try:
                 if required_call:
-                    message = await provider_request(settings, messages, tools, tool_choice='required')
+                    message = provider_message(await provider_request(settings, messages, tools, tool_choice='required'))
                 else:
-                    message = await provider_request(settings, messages, tools)
+                    message = provider_message(await provider_request(settings, messages, tools))
             except Exception as exc:
                 diagnostic('model_error', round=round_index + 1, error_code=error_code(exc), duration_ms=(time.monotonic() - started) * 1000)
+                if used or failures:
+                    failures.append({'tool': 'ai_provider', 'error_code': error_code(exc), 'fields': []})
+                    heading = ('Изменения подготовлены и ожидают вашего решения. Проверьте карточку подтверждения.'
+                               if prepared_operation else 'Часть проверок выполнена, но полный ответ получить не удалось.')
+                    return {'answer': heading + '\n\n' + safe_error(exc), 'tools_used': used,
+                            'status': 'partial' if prepared_operation else 'incomplete', 'diagnostics': failures[-16:],
+                            'prepared_operation_ids': sorted(prepared_ids)}
                 raise
             reported_usage = message.get('_usage') if isinstance(message.get('_usage'), dict) else {}
             diagnostic('model_result', round=round_index + 1, duration_ms=(time.monotonic() - started) * 1000,
@@ -1612,7 +1704,13 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                         messages.append({'role': 'system', 'content': 'В этом запросе ты не вызвала ни одного инструмента. Описания операций и ID из истории не являются результатами выполнения. Ответь на текущий вопрос пользователя; не возвращайся к прежнему действию. Если текущий вопрос требует проверки, вызови подходящий инструмент настоящим tool_calls. Если это обычный разговор, ответь прямо без инструментов. Не утверждай, что что-то проверено, подготовлено или выполнено без результата инструмента.'})
                         continue
                     answer = 'ИИ не вызвал инструменты, поэтому актуальные данные для ответа на этот вопрос не проверены. Текущее состояние и причины ошибки не подтверждены; по прежней переписке установить их нельзя.'
-                result = {'answer': answer[:20000], 'tools_used': used}
+                    failures.append({'tool': 'ai_provider', 'error_code': 'tools_not_called', 'fields': []})
+                grounded = grounded_answer(answer, successful, prepared_operation,
+                    bool(executed_ids & prepared_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures)
+                if grounded != answer and not prepared_operation:
+                    failures.append({'tool': 'ai_provider', 'error_code': 'ungrounded_report', 'fields': []})
+                answer = grounded
+                result = {'answer': answer[:20000], 'tools_used': used, 'prepared_operation_ids': sorted(prepared_ids)}
                 if prepared_operation: result['status'] = 'awaiting_confirmation'
                 if failures:
                     result.update(diagnostics=failures[-16:], status='partial' if prepared_operation else 'incomplete')
@@ -1627,16 +1725,22 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 progress('tools', '')
                 name = call['function']['name']
                 fingerprint = None
+                mutating = False
                 tool_started = time.monotonic()
                 try:
-                    if name not in connections:
-                        raise PermissionError('Инструмент недоступен')
-                    session, tool = connections[name]
                     try: arguments = json.loads(call['function'].get('arguments') or '{}')
                     except (json.JSONDecodeError, TypeError):
                         raise ToolValidationError([{'field': 'arguments', 'issue': 'Ожидается JSON-объект с параметрами инструмента'}]) from None
                     fingerprint = hashlib.sha256(json.dumps([name, arguments], sort_keys=True).encode()).hexdigest()
-                    if fingerprint in failed_calls:
+                    mutating = changing_tool(name, arguments) if isinstance(arguments, dict) else False
+                    if mutating: mutation_names.add(name)
+                    if stopped or mutation_uncertain and mutating:
+                        stopped = True
+                        receipt = {**tool_failure('mutation_unconfirmed' if mutation_uncertain and mutating else 'batch_stopped'), 'executed': False, 'execution_state': 'not_executed'}
+                        failures.append(failure_evidence(name, receipt))
+                        messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': json.dumps(receipt, ensure_ascii=False)})
+                        continue
+                    if fingerprint in failed_calls and (mutating or failed_calls[fingerprint] in ('tool_validation_error', 'validation_error', 'permission_denied') or attempts.get(fingerprint, 0) >= 2):
                         stopped = True
                         receipt = tool_failure('repeat_blocked')
                         text = json.dumps(receipt, ensure_ascii=False)
@@ -1644,41 +1748,67 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                         diagnostic('repeat_blocked', round=round_index + 1, **failures[-1])
                         messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': text})
                         continue
+                    if mutating and fingerprint in completed_calls:
+                        messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': completed_calls[fingerprint]})
+                        diagnostic('tool_result', round=round_index + 1, tool=name, status='reused')
+                        continue
+                    if name not in connections:
+                        raise PermissionError('Инструмент недоступен')
+                    session, tool = connections[name]
                     validate_tool_arguments(arguments, tool.inputSchema)
                     diagnostic('tool_start', round=round_index + 1, tool=name, fields=list(arguments), argument_types=argument_types(arguments), argument_chars=len(call['function'].get('arguments') or ''))
+                    attempts[fingerprint] = attempts.get(fingerprint, 0) + 1
                     result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=TOOL_TIMEOUT)
                     text = '\n'.join(item.text for item in result.content if item.type == 'text')
-                    limit = WEB_RESULT_LIMIT if name.startswith('web_') else TOOL_RESULT_LIMIT
-                    if len(text) > limit: text = json.dumps({'truncated': True, 'excerpt': text[:limit // 2]}, ensure_ascii=False)
                     used.append(name)
                     try: receipt = json.loads(text)
                     except (ValueError, TypeError): receipt = None
-                    if getattr(result, 'isError', False):
+                    if getattr(result, 'isError', False) or not text.strip():
                         receipt = tool_failure('tool_error')
                         text = json.dumps(receipt, ensure_ascii=False)
                     if isinstance(receipt, dict) and receipt.get('error'):
-                        failed_calls.add(fingerprint)
+                        failed_calls[fingerprint] = receipt['error']
+                        if mutating and receipt.get('executed') is not False and receipt['error'] not in ('permission_denied', 'not_found', 'revision_conflict', 'tool_validation_error', 'validation_error'):
+                            mutation_uncertain = True
                         failures.append(failure_evidence(name, receipt))
                         diagnostic('tool_result', round=round_index + 1, status='failed', duration_ms=(time.monotonic() - tool_started) * 1000, **failures[-1])
                     else:
+                        successful += 1
+                        failed_calls.pop(fingerprint, None)
+                        attempts.pop(fingerprint, None)
+                        if mutating and isinstance(receipt, dict) and not receipt.get('confirmation_required') and (
+                                name in ('context_remember', 'context_forget') or receipt.get('executed') is True):
+                            immediate_successes.add(name)
+                        if isinstance(receipt, dict) and receipt.get('state') in ('succeeded', 'finished', 'done') and receipt.get('result') in (None, '', 'passed', 'success'):
+                            identity = receipt.get('id', receipt.get('operation_id'))
+                            if isinstance(identity, str) and re.fullmatch(r'[a-f0-9]{32}', identity): executed_ids.add(identity)
                         diagnostic('tool_result', round=round_index + 1, tool=name, status='awaiting_confirmation' if isinstance(receipt, dict) and receipt.get('confirmation_required') is True else 'success', duration_ms=(time.monotonic() - tool_started) * 1000,
                                    operation_id=receipt.get('operation_id') if isinstance(receipt, dict) else None,
                                    operation_ids=receipt.get('operation_ids') if isinstance(receipt, dict) else None)
                     if name == 'request_confirmation' or name.startswith('mihomo_') or name in ('vps_service_action', 'relay_prepare', 'telegram_prepare'):
-                        try: receipt = json.loads(text)
-                        except (ValueError, TypeError): receipt = None
                         if isinstance(receipt, dict) and not receipt.get('error') and receipt.get('confirmation_required') is True:
                             identities = receipt.get('operation_ids', [receipt.get('operation_id')])
-                            if isinstance(identities, list) and identities and all(isinstance(identity, str) and re.fullmatch(r'[0-9a-f]{32}', identity) for identity in identities): prepared_operation = True
+                            if isinstance(identities, list) and identities and all(isinstance(identity, str) and re.fullmatch(r'[0-9a-f]{32}', identity) for identity in identities):
+                                prepared_operation = True
+                                prepared_ids.update(identities)
+                    limit = WEB_RESULT_LIMIT if name.startswith('web_') else TOOL_RESULT_LIMIT
+                    if len(text) > limit:
+                        summary = {key: receipt[key] for key in ('error', 'message', 'confirmation_required', 'operation_id', 'operation_ids', 'state') if isinstance(receipt, dict) and key in receipt}
+                        summary = {key: value[:1000] if isinstance(value, str) else value[:96] if isinstance(value, list) else value
+                                   for key, value in summary.items()}
+                        text = json.dumps({**summary, 'truncated': True, 'excerpt': text[:limit // 2]}, ensure_ascii=False)
+                    if mutating and not (isinstance(receipt, dict) and receipt.get('error')):
+                        completed_calls[fingerprint] = text
                 except ToolValidationError as exc:
                     receipt = exc.result()
-                    if fingerprint: failed_calls.add(fingerprint)
+                    if fingerprint: failed_calls[fingerprint] = receipt['error']
                     failures.append(failure_evidence(name if name in connections else 'unknown_tool', receipt))
                     diagnostic('tool_result', round=round_index + 1, status='failed', **failures[-1])
                     text = json.dumps(receipt, ensure_ascii=False)
                 except Exception as exc:
                     receipt = tool_failure('permission_denied' if isinstance(exc, PermissionError) else 'tool_timeout' if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) else 'tool_error')
-                    if fingerprint: failed_calls.add(fingerprint)
+                    if fingerprint: failed_calls[fingerprint] = receipt['error']
+                    if mutating and not isinstance(exc, PermissionError): mutation_uncertain = True
                     failures.append(failure_evidence(name if name in connections else 'unknown_tool', receipt))
                     diagnostic('tool_result', round=round_index + 1, status='unknown', duration_ms=(time.monotonic() - tool_started) * 1000, **failures[-1])
                     text = json.dumps(receipt, ensure_ascii=False)
@@ -1686,7 +1816,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
             if stopped: break
         if not stopped: diagnostic('budget_exhausted', status='partial')
         if prepared_operation and not failures:
-            result = {'answer': 'Изменения подготовлены и ожидают вашего решения. Проверьте карточку подтверждения. Лимит шагов ИИ достигнут; дополнительных операций автоматически не запускаем.', 'tools_used': used, 'status': 'awaiting_confirmation'}
+            result = {'answer': 'Изменения подготовлены и ожидают вашего решения. Проверьте карточку подтверждения. Лимит шагов ИИ достигнут; дополнительных операций автоматически не запускаем.', 'tools_used': used, 'status': 'awaiting_confirmation', 'prepared_operation_ids': sorted(prepared_ids)}
             if complete_usage: result['usage'] = usage
             return result
         heading = 'Часть изменений подготовлена и ожидает вашего решения. Подготовка оставшейся части не подтверждена; проверьте карточки подтверждения.' if prepared_operation else 'Не удалось завершить запрос.'
@@ -1707,8 +1837,10 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         except Exception as exc:
             diagnostic('model_error', error_code=error_code(exc))
             answer, complete_usage = fallback, False
+        answer = grounded_answer(answer, successful, prepared_operation,
+            bool(executed_ids & prepared_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures)
         diagnostic('summary_result', status='incomplete', answer_chars=len(answer))
-        result = {'answer': heading + '\n\n' + answer[:18000], 'tools_used': used, 'status': 'partial' if prepared_operation else 'incomplete', 'diagnostics': failures[-16:]}
+        result = {'answer': heading + '\n\n' + answer[:18000], 'tools_used': used, 'status': 'partial' if prepared_operation else 'incomplete', 'diagnostics': failures[-16:], 'prepared_operation_ids': sorted(prepared_ids)}
         if complete_usage: result['usage'] = usage
         return result
 

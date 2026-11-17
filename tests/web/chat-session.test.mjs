@@ -56,10 +56,11 @@ test('switching actors flushes the previous draft into its own scope and keeps r
   const client={sessionKey:'scope'},first=createChatSessionWriter(client,'11');
   const second=createChatSessionWriter(client,'22');
   try{
-    first.schedule({...snapshot,prompt:'First actor',turns:[{...snapshot.turns[0],request_id:'b'.repeat(32)}]});first.dispose();
+    first.schedule({...snapshot,prompt:'First actor',turns:[{...snapshot.turns[0],request_id:'b'.repeat(32),status:'partial'}]});first.dispose();
     second.schedule({...snapshot,prompt:'Second actor'});second.flush();
     assert.equal(readChatSession(client,'11').prompt,'First actor');
     assert.equal(readChatSession(client,'11').turns[0].request_id,'b'.repeat(32));
+    assert.equal(readChatSession(client,'11').turns[0].status,'partial');
     assert.equal(readChatSession(client,'22').prompt,'Second actor');
   }finally{first.dispose(false);second.dispose(false);globalThis.sessionStorage=previous;}
 });

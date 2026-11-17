@@ -2,7 +2,8 @@ import type { PendingAction } from "./confirmation-queue";
 import { ApiRequestError, type createApiClient } from "../../shared/lib/api-request.ts";
 
 type Client = ReturnType<typeof createApiClient>;
-export type ChatOutput = { result: { answer: string; tools_used: string[] }; conversation_id?: string; cache_error?: string;
+export type ChatReplyStatus = "incomplete" | "partial" | "awaiting_confirmation";
+export type ChatOutput = { result: { answer: string; tools_used: string[]; status?: ChatReplyStatus }; conversation_id?: string; cache_error?: string;
   provider_usage?: Record<string, import("./assistant-state").ProviderUsage>;
   pending_action?: PendingAction; pending_actions?: PendingAction[] };
 export type ChatJob = { id: string; seq: number; state: "queued" | "running" | "done" | "failed" | "unknown";
@@ -28,16 +29,37 @@ export function savedChat(client: Client, actor: string) {
 export const chatStage = (stage: string) => ({ queued: "В очереди AI", waiting_provider: "Ожидает свободного провайдера", starting: "Думает…",
   waiting_model: "Думает…", receiving: "Печатает…", tools: "Думает…", reconnecting: "Восстанавливает связь…" }[stage] ?? "Думает…");
 
+class ChatJobProtocolError extends Error {}
+function checkedJob(value: unknown, identity: string): ChatJob {
+  const invalid = () => { throw new ChatJobProtocolError(`Некорректный ответ о запросе AI ${identity}. Повторной отправки не было`); };
+  if (!value || typeof value !== "object") return invalid();
+  const job = value as ChatJob;
+  if (job.id !== identity || !["queued", "running", "done", "failed", "unknown"].includes(job.state)
+      || !Number.isSafeInteger(job.seq) || job.seq < 0 || typeof job.stage !== "string"
+      || typeof job.question !== "string" || typeof job.model !== "string"
+      || job.partial !== undefined && typeof job.partial !== "string") return invalid();
+  if (job.error !== undefined && (!job.error || typeof job.error.code !== "string" || typeof job.error.message !== "string")) return invalid();
+  if (job.output !== undefined || job.state === "done") {
+    const result = job.output?.result;
+    if (!result || typeof result.answer !== "string" || !Array.isArray(result.tools_used)
+        || result.tools_used.some(name => typeof name !== "string")
+        || result.status !== undefined && !["incomplete", "partial", "awaiting_confirmation"].includes(result.status)) return invalid();
+  }
+  return job;
+}
+
 export async function observeChatJob(client: Client, id: string, actor: string, streaming: boolean,
   publish: (job: ChatJob) => void, signal: AbortSignal): Promise<ChatOutput> {
   const path = `/assistant/requests/${id}`;
   const query = actor ? `?telegram_id=${actor}` : "";
   let terminal: ChatJob | undefined;
   let failures = 0;
+  let sequence = -1;
   const started = Date.now();
   const receive = (value: unknown) => {
-    const job = value as ChatJob;
-    if (job.id !== id || typeof job.state !== "string") throw new Error("Некорректное состояние запроса AI");
+    const job = checkedJob(value, id);
+    if (job.seq < sequence) return;
+    sequence = job.seq;
     publish(job);
     if (["done", "failed", "unknown"].includes(job.state)) terminal = job;
   };
@@ -49,6 +71,7 @@ export async function observeChatJob(client: Client, id: string, actor: string, 
       if (terminal) break;
     } catch (cause) {
       if (signal.aborted) throw cause;
+      if (cause instanceof ChatJobProtocolError) throw cause;
       if (cause instanceof ApiRequestError && [401, 403, 404, 410].includes(cause.status ?? 0)) {
         if ([404, 410].includes(cause.status ?? 0)) rememberChat(client, actor, null);
         throw cause;

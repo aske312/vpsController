@@ -1,10 +1,14 @@
 import { messageCommandIds } from "./command-message-state.ts";
 import type { createApiClient } from "../../shared/lib/api-request";
+import type { ChatReplyStatus } from "./chat-jobs";
 
 type Client = Pick<ReturnType<typeof createApiClient>, "sessionKey">;
-export type SessionTurn = { command_ids?: string[]; system_event?: boolean; request_id?: string; id: number; question: string; model: string; answer?: string; error?: string; tools?: string[]; context_safe?: boolean; files: [] };
+export type SessionTurn = { status?: ChatReplyStatus; command_ids?: string[]; system_event?: boolean; request_id?: string; id: number; question: string; model: string; answer?: string; error?: string; tools?: string[]; context_safe?: boolean; files: [] };
 export type ChatSession = { model: string; provider: string; streaming: boolean; conversation_id: string | null; prompt: string; turns: SessionTurn[] };
 const MAX_CHARS = 240000;
+function replyState(turn: { status?: unknown }): { status?: ChatReplyStatus } {
+  return turn.status === "incomplete" || turn.status === "partial" || turn.status === "awaiting_confirmation" ? { status: turn.status } : {};
+}
 function commandLinks(turn: Parameters<typeof messageCommandIds>[0]) {
   const ids = messageCommandIds(turn);
   return ids.length ? { command_ids: ids } : {};
@@ -52,13 +56,13 @@ export function readChatSession(client: Client, actor: string): ChatSession | un
     if (typeof value.model !== "string" || typeof value.provider !== "string" || typeof value.streaming !== "boolean" || typeof value.prompt !== "string" || value.prompt.length > 12000 || !Array.isArray(value.turns) || value.turns.length > 40) return;
     if (value.conversation_id !== null && !/^[a-f0-9]{32}$/.test(value.conversation_id)) return;
     if (value.turns.some((turn: SessionTurn) => !Number.isSafeInteger(turn.id) || turn.id < 1 || typeof turn.question !== "string" || typeof turn.model !== "string" || turn.answer !== undefined && typeof turn.answer !== "string" || turn.error !== undefined && typeof turn.error !== "string")) return;
-    return { ...value, turns: value.turns.map((turn: SessionTurn) => ({ ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), ...(turn.system_event === true ? { system_event: true } : {}), ...commandLinks({ id: turn.id, command_ids: turn.command_ids }), id: turn.id, question: turn.question, model: turn.model, answer: turn.answer, error: turn.error, tools: Array.isArray(turn.tools) ? turn.tools.filter(tool => typeof tool === "string") : [], context_safe: typeof turn.context_safe === "boolean" ? turn.context_safe : undefined, files: [] })) };
+    return { ...value, turns: value.turns.map((turn: SessionTurn) => ({ ...replyState(turn), ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), ...(turn.system_event === true ? { system_event: true } : {}), ...commandLinks({ id: turn.id, command_ids: turn.command_ids }), id: turn.id, question: turn.question, model: turn.model, answer: turn.answer, error: turn.error, tools: Array.isArray(turn.tools) ? turn.tools.filter(tool => typeof tool === "string") : [], context_safe: typeof turn.context_safe === "boolean" ? turn.context_safe : undefined, files: [] })) };
   } catch { /* A damaged snapshot must not block server history. */ }
 }
 export function saveChatSession(client: Client, actor: string, value: Omit<ChatSession, "turns"> & { turns: (Omit<SessionTurn, "files"> & { files?: unknown[]; queue_state?: "queued" | "running"; pending_action?: { operation_id?: string }; pending_actions?: { operation_id?: string }[] })[] }) {
   const identity = key(client, actor);
   if (!identity) return;
-  const turns: SessionTurn[] = value.turns.filter(turn => turn.queue_state !== "running").slice(-40).map(turn => ({ ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), ...(turn.system_event === true ? { system_event: true } : {}), ...commandLinks(turn), id: turn.id, question: turn.question.slice(0, 12000), model: turn.model, answer: turn.answer?.slice(0, 20000), tools: turn.tools, context_safe: turn.context_safe, files: [],
+  const turns: SessionTurn[] = value.turns.filter(turn => turn.queue_state !== "running").slice(-40).map(turn => ({ ...replyState(turn), ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), ...(turn.system_event === true ? { system_event: true } : {}), ...commandLinks(turn), id: turn.id, question: turn.question.slice(0, 12000), model: turn.model, answer: turn.answer?.slice(0, 20000), tools: turn.tools, context_safe: turn.context_safe, files: [],
     error: turn.queue_state === "queued" ? "Не отправлено после обновления страницы. Отправьте сообщение вручную." : turn.error?.slice(0, 2000) }));
   const snapshot = { ...value, turns };
   let size = JSON.stringify({ ...value, turns: [] }).length;

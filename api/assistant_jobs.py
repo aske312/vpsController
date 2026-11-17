@@ -50,7 +50,7 @@ def reconcile(api, record):
     observed = api.observe_service(record['unit'])
     record['worker_checked_at'] = time.time()
     if observed.get('state') in ('inactive', 'failed') or observed.get('unit_present') is False:
-        record.update(state='unknown', stage='interrupted', updated_at=time.time(), seq=record['seq'] + 1,
+        record.update(state='unknown', stage='interrupted', partial='', updated_at=time.time(), seq=record['seq'] + 1,
                       duration_ms=round((time.time() - record['created_at']) * 1000),
                       error={'code': 'worker_interrupted', 'message': 'Рабочий процесс прерван; результат не подтверждён. Автоматического повтора не было.'})
         record.pop('payload', None)
@@ -118,6 +118,7 @@ def update(api, identity, **values):
         record.update(values, updated_at=time.time(), seq=record['seq'] + 1)
         if record['state'] in TERMINAL:
             record.pop('payload', None)
+            record['partial'] = ''
             record['duration_ms'] = round((time.time() - record['created_at']) * 1000)
         operations.atomic_json(file, record)
         if record['state'] in TERMINAL: input_path(api, identity).unlink(missing_ok=True)
@@ -125,11 +126,12 @@ def update(api, identity, **values):
         # Metadata only; prompts, answers, keys and exception text never enter observability.
         try:
             import observability
+            incomplete = record['state'] == 'done' and record.get('output', {}).get('result', {}).get('status') in ('incomplete', 'partial')
             observability.Store(api.DATA_DIR).append({'at': time.time(), 'request_id': identity,
                 'service': 'panel', 'route': '/api/assistant/requests/{identity}', 'method': 'JOB',
-                'status': 200 if record['state'] == 'done' else record.get('error', {}).get('http_status', 502),
-                'duration_ms': record['duration_ms'], 'reason': 'completed' if record['state'] == 'done' else 'server_error',
-                'kind': 'chat_job', 'error_code': record.get('error', {}).get('code'), 'stage': record['stage'],
+                'status': 502 if incomplete else 200 if record['state'] == 'done' else record.get('error', {}).get('http_status', 502),
+                'duration_ms': record['duration_ms'], 'reason': 'completed' if record['state'] == 'done' and not incomplete else 'server_error',
+                'kind': 'chat_job', 'error_code': 'chat_incomplete' if incomplete else record.get('error', {}).get('code'), 'stage': record['stage'],
                 'component': 'nodera', 'operation_type': 'chat', 'retryable': False})
         except Exception:
             pass  # Observability must never discard the saved result.

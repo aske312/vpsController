@@ -100,7 +100,8 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
   }, [request, notifications, readOperation, publishActivities, dismissActivity]);
   const ingest = useCallback((actor: string, incoming: PendingAction[]) => {
     generation.current++;
-    setActions(current => [...current.filter(item => (item.actor || "panel") !== actor),
+    const keys = new Set(incoming.map(item => confirmationKey({ ...item, actor })));
+    setActions(current => [...current.filter(item => !keys.has(confirmationKey(item))),
       ...incoming.map(item => ({ ...item, actor })).filter(item => !settled.current.has(confirmationKey(item)) && item.expires * 1000 > Date.now())]);
   }, []);
   const decideOne = useCallback(async (action: PendingAction, decision: "confirm" | "reject", batchKey?: string) => {

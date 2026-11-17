@@ -18,17 +18,26 @@ export async function readChatFiles(files: File[], current: ChatFile[]): Promise
     return { id: crypto.randomUUID(), name: file.name, mime, data: btoa(binary), size: file.size };
   }));
 }
-export function chatHistory(turns: { question: string; answer?: string; files?: ChatFile[]; context_safe?: boolean }[], currentFiles: ChatFile[] = []) {
+export function chatHistory(turns: { question: string; answer?: string; error?: string; status?: string; queue_state?: string; request_id?: string; files?: ChatFile[]; context_safe?: boolean }[], currentFiles: ChatFile[] = []) {
   const result: { role: 'user' | 'assistant'; content: string; attachments?: { name: string; mime: string; data: string }[] }[] = [];
   let length = 0;
   let bytes = currentFiles.reduce((sum, file) => sum + file.size, 0);
-  for (const turn of turns.filter(turn => turn.answer && turn.context_safe !== false).slice(-20).reverse()) {
-    const question = turn.question.slice(0, 8000) || 'Файлы', answer = turn.answer!.slice(0, 8000);
-    const fileBytes = turn.files?.reduce((sum, file) => sum + file.size, 0) ?? 0;
-    if (length + question.length + answer.length > 48000 || bytes + fileBytes > 6 * 1024 * 1024) break;
+  for (const turn of turns.filter(turn => turn.answer && !turn.error && turn.queue_state !== 'running' && turn.context_safe !== false).slice(-20).reverse()) {
+    let question = turn.question.slice(0, 8000) || 'Файлы', answer = turn.answer!.slice(0, 8000);
+    let files = turn.files;
+    let fileBytes = files?.reduce((sum, file) => sum + file.size, 0) ?? 0;
+    if (bytes + fileBytes > 6 * 1024 * 1024) {
+      files = undefined; fileBytes = 0;
+      question += '\n[Вложения предыдущего сообщения не включены в контекст по лимиту.]';
+    }
+    if (turn.status === 'incomplete' || turn.status === 'partial' || turn.status === 'awaiting_confirmation') {
+      answer = turn.status === 'awaiting_confirmation' ? 'В предыдущем запросе было подготовлено действие; его текущее состояние требует отдельной проверки.' : 'Предыдущий ответ получен не полностью и не подтверждает текущее состояние.';
+      if (turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id)) answer += ' Журнал запроса ИИ: ' + turn.request_id + '.';
+    }
+    if (length + question.length + answer.length > 48000) break;
     length += question.length + answer.length;
     bytes += fileBytes;
-    result.unshift({ role: 'user', content: question, attachments: turn.files?.map(({ name, mime, data }) => ({ name, mime, data })) }, { role: 'assistant', content: answer });
+    result.unshift({ role: 'user', content: question, attachments: files?.map(({ name, mime, data }) => ({ name, mime, data })) }, { role: 'assistant', content: answer });
   }
   return result;
 }

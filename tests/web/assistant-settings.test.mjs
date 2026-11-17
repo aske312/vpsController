@@ -413,6 +413,23 @@ test('confirmation pauses follow-ups so another request cannot replace an unconf
   assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 1);
 });
 
+test('incomplete chat pauses queued questions while retaining the partial answer', async () => {
+  const status=fixture();Object.assign(status.settings,{model:'fixture-model',modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0],{enabled:true,configured:true});
+  let finish;
+  const view=mount(status,[],{chat:()=>new Promise(resolve=>{finish=resolve;})});
+  view.render();await Promise.resolve();
+  for(const question of ['audit','follow-up']) {
+    nodes(view.render(),n=>n.type==='textarea')[0].node.props.onChange({target:{value:question,style:{},scrollHeight:48}});
+    nodes(view.render(),n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();
+  }
+  finish({result:{answer:'Only part of the audit is available',tools_used:['mihomo_read'],status:'incomplete'}});
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length,1);
+  assert.match(JSON.stringify(view.render()),/Only part of the audit is available/);
+  assert.match(JSON.stringify(view.render()),/Не отправлено/);
+});
+
 test('failed chat stops queued follow-ups without repeating any POST and keeps unsent questions', async () => {
   const status = fixture();
   Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});

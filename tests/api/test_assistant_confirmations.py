@@ -94,8 +94,36 @@ class ConfirmationRequestTests(unittest.TestCase):
                 patch.object(control, 'provider_usage', return_value={}), \
                 patch.object(control, 'runtime_request', return_value={'result': {'answer': 'Based on output', 'tools_used': []}}) as runtime:
             control._chat_request(api, control.Chat(prompt='Explain output', history=history + private, conversation_id='a'*32), 'panel', settings=settings)
-        self.assertEqual([{key: row[key] for key in ('role', 'content')} for row in runtime.call_args.args[2]['history']], [{'role': 'user', 'content': 'Earlier AI question'}, {'role': 'assistant', 'content': 'Stored AI answer'}] + history)
+        merged = runtime.call_args.args[2]['history']
+        self.assertIn('/status', merged[0]['content'])
+        self.assertIn('время относительно диалога не подтверждено', merged[0]['content'])
+        self.assertEqual(merged[1]['content'], 'Observed command output')
+        self.assertEqual([{key: row[key] for key in ('role', 'content')} for row in merged[2:]], [{'role': 'user', 'content': 'Earlier AI question'}, {'role': 'assistant', 'content': 'Stored AI answer'}])
         self.assertEqual(runtime.call_args.args[2]['context_conversation'], 'a'*32)
+
+    def test_chat_only_associates_current_request_confirmations(self):
+        old, new = {'operation_id': 'a'*32}, {'operation_id': 'b'*32}
+        for result, pending in (({'answer': 'Hello', 'prepared_operation_ids': []}, []),
+                ({'answer': 'Prepared', 'prepared_operation_ids': ['b'*32]}, [new]),
+                ({'answer': 'Legacy'}, [new])):
+            with self.subTest(result=result), \
+                    patch.object(commands, 'pending_actions', side_effect=[[old], [old, new]]), \
+                    patch.object(control.assistant_memory, 'append'), \
+                    patch.object(control, 'provider_usage', return_value={}), \
+                    patch.object(control, 'runtime_request', return_value={'result': result}):
+                output = control._chat_request(api, control.Chat(prompt='New question'), settings=control.read(api))
+            self.assertEqual(output['pending_actions'], pending)
+            self.assertEqual(output.get('pending_action'), pending[-1] if pending else None)
+
+    def test_expired_confirmation_is_not_presented_as_awaiting(self):
+        with patch.object(commands, 'pending_actions', return_value=[]), \
+                patch.object(control.assistant_memory, 'append'), \
+                patch.object(control, 'provider_usage', return_value={}), \
+                patch.object(control, 'runtime_request', return_value={'result': {
+                    'answer': 'Prepared', 'status': 'awaiting_confirmation', 'prepared_operation_ids': ['a'*32]}}):
+            output = control._chat_request(api, control.Chat(prompt='New question'), settings=control.read(api))
+        self.assertEqual(output['result']['status'], 'incomplete')
+        self.assertEqual(output['pending_actions'], [])
 
     def group(self, codes, actor='11', **changes):
         ids = [control.operations.read(commands.pending_path(api, '11', code=code))['operation_id'] for code in codes]

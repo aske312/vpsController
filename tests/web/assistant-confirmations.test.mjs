@@ -195,6 +195,19 @@ function mount(initial, options={}) {
   };
 }
 
+test('chat reply confirmations merge without removing unrelated actor actions',async()=>{
+  const old=action('aabbccdd'),next=action('11223344');
+  const app=mount([old]);
+  try {
+    await app.settle();app.queue.ingest('panel',[next]);await app.settle();
+    assert.equal(app.queue.actions.length,2);
+    app.queue.ingest('panel',[]);await app.settle();
+    assert.equal(app.queue.actions.length,2);
+    app.queue.ingest('panel',[next]);await app.settle();
+    assert.equal(app.queue.actions.length,2);
+  } finally {app.dispose();}
+});
+
 test('confirmation display uses formatted text while notifications keep plain text',async()=>{
   const formatted='⏸ **Действие отклонено**\n\nЗапрос закрыт.';
   const app=mount([action('aabbccdd')],{displayText:formatted});
