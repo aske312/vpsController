@@ -48,7 +48,7 @@ def admission(api, provider, *, wait_seconds=90):
         for handle in reversed(handles): handle.close()
 
 
-def communicate(process, payload, timeout=255):
+def communicate(process, payload, timeout=630):
     output, failures = [], []
     size = 0
 

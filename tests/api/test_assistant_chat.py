@@ -18,6 +18,25 @@ def attachment(name, mime, data):
 
 
 class AssistantChatFilesTests(unittest.TestCase):
+    def test_long_research_can_finish_after_seven_tool_rounds_without_clipping_pages(self):
+        import json
+        page = json.dumps({'text': 'x' * 35000})
+        session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[SimpleNamespace(type='text', text=page)])))
+        tool = SimpleNamespace(name='web_read', description='Read a page', inputSchema={'type': 'object'})
+        @asynccontextmanager
+        async def connections(*_): yield {'web_read': (session, tool)}
+        replies = [{'tool_calls': [{'id': str(i), 'type': 'function', 'function': {'name': 'web_read', 'arguments': json.dumps({'url': f'https://example.com/{i}'})}}]} for i in range(7)]
+        provider = AsyncMock(side_effect=[*replies, {'content': 'Research complete.'}])
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Research these pages'))
+        self.assertEqual(result['answer'], 'Research complete.')
+        self.assertEqual(session.call_tool.await_count, 7)
+        messages = provider.call_args.args[1]
+        pages = [json.loads(item['content']) for item in messages if item['role'] == 'tool']
+        self.assertEqual(len(pages), 7)
+        self.assertTrue(all(len(item['text']) == 35000 for item in pages))
+
     def test_last_tool_round_with_a_prepared_operation_returns_a_pending_decision_instead_of_failing_chat(self):
         session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[SimpleNamespace(type='text', text='{"confirmation_required":true,"operation_id":"' + 'a'*32 + '"}')])) )
         tool = SimpleNamespace(name='mihomo_settings', description='Prepare settings', inputSchema={'type': 'object'})

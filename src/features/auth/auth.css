@@ -420,7 +420,7 @@
 
 /* Authentication scene */
 .loginRedesign { --login-content-width:min(1340px,calc(100% - 72px)); min-height:100dvh !important; padding:0 0 6px !important; display:flex; flex-direction:column; align-items:stretch; background:#04090f !important; }
-.loginRedesign > .legalFooter { width:var(--login-content-width); margin-inline:auto; }
+.loginRedesign > .legalFooterSlot { width:var(--login-content-width); margin-inline:auto; }
 .loginRedesign::before { background-position:center; background-size:cover; opacity:.72; filter:saturate(.86) brightness(.66); }
 .loginRedesign::after { z-index:-2; background:linear-gradient(90deg,rgba(3,8,13,.97) 0%,rgba(3,8,13,.86) 35%,rgba(3,8,13,.35) 67%,rgba(3,8,13,.72) 100%),linear-gradient(0deg,rgba(3,8,13,.96),transparent 42%,rgba(3,8,13,.38)); }
 .loginBackdrop { position:absolute; inset:0; z-index:-1; pointer-events:none; background:radial-gradient(circle at 72% 44%,rgba(72,128,205,.12),transparent 28%),radial-gradient(circle at 42% 58%,rgba(81,223,208,.055),transparent 32%); box-shadow:inset 0 0 120px rgba(0,0,0,.56); }
@@ -482,7 +482,7 @@
 
 @media (max-width:980px) {
   .loginRedesign { --login-content-width:min(520px,calc(100% - 36px)); }
-  .loginRedesign > .legalFooter { flex-direction:column; gap:2px; text-align:center; }
+  .loginRedesign > .legalFooterSlot > .legalFooter { flex-direction:column; gap:2px; text-align:center; }
   .loginLayout { grid-template-columns:1fr; gap:34px; align-content:center; padding:34px 0; }
   .loginHero { align-self:auto; display:grid; gap:28px; padding:0; }
   .loginHeroCopy { margin:0; }

@@ -39,7 +39,6 @@ sudo vps-control uninstall --yes
 
 ## Документация
 
-- [Подключение клиентских устройств](docs/CONNECTION_GUIDE.md)
 - [Приватность](docs/PRIVACY_POLICY.md) · [Условия использования](docs/TERMS_OF_USE.md)
 
 Лицензия [MIT](LICENSE).

@@ -36,12 +36,11 @@ test("PRO shows ISO country flags and the release identity used by Light", async
   assert.match(page, /channel=\{releaseChannel\}/);
 });
 
-test("MIT license, privacy notice and connection guide are included in Russian", async () => {
-  const [privacy, terms, legalUi, guide] = await Promise.all([
+test("MIT license and privacy notice are included in Russian", async () => {
+  const [privacy, terms, legalUi] = await Promise.all([
     read("docs/PRIVACY_POLICY.md"),
     read("docs/TERMS_OF_USE.md"),
     read("src/shared/components/legal-footer.tsx"),
-    read("docs/CONNECTION_GUIDE.md"),
   ]);
   assert.match(privacy, /Уведомление о приватности 312node\.net/);
   assert.match(privacy, /Privacy Notice/);
@@ -54,7 +53,6 @@ test("MIT license, privacy notice and connection guide are included in Russian",
   assert.match(legalUi, /Приватность \/ Privacy/);
   assert.match(legalUi, /Privacy/);
   assert.match(legalUi, /Лицензия \/ License/);
-  assert.match(guide, /Mihomo\/Clash YAML/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
 });
 

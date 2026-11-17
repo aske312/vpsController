@@ -58,8 +58,11 @@ class ReleaseStagingTests(unittest.TestCase):
             retired = stage / 'protocol-images/mihomo/client_singbox.py'
             retired.parent.mkdir(parents=True)
             retired.write_text('retired fixture')
+            old_guide = stage / 'docs/CONNECTION_GUIDE.md'
+            old_guide.parent.mkdir(parents=True, exist_ok=True)
+            old_guide.write_text('old cached guide')
             subprocess.run(['bash', '-euc', command], check=True,
                            env={**os.environ, 'ROOT_DIR': str(root), 'STAGE': str(stage)})
             self.assertEqual(sorted(str(p.relative_to(stage)) for p in stage.rglob('*') if p.is_file()),
-                             ['.env.example', 'api/main.py', 'docs/CONNECTION_GUIDE.md',
+                             ['.env.example', 'api/main.py',
                               'docs/PRIVACY_POLICY.md', 'docs/TERMS_OF_USE.md'])

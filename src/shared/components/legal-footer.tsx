@@ -145,19 +145,21 @@ export function LegalFooter({ version, channel, commit }: LegalFooterProps) {
 
   return (
     <>
-      <footer className="versionFooter legalFooter" aria-label="Версия и правовая информация">
-        <div className="legalVersionLine" aria-label={`${displayChannel}, версия ${displayVersion}, сборка ${buildId}`}>
-          <span>{displayChannel} {displayVersion} build:{buildId}</span>
-        </div>
-        <div className="legalFooterLinks">
-          <button type="button" className="legalLink" onClick={() => setPanel("privacy")}>
-            Приватность / Privacy
-          </button>
-          <button type="button" className="legalLink" onClick={() => setPanel("license")}>
-            Лицензия / License
-          </button>
-        </div>
-      </footer>
+      <div className="legalFooterSlot">
+        <footer className="versionFooter legalFooter" aria-label="Версия и правовая информация">
+          <div className="legalVersionLine" aria-label={`${displayChannel}, версия ${displayVersion}, сборка ${buildId}`}>
+            <span>{displayChannel} {displayVersion} build:{buildId}</span>
+          </div>
+          <div className="legalFooterLinks">
+            <button type="button" className="legalLink" onClick={() => setPanel("privacy")}>
+              Приватность / Privacy
+            </button>
+            <button type="button" className="legalLink" onClick={() => setPanel("license")}>
+              Лицензия / License
+            </button>
+          </div>
+        </footer>
+      </div>
 
       {legal && (
         <div className="legalBackdrop" role="presentation" onClick={() => setPanel(null)}>

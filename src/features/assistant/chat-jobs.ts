@@ -41,7 +41,7 @@ export async function observeChatJob(client: Client, id: string, actor: string, 
     publish(job);
     if (["done", "failed", "unknown"].includes(job.state)) terminal = job;
   };
-  while (!signal.aborted && Date.now() - started < 600000) {
+  while (!signal.aborted && Date.now() - started < 1200000) {
     try {
       receive(await client<ChatJob>(path + query, { cache: "no-store", signal }));
       if (terminal) break;

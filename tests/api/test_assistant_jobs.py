@@ -34,7 +34,7 @@ class ChatJobsTests(unittest.TestCase):
             jobs.submit(api,self.payload.model_copy(update={'prompt':'another'}))
         self.assertEqual(caught.exception.status_code,409);self.assertEqual(self.launch.call_count,1)
         args=self.launch.call_args.args[0]
-        self.assertIn('--property=RuntimeMaxSec=6min',args)
+        self.assertIn('--property=RuntimeMaxSec=15min',args)
         self.assertNotIn('private question',' '.join(args))
     def test_lost_launch_reply_is_not_replayed_and_can_finish(self):
         self.launch.side_effect=subprocess.TimeoutExpired('systemd-run',12)

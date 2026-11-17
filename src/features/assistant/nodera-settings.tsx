@@ -398,8 +398,8 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     {internetOpen && <SettingsDialog title="Интернет" close={() => setInternetOpen(false)}>
 
       <label className="noderaPermissionSwitch"><span>Парсинг страниц</span><input type="checkbox" role="switch" aria-label="Парсинг страниц" checked={draft.web_extract_enabled ?? true} disabled={blocked} onChange={event => patch({ web_extract_enabled: event.target.checked })}/></label>
-      <label>Источников для исследования<select value={draft.web_max_sources ?? 3} disabled={blocked} onChange={event => patch({ web_max_sources: Number(event.target.value) })}>{[1,2,3,4,5].map(value => <option value={value} key={value}>{value}</option>)}</select></label>
-      <label>Лимит чтения страницы<select value={draft.web_read_chars ?? 14000} disabled={blocked} onChange={event => patch({ web_read_chars: Number(event.target.value) })}>{[2000,6000,14000,20000].map(value => <option value={value} key={value}>{value.toLocaleString("ru-RU")} символов</option>)}</select></label>
+      <label>Источников для исследования<select value={draft.web_max_sources ?? 5} disabled={blocked} onChange={event => patch({ web_max_sources: Number(event.target.value) })}>{[1,2,3,4,5,6,7,8].map(value => <option value={value} key={value}>{value}</option>)}</select></label>
+      <label>Лимит чтения страницы<select value={draft.web_read_chars ?? 20000} disabled={blocked} onChange={event => patch({ web_read_chars: Number(event.target.value) })}>{[2000,6000,14000,20000,30000,40000].map(value => <option value={value} key={value}>{value.toLocaleString("ru-RU")} символов</option>)}</select></label>
       <label>Предпочитаемые сайты<input placeholder="example.com, docs.example.org" value={sitesText} disabled={blocked} onChange={event => { setSitesText(event.target.value); patch({ web_domains: event.target.value.split(",").map(value => value.trim()).filter(Boolean) }); }}/></label>
 
 

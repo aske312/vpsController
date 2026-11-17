@@ -382,6 +382,7 @@
 .mihomoRowActions { display: flex; justify-content: flex-end; gap: 7px; }
 
 .mihomoRowActions button { min-height: 33px; padding: 0 10px; border: 1px solid rgba(91, 113, 138, .20); border-radius: 9px; background: rgba(9, 18, 27, .72); color: #a0b1bd; font-size: 10px; cursor: pointer; }
+.mihomoRowActions .mihomoLinkRotate { display:inline-grid; place-items:center; width:33px; padding:0; flex-shrink:0; font-size:20px; line-height:1; }
 .mihomoProfileDevices { display:grid; gap:12px; padding:14px 16px 16px; }
 .mihomoProfileDevice { min-width:0; overflow:hidden; border:1px solid rgba(91,113,138,.14); border-radius:12px; background:rgba(5,13,21,.48); }
 .mihomoDeviceHeader { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:9px 10px; border-bottom:1px solid rgba(91,113,138,.12); background:linear-gradient(90deg,rgba(92,75,180,.09),transparent 58%); }

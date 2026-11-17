@@ -76,9 +76,17 @@ class AssistantTests(unittest.TestCase):
         self.save(legacy)
         self.assertFalse(control.read(api)['web_extract_enabled'])
         self.assertEqual(control.read(api)['web_read_chars'], 2000)
-        for field, value in [('web_max_sources', 6), ('web_read_chars', 20001), ('web_extract_enabled', 'yes')]:
+        for field, value in [('web_max_sources', 9), ('web_read_chars', 40001), ('web_extract_enabled', 'yes')]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 control.Settings.model_validate({**payload, field: value})
+
+    def test_expanded_web_limits_can_be_saved(self):
+        payload = self.payload()
+        payload.update(web_max_sources=8, web_read_chars=40000)
+        self.save(payload)
+        saved = control.read(api)
+        self.assertEqual(saved['web_max_sources'], 8)
+        self.assertEqual(saved['web_read_chars'], 40000)
 
     def test_saved_fixed_roles_before_terminal_permission_remain_readable(self):
         import assistant_roles as roles

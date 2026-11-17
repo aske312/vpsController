@@ -2312,7 +2312,6 @@ sync_release() {
   rsync -a --delete \
     --exclude '.git/' \
     --include '/docs/' \
-    --include '/docs/CONNECTION_GUIDE.md' \
     --include '/docs/PRIVACY_POLICY.md' \
     --include '/docs/TERMS_OF_USE.md' \
     --exclude '/docs/***' \
@@ -2333,6 +2332,7 @@ sync_release() {
     --exclude 'outputs/' \
     --exclude '.package-stage-*/' \
     "${PROJECT_DIR}/" "${INSTALL_DIR}/"
+  rm -f -- "${INSTALL_DIR}/docs/CONNECTION_GUIDE.md"
   chmod 0755 "${INSTALL_DIR}/scripts/vps-control.sh"
   if [[ "${PRESERVE_MANAGER}" != "yes" ]]; then
     install -m 0755 "${PROJECT_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"

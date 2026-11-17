@@ -98,7 +98,7 @@ def submit(api, payload):
     try:
         # An independent unit survives API restarts. Credentials only come from the existing environment file.
         result = subprocess.run(['systemd-run', '--quiet', '--collect', '--property=Type=exec',
-            '--unit=' + record['unit'], '--property=RuntimeMaxSec=6min', '--property=UMask=0077',
+            '--unit=' + record['unit'], '--property=RuntimeMaxSec=15min', '--property=UMask=0077',
             '--property=EnvironmentFile=' + str(api.ENV_FILE),
             '--setenv=DATA_DIR=' + str(api.DATA_DIR), sys.executable, str(Path(__file__).resolve()), identity],
             capture_output=True, timeout=12, check=False)
@@ -147,7 +147,7 @@ def get(api, identity, actor='panel'):
 
 async def events(api, identity, actor, request):
     last, heartbeat, started = -1, 0, time.monotonic()
-    while time.monotonic() - started < 300:
+    while time.monotonic() - started < 900:
         if await request.is_disconnected(): return
         record = await asyncio.to_thread(get, api, identity, actor)
         if record['seq'] != last:

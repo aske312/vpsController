@@ -36,6 +36,38 @@ def dns(address):
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):
+    async def test_long_page_read_supports_forty_thousand_characters(self):
+        body = b'<p>' + b'x' * 45000 + b'</p>'
+        with patch.object(runner, 'web_get', new=AsyncMock(return_value=('https://example.com', 'text/html', body, 'utf-8'))):
+            result = await runner.internet_read('https://example.com', max_chars=40000)
+        self.assertEqual(len(result['text']), 40000)
+        self.assertTrue(result['truncated'])
+        with self.assertRaises(ValueError):
+            await runner.internet_read('https://example.com', max_chars=40001)
+
+    async def test_eight_source_research_limits_concurrent_reads(self):
+        hits = {'results': [{'url': f'https://example.com/{i}'} for i in range(10)]}
+        active, peak = 0, 0
+        async def read(url, *_, **_kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return {'url': url, 'text': 'verified source', 'truncated': False}
+        with patch.object(runner, 'internet_search', new=AsyncMock(return_value=hits)), patch.object(runner, 'internet_read', side_effect=read):
+            result = await runner.internet_research('topic', max_sources=8, max_chars=40000)
+        self.assertEqual(len(result['sources']), 8)
+        self.assertEqual(len({item['url'] for item in result['sources']}), 8)
+        self.assertLessEqual(peak, 4)
+
+    async def test_search_returns_ten_results_with_bounded_snippets(self):
+        html = ''.join(f'<a class="result__a" href="https://example.com/{i}">{"t" * 400}</a><div class="result__snippet">{"s" * 1200}</div>' for i in range(12)).encode()
+        with patch.object(runner, 'web_get', new=AsyncMock(return_value=('', 'text/html', html, 'utf-8'))):
+            result = await runner.internet_search('topic')
+        self.assertEqual(len(result['results']), 10)
+        self.assertTrue(all(len(item['title']) == 300 and len(item['description']) == 1000 for item in result['results']))
+
     async def test_structured_extraction_resolves_links_and_ignores_executable_content(self):
         html = b'<title>Docs</title><meta name="description" content="About docs"><h1>Heading</h1><script><h2>hidden</h2></script><a href="/guide">Guide</a><a href="javascript:alert(1)">bad</a><table><tr><th>Name</th><td>Value</td></tr></table>'
         with patch.object(runner, 'web_get', new=AsyncMock(return_value=('https://example.com/docs', 'text/html', html, 'utf-8'))):

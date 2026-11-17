@@ -13,7 +13,7 @@ from fastapi import HTTPException
 current = ContextVar('assistant_trace', default=None)
 RETENTION = 7 * 86400
 MAX_FILES = 256
-MAX_BYTES = 128 * 1024
+MAX_BYTES = 256 * 1024
 STAGES = {'request_started', 'request_finished', 'runtime_started', 'model_start', 'model_result', 'model_error', 'tool_start', 'tool_result', 'repeat_blocked', 'summary_start', 'summary_result', 'budget_exhausted', 'trace_truncated'}
 FIELDS = {'name', 'view', 'method', 'path', 'body', 'values', 'expected_revision', 'operation_id', 'profile_id', 'device_id', 'routing', 'structured_policy', 'structured_policy_selection', 'groups', 'rules', 'members', 'kind', 'value', 'target', 'connections', 'devices', 'settings', 'limits', 'section', 'module_id', 'group_id', 'service', 'action', 'selection', 'telegram_id', 'query', 'url', 'timeout', 'interval', 'strategy', 'max_failed_times', 'tolerance', 'request_id', 'operation_ids'}
 

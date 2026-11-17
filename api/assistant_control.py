@@ -150,8 +150,8 @@ class Settings(BaseModel):
     personalization_enabled: StrictBool = True
     web_enabled: StrictBool = True
     web_extract_enabled: StrictBool = True
-    web_max_sources: int = Field(default=3, strict=True, ge=1, le=5)
-    web_read_chars: int = Field(default=14000, strict=True, ge=2000, le=20000)
+    web_max_sources: int = Field(default=5, strict=True, ge=1, le=8)
+    web_read_chars: int = Field(default=20000, strict=True, ge=2000, le=40000)
     web_domains: list[str] = Field(default_factory=list, max_length=8)
     memory_enabled: StrictBool = True
     memory_days: int = Field(default=30, strict=True, ge=1, le=90)
@@ -438,7 +438,7 @@ def _read(api):
         raise operations.OperationConflict('Настройки MCP повреждены; автоматический сброс не выполняется') from None
     if value.get('mcp_installed') is None:
         value['mcp_installed'] = list(MCP_MODULES)
-    for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 3), ('web_read_chars', 14000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
+    for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 5), ('web_read_chars', 20000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
         value.setdefault(key, default)
     return value
 
@@ -461,7 +461,7 @@ def store(api, value):
     ai = {key: value.get(key) for key in ('provider_url', 'model', 'api_key', 'telegram_api_id', 'telegram_api_hash')}
     ai['model_mode'] = value.get('model_mode', 'single')
     ai['mcp_installed'] = [key for key in LEGACY_MCP_MODULES if key in value.get('mcp_installed', LEGACY_MCP_MODULES) or value['mcp'].get(key)]
-    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 3), ('web_read_chars', 14000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
+    ai.update({key: value.get(key, default) for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 5), ('web_read_chars', 20000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30))})
     ai.update(modules={'ai-agent': value['modules']['ai-agent']}, mcp={key: value['mcp'][key] for key in LEGACY_MCP_MODULES},
               accounts=[{key: item for key, item in a.items() if key not in ('bot_access', *ACCOUNT_OPTIONS)} for a in value['accounts']])
     bot = {'modules': {'nodera-bot': value['modules']['nodera-bot']}, 'bot_token': value.get('bot_token', ''),
@@ -695,7 +695,7 @@ def configure(api, payload):
             if submitted['mcp_installed'] is not None and 'mihomo-mcp' in old['mcp_installed']:
                 submitted['mcp_installed'] = list(dict.fromkeys([*submitted['mcp_installed'], 'mihomo-mcp']))
         if 'role_permissions' not in payload.model_fields_set: submitted['role_permissions'] = old.get('role_permissions', {})
-        for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 3), ('web_read_chars', 14000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
+        for key, default in (('assistant_style', 'balanced'), ('assistant_character', Settings.model_fields['assistant_character'].default), ('assistant_instructions', ''), ('personalization_enabled', True), ('web_extract_enabled', True), ('web_max_sources', 5), ('web_read_chars', 20000), ('web_domains', []), ('web_enabled', True), ('memory_enabled', True), ('memory_days', 30)):
             if key not in payload.model_fields_set:
                 submitted[key] = old.get(key, default)
         value = {**old, 'modules': dict(old['modules']), 'accounts': []}

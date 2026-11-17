@@ -112,7 +112,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
   assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 12\/13/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
-  assert.match(readme, /Подключение клиентских устройств/);
+  assert.doesNotMatch(readme, /CONNECTION_GUIDE\.md/);
   assert.match(readme, /sudo vps-control update/);
   assert.doesNotMatch(readme, /test-pro|CI|Разработка|Ручное обновление без сборки/);
   assert.match(readme, /установка/i);

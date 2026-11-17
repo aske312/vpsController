@@ -1,7 +1,7 @@
 {
   "id": "nodera",
   "name": "Nodera",
-  "version": "1.30.0",
+  "version": "1.31.0",
   "installable": true,
   "description": "AI Ассистент, Telegram и управление VPS через MCP.",
   "category": "assistant",

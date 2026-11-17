@@ -301,7 +301,7 @@ async def bot_api(settings, method, **payload):
 async def agent_request(settings, actor, prompt, attachments=None, alert=None):
     headers = {'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)}
     request_id = secrets.token_hex(16)
-    async with httpx.AsyncClient(timeout=300, trust_env=False) as client:
+    async with httpx.AsyncClient(timeout=960, trust_env=False) as client:
         payload = {'prompt': prompt, 'request_id': request_id}
         if attachments: payload['attachments'] = attachments
         if alert: payload['alert'] = alert
