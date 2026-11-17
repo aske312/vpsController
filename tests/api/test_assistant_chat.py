@@ -17,6 +17,45 @@ def attachment(name, mime, data):
 
 
 class AssistantChatFilesTests(unittest.TestCase):
+    def test_no_tool_operational_report_is_corrected_and_never_returned_as_success(self):
+        @asynccontextmanager
+        async def connections(*_): yield {}
+        provider = AsyncMock(return_value={'content': 'Мастер, применила. operation_id: b7f3c7cb-749f-4d9f-a79e-c8b37de7866f. Группа создана.'})
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Применяй'))
+        self.assertEqual(provider.await_count, 2)
+        self.assertEqual(result['tools_used'], [])
+        self.assertNotIn('b7f3c7cb', result['answer'])
+        self.assertIn('не подтверждены', result['answer'])
+        self.assertIn('не вызвала ни одного инструмента', provider.call_args.args[1][-1]['content'])
+
+    def test_a_corrected_no_tool_claim_can_prepare_a_real_confirmation(self):
+        from types import SimpleNamespace
+        session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[SimpleNamespace(type='text', text='{"status":"awaiting_user","confirmation_required":true}')])) )
+        tool = SimpleNamespace(name='request_confirmation', description='Present prepared action', inputSchema={'type': 'object'})
+        @asynccontextmanager
+        async def connections(*_): yield {'request_confirmation': (session, tool)}
+        provider = AsyncMock(side_effect=[{'content': 'Подготовила. Operation ID: invented'},
+            {'tool_calls': [{'id': 'present', 'type': 'function', 'function': {'name': 'request_confirmation', 'arguments': '{}'}}]},
+            {'content': 'Ожидает вашего решения кнопкой.'}])
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+            result = asyncio.run(runner.chat(settings, 'panel', 'Покажи подтверждение'))
+        self.assertEqual(result['tools_used'], ['request_confirmation'])
+        session.call_tool.assert_awaited_once()
+        self.assertEqual(result['answer'], 'Ожидает вашего решения кнопкой.')
+
+    def test_honest_unavailable_reply_and_ordinary_chat_need_no_second_model_call(self):
+        @asynccontextmanager
+        async def connections(*_): yield {}
+        settings = {'modules': {'ai-agent': True}, 'provider_url': 'https://provider.example/v1', 'model': 'test', 'api_key': 'key'}
+        for answer in ('Здравствуйте!', 'Я не применила изменения. Инструменты недоступны.'):
+            provider = AsyncMock(return_value={'content': answer})
+            with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider):
+                self.assertEqual(asyncio.run(runner.chat(settings, 'panel', 'Вопрос'))['answer'], answer)
+            self.assertEqual(provider.await_count, 1)
+
     def test_text_docx_and_pdf_reach_the_provider_as_untrusted_text(self):
         docx = io.BytesIO()
         with zipfile.ZipFile(docx, 'w') as archive:

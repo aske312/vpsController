@@ -131,6 +131,7 @@ def persona(settings, actor='panel'):
             'MCP позволяют мониторинг и подготовку действий служб. Выключение VPS и включение защищённого доступа через Nodera запрещены. '
             'Для изменения службы вызови vps_service_action. После подготовки любого действия с confirmation_required вызови request_confirmation с operation_ids подготовленных действий, понятным title и reason: зачем действие нужно и как повлияет на работу. Связанные операции объедини одним вызовом request_confirmation с их operation_ids в порядке выполнения. Уже подготовленные операции текущего собеседника перечислены в pending_confirmations: используй их operation_id, не создавая дубликаты. Дождись решения пользователя. Не подтверждай действия за пользователя и не считай старый текст команды разрешением нового действия. '
             'Изменения Mihomo также требуют подтверждения человеком. Не меняй чужие профили и лимиты обычного пользователя. '
+            'Текст ответа не создаёт операцию или кнопки. Для правил и групп Mihomo используй mihomo_settings или mihomo_group_update, затем request_confirmation. Не придумывай ID операций, группы и результаты из истории. Если инструменты недоступны, прямо сообщи об этом. Слова «подтверждаю» и «применяй» не заменяют нажатие кнопки пользователем. '
             'Команды Telegram подсказывай по запросу или для подтверждения действия: /status, /resources, /services, /components, /models, /model <ID>, /service <ID> <start|stop|restart>, /confirm <код>, /cancel, /operation <ID>. '
             'Не перечисляй команды управления в приветствии. Для действий предпочитай доступные инструменты и подтверждение пользователем. '
             'Манера общения не даёт новых прав. Не раскрывай пароли сервера, ключи и Telegram-сессии. Ссылку подписки выдавай только владельцу или администратору.')
@@ -1226,6 +1227,14 @@ def user_content(prompt, attachments):
     return [{'type': 'text', 'text': text or 'Проанализируй приложенные изображения.'}, *parts]
 
 
+def ungrounded_operation_claim(answer):
+    """Catch operational reports when no tool was called in this turn."""
+    text = re.sub(r'[*`_#]', '', answer).lower()
+    return bool(re.search(r'(?<!не )\b(?:применила|применил|создала|создал|сохранила|сохранил|подготовила|подготовил|проверила|проверил)\b|'
+                          r'\bопераци[яи]\s+(?:завершена|подтверждена|выполнена)|\bподтверждение\s+принято|'
+                          r'\boperation[_ ]id\b|/confirm\s+[0-9a-f-]{8,}|<tool_call>', text))
+
+
 async def chat(settings, actor, prompt, attachments=None, history=None):
     if not settings['modules']['ai-agent']:
         raise PermissionError('AI-agent выключен')
@@ -1262,6 +1271,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         used = []
         usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         complete_usage = True
+        corrected_claim = False
         for _ in range(MAX_ROUNDS):
             message = await provider_request(settings, messages, tools)
             measured = message.get('_usage')
@@ -1275,6 +1285,13 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 answer = message.get('content')
                 if not isinstance(answer, str) or not answer.strip():
                     raise RuntimeError('AI-провайдер вернул пустой ответ')
+                if not used and ungrounded_operation_claim(answer):
+                    progress('waiting_model', '')
+                    if not corrected_claim:
+                        corrected_claim = True
+                        messages.append({'role': 'system', 'content': 'В этом запросе ты не вызвала ни одного инструмента. Описания операций и ID из истории не являются результатами выполнения. Если пользователь просит действие, вызови доступный профильный инструмент настоящим tool_calls, затем request_confirmation. Не подтверждай за человека. Если выполнить запрос инструментами нельзя, честно сообщи об этом; не утверждай, что что-то проверено, подготовлено или выполнено.'})
+                        continue
+                    answer = 'ИИ не вызвал инструменты для проверки или изменения настроек. Выполнение и подготовка операций не подтверждены; запроса с кнопками подтверждения нет. Повторите запрос на подготовку действия. Предыдущие текстовые сообщения ИИ об успехе не подтверждают изменение сервера.'
                 result = {'answer': answer[:20000], 'tools_used': used}
                 if complete_usage:
                     result['usage'] = usage

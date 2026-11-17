@@ -123,8 +123,8 @@ function mount(initial, options={}) {
   };
   request.sessionKey='fixture';
   globalThis.window={setInterval(fn){timers.push(fn);return timers.length;},clearInterval(){}};
-  const onOperation=()=>{};
-  const render=()=>{cursor=0;queue=exports.AssistantConfirmations({request,onOperation,children:null}).props.value;while(effects.length)effects.shift()();return queue;};
+  const onOperation=()=>{},onChanged=()=>{options.onChanged?.();};
+  const render=()=>{cursor=0;queue=exports.AssistantConfirmations({request,onOperation,onChanged,children:null}).props.value;while(effects.length)effects.shift()();return queue;};
   const settle=async()=>{await new Promise(resolve=>setImmediate(resolve));render();await new Promise(resolve=>setImmediate(resolve));render();};
   render();
   return {store,remote,calls,messages,render,settle,get queue(){return queue;},
@@ -133,6 +133,22 @@ function mount(initial, options={}) {
     dispose(){for(const slot of slots)slot?.cleanup?.();globalThis.window=previousWindow;},
   };
 }
+
+test('routing refresh follows confirmed saves and completed jobs, never rejection or uncertain results', async()=>{
+  for(const scenario of ['saved','rejected','unknown','job']){
+    let changes=0;
+    const app=mount([action('aabbccdd')],{onChanged:()=>{changes++;},unknown:scenario==='unknown',jobs:scenario==='job'});
+    try{
+      await app.settle();await app.queue.decide(app.queue.actions[0],scenario==='rejected'?'reject':'confirm');await app.settle();
+      assert.equal(changes,scenario==='saved'?1:0);
+      if(scenario==='job'){
+        app.remote.jobs['aabbccdd'.repeat(4)].state='succeeded';
+        await app.tick();assert.equal(changes,1);
+        await app.tick();assert.equal(changes,1);
+      }
+    }finally{app.dispose();}
+  }
+});
 
 test('global notifications contain every actor before a chat exists and rejecting one keeps the others',async()=>{
   const app=mount([action('aabbccdd'),action('11223344'),action('eeff0011','11')]);

@@ -41,6 +41,39 @@ class MihomoOperatorTests(unittest.TestCase):
         if method == 'GET': return {'ok': True}
         return {'id': operation_id, 'state': 'queued'}
 
+    def test_routing_rules_and_groups_reach_the_same_schema_as_the_ui_only_after_human_confirmation(self):
+        from tests.api.support import manager
+        folder = self.root / 'mihomo-settings'
+        folder.mkdir()
+        for key, filename in [('ROUTING_SETTINGS_FILE', 'routing-policy.json'), ('PRESET_SETTINGS_FILE', 'presets.json'), ('PERSONAL_RULES_FILE', 'personal.json')]:
+            self.enterContext(patch.object(manager, key, folder / filename))
+        self.enterContext(patch.object(manager, 'SETTINGS_ROOT', folder))
+        self.enterContext(patch.object(manager, 'profiles', return_value=[]))
+        policy = {'groups': [{'name': 'Media', 'type': 'fallback', 'members': ['*']}],
+                  'rules': [{'kind': 'domain-suffix', 'value': 'example.test', 'target': 'Media'}]}
+        initial = manager.get_routing_schema()
+        writes = []
+        def transport(method, path, body=None, operation_id=None):
+            if method == 'GET' and path == '/routing/schema': return manager.get_routing_schema()
+            self.assertEqual((method, path), ('PATCH', '/routing/settings'))
+            writes.append(body)
+            return manager.patch_routing_settings(manager.ModuleSettingsPatch.model_validate(body))
+        with patch.object(bridge, 'request', side_effect=transport):
+            response = bridge.call(api, 'panel', 'PATCH', '/routing/settings',
+                {'values': {'structured_policy': json.dumps(policy)}, 'expected_revision': initial['revision']})
+            self.assertTrue(response['confirmation_required'])
+            self.assertEqual(writes, [])
+            self.assertFalse(json.loads(manager.get_routing_schema()['values'].get('structured_policy') or '{}').get('rules'))
+            with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
+                pending = self.client.get('/api/assistant/pending-action').json()['pending_actions']
+                row = next(row for row in pending if row['operation_id'] == response['operation_id'])
+                confirmed = self.client.post('/api/assistant/service-confirm', json={'code': row['code'], 'decision': 'confirm'})
+            self.assertEqual(confirmed.status_code, 200, confirmed.text)
+            actual = json.loads(bridge.call(api, 'panel', 'GET', '/routing/schema', {})['values']['structured_policy'])
+            self.assertEqual(actual['rules'], policy['rules'])
+            self.assertEqual(actual['groups'][0]['name'], 'Media')
+            self.assertEqual(len(writes), 1)
+
     def tool(self, **payload):
         return self.client.post('/api/assistant/control-tool', headers=self.headers, json=payload)
 

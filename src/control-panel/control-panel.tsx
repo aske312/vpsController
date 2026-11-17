@@ -213,6 +213,11 @@ export function ControlPanel() {
     acceptedOperation.current = { id: operation.id, state: operation.state };
     setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: operation }));
   }, [token]);
+  const refreshAssistantChanges = useCallback(() => {
+    invalidateApiReads(token);
+    setMihomoRefreshKey(value => value + 1);
+    setMcpRefreshKey(value => value + 1);
+  }, [token]);
   const { pending: admissionPending, submit: submitSystemOperation, retain: retainAdmission, recheck: recheckAdmission, cancel: cancelSystemOperation } = useSystemAdmission(request, token, acceptSystemOperation);
   const busy = localBusy || admissionPending || systemActionNeedsPolling(application?.action);
   const admitNetworkOperation = useCallback((path: string, options: RequestInit) => submitSystemOperation(request, path, options), [request, submitSystemOperation]);
@@ -1390,7 +1395,7 @@ export function ControlPanel() {
     : tab === "application" ? "modules"
     : "modules";
 
-  return <AssistantConfirmations key={request.sessionKey} request={request} onOperation={acceptSystemOperation}><AppWorkspace
+  return <AssistantConfirmations key={request.sessionKey} request={request} onOperation={acceptSystemOperation} onChanged={refreshAssistantChanges}><AppWorkspace
     activeTab={tab}
     visualArt={visualArt}
     protocolImages={protocolImages}

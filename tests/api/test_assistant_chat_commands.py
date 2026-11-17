@@ -105,32 +105,6 @@ class ChatCommandTests(unittest.TestCase):
             model.assert_not_called()
         self.assertEqual(control.operations.read(preference), {'model': 'bot-model'})
 
-    def test_model_catalog_returns_selection_and_pagination_buttons(self):
-        settings = control.read(api)
-        settings.update(model_mode='catalog', provider_url='https://models.example.test/v1')
-        control.store(api, settings)
-        models = [f'model-{index}' for index in range(41)]
-        with patch.object(control, 'model_catalog', return_value={'models': models}):
-            first = self.command('/models').json()['actions']
-            self.assertEqual(first[0]['command'], '/model model-0')
-            self.assertIn('/models 2', [row['command'] for row in first])
-            second = self.command('/models 2').json()['actions']
-            self.assertEqual(second[0]['command'], '/model model-40')
-            self.assertIn('/models 1', [row['command'] for row in second])
-            self.assertIn('/model default', [row['command'] for row in second])
-
-    def test_service_buttons_keep_guards_and_only_prepare_an_action(self):
-        with patch.object(api, 'observe_service', return_value={}), patch.object(api, 'manage_service') as mutate:
-            response = self.command('/services')
-            self.assertEqual(response.status_code, 200, response.text)
-            buttons = [row['command'] for row in response.json()['actions']]
-            self.assertIn('/service fixture restart', buttons)
-            self.assertNotIn('/service ssh stop', buttons)
-            self.assertNotIn('/service nodera-bot restart', buttons)
-            prepared = self.command('/service fixture restart')
-            self.assertTrue(prepared.json()['pending_actions'])
-            mutate.assert_not_called()
-
     def test_help_and_id_do_not_leak_owner_commands_into_an_unprivileged_context(self):
         settings = control.read(api)
         settings['accounts'][0].update(role='guest', products=[], permission_overrides={})

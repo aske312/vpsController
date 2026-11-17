@@ -34,7 +34,7 @@ export function useAssistantConfirmations() {
   return value;
 }
 
-export function AssistantConfirmations({ request, onOperation, children }: { request: Client; onOperation: (operation: SystemAction) => void; children: ReactNode }) {
+export function AssistantConfirmations({ request, onOperation, onChanged, children }: { request: Client; onOperation: (operation: SystemAction) => void; onChanged?: () => void; children: ReactNode }) {
   const notifications = useNotifications();
   const notify = useNotifier("nodera", "Nodera · Подтверждение");
   const [context, setContext] = useState<DecisionContext[]>([]);
@@ -52,6 +52,8 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
   const registered = useRef(new Set<string>());
   const tracked = useRef(new Map<string, { snapshot: SystemAction; title: string; reading: boolean; checked: number; terminal: boolean }>());
   const operation = useRef(onOperation);
+  const changed = useRef(onChanged);
+  useEffect(() => { changed.current = onChanged; }, [onChanged]);
   useEffect(() => { operation.current = onOperation; }, [onOperation]);
   const readOperation = useCallback(async function readOperation(id: string) {
     const item = tracked.current.get(id);
@@ -60,8 +62,10 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     try {
       const observed = await request(`/application/operations/${id}`, { cache: "no-store" });
       if (activeRequest.current !== request) return;
+      const previousState = item.snapshot.state;
       item.snapshot = systemAdmissionSnapshot(observed, id, item.snapshot);
       item.terminal = !systemActionNeedsPolling(item.snapshot);
+      if (item.snapshot.state === "succeeded" && previousState !== "succeeded") changed.current?.();
     } catch {
       if (activeRequest.current !== request) return;
       item.snapshot = { ...item.snapshot, state: "unknown", progress: undefined, message: "Результат команды пока не подтверждён. Повторно команду не отправляем." };
@@ -100,8 +104,12 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
         const snapshot = systemActionSnapshot(result.operation);
         trackOperation(snapshot, `Nodera · ${action.action} · ${action.service}`);
         operation.current(snapshot);
+        if (decision === "confirm" && snapshot.state === "succeeded") changed.current?.();
       }
-      else if (!batchKey) notify.info(result.text);
+      else {
+        if (decision === "confirm") changed.current?.();
+        if (!batchKey) notify.info(result.text);
+      }
       return result;
     } catch (cause) {
       if (activeRequest.current !== request) return;
