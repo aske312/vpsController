@@ -14,7 +14,7 @@ current = ContextVar('assistant_trace', default=None)
 RETENTION = 7 * 86400
 MAX_FILES = 256
 MAX_BYTES = 256 * 1024
-STAGES = {'request_started', 'request_finished', 'runtime_started', 'model_start', 'model_result', 'model_error', 'tool_start', 'tool_result', 'repeat_blocked', 'summary_start', 'summary_result', 'budget_exhausted', 'trace_truncated'}
+STAGES = {'request_started', 'request_finished', 'runtime_started', 'model_start', 'model_result', 'model_error', 'provider_transport', 'provider_error', 'tool_start', 'tool_result', 'repeat_blocked', 'summary_start', 'summary_result', 'budget_exhausted', 'trace_truncated'}
 FIELDS = {'name', 'view', 'method', 'path', 'body', 'values', 'expected_revision', 'operation_id', 'profile_id', 'device_id', 'routing', 'structured_policy', 'structured_policy_selection', 'groups', 'rules', 'members', 'kind', 'value', 'target', 'connections', 'devices', 'settings', 'limits', 'section', 'module_id', 'group_id', 'service', 'action', 'selection', 'telegram_id', 'query', 'url', 'timeout', 'interval', 'strategy', 'max_failed_times', 'tolerance', 'request_id', 'operation_ids'}
 
 
@@ -38,6 +38,23 @@ def safe_event(value):
         if type(item) in (int, float) and 0 <= item <= 10**9: result[key] = round(item, 2)
     if isinstance(value.get('fields'), list): result['fields'] = [safe_field(field) for field in value['fields'][:24] if safe_field(field)]
     if value.get('source') in ('local', 'api', 'mihomo'): result['source'] = value['source']
+    if value.get('transport_phase') in ('dns', 'tcp_connect', 'tls_handshake', 'request_headers', 'request_body', 'response_headers', 'response_body', 'response_parse', 'unknown'):
+        result['transport_phase'] = value['transport_phase']
+    if value.get('transport_reason') in ('certificate_verification', 'timeout', 'cancelled', 'dns_resolution', 'connection_refused', 'connection_reset', 'unexpected_eof', 'tls_error', 'protocol_error', 'http_error', 'invalid_response', 'unknown'):
+        result['transport_reason'] = value['transport_reason']
+    if isinstance(value.get('exception_types'), list):
+        allowed = {'ConnectTimeout', 'ReadTimeout', 'WriteTimeout', 'PoolTimeout', 'TimeoutError', 'ConnectError', 'ReadError', 'WriteError',
+                   'RemoteProtocolError', 'LocalProtocolError', 'SSLError', 'SSLCertVerificationError', 'SSLEOFError', 'SSLZeroReturnError',
+                   'SSLWantReadError', 'SSLWantWriteError', 'ConnectionResetError', 'ConnectionRefusedError', 'BrokenPipeError', 'OSError',
+                   'gaierror', 'ProviderFailure', 'JSONDecodeError', 'OtherError'}
+        result['exception_types'] = [name for name in value['exception_types'][:8] if isinstance(name, str) and name in allowed]
+    for key, maximum in (('os_errno', 4095), ('certificate_verify_code', 999)):
+        if type(value.get(key)) is int and 0 <= value[key] <= maximum: result[key] = value[key]
+    if value.get('tls_reason') in ('CERTIFICATE_VERIFY_FAILED', 'WRONG_VERSION_NUMBER', 'UNEXPECTED_EOF_WHILE_READING',
+                                  'TLSV1_ALERT_PROTOCOL_VERSION', 'TLSV1_ALERT_INTERNAL_ERROR', 'TLSV1_ALERT_UNKNOWN_CA',
+                                  'SSLV3_ALERT_HANDSHAKE_FAILURE', 'SSLV3_ALERT_BAD_CERTIFICATE', 'SSLV3_ALERT_CERTIFICATE_EXPIRED',
+                                  'TLSV1_ALERT_DECODE_ERROR', 'DECRYPTION_FAILED_OR_BAD_RECORD_MAC'):
+        result['tls_reason'] = value['tls_reason']
     if isinstance(value.get('validation'), list):
         result['validation'] = [{'field': safe_field(row.get('field')), 'constraint': row['constraint']} for row in value['validation'][:8]
                                 if isinstance(row, dict) and safe_field(row.get('field')) and row.get('constraint') in ('type', 'required', 'extra', 'enum', 'pattern', 'minimum', 'maximum', 'minLength', 'maxLength', 'revision_format', 'schema')]

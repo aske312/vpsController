@@ -60,6 +60,17 @@ class AssistantTraceTests(unittest.TestCase):
         self.assertEqual(result['result']['answer'], 'Ready')
         self.assertEqual(trace.read(self.env, self.identity)['events'][0]['tool'], 'mihomo_api')
 
+    def test_provider_failure_evidence_reaches_the_model_trace_tool(self):
+        with trace.capture(self.env, self.identity, '11', 'panel'):
+            trace.record({'stage': 'provider_error', 'error_code': 'provider_read_timeout', 'transport_phase': 'response_body',
+                          'transport_reason': 'timeout', 'exception_types': ['ReadTimeout', 'SSLWantReadError'],
+                          'http_status': 200, 'duration_ms': 180000, 'message': 'PRIVATE KEY'})
+        with patch.object(api, 'DATA_DIR', self.root):
+            result = control.control_tool(api, 'ai_dialog_trace', {'body': {'request_id': self.identity}})
+        self.assertEqual(result['events'][0]['transport_phase'], 'response_body')
+        self.assertEqual(result['events'][0]['exception_types'], ['ReadTimeout', 'SSLWantReadError'])
+        self.assertNotIn('PRIVATE', json.dumps(result))
+
     def test_request_failure_still_finishes_trace_and_administrator_can_diagnose_it(self):
         with patch.object(api, 'DATA_DIR', self.root), patch.object(control, '_admitted_chat', side_effect=HTTPException(502, 'PRIVATE FAILURE')):
             with self.assertRaises(HTTPException): control.chat_request(api, control.Chat(prompt='PRIVATE QUESTION', request_id=self.identity))
