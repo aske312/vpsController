@@ -7,6 +7,7 @@ import socket
 import socketserver
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -19,6 +20,13 @@ import snell_runtime as snell
 
 
 class SnellTests(unittest.TestCase):
+    def test_system_service_launcher_needs_only_standard_library(self):
+        result = subprocess.run([sys.executable, '-S', str(ROOT / 'protocol-images/mihomo/snell_runtime.py')],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Expected: serve INSTANCE', result.stderr)
+        self.assertNotIn('ModuleNotFoundError', result.stderr)
+
     def credential(self, **changes):
         return {'instance_id': 'profile-phone', 'port': 33000, 'password': 'test-key-for-snell-v6', 'mode': 'default', **changes}
 

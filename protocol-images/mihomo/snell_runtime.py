@@ -4,8 +4,6 @@ import re
 import secrets
 import time
 
-from fastapi import HTTPException
-
 MODULE = 'transport-snell'
 PREFIX = 'vps-control-mihomo-snell@'
 UNIT = re.compile(r'vps-control-mihomo-snell@[A-Za-z0-9_-]{1,128}\.service')
@@ -91,6 +89,7 @@ def stats(api, credential):
 
 
 def render(credential, name, server):
+    from fastapi import HTTPException
     try: configuration(identity(credential.get('instance_id', 'export')), credential)
     except ValueError as exc: raise HTTPException(422, str(exc)) from None
     q = lambda value: json.dumps(value, ensure_ascii=False)
