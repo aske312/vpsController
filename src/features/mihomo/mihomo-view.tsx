@@ -10,7 +10,7 @@ import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
-import { AdvancedRouting, BalanceStrategy, ProfilePolicyGroups } from "./advanced-routing";
+import { AdvancedRouting, BalanceStrategy, ProfilePolicyGroups, libraryRoute } from "./advanced-routing";
 import { SavedRoutingOrder } from "./saved-routing-order";
 import { ProfileRoutingMode } from "./profile-routing-mode";
 import { mergeProfileRouting, policySelectionKey, profileConnectionMode, profileModeChange, profileRuleVisible, profileRoutingSettings } from "./profile-modes";
@@ -138,6 +138,7 @@ export function MihomoPage({
   const [gameSearch, setGameSearch] = useState("");
   const [gameFilter, setGameFilter] = useState<"all" | "direct" | "vpn" | "restricted">("all");
   const routingDirtyRef = useRef(false);
+  const ruleStudio = useRef<HTMLElement>(null);
   const routingDraftRef = useRef<Record<string, string | number | boolean>>({});
   const [requestBusy, setBusy] = useState("");
   const [pendingPolicySave, setPendingPolicySave] = useState<PolicySave | null>(null);
@@ -1390,6 +1391,11 @@ export function MihomoPage({
   const policiesReady = modulesReadKnown && dnsReadKnown && routingReadKnown && installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
   const editableRuleLists = routingPolicy?.rule_lists || [];
   const personalRules = routingPolicy?.personal_rules || [];
+  const routingLibrary = [
+    ...profileDirectRules.map(rule => ({ id: `preset:${rule.key}`, title: rule.title, group: rule.group, defaultTarget: rule.key.startsWith("block_") || rule.key === "quic_compatibility" ? "REJECT" : "DIRECT" })),
+    { id: "preset:udp_tunnel_exclusions", title: "Исключения UDP", group: "Сеть", defaultTarget: "GATE.312" },
+    ...personalRules.map(rule => ({ id: `personal:${rule.id}`, title: rule.title, group: "Персональные", defaultTarget: rule.target })),
+  ];
   const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
   const selectedPersonalRule = personalRules.find((rule) => activeRuleList === `personal:${rule.id}`);
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
@@ -1658,7 +1664,7 @@ export function MihomoPage({
           </header>
 
           {view === "rules" && <>
-          <section className="mihomoRuleStudio">
+          <section ref={ruleStudio} className="mihomoRuleStudio">
             <aside><header><b>Библиотека правил</b><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b></p><i>{profileCount} проф.</i></button>; })}</section>)}{(visiblePersonalRules.length > 0 || !normalizedRuleSearch) && <section className="mihomoPersonalRuleLibrary"><h4>Персональные</h4>{visiblePersonalRules.map((rule) => { const profileCount = profiles.reduce((count, profile) => count + (profile.devices || []).filter((device) => (device.personal_rule_ids || []).includes(rule.id)).length, 0); return <button type="button" key={rule.id} className={activeRuleList === `personal:${rule.id}` ? "is-active" : ""} onClick={() => setActiveRuleList(`personal:${rule.id}`)}><span>{rule.code}</span><p><b>{rule.title}</b><small>{rule.entries.length}</small></p><i>{profileCount} устр.</i></button>; })}<button type="button" className="mihomoRuleLibraryAdd" disabled={!routingReadKnown} onClick={() => openPersonalRuleEditor()}>+ Создать персональное правило</button></section>}</div></aside>
             <article>
               {selectedPersonalRule ? <>
@@ -1697,7 +1703,10 @@ export function MihomoPage({
             </article>
           </section>
 
-          <AdvancedRouting value={routingDraft.structured_policy} defaults={routingDraft} onChange={value => updateRoutingDraft("structured_policy", value)}/>
+          {!routingPolicy?.routing_library_supported && <p className="mihomoHint">Для назначения маршрутов наборам обновите компонент Mihomo.</p>}
+          <AdvancedRouting value={routingDraft.structured_policy} defaults={routingDraft} library={routingPolicy?.routing_library_supported ? routingLibrary : []}
+            onEditSource={id => { setActiveRuleList(id.startsWith("preset:") ? id.slice(7) : id); ruleStudio.current?.scrollIntoView({ block: "start" }); }}
+            onChange={value => updateRoutingDraft("structured_policy", value)}/>
           {String(routingDraft.rules || "").trim() && <details className="mihomoAdvancedRules"><summary>Прежние дополнительные правила · сохранены без изменений</summary><pre className="observabilityTerminal">{String(routingDraft.rules)}</pre></details>}
           </>}
 
@@ -1814,7 +1823,7 @@ export function MihomoPage({
             {activeProfileRouting.strategy === "load-balance" && <BalanceStrategy value={effectiveProfileRouting.load_balance_strategy} onChange={value => setProfileRoutingValue("load_balance_strategy", value)}/>}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
-            <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b>{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b>{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>}</section>
+            <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); const route = libraryRoute(effectiveProfileRouting.structured_policy, effectiveProfileRouting[policySelectionKey], `preset:${rule.key}`); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b>{route && <small className="mihomoProfileRuleRoute">{route}</small>}{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); const route = libraryRoute(effectiveProfileRouting.structured_policy, effectiveProfileRouting[policySelectionKey], `personal:${rule.id}`); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b>{route && <small className="mihomoProfileRuleRoute">{route}</small>}{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>}</section>
             {profileStep === 3 && <>
               <ProfilePolicyGroups value={effectiveProfileRouting.structured_policy} selection={effectiveProfileRouting[policySelectionKey]} ownSelection={activeProfileDevice?.routing?.[policySelectionKey]}
                 onChange={value => setProfileRoutingValue(policySelectionKey, value)} onReset={inheritPolicySelection}

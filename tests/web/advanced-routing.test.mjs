@@ -7,11 +7,44 @@ import { createTestLoader } from "./vite-test-loader.mjs";
 
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
-const { AdvancedRouting, ProfilePolicyGroups } = await loader.ssrLoadModule("/src/features/mihomo/advanced-routing.tsx");
+const { AdvancedRouting, ProfilePolicyGroups, libraryRoute } = await loader.ssrLoadModule("/src/features/mihomo/advanced-routing.tsx");
 function nodes(node, predicate) {
   if (!isValidElement(node)) return [];
   return [...(predicate(node) ? [node] : []), ...Children.toArray(node.props.children).flatMap(child => nodes(child, predicate))];
 }
+
+test('library assignments retain source identities and edit existing sets without copying conditions', () => {
+  const library = [{ id: 'preset:block_malware', title: 'Protection', group: 'Built-in', defaultTarget: 'REJECT' },
+    { id: 'personal:personal-123456abcdef', title: 'Work sites', group: 'Personal', defaultTarget: 'DIRECT' }];
+  let next, opened;
+  const props = { value: '{}', library, onChange: raw => { next = JSON.parse(raw); }, onEditSource: id => { opened = id; } };
+  nodes(AdvancedRouting(props), node => node.type === 'button' && node.props.children === 'Назначить маршрут')[0].props.onClick();
+  assert.deepEqual(next.rules, [{ kind: 'library', value: 'preset:block_malware', target: 'REJECT' }]);
+  const value = JSON.stringify(next), tree = AdvancedRouting({ ...props, value });
+  nodes(tree, node => node.props['aria-label'] === 'Набор правил')[0].props.onChange({ target: { value: library[1].id } });
+  assert.equal(next.rules[0].value, library[1].id);
+  assert.equal(next.rules[0].kind, 'library');
+  nodes(tree, node => node.props['aria-label'] === 'Открыть набор в библиотеке')[0].props.onClick();
+  assert.equal(opened, library[0].id);
+  nodes(tree, node => node.props['aria-label'] === 'Убрать назначение маршрута')[0].props.onClick();
+  assert.deepEqual(next.rules, []);
+  const populated = AdvancedRouting({ ...props, value: JSON.stringify({ rules: library.map(item => ({ kind: 'library', value: item.id, target: 'DIRECT' })) }) });
+  assert.equal(nodes(populated, node => node.type === 'button' && node.props.children === 'Назначить маршрут')[0].props.disabled, true);
+});
+
+test('profile route labels use effective group choices and preserve immutable library references on rename', () => {
+  let next;
+  const value = JSON.stringify({ groups: [{ id: 'work-id', name: 'Work', type: 'fallback', members: ['*'] }],
+    rules: [{ kind: 'library', value: 'preset:direct_ru_sites', target: 'Work' }] });
+  const source = 'preset:direct_ru_sites';
+  assert.equal(libraryRoute(value, '{}', source), 'Work');
+  assert.equal(libraryRoute(value, '{"work-id":false}', source), undefined);
+  assert.equal(libraryRoute(value, '{}', 'preset:missing'), undefined);
+  nodes(AdvancedRouting({ value, onChange: raw => { next = JSON.parse(raw); } }), node => node.type === 'input' && node.props.value === 'Work')[0].props.onChange({ target: { value: 'Office' } });
+  assert.equal(next.rules[0].value, source);
+  assert.equal(libraryRoute(JSON.stringify(next), '{}', source), 'Office');
+  assert.equal(libraryRoute(JSON.stringify(next), '{"work-id":false}', source), undefined);
+});
 test("structured constructor preserves rule order and changes targets without raw YAML", () => {
   const value = { groups: [{ name: "Media", type: "fallback", members: ["*"], strategy: "consistent-hashing" }], rules: [
     { kind: "domain", value: "first.test", target: "Media" }, { kind: "ip-cidr", value: "2001:db8::/32", target: "REJECT" }] };

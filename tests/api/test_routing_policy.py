@@ -26,6 +26,65 @@ class StructuredRoutingTests(unittest.TestCase):
 
     def raw(self, groups=None, rules=None): return json.dumps({'groups': groups or [], 'rules': rules or []})
 
+    def test_library_references_are_strict_unique_and_do_not_store_copied_conditions(self):
+        for source in ('preset:missing', 'personal:../../private', 'domain:example.com'):
+            with self.subTest(source=source), self.assertRaises(HTTPException):
+                policy.parse(self.raw(rules=[{'kind': 'library', 'value': source}]))
+        rule = {'kind': 'library', 'value': 'preset:direct_ru_sites', 'target': 'DIRECT'}
+        with self.assertRaises(HTTPException): policy.parse(self.raw(rules=[rule, rule]))
+        self.assertEqual(policy.rules(self.raw(rules=[rule])), [])
+        self.assertEqual(policy.route_library(['AND,((NETWORK,UDP),(DOMAIN,site.test)),REJECT',
+                                               'IP-CIDR,192.0.2.0/24,DIRECT,no-resolve'], 'policy:Work'),
+                         ['AND,((NETWORK,UDP),(DOMAIN,site.test)),policy:Work',
+                          'IP-CIDR,192.0.2.0/24,policy:Work,no-resolve'])
+
+    def test_library_routes_follow_live_content_opt_in_and_original_priority(self):
+        raw = self.raw([{'id': 'work', 'name': 'Work'}], [
+            {'kind': 'library', 'value': 'preset:direct_ru_sites', 'target': 'Work'}])
+        routing = {'structured_policy': raw, 'direct_ru_sites': True,
+                   'direct_ru_sites_rules': 'DOMAIN-SUFFIX,work.test,DIRECT\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve',
+                   '_personal_rule_lines': ['PROCESS-NAME,browser.exe,GATE.312']}
+        lines = manager.profile_rules(routing)
+        self.assertEqual(lines.count('DOMAIN-SUFFIX,work.test,policy:Work'), 1)
+        self.assertNotIn('DOMAIN-SUFFIX,work.test,DIRECT', lines)
+        self.assertLess(lines.index('DOMAIN-SUFFIX,work.test,policy:Work'), lines.index('PROCESS-NAME,browser.exe,GATE.312'))
+        self.assertIn('IP-CIDR,192.0.2.0/24,policy:Work,no-resolve', lines)
+        routing['direct_ru_sites_rules'] = 'DOMAIN,new-work.test,DIRECT'
+        self.assertIn('DOMAIN,new-work.test,policy:Work', manager.profile_rules(routing))
+        self.assertNotIn('DOMAIN-SUFFIX,work.test,policy:Work', manager.profile_rules(routing))
+        routing[policy.SELECTION_KEY] = '{"work":false}'
+        self.assertIn('DOMAIN,new-work.test,DIRECT', manager.profile_rules(routing))
+        routing['direct_ru_sites'] = False
+        self.assertNotIn('new-work.test', '\n'.join(manager.profile_rules(routing)))
+
+    def test_personal_library_route_follows_device_selection_and_live_edits(self):
+        rule = {'id': 'personal-123456abcdef', 'kind': 'domain', 'entries': ['work.test'], 'target': 'DIRECT'}
+        item = profile()
+        item['routing'] = {'structured_policy': self.raw([{'name': 'Work'}], [
+            {'kind': 'library', 'value': 'personal:' + rule['id'], 'target': 'Work'}])}
+        item['devices'][0]['personal_rule_ids'] = [rule['id']]
+        item['devices'].append({'id': 'phone', 'os': 'android', 'routing': {}})
+        item['connections'].append({**deepcopy(item['connections'][0]), 'id': 'phone-c', 'device_id': 'phone'})
+        with patch.object(manager, 'personal_rules', return_value=[rule]):
+            common = yaml.safe_load(manager.render_profile(item, 'common'))
+            self.assertIn('DOMAIN-SUFFIX,work.test,policy:Work', common['rules'])
+            self.assertNotIn('DOMAIN-SUFFIX,work.test,DIRECT', common['rules'])
+            rule['entries'] = ['updated.test']
+            common = yaml.safe_load(manager.render_profile(item, 'common'))
+            self.assertIn('DOMAIN-SUFFIX,updated.test,policy:Work', common['rules'])
+            self.assertNotIn('updated.test', '\n'.join(yaml.safe_load(manager.render_profile(item, 'phone'))['rules']))
+            self.assertEqual(rule['target'], 'DIRECT')
+
+    def test_library_udp_route_preserves_tunnel_exclusions_and_profile_gate(self):
+        raw = self.raw([{'name': 'Work'}], [{'kind': 'library', 'value': 'preset:direct_games_udp_enabled', 'target': 'Work'}])
+        routing = {'structured_policy': raw, 'direct_games_udp_enabled': True, 'udp_tunnel_exclusions': 'telegram'}
+        lines = manager.profile_rules(routing)
+        self.assertIn('NETWORK,UDP,policy:Work', lines)
+        self.assertLess(lines.index('DOMAIN-SUFFIX,telegram.org,GATE.312'), lines.index('NETWORK,UDP,policy:Work'))
+        self.assertNotIn('NETWORK,UDP,DIRECT', lines)
+        routing['direct_games_udp_enabled'] = False
+        self.assertNotIn('NETWORK,UDP,policy:Work', manager.profile_rules(routing))
+
     def test_cycles_unknown_references_and_injection_are_rejected(self):
         for groups in ([{'name': 'A', 'members': ['group:B']}, {'name': 'B', 'members': ['group:A']}],
                        [{'name': 'A', 'members': ['group:deleted']}], [{'name': 'A', 'members': ['DIRECT']}],
@@ -161,9 +220,11 @@ class StructuredRoutingTests(unittest.TestCase):
         for algorithm in ('consistent-hashing', 'round-robin', 'sticky-sessions'):
             item = profile()
             item['routing'] = {'strategy': 'load-balance', 'load_balance_strategy': algorithm,
+                'direct_ru_banks': True, 'direct_ru_banks_rules': 'DOMAIN-SUFFIX,bank.test,DIRECT',
                 'connection_mode': 'tun', 'structured_policy': self.raw([
                     {'name': 'Reserve', 'type': 'fallback'}, {'name': 'Latency', 'type': 'url-test', 'members': ['group:Reserve']},
                     {'name': 'Manual', 'type': 'select'}, {'name': 'Balance', 'type': 'load-balance', 'strategy': algorithm}], [
+                    {'kind': 'library', 'value': 'preset:direct_ru_banks', 'target': 'Balance'},
                     {'kind': 'domain', 'value': 'example.com', 'target': 'Balance'}, {'kind': 'ip-cidr', 'value': '2001:db8::/32', 'target': 'REJECT'}])}
             with tempfile.TemporaryDirectory() as folder:
                 target = Path(folder) / 'config.yaml'

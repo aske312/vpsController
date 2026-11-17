@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 GROUP = 'GATE.312'
 KINDS = ('domain', 'domain-suffix', 'ip-cidr', 'geoip', 'geosite', 'process')
+LIBRARY_PRESETS = {'block_malware', 'block_advertising', 'block_privacy', 'quic_compatibility',
+                   'direct_ru_services', 'direct_ru_sites', 'direct_ru_banks', 'direct_ru_marketplaces',
+                   'direct_downloads', 'windows_geolocation', 'direct_local_network', 'direct_games_enabled',
+                   'direct_games_udp_enabled', 'direct_p2p_enabled', 'udp_tunnel_exclusions'}
 GEO_CATALOG = {
     **{'geoip-' + name: {'behavior': 'ipcidr', 'format': 'text', 'interval': 86400,
         'url': f'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/{name}.list'} for name in ('cn', 'ru')},
@@ -20,7 +24,7 @@ GEO_CATALOG = {
 
 class Rule(BaseModel):
     model_config = {'extra': 'forbid'}
-    kind: Literal['domain', 'domain-suffix', 'ip-cidr', 'geoip', 'geosite', 'process']
+    kind: Literal['domain', 'domain-suffix', 'ip-cidr', 'geoip', 'geosite', 'process', 'library']
     value: str = Field(min_length=1, max_length=253)
     target: str = Field(default=GROUP, min_length=1, max_length=48)
 
@@ -79,9 +83,16 @@ def parse(raw):
             for other in graph[name]: visit(other, {*path, name})
             complete.add(name)
         for name in graph: visit(name, set())
+        references = set()
         for rule in policy.rules:
             if rule.target not in ('DIRECT', 'REJECT', GROUP, *names): raise ValueError('Правило ссылается на неизвестную группу')
-            if rule.kind in ('domain', 'domain-suffix'):
+            if rule.kind == 'library':
+                if not (rule.value.startswith('preset:') and rule.value[7:] in LIBRARY_PRESETS
+                        or re.fullmatch(r'personal:personal-[a-f0-9]{12}', rule.value)):
+                    raise ValueError('Неизвестный набор библиотеки правил')
+                if rule.value in references: raise ValueError('Для набора уже назначен маршрут')
+                references.add(rule.value)
+            elif rule.kind in ('domain', 'domain-suffix'):
                 if not re.fullmatch(r'(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', rule.value) or '..' in rule.value:
                     raise ValueError('Укажите домен без URL')
             elif rule.kind == 'ip-cidr': rule.value = str(ipaddress.ip_network(rule.value, strict=False))
@@ -156,6 +167,7 @@ def effective(routing):
 def rules(raw, *, mode=None, os=None):
     result = []
     for rule in parse(raw).rules:
+        if rule.kind == 'library': continue  # Resolved by the existing rule generator, in its original position.
         target = rule.target if rule.target in ('DIRECT', 'REJECT', GROUP) else group_name(rule.target)
         if rule.kind == 'process':
             if mode == 'proxy' or os is not None and os not in ('windows', 'linux', 'macos'):
@@ -167,6 +179,22 @@ def rules(raw, *, mode=None, os=None):
             continue
         else: kind = rule.kind.upper()
         result.append(f'{kind},{rule.value},{target}' + (',no-resolve' if rule.kind == 'ip-cidr' else ''))
+    return result
+
+
+def library_targets(raw):
+    return {rule.value: rule.target if rule.target in ('DIRECT', 'REJECT', GROUP) else group_name(rule.target)
+            for rule in parse(raw).rules if rule.kind == 'library'}
+
+
+def route_library(lines, target):
+    """Change the route of a live library source without copying its conditions."""
+    if target is None: return lines
+    result = []
+    for line in lines:
+        suffix = ',no-resolve' if line.endswith(',no-resolve') else ''
+        body = line[:-len(suffix)] if suffix else line
+        result.append(body.rsplit(',', 1)[0] + ',' + target + suffix)
     return result
 
 

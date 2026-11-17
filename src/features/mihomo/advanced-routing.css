@@ -1,6 +1,14 @@
 /* Shared routing controls: the Rules workspace and profile configuration. */
 .mihomoStructuredPolicy,.mihomoPolicyPicker { display:grid; gap:8px; min-width:0; width:100%; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--panel-inset); box-sizing:border-box; font:11px/1.45 var(--ui-font); }
 .mihomoStructuredPolicy { container:routing-policy / inline-size; }
+.mihomoPolicyBindings { display:grid; gap:6px; min-width:0; }
+.mihomoPolicyBinding { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto; align-items:end; gap:8px; padding:8px; border:1px solid var(--line); border-radius:8px; }
+.mihomoPolicyBinding > label { display:grid; gap:4px; min-width:0; color:var(--muted); font-size:10px; }
+.mihomoProfileRuleButton small.mihomoProfileRuleRoute { display:block; color:var(--muted); font-size:9px; overflow-wrap:anywhere; }
+.mihomoPolicyStandalone { min-width:0; padding:8px 0; border-top:1px solid var(--line); }
+.mihomoPolicyStandalone > summary { cursor:pointer; color:var(--muted); font-size:11px; }
+.mihomoPolicyStandalone > summary span { margin-left:6px; font:10px var(--font-mono); }
+.mihomoPolicyStandalone[open] > :not(summary) { margin-top:8px; }
 .mihomoStructuredPolicy > header,.mihomoPolicyPicker > header,.mihomoPolicySectionHead { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 10px; min-width:0; }
 .mihomoStructuredPolicy > header b,.mihomoPolicyPicker > header b { font-size:12px; font-weight:600; color:var(--text); }
 .mihomoPolicyHeaderActions,.mihomoPolicyPicker > header > div { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -23,6 +31,7 @@
 .mihomoPolicyIndex { align-self:center; color:var(--dim); font:10px var(--font-mono); text-align:center; }
 .mihomoPolicyActions { display:flex; gap:3px; align-self:end; }
 .mihomoStructuredPolicy .mihomoPolicyActions button { display:grid; place-items:center; width:26px; min-width:26px; height:29px; padding:0; font-size:14px; }
+.mihomoStructuredPolicy .mihomoPolicyBinding .mihomoPolicyActions button:not(:last-child) { width:auto; min-width:0; padding:4px 8px; font-size:11px; }
 .mihomoPolicyActions button:last-child { color:var(--red); }
 .mihomoPolicyGroups { display:grid; gap:6px; min-width:0; margin-top:4px; padding-top:8px; border-top:1px solid var(--line); }
 .mihomoPolicyGroup { min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
@@ -69,6 +78,8 @@
 .mihomoPolicyPicker > footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; color:var(--muted); font-size:10px; }
 .mihomoPolicyLegacy { display:grid; justify-items:start; gap:6px; padding:8px; border:1px solid var(--line); border-radius:7px; }
 @container routing-policy (max-width:650px) {
+  .mihomoPolicyBinding { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .mihomoPolicyBinding .mihomoPolicyActions { grid-column:1/-1; justify-content:end; }
   .mihomoPolicyRule { grid-template-columns:20px minmax(0,1fr) minmax(0,1fr); gap:5px 7px; }
   .mihomoPolicyIndex { grid-column:1; grid-row:1/3; align-self:start; padding-top:21px; }
   .mihomoPolicyRuleKind { grid-column:2; grid-row:1; }

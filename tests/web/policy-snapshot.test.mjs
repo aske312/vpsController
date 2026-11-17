@@ -10,6 +10,7 @@ const routing={schema:[],values:{mode:"rule"},presets:[preset],personal_rules:[r
 test("valid policy schemas and nested records keep their values",()=>{
   assert.equal(policySnapshot(dns,"dns"),dns);
   assert.equal(policySnapshot(routing,"routing"),routing);
+  for(const supported of [true,false])assert.equal(policySnapshot({...routing,routing_library_supported:supported},"routing").routing_library_supported,supported);
   assert.equal(personalRuleSnapshot(rule),rule);
   assert.deepEqual(presetsSnapshot({presets:[preset]}),{presets:[preset]});
 });
@@ -36,5 +37,6 @@ test("malformed presets and personal rules never reach editor callbacks",()=>{
   assert.throws(()=>presetsSnapshot({presets:[preset,preset]}),Error);
   for(const change of [{entries:null},{entries:[{}]},{kind:"unknown"},{target:"unknown"},{description:{}}])assert.throws(()=>personalRuleSnapshot({...rule,...change}),Error);
   assert.throws(()=>policySnapshot({...routing,personal_rules:[rule,rule]},"routing"),Error);
+  assert.throws(()=>policySnapshot({...routing,routing_library_supported:"true"},"routing"),Error);
   assert.throws(()=>policySnapshot({...routing,rule_lists:[{...routing.rule_lists[0],default_rules:[]}]},"routing"),Error);
 });

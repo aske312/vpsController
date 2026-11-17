@@ -1488,17 +1488,19 @@ def tunnel_game_rules(routing: dict[str, Any]) -> list[str]:
     return process_rules(routing, "tunnel_games", "tunnel_game_processes", TUNNEL_GAME_PROCESSES, "GATE.312", DEFAULT_TUNNEL_GAMES)
 
 
-def direct_game_rules(routing: dict[str, Any]) -> list[str]:
+def direct_game_rules(routing: dict[str, Any], targets: dict[str, str] | None = None) -> list[str]:
     direct_all = bool(routing.get("direct_games_enabled", False))
     direct_udp = bool(routing.get("direct_games_udp_enabled", False))
     if not direct_all and not direct_udp:
         return []
     # Mihomo uses the first matching rule. Tunnel exclusions must therefore be
     # emitted before the catch-all UDP direct rule.
-    rules: list[str] = [*udp_tunnel_exclusion_rules(routing), "NETWORK,UDP,DIRECT"] if direct_udp else []
+    targets = targets or {}
+    rules: list[str] = [*routing_policy.route_library(udp_tunnel_exclusion_rules(routing), targets.get('preset:udp_tunnel_exclusions')),
+                        *routing_policy.route_library(['NETWORK,UDP,DIRECT'], targets.get('preset:direct_games_udp_enabled'))] if direct_udp else []
     if not direct_all:
         return rules
-    rules.extend(process_rules(routing, "direct_games", "direct_game_processes", DIRECT_GAME_PROCESSES, "DIRECT", DEFAULT_DIRECT_GAMES))
+    rules.extend(routing_policy.route_library(process_rules(routing, "direct_games", "direct_game_processes", DIRECT_GAME_PROCESSES, "DIRECT", DEFAULT_DIRECT_GAMES), targets.get('preset:direct_games_enabled')))
     return rules
 
 
@@ -1510,10 +1512,14 @@ def direct_p2p_rules(routing: dict[str, Any]) -> list[str]:
 
 def profile_rules(routing: dict[str, Any]) -> list[str]:
     rules: list[str] = []
+    effective_policy = routing_policy.effective(routing)
+    targets = routing_policy.library_targets(effective_policy)
+    def routed(setting, lines):
+        return routing_policy.route_library(lines, targets.get('preset:' + setting))
     # Local destinations must win over blocking and tunnel rules so that a
     # router, NAS or smart-home device never disappears behind the profile.
     if routing.get("direct_local_network", False):
-        rules.extend(configured_preset_rules(routing, "direct_local_network"))
+        rules.extend(routed("direct_local_network", configured_preset_rules(routing, "direct_local_network")))
     personal = [
         str(rule).strip()
         for rule in routing.get("_personal_rule_lines", [])
@@ -1524,17 +1530,17 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     rules.extend(rule for rule in personal if not rule.startswith("PROCESS-"))
     for setting in ("block_malware", "block_advertising", "block_privacy", "quic_compatibility"):
         if routing.get(setting, False):
-            rules.extend(configured_preset_rules(routing, setting))
+            rules.extend(routed(setting, configured_preset_rules(routing, setting)))
     if routing.get('quic_compatibility', False):
-        rules.extend(quic_rule(domain) for domain in quic_domains(routing.get('quic_domains', '')))
+        rules.extend(routed('quic_compatibility', [quic_rule(domain) for domain in quic_domains(routing.get('quic_domains', ''))]))
     # Regional domain exceptions must win over a browser/application-wide VPN
     # route, for TCP and UDP alike. Keep explicit personal domain decisions and
     # security filters first; IP-based GEOIP bypasses retain their later priority.
     if routing.get('routing_scope') != 'selected':
         for setting in ('direct_ru_sites', 'direct_ru_banks', 'direct_ru_marketplaces', 'direct_ru_services'):
             if routing.get(setting, False):
-                rules.extend(rule for rule in configured_preset_rules(routing, setting)
-                             if rule.startswith(('DOMAIN,', 'DOMAIN-SUFFIX,')) and rule.endswith(',DIRECT'))
+                rules.extend(routed(setting, [rule for rule in configured_preset_rules(routing, setting)
+                             if rule.startswith(('DOMAIN,', 'DOMAIN-SUFFIX,')) and rule.endswith(',DIRECT')]))
     rules.extend(rule for rule in personal if rule.startswith("PROCESS-"))
     rules.extend(service_rules(routing))
     for setting in DIRECT_RULE_PRESETS:
@@ -1543,14 +1549,14 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
         if routing.get('routing_scope') == 'selected':
             continue  # Broad bypass presets belong to the VPN-by-default mode.
         if routing.get(setting, False):
-            rules.extend(configured_preset_rules(routing, setting))
+            rules.extend(routed(setting, configured_preset_rules(routing, setting)))
     # Tunnel-required games win over both process-level DIRECT and the global
     # UDP bypass when a user accidentally enables overlapping rules.
     if routing.get('routing_scope') != 'selected':
         rules.extend(tunnel_game_rules(routing))
-        rules.extend(direct_game_rules(routing))
-        rules.extend(direct_p2p_rules(routing))
-    rules.extend(routing_policy.rules(routing_policy.effective(routing), mode=connection_mode(routing), os=routing.get('_device_os')))
+        rules.extend(direct_game_rules(routing, targets))
+        rules.extend(routed('direct_p2p_enabled', direct_p2p_rules(routing)))
+    rules.extend(routing_policy.rules(effective_policy, mode=connection_mode(routing), os=routing.get('_device_os')))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
     if routing.get('connection_mode') == 'proxy':
@@ -1793,8 +1799,10 @@ def personal_rule_lines(rule: dict[str, Any]) -> list[str]:
     return [f"DOMAIN-SUFFIX,{entry},{target}" for entry in rule.get("entries", [])]
 
 
-def personal_rule_lines_for_device(profile: dict[str, Any], device_id: str) -> list[str]:
-    return [line for rule in personal_rules_for_device(profile, device_id) for line in personal_rule_lines(rule)]
+def personal_rule_lines_for_device(profile: dict[str, Any], device_id: str, routing: dict[str, Any] | None = None) -> list[str]:
+    targets = routing_policy.library_targets(routing_policy.effective(routing or {}))
+    return [line for rule in personal_rules_for_device(profile, device_id)
+            for line in routing_policy.route_library(personal_rule_lines(rule), targets.get('personal:' + rule['id']))]
 
 
 def validate_personal_rule_ids(devices: list[dict[str, Any]]) -> None:
@@ -1910,7 +1918,7 @@ def get_routing_schema() -> dict[str, Any]:
     values = routing_settings(stored)
     presets = profile_presets(stored_presets)
     return {"schema": routing_schema(), "values": values, "revision": module_settings_revision(ROUTING_MODULE_ID, values),
-            "structured_policy_schema": routing_policy.Policy.model_json_schema(),
+            "structured_policy_schema": routing_policy.Policy.model_json_schema(), "routing_library_supported": True,
             "last_operation_id": mutation_record(stored).get("id"),
             "presets": presets, "presets_revision": collection_revision("presets", presets),
             "presets_last_operation_id": mutation_record(stored_presets).get("id"),
@@ -4437,7 +4445,7 @@ def verification_routing(profile: dict[str, Any], device_id: str) -> dict[str, A
     """Include exporter inheritance without inheriting device-only switches."""
     values = device_routing(profile, device_id)
     routing = routing_policy.merge_routing(routing_settings(), values)
-    routing["_personal_rule_lines"] = personal_rule_lines_for_device(profile, device_id)
+    routing["_personal_rule_lines"] = personal_rule_lines_for_device(profile, device_id, routing)
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled", "tunnel_ech", "tunnel_privacy"):
         routing[key] = bool(values.get(key, False))
     return routing
@@ -5152,7 +5160,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         rendered.append((connection, direct_name, cdn_name, tls_name))
     routing = routing_policy.merge_routing(routing_settings(), profile_routing)
     routing["_device_os"] = next((device.get("os") for device in normalized.get("devices", []) if device["id"] == selected_device), None)
-    routing["_personal_rule_lines"] = personal_rule_lines_for_device(normalized, selected_device)
+    routing["_personal_rule_lines"] = personal_rule_lines_for_device(normalized, selected_device, routing)
     ech_requested = bool(profile_routing.get("tunnel_ech", False))
     # The client resolves current ECH parameters through encrypted DNS. A
     # server-side DNS outage must not silently disable the requested protection.

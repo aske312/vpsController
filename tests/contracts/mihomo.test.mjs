@@ -77,11 +77,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /UDP_TUNNEL_EXCLUSION_CATALOG/);
   assert.match(manager, /udp_tunnel_exclusion_rules\(routing\)/);
   assert.match(manager, /tunnel_game_rules\(routing\)/);
-  assert.ok(manager.indexOf("rules.extend(tunnel_game_rules(routing))") < manager.indexOf("rules.extend(direct_game_rules(routing))"), "tunnel-required games must win over direct game rules");
   assert.match(manager, /TUNNEL_GAME_PROCESSES, "GATE\.312", DEFAULT_TUNNEL_GAMES/);
   assert.match(manager, /DIRECT_GAME_PROCESSES, "DIRECT", DEFAULT_DIRECT_GAMES/);
-  assert.match(manager, /\[\*udp_tunnel_exclusion_rules\(routing\), "NETWORK,UDP,DIRECT"\]/);
-  assert.ok(manager.indexOf("udp_tunnel_exclusion_rules(routing)") < manager.indexOf('"NETWORK,UDP,DIRECT"'), "UDP tunnel exclusions must precede the catch-all direct rule");
   assert.match(manager, /NETWORK,UDP,DIRECT/);
   assert.doesNotMatch(manager, /AND,\(\(\{process_rule\}\),\(NETWORK,UDP\)\),DIRECT/);
   assert.match(manager, /profile_routing\.get\(key, False\)/);

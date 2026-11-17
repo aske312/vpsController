@@ -253,6 +253,7 @@ export function policySnapshot(value: unknown, kind: "dns" | "routing"): PolicyS
     throw new Error("Некорректные значения политики Mihomo");
   }
   if (kind === "routing") {
+    if (value.routing_library_supported !== undefined && typeof value.routing_library_supported !== "boolean") throw new Error("Некорректная поддержка библиотеки маршрутизации Mihomo");
     presetRows(value.presets);
     for (const rule of identifiedRows(value.personal_rules)) personalRuleSnapshot(rule);
     for (const row of identifiedRows(value.rule_lists)) {

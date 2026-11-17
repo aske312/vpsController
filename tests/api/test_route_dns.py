@@ -10,10 +10,19 @@ from unittest.mock import patch
 import yaml
 from tests.api.support import manager, ROOT
 from tests.api.test_mihomo_rules_runtime import profile
-from dns_routing import domain_dns_routes, mihomo_route_dns
+from dns_routing import domain_dns_routes, default_dns_target, mihomo_route_dns
 
 
 class RouteDnsTests(unittest.TestCase):
+    def test_named_vpn_groups_keep_dns_inside_tunnel_before_later_direct_rules(self):
+        rules = ['DOMAIN-SUFFIX,work.test,policy:Work', 'DOMAIN-SUFFIX,test,DIRECT', 'MATCH,DIRECT']
+        self.assertEqual(domain_dns_routes(rules), [('DOMAIN-SUFFIX', 'work.test', 'GATE.312'),
+                                                   ('DOMAIN-SUFFIX', 'test', 'DIRECT')])
+        for condition in ('PROCESS-NAME,browser.exe', 'IP-CIDR,192.0.2.0/24', 'RULE-SET,security-threats'):
+            rules = [condition + ',policy:Work', 'DOMAIN-SUFFIX,work.test,DIRECT', 'MATCH,DIRECT']
+            self.assertEqual(domain_dns_routes(rules), [])
+            self.assertEqual(default_dns_target(rules), 'GATE.312')
+
     def test_max_and_russian_resources_resolve_directly_before_application_vpn(self):
         item = profile()
         item['routing'] = {'route_dns': True, 'direct_ru_sites': True,

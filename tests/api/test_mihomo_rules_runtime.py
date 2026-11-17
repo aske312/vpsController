@@ -23,6 +23,18 @@ def profile():
 
 
 class RuleExportTests(unittest.TestCase):
+    def test_tunnel_required_games_and_udp_exceptions_precede_broad_direct_rules(self):
+        routing = {'direct_games_enabled': True, 'direct_games_udp_enabled': True,
+                   'tunnel_game_processes': 'same-game.exe', 'direct_game_processes': 'same-game.exe',
+                   'udp_tunnel_exclusions': 'telegram'}
+        rules = manager.profile_rules(routing)
+        tunnel = rules.index('PROCESS-NAME,same-game.exe,GATE.312')
+        direct = rules.index('PROCESS-NAME,same-game.exe,DIRECT')
+        udp = rules.index('NETWORK,UDP,DIRECT')
+        self.assertLess(tunnel, direct)
+        self.assertLess(tunnel, udp)
+        self.assertLess(rules.index('DOMAIN-SUFFIX,telegram.org,GATE.312'), udp)
+
     def setUp(self):
         self.enterContext(patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"))
         self.enterContext(patch.object(manager, "public_endpoint", return_value="127.0.0.1"))

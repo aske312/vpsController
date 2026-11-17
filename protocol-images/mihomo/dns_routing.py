@@ -61,6 +61,8 @@ def domain_dns_routes(rules, mode='rule'):
     direct_safe = True
     for rule in rules:
         parts = rule.removesuffix(',no-resolve').split(',')
+        if parts[-1].startswith('policy:'):
+            parts[-1] = 'GATE.312'  # Named policy groups contain only VPN channels.
         if parts[0] == 'MATCH':
             break
         if len(parts) != 3 or parts[0] not in {'DOMAIN', 'DOMAIN-SUFFIX'} or parts[2] not in {'DIRECT', 'GATE.312', 'REJECT'}:
@@ -94,6 +96,8 @@ def default_dns_target(rules, mode='rule'):
     uncertain_tunnel = False
     for rule in rules:
         parts = rule.removesuffix(',no-resolve').split(',')
+        if parts[-1].startswith('policy:'):
+            parts[-1] = 'GATE.312'
         if len(parts) == 2 and parts[0] == 'MATCH':
             return 'DIRECT' if parts[1] == 'DIRECT' and not uncertain_tunnel else 'GATE.312'
         if parts[-1] == 'GATE.312' and parts[0] not in {'DOMAIN', 'DOMAIN-SUFFIX'}:

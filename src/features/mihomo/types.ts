@@ -100,6 +100,7 @@ export type VerifiedClient = { id: string; client_name: string; client_version: 
 export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; subscription_format?: "mihomo"; verified_clients?: VerifiedClient[]; supported_formats?: ("mihomo")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; core_name?: string; core_version?: string; user_agent?: string; personal_rule_ids?: string[]; routing?: Record<string, string | number | boolean> };
 
 export type PolicySettings = {
+  routing_library_supported?: boolean;
   last_operation_id?: string;
   presets_last_operation_id?: string;
   revision?: string;
