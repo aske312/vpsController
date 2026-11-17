@@ -56,7 +56,8 @@ class ToolValidationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(runner, 'mcp_connections', connections), patch.object(runner, 'provider_request', provider), patch.object(runner, 'MAX_ROUNDS', 1):
             result = await runner.chat(SETTINGS, 'panel', 'Создай группу')
         self.assertEqual(result['status'], 'incomplete')
-        self.assertIn('не подтверждена', result['answer'])
+        self.assertEqual(result['diagnostics'][-1]['error_code'], 'tool_timeout')
+        self.assertTrue(result['answer'].strip())
         self.assertNotIn('PRIVATE', json.dumps(result))
         session.call_tool.assert_awaited_once()
 
