@@ -6,9 +6,35 @@ import ts from 'typescript';
 import {createNotificationStore} from '../../src/shared/notifications/store.ts';
 import * as operations from '../../src/control-panel/system-operation.ts';
 import {mutationFailureState} from '../../src/shared/lib/api-request.ts';
+import * as commandMessages from '../../src/features/assistant/command-message-state.ts';
 
 const action = (code, actor='panel') => ({actor,actor_name:actor,code,expires:Date.now()/1000+600,operation_id:code.repeat(4),action:'restart',service:code});
 const plan = (codes, actor='panel', id='f'.repeat(32)) => codes.map(code=>({...action(code,actor),confirmation_request:{request_id:id,title:'Repair connections',reason:'Apply prepared actions in order',operation_ids:codes.map(code=>code.repeat(4))}}));
+let fixtureSession = 0;
+
+test('closing the global result also closes its chat message and stays closed after provider restoration',async()=>{
+  const previousStorage=globalThis.sessionStorage,entries=new Map();
+  globalThis.sessionStorage={getItem:key=>entries.get(key)??null,setItem:(key,value)=>entries.set(key,value)};
+  const pending=action('aabbccdd'),sessionKey=`restore-${Date.now()}`;
+  const app=mount([pending],{jobs:true,jobState:'running',sessionKey});
+  try {
+    await app.settle();await app.queue.decide(pending,'confirm');await app.settle();
+    const id=`operation:system:${pending.operation_id}`;
+    app.store.upsert({...app.store.getSnapshot().find(row=>row.id===id),state:'success',title:'Panel title',onDismiss:undefined});
+    app.store.dismiss(id);await app.settle();
+    assert.equal(app.queue.activities[0].dismissed,true);
+    app.remote.jobs[pending.operation_id].state='succeeded';
+    const restored=mount([],{sessionKey});
+    try {
+      restored.remote.operations=[{id:pending.operation_id,action:'restart',service:'fixture'}];
+      restored.remote.jobs[pending.operation_id]=app.remote.jobs[pending.operation_id];
+      await restored.settle();await restored.tick();
+      assert.equal(restored.queue.activities[0].dismissed,true);
+      assert.equal(restored.store.getSnapshot().some(row=>row.id===id),false);
+      assert.equal(restored.calls.length,0);
+    } finally {restored.dispose();}
+  } finally {app.dispose();globalThis.sessionStorage=previousStorage;}
+});
 
 test('chat operation activity retains its actor and follows live terminal state without another decision',async()=>{
   const pending=action('aabbccdd','11');
@@ -135,7 +161,7 @@ function mount(initial, options={}) {
   const actual=createRequire(import.meta.url),exports={};
   const source=readFileSync(new URL('../../src/features/assistant/confirmation-queue.tsx',import.meta.url),'utf8');
   const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}});
-  const require=name=>name==='react'?hooks:name.endsWith('/use-dialog-focus')?{useDialogFocus:()=>({current:null})}:name.endsWith('/notification-center')?{useNotifications:()=>store,useNotifier:()=>notify}:name.endsWith('/system-operation')?operations:name.endsWith('/api-request')?{mutationFailureState}:actual(name);
+  const require=name=>name==='react'?hooks:name.endsWith('/command-message-state')?commandMessages:name.endsWith('/use-dialog-focus')?{useDialogFocus:()=>({current:null})}:name.endsWith('/notification-center')?{useNotifications:()=>store,useNotifier:()=>notify}:name.endsWith('/system-operation')?operations:name.endsWith('/api-request')?{mutationFailureState}:actual(name);
   new Function('require','exports',compiled.outputText)(require,exports);
   const request=async(path,init)=>{
     if(path.startsWith('/assistant/pending-action')){
@@ -156,7 +182,7 @@ function mount(initial, options={}) {
     if(options.jobs){const id=body.code.repeat(4);remote.jobs[id]={id,state:options.jobState||'queued',action:'fixture'};result.operation=remote.jobs[id];}
     return result;
   };
-  request.sessionKey='fixture';
+  request.sessionKey=options.sessionKey || `fixture-${++fixtureSession}`;
   globalThis.window={setInterval(fn){timers.push(fn);return timers.length;},clearInterval(){}};
   const onOperation=()=>{},onChanged=()=>{options.onChanged?.();};
   const render=()=>{cursor=0;queue=exports.AssistantConfirmations({request,onOperation,onChanged,children:null}).props.value;while(effects.length)effects.shift()();return queue;};

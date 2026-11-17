@@ -7,7 +7,8 @@ import { createApiClient } from "../../shared/lib/api-request";
 import { useNotifier, useNotifications } from "../../shared/notifications/notification-center";
 import { mutationFailureState } from "../../shared/lib/api-request";
 import { observeChatJob, rememberChat, savedChat, chatStage, ChatJobError, type ChatJob, type ChatOutput } from "./chat-jobs";
-import { ConfirmationCards, useAssistantConfirmations, type PendingAction } from "./confirmation-queue";
+import { ConfirmationCards, confirmationGroups, useAssistantConfirmations, type PendingAction } from "./confirmation-queue";
+import { commandMessageOwner } from "./command-message-state";
 import { ChatIcon } from "./chat-icon";
 import { ChatTurnRow, type ChatTurn as Turn } from "./chat-turn";
 import { conversationMarkdown } from "./answer-format";
@@ -420,7 +421,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         method: "POST", body: JSON.stringify({ command, telegram_id: actor ? Number(actor) : null, selected_model: selectedModel || null }),
       });
       if (client.current !== request || activeActor.current !== actor) return;
-      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.display_text || result.text, context_safe: result.context_safe === true } : turn));
+      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: result.display_text || result.text, pending_actions: result.pending_actions, context_safe: result.context_safe === true } : turn));
       if (result.pending_actions) ingestConfirmations(actor || "panel", result.pending_actions);
       if (typeof result.model === "string") {
         const chosen = result.model; setModel(chosen);
@@ -593,6 +594,12 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const pendingLabel = (turn: Turn) => turn.queue_state === "queued"
     ? `В очереди · ${turns.filter(item => item.queue_state === "queued" && item.id <= turn.id).length}`
     : chatQueue?.state === "queued" ? `В очереди AI · ${chatQueue.position}` : chatStageText || "Обрабатывает запрос…";
+  const messageTurns = turns.filter(turn => !turn.system_event);
+  const commandOwnerFor = (ids: string[]) => commandMessageOwner(messageTurns, ids);
+  const commandTurns = new Set([
+    ...confirmationGroups(confirmations.actions.filter(item => (item.actor || "panel") === (actor || "panel"))).map(group => commandOwnerFor(group.actions.flatMap(item => item.operation_id ? [item.operation_id] : []))),
+    ...(confirmations.activities || []).filter(item => !item.dismissed && item.actor === (actor || "panel")).map(item => commandOwnerFor(item.snapshot.id ? [item.snapshot.id] : [])),
+  ]);
   return <div hidden={!active} className={`mcpWorkspace noderaWorkspace ${active && isChat ? "isChat" : ""}`}>
     {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
     {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
@@ -617,8 +624,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
       }}>
         {!turns.length && !confirmations.actions.some(item => (item.actor || "panel") === (actor || "panel")) && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{commands.some(item => ["/status", "/services"].includes(item.command)) && <div>{commands.some(item => item.command === "/status") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/status", false)}>Состояние сервера</button>}{commands.some(item => item.command === "/services") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/services", false)}>Службы</button>}</div>}</div>}
-        {turns.filter(turn => !turn.system_event).map(turn => <ChatTurnRow key={turn.id} turn={turn} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}/>)}
-        <ConfirmationCards key={actor} actor={actor} active={active && isChat}/>
+        {messageTurns.map(turn => <ChatTurnRow key={turn.id} turn={turn} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}>
+          {commandTurns.has(turn.id) && <ConfirmationCards actor={actor} active={active && isChat} embedded turnId={turn.id} ownerFor={commandOwnerFor}/>}
+        </ChatTurnRow>)}
+        <ConfirmationCards key={actor} actor={actor} active={active && isChat} ownerFor={commandOwnerFor}/>
       </div>
       <div className="mcpDecisionDock">{chatBusy && <div className="mcpChatWork" role="status"><span className="mcpWorkSpinner" aria-hidden="true"/><span>{turns.some(turn => turn.queue_state === "running") ? pendingLabel(turns.find(turn => turn.queue_state === "running")!) : chatStageText || "Nodera"}</span></div>}</div>
       <div className="mcpComposer">

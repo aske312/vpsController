@@ -4,8 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createApiClient, mutationFailureState } from "../../shared/lib/api-request";
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "../../control-panel/system-operation";
 import { useNotifications, useNotifier } from "../../shared/notifications/notification-center";
-import { useDialogFocus } from "../../shared/components/use-dialog-focus";
-import { createPortal } from "react-dom";
+import { closedCommandMessages, rememberClosedCommand } from "./command-message-state";
 
 export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string; request_id?: string; operation_ids?: string[] } };
 type Client = ReturnType<typeof createApiClient>;
@@ -57,13 +56,15 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
   const registered = useRef(new Set<string>());
   const tracked = useRef(new Map<string, Activity & { reading: boolean; checked: number; terminal: boolean }>());
   const publishActivities = useCallback(() => setActivities([...tracked.current.values()].map(({ actor, snapshot, title, dismissed }) => ({ actor, snapshot, title, dismissed }))), []);
-  const dismissActivity = useCallback((id: string) => {
+  const dismissActivity = useCallback((id: string, confirmedTerminal = false) => {
     const item = tracked.current.get(id);
-    if (!item || systemActionNeedsPolling(item.snapshot)) return;
+    if (!item || item.dismissed || !confirmedTerminal && systemActionNeedsPolling(item.snapshot)) return;
     item.dismissed = true;
+    rememberClosedCommand(request, id);
+    if (!systemActionNeedsPolling(item.snapshot)) notifications.finishOperation(systemOperationNotification(item.snapshot, item.title, false));
     notifications.dismiss(`operation:system:${id}`);
     publishActivities();
-  }, [notifications, publishActivities]);
+  }, [request, notifications, publishActivities]);
   const operation = useRef(onOperation);
   const changed = useRef(onChanged);
   useEffect(() => { changed.current = onChanged; }, [onChanged]);
@@ -83,15 +84,20 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
       if (activeRequest.current !== request) return;
       item.snapshot = { ...item.snapshot, state: "unknown", progress: undefined, message: "Результат команды пока не подтверждён. Повторно команду не отправляем." };
     } finally { item.reading = false; }
-    if (activeRequest.current === request) { publishActivities(); notifications.upsert(systemOperationNotification(item.snapshot, item.title, true, undefined, () => readOperation(id))); }
-  }, [request, notifications, publishActivities]);
+    if (activeRequest.current === request) {
+      publishActivities();
+      if (!item.dismissed) notifications.upsert({ ...systemOperationNotification(item.snapshot, item.title, true, undefined, () => readOperation(id)), onDismiss: () => dismissActivity(id, true) });
+      else if (item.terminal) { notifications.finishOperation(systemOperationNotification(item.snapshot, item.title, false)); notifications.dismiss(`operation:system:${id}`); }
+    }
+  }, [request, notifications, publishActivities, dismissActivity]);
   const trackOperation = useCallback((snapshot: SystemAction, title: string, actor = "panel") => {
     if (!snapshot.id || !/^[a-f0-9]{32}$/.test(snapshot.id) || tracked.current.has(snapshot.id)) return;
-    tracked.current.set(snapshot.id, { snapshot, title, actor, reading: false, checked: 0, terminal: !systemActionNeedsPolling(snapshot) });
+    const dismissed = closedCommandMessages(request).has(snapshot.id);
+    tracked.current.set(snapshot.id, { snapshot, title, actor, dismissed, reading: false, checked: 0, terminal: !systemActionNeedsPolling(snapshot) });
     publishActivities();
-    notifications.upsert(systemOperationNotification(snapshot, title, true, undefined, () => readOperation(snapshot.id!)));
+    if (!dismissed) notifications.upsert({ ...systemOperationNotification(snapshot, title, true, undefined, () => readOperation(snapshot.id!)), onDismiss: () => dismissActivity(snapshot.id!, true) });
     if (systemActionNeedsPolling(snapshot)) void readOperation(snapshot.id);
-  }, [notifications, readOperation, publishActivities]);
+  }, [request, notifications, readOperation, publishActivities, dismissActivity]);
   const ingest = useCallback((actor: string, incoming: PendingAction[]) => {
     generation.current++;
     setActions(current => [...current.filter(item => (item.actor || "panel") !== actor),
@@ -288,69 +294,45 @@ function DecisionButtons({ group, queue }: { group: ConfirmationGroup; queue: Qu
   </div>;
 }
 
-function DecisionDetails({ group, activity, queue, close }: { group?: ConfirmationGroup; activity?: Activity; queue: Queue; close: () => void }) {
-  const ref = useDialogFocus(true, close);
-  const title = group?.presentation?.title || (group ? confirmationSummary(group.actions[0]).title : activity?.title);
-  return createPortal(<div className="confirmBackdrop mcpDecisionBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
-    <section ref={ref} tabIndex={-1} className="mcpDecisionModal" role="dialog" aria-modal="true" aria-label={title}>
-      <header><div><small>{group ? "Подтверждение действия" : "Состояние операции"}</small><h2>{title}</h2></div><button type="button" className="ghostButton" onClick={close} aria-label="Закрыть подробности">×</button></header>
-      <div className="mcpDecisionModalBody">
-        {group && queue.errors[group.key] && <p className="error" role="alert">{queue.errors[group.key]}</p>}
-        {group && <><p>{group.presentation?.reason || "Изменения ещё не применены. Проверьте состав действия перед подтверждением."}</p>
-          <ol className="mcpConfirmationItems">{group.actions.map(action => <li key={confirmationKey(action)}>{confirmationChanges(action)}
-            <small>{action.actor_name || "Администратор"} · До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</small>
-            {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}
-          </li>)}</ol></>}
-        {activity && <><p>{operationLabel(activity.snapshot)}</p><p>{activity.snapshot.message}</p><dl><dt>ID операции</dt><dd>{activity.snapshot.id}</dd></dl></>}
-      </div>
-      <footer>{group ? <DecisionButtons group={group} queue={queue}/> : <button type="button" className="ghostButton" onClick={close}>Закрыть</button>}</footer>
-    </section>
-  </div>, document.body);
-}
-
 function operationLabel(snapshot: SystemAction) {
+  if (systemActionNeedsPolling(snapshot) && !["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(snapshot.state || "")) return "Уточняю результат";
   return ({ queued: "В очереди", running: "Выполняется", succeeded: "Выполнено", failed: "Ошибка выполнения", cancelled: "Отменено", unknown: "Уточняем состояние" } as Record<string, string>)[snapshot.state || "unknown"] || "Состояние не подтверждено";
 }
 
-export function ConfirmationCards({ actor, active = true }: { actor: string; active?: boolean }) {
+export function ConfirmationCards({ actor, active = true, embedded = false, turnId, ownerFor }: { actor: string; active?: boolean; embedded?: boolean; turnId?: number; ownerFor?: (ids: string[]) => number | undefined }) {
   const queue = useAssistantConfirmations();
   const notifications = useNotifications();
   const inlineOwner = useRef(Symbol('chat-decisions'));
-  const [selected, setSelected] = useState<string>();
-  useEffect(() => { if (!active) queueMicrotask(() => setSelected(undefined)); }, [active]);
-  const groups = confirmationGroups(queue.actions.filter(item => (item.actor || "panel") === (actor || "panel")));
-  const activities = (queue.activities ?? []).filter(item => item.actor === (actor || "panel"));
-  const ongoing = activities.filter(item => systemActionNeedsPolling(item.snapshot));
-  const recent = activities.filter(item => !item.dismissed && !systemActionNeedsPolling(item.snapshot));
+  const belongs = (ids: string[]) => !ownerFor || ownerFor(ids) === turnId;
+  const groups = confirmationGroups(queue.actions.filter(item => (item.actor || "panel") === (actor || "panel"))).filter(group => belongs(group.actions.flatMap(action => action.operation_id ? [action.operation_id] : [])));
+  const activities = (queue.activities ?? []).filter(item => item.actor === (actor || "panel") && belongs(item.snapshot.id ? [item.snapshot.id] : []));
+  const messages = activities.filter(item => !item.dismissed);
   const inlineIds = [...groups.map(group => `nodera-confirm:${group.key}`), ...activities.map(item => `operation:system:${item.snapshot.id}`)].join('|');
   useEffect(() => { notifications.setInline?.(inlineOwner.current, active && inlineIds ? inlineIds.split('|') : []); }, [notifications, active, inlineIds]);
   useEffect(() => { const owner = inlineOwner.current; return () => notifications.setInline?.(owner, []); }, [notifications]);
-  const group = groups.find(item => selected === item.key);
-  const activity = activities.find(item => selected === `operation:${item.snapshot.id}`);
-  if (!active || !groups.length && !ongoing.length && !recent.length) return null;
-  return <>
-    <section className="mcpConfirmations" role="region" aria-label="Подтверждение действий">
+  if (!active || !groups.length && !messages.length) return null;
+  const message = (key: string, title: string, content: ReactNode) => embedded
+    ? <section key={key} className="mcpCommandReply" aria-label={title}>{content}</section>
+    : <div key={key} className="mcpTurn"><article className="mcpAnswer" aria-label={title}><small>Nodera</small><div className="mcpCommandReply">{content}</div></article></div>;
+  return <section className="mcpCommandMessages" role="region" aria-label="Подтверждение действий">
       {groups.map(group => {
         const title = group.presentation?.title || group.actions[0].confirmation_request?.title || confirmationSummary(group.actions[0]).title;
         const error = queue.errors[group.key] || group.actions.map(action => queue.errors[confirmationKey(action)]).find(Boolean);
-        return <article key={group.key} className="mcpConfirmationCompact" aria-label={title}>
-          <small className="mcpDecisionAuthor">Nodera · Подтверждение</small>
-          <div className="mcpDecisionSummary"><strong title={title}>{title}</strong><small role={error ? "alert" : undefined}>{error || `${group.actions.length > 1 ? `${group.actions.length} действия · ` : ""}Ожидает вашего решения`}</small></div>
-          {group.actions.length > 1 && <ol className="mcpConfirmationItems">{group.actions.map(action => <li key={confirmationKey(action)}>{confirmationSummary(action).title}</li>)}</ol>}
-          {(group.presentation?.reason || group.actions[0].confirmation_request?.reason) && <p className="mcpDecisionMessage">{group.presentation?.reason || group.actions[0].confirmation_request?.reason}</p>}
-          <button type="button" className="ghostButton" onClick={() => setSelected(group.key)}>Подробнее</button>
+        return message(group.key, title, <>
+          <div className="mcpAnswerContent"><p>Для выполнения нужно ваше подтверждение.</p><p><strong>{title}</strong></p>
+            {(group.presentation?.reason || group.actions[0].confirmation_request?.reason) && <p>{group.presentation?.reason || group.actions[0].confirmation_request?.reason}</p>}
+            {error && <p className="error" role="alert">{error}</p>}
+          </div>
+          <details className="mcpCommandDetails" open={group.actions.length > 1}><summary>Состав действия{group.actions.length > 1 ? ` · ${group.actions.length}` : ""}</summary>
+            <ol className="mcpConfirmationItems">{group.actions.map(action => <li key={confirmationKey(action)}>{confirmationChanges(action)}<small>До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</small></li>)}</ol>
+          </details>
           <DecisionButtons group={group} queue={queue}/>
-        </article>;
+        </>);
       })}
-      {[...ongoing, ...recent].map(item => <article className="mcpOperationCompact" key={item.snapshot.id}>
-        <small className="mcpDecisionAuthor">Nodera · Команда</small>
-        {["queued", "running"].includes(item.snapshot.state || "") ? <span className="mcpWorkSpinner" aria-hidden="true"/> : <span aria-hidden="true">{item.snapshot.state === "succeeded" ? "✓" : item.snapshot.state === "failed" ? "!" : "·"}</span>}
-        <div className="mcpDecisionSummary" role="status"><strong>{item.title}</strong><small>{operationLabel(item.snapshot)}</small></div>
-        {item.snapshot.message && <p className="mcpDecisionMessage">{item.snapshot.message}</p>}
-        <button type="button" className="ghostButton" onClick={() => setSelected(`operation:${item.snapshot.id}`)}>Подробнее</button>
-        {!systemActionNeedsPolling(item.snapshot) && <button type="button" className="ghostButton" aria-label={`Закрыть: ${item.title}`} onClick={() => queue.dismissActivity(item.snapshot.id!)}>×</button>}
-      </article>)}
-    </section>
-    {(group || activity) && <DecisionDetails group={group} activity={activity} queue={queue} close={() => setSelected(undefined)}/>}
-  </>;
+      {messages.map(item => message(`operation:${item.snapshot.id}`, item.title, <>
+        <div className="mcpAnswerContent" role="status"><p className="mcpCommandStatus">{systemActionNeedsPolling(item.snapshot) && <span className="mcpWorkSpinner" aria-hidden="true"/>}<strong>{operationLabel(item.snapshot)}: {item.title}</strong></p>{item.snapshot.message && <p>{item.snapshot.message}</p>}</div>
+        <details className="mcpCommandDetails"><summary>Подробности выполнения</summary><p>ID: <code>{item.snapshot.id}</code></p></details>
+        {!systemActionNeedsPolling(item.snapshot) && <button type="button" className="ghostButton" aria-label={`Закрыть: ${item.title}`} onClick={() => queue.dismissActivity(item.snapshot.id!)}>Закрыть результат</button>}
+      </>))}
+  </section>;
 }

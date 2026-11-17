@@ -2,9 +2,26 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createApiClient} from '../../src/shared/lib/api-request.ts';
 import {saveChatSession,readChatSession,savedActor,rememberActor,clearChatSessions,createChatSessionWriter} from '../../src/features/assistant/chat-session.ts';
+import {commandMessageOwner,closedCommandMessages,rememberClosedCommand} from '../../src/features/assistant/command-message-state.ts';
 
 function storage(){const entries=new Map();return {get length(){return entries.size;},key:i=>[...entries.keys()][i]??null,getItem:k=>entries.get(k)??null,setItem:(k,v)=>entries.set(k,v),removeItem:k=>entries.delete(k),entries};}
 const snapshot={provider:'provider-one',model:'selected-model',streaming:true,conversation_id:'a'.repeat(32),prompt:'Unsent draft',turns:[{id:1,question:'Question',answer:'Answer',model:'selected-model',context_safe:true,files:[]}]};
+
+test('operation links survive reload without confirmation codes and closed results are scoped and cleared on logout',()=>{
+  const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();
+  try {
+    const scope={sessionKey:'commands'},id='b'.repeat(32),second='c'.repeat(32);
+    saveChatSession(scope,'11',{...snapshot,turns:[{...snapshot.turns[0],pending_actions:[{operation_id:id,code:'secret-code'}]},{...snapshot.turns[0],id:2,pending_action:{operation_id:second}}]});
+    const turns=readChatSession(scope,'11').turns;
+    assert.equal(commandMessageOwner(turns,[id]),1);assert.equal(commandMessageOwner(turns,[second]),2);
+    assert.equal(commandMessageOwner([...turns,{id:3,command_ids:[id]}],[id]),1);
+    assert.equal(commandMessageOwner(turns,['d'.repeat(32)]),undefined);
+    assert(!JSON.stringify([...sessionStorage.entries.values()]).includes('secret-code'));
+    rememberClosedCommand(scope,id);assert(closedCommandMessages(scope).has(id));
+    assert.equal(closedCommandMessages({sessionKey:'another'}).size,0);
+    clearChatSessions(scope);assert.equal(closedCommandMessages(scope).size,0);
+  } finally {globalThis.sessionStorage=previous;}
+});
 
 test('hidden decisions retain model context across reload without becoming visible dialogue turns',()=>{
   const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();

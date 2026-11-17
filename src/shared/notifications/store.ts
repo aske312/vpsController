@@ -59,6 +59,7 @@ export function createNotificationStore(now = Date.now) {
       input = { ...input, message: input.message.trim() || summaries[input.state] };
     }
     const previous = items.find((item) => item.id === input.id);
+    if (input.kind === "operation") input = { ...input, onDismiss: input.onDismiss ?? previous?.onDismiss };
     input = { ...input, startedAt: Number.isFinite(input.startedAt) ? input.startedAt : previous?.startedAt };
     const signature = fingerprint(input);
     if (dismissed.get(input.id) === signature) return input.id;
@@ -91,14 +92,21 @@ export function createNotificationStore(now = Date.now) {
     return upsert({ id: `message:${++sequence}`, source, title, state, message, kind: "message" });
   }
 
-  function dismiss(id: string) {
+  function dismiss(id: string, explicit = true) {
     const item = items.find((entry) => entry.id === id);
     if (!item || isPending(item)) return;
+    // Immutable server operation IDs cannot represent a new run. A second
+    // publisher may change the title/message or deliver stale progress later.
+    if (item.kind === "operation" && /^operation:(?:system|cdn):[a-f0-9]{32}$/.test(id)) {
+      finishedOperations.add(id);
+      if (finishedOperations.size > 200) finishedOperations.delete(finishedOperations.values().next().value!);
+    }
     dismissed.set(id, fingerprint(item));
     if (dismissed.size > 200) dismissed.delete(dismissed.keys().next().value!);
     items = items.filter((entry) => entry.id !== id);
     emit();
-    item.onDismiss?.();
+    // Expiration removes a toast, not the operation's message in chat history.
+    if (explicit || item.kind !== "operation") item.onDismiss?.();
   }
 
   function syncFailures() {
@@ -163,7 +171,7 @@ export function createNotificationStore(now = Date.now) {
     tick: () => {
       syncFailures();
       if (pausedAt !== undefined) return;
-      for (const item of [...items]) if (item.expiresAt && item.expiresAt <= now()) dismiss(item.id);
+      for (const item of [...items]) if (item.expiresAt && item.expiresAt <= now()) dismiss(item.id, false);
     },
   };
 }

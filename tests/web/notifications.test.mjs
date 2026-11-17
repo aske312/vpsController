@@ -6,6 +6,26 @@ import { notificationDuration, notificationPresentation, notificationText, order
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
 
+test('closing an immutable command survives different publishers, changed results and late progress',()=>{
+  const store=createNotificationStore(),id='operation:system:'+'a'.repeat(32);
+  let closed=0;
+  store.upsert({...operation(id,'success','Chat completed'),onDismiss:()=>closed++});
+  store.upsert({...operation(id,'success','Panel completed'),title:'Another publisher'});
+  store.dismiss(id);
+  assert.equal(closed,1);
+  for(const state of ['success','running','unknown','error'])store.upsert({...operation(id,state,'Late update'),title:'Updated title'});
+  assert.equal(store.getSnapshot().length,0);
+  store.upsert(operation('operation:system:'+'b'.repeat(32)));
+  assert.equal(store.getSnapshot().length,1);
+});
+
+test('expiring a command toast does not close its message in chat history',()=>{
+  let now=0,closed=0;const store=createNotificationStore(()=>now);
+  const id='operation:system:'+'c'.repeat(32);
+  store.upsert({...operation(id,'success'),onDismiss:()=>closed++});
+  now=9000;store.tick();assert.equal(store.getSnapshot().length,0);assert.equal(closed,0);
+});
+
 test('inline chat work stays tracked and returns to notifications when leaving the chat',()=>{
   const store=createNotificationStore(),owner=Symbol('chat');
   store.upsert(operation('chat-operation'));store.upsert(operation('other-user'));

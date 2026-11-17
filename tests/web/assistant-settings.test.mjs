@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as chatCommands from '../../src/features/assistant/chat-commands.ts';
 import * as chatSession from '../../src/features/assistant/chat-session.ts';
+import * as commandMessages from '../../src/features/assistant/command-message-state.ts';
 import * as chatJobs from '../../src/features/assistant/chat-jobs.ts';
 import * as helpers from '../../src/features/assistant/assistant-state.ts';
 import * as chatFiles from '../../src/features/assistant/chat-files.ts';
@@ -49,7 +50,7 @@ function mount(status, catalog = [], overrides = {}) {
   const confirmationModule = {}, commandMenuModule = {}, turnModule = {};
   const sessionHelpers = { ...chatSession, createChatSessionWriter(...args) { const writer = chatSession.createChatSessionWriter(...args); persistence.push(writer); return writer; } };
   const confirmations = { actions: [], working: [], results: {}, errors: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
-  const require = name => name === 'react' ? hooks : name.endsWith('/use-dialog-focus') ? {useDialogFocus:()=>({current:null})} : name === './chat-session' ? sessionHelpers : name === './chat-turn' ? turnModule : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name.endsWith('/command-message-state') ? commandMessages : name === 'react' ? hooks : name.endsWith('/use-dialog-focus') ? {useDialogFocus:()=>({current:null})} : name === './chat-session' ? sessionHelpers : name === './chat-turn' ? turnModule : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const alertsSource = readFileSync(new URL('../../src/features/assistant/telegram-alerts.tsx', import.meta.url), 'utf8');
   const compiledAlerts = ts.transpileModule(alertsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
@@ -192,13 +193,16 @@ test('a shortcut requiring arguments fills the composer and service preparation 
 
 test('AI-prepared operations expose human decisions in the conversation',async()=>{
   const status=fixture();Object.assign(status.settings,{model:'fixture-model',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
-  const pending={code:'aabbccdd',service:'Mihomo /routing/settings',action:'PATCH',expires:Date.now()/1000+600};
+  const pending={code:'aabbccdd',operation_id:'aabbccdd'.repeat(4),service:'Mihomo /routing/settings',action:'PATCH',expires:Date.now()/1000+600};
   const view=mount(status,[],{chat:()=>({result:{answer:'Review routing changes',tools_used:['mihomo_settings']},pending_actions:[pending]})});
   view.render();await Promise.resolve();let tree=view.render();
   nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'Prepare routing changes',style:{},scrollHeight:48}});tree=view.render();
   nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);tree=view.render();
   const transcript=nodes(tree,n=>n.props.role==='log')[0].node;
   for(const label of ['Подтвердить','Отказать'])assert.equal(nodes(transcript,n=>n.type==='button'&&n.props.children===label).length,1);
+  const answer=nodes(transcript,n=>n.type==='article'&&n.props.className?.split(' ').includes('mcpAnswer'))[0].node;
+  assert.equal(nodes(answer,n=>n.type==='button'&&n.props.children==='Подтвердить').length,1);
+  assert.equal(nodes(tree,n=>n.props.role==='dialog').length,0);
   assert.equal(nodes(tree,n=>n.props.className==='mcpQuickCommands').length,0);
 });
 
