@@ -1594,7 +1594,17 @@ def operation_request(prompt, history=None):
     if (re.match(r'(?iu)^\s*(?:что такое|как устроен\w*|как работает|в ч[её]м разница|объясни(?:те)?)\b', prompt)
             and not re.search(r'(?iu)\b(?:сейчас|текущ\w*|у нас|наш\w*|мо[яиюеё]\w*|на сервере)\b', prompt)):
         return False
-    if re.search(r'(?iu)\b(?:mihomo|routing|маршрутиз\w*|правил\w*|групп\w*|операци\w*|подтвержд\w*|форм[ауы]|служб\w*|профил\w*|подписк\w*|подключени\w*)\b', prompt):
+    topic = re.search(r'(?iu)\b(?:mihomo|routing|маршрутиз\w*|правил\w*|групп\w*|операци\w*|подтвержд\w*|форм[ауы]|служб\w*|профил\w*|подписк\w*|подключени\w*)\b', prompt)
+    # A component name is a topic, not evidence that a live check was requested.
+    # Clarifications such as "I mean control of Mihomo" can be answered directly.
+    live_intent = re.search(r'(?iu)\b(?:провер\w*|проверь\w*|посмотр\w*|покаж\w*|вывед\w*|проч\w*|перечит\w*|'
+        r'созда\w*|добав\w*|измени\w*|настрой(?:те)?|удал\w*|примени\w*|выполни\w*|включ\w*|выключ\w*|'
+        r'перезапус\w*|перезапусти\w*|останов\w*|запуст\w*|исправ\w*|подготов\w*|сохран\w*|подтверди\w*|отклони\w*|'
+        r'аудит\w*|диагност\w*|ошиб\w*|сбой\w*|неисправ\w*|не\s+(?:работ\w*|появ\w*|примен\w*)|'
+        r'статус\w*|состояни\w*|текущ\w*|сейчас|у нас|на сервере|где|сколько|'
+        r'check|inspect|show|read|prepare|create|add|update|delete|apply|restart|status|failed|error)\b', prompt)
+    capability = re.search(r'(?iu)возможност\w*|функционал\w*|\bчто\s+(?:ты\s+)?(?:можешь|умеешь)\b', prompt)
+    if topic and (live_intent or not capability and re.search(r'(?iu)\b(?:како[йевяю]|какие|хочу|нуж\w*)\b', prompt)):
         return True
     if re.fullmatch(r'(?iu)(?:примени|применяй|выполни|выполняй)[.!?]*', prompt.strip()):
         return True

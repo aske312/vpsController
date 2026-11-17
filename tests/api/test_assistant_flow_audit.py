@@ -51,6 +51,24 @@ class FlowAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('status', result)
         tool.assert_not_awaited()
 
+    async def test_component_clarification_keeps_the_models_direct_answer(self):
+        answer = 'Да, я могу управлять Mihomo доступными инструментами. Изменения требуют вашего подтверждения.'
+        result, tool, provider = await self.run_chat([{'content': answer}], [],
+            prompt='я про контроль этим компонентом mihomo')
+        self.assertEqual(result['answer'], answer)
+        self.assertNotIn('status', result)
+        self.assertNotIn('tool_choice', provider.call_args.kwargs)
+        tool.assert_not_awaited()
+
+    def test_component_topics_are_distinct_from_requests_for_live_evidence(self):
+        for prompt in ('я про контроль этим компонентом mihomo', 'Mihomo',
+                'Какие твои возможности по управлению профилями?', 'Что ты умеешь с Mihomo?',
+                'Объясни правила маршрутизации', 'по твоему функционалу, новый протокол в твоей власти?'):
+            with self.subTest(prompt=prompt): self.assertFalse(runner.operation_request(prompt))
+        for prompt in ('Проверь Mihomo', 'Какие профили у нас сейчас?', 'Форма всё так же не появляется, почему?',
+                'Создай группу', 'Prepare routing', 'Покажи текущие правила', 'Подтверди операцию'):
+            with self.subTest(prompt=prompt): self.assertTrue(runner.operation_request(prompt))
+
     async def test_one_completed_operation_does_not_confirm_an_entire_plan(self):
         result, _, _ = await self.run_chat([
             {'tool_calls': [call('mihomo_settings', {'method': 'PATCH'})]},
