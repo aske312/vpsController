@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createApiClient, mutationFailureState } from "../../shared/lib/api-request";
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "../../control-panel/system-operation";
-import { useNotifications, useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifications } from "../../shared/notifications/notification-center";
+import { AssistantAnswer } from "./assistant-answer";
 import { closedCommandMessages, rememberClosedCommand } from "./command-message-state";
 
 export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string; request_id?: string; operation_ids?: string[] } };
@@ -23,7 +24,7 @@ export function confirmationGroups(actions: PendingAction[]): ConfirmationGroup[
   return [...groups.values()];
 }
 
-type DecisionContext = { key: string; actor: string; question: string; answer: string };
+type DecisionContext = { key: string; actor: string; question: string; answer: string; operation_id?: string; title?: string };
 type Activity = { actor: string; snapshot: SystemAction; title: string; dismissed?: boolean };
 type Queue = { context: DecisionContext[]; activities: Activity[]; actions: PendingAction[]; working: string[]; results: Record<string, string>; errors: Record<string, string>;
   decide: (action: PendingAction, decision: "confirm" | "reject") => Promise<string | undefined>;
@@ -39,7 +40,6 @@ export function useAssistantConfirmations() {
 
 export function AssistantConfirmations({ request, onOperation, onChanged, children }: { request: Client; onOperation: (operation: SystemAction) => void; onChanged?: () => void; children: ReactNode }) {
   const notifications = useNotifications();
-  const notify = useNotifier("nodera", "Nodera · Подтверждение");
   const [context, setContext] = useState<DecisionContext[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [actions, setActions] = useState<PendingAction[]>([]);
@@ -116,7 +116,7 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
         method: "POST", body: JSON.stringify({ code: action.code, decision, telegram_id: action.actor && action.actor !== "panel" ? Number(action.actor) : null }),
       });
       if (activeRequest.current !== request) return;
-      setContext(current => [...current, { key, actor: action.actor || "panel", question: `${decision === "confirm" ? "Подтверждено" : "Отклонено"}: ${action.confirmation_request?.title ? action.confirmation_request.title + ": " : ""}${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: result.display_text || result.text }].slice(-32));
+      setContext(current => [...current, { key, actor: action.actor || "panel", operation_id: result.operation?.id || action.operation_id, title: confirmationSummary(action).title, question: `${decision === "confirm" ? "Подтверждено" : "Отклонено"}: ${action.confirmation_request?.title ? action.confirmation_request.title + ": " : ""}${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: result.display_text || result.text }].slice(-32));
       settled.current.add(key);
       setActions(current => current.filter(item => confirmationKey(item) !== key));
       setResults(current => ({ ...current, [key]: result.display_text || result.text }));
@@ -128,7 +128,7 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
       }
       else {
         if (decision === "confirm") changed.current?.();
-        if (!batchKey) notify.info(result.text);
+        notifications.upsert({ id: `nodera-decision:${key}`, source: "nodera", title: confirmationSummary(action).title, kind: "message", state: "info", message: result.text });
       }
       return result;
     } catch (cause) {
@@ -138,18 +138,18 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
         setActions(current => current.filter(item => confirmationKey(item) !== key));
         const text = "Результат решения не подтверждён. Проверяем состояние без повторной отправки.";
         setResults(current => ({ ...current, [key]: text }));
-        setContext(current => [...current, { key, actor: action.actor || "panel", question: `Попытка ${decision === "confirm" ? "подтверждения" : "отказа"}: ${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: text }].slice(-32));
+        setContext(current => [...current, { key, actor: action.actor || "panel", operation_id: action.operation_id, title: confirmationSummary(action).title, question: `Попытка ${decision === "confirm" ? "подтверждения" : "отказа"}: ${action.action} · ${action.service}. Операция ${action.operation_id || ""}`, answer: text }].slice(-32));
         if (decision === "confirm" && action.operation_id) {
           const snapshot = { id: action.operation_id, state: "unknown", message: text };
           trackOperation(snapshot, confirmationSummary(action).title, action.actor || "panel");
           operation.current(snapshot);
         }
-        else notify.error(text);
+        else notifications.upsert({ id: `nodera-decision:${key}`, source: "nodera", title: confirmationSummary(action).title, kind: "message", state: "error", message: text });
       } else setErrors(current => ({ ...current, [key]: cause instanceof Error ? cause.message : "Действие не выполнено" }));
     } finally {
       if (activeRequest.current === request) { writing.current.delete(key); setWorking([...writing.current, ...batching.current]); }
     }
-  }, [request, notify, trackOperation]);
+  }, [request, notifications, trackOperation]);
   const decide = useCallback(async (action: PendingAction, decision: "confirm" | "reject") => { const result = await decideOne(action, decision); return result?.display_text || result?.text; }, [decideOne]);
   const decideGroup = useCallback(async (group: ConfirmationGroup, decision: "confirm" | "reject") => {
     if (!group.presentation || batching.current.has(group.key) || activeRequest.current !== request) return;
@@ -177,11 +177,10 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
-      if (activeRequest.current === request) notify.info(`${decision === "confirm" ? "План выполнен" : "План отклонён"}: ${group.presentation.title} · ${selected.length}`);
     } finally {
       if (activeRequest.current === request) { batching.current.delete(group.key); setWorking([...writing.current, ...batching.current]); }
     }
-  }, [request, decideOne, readOperation, notify]);
+  }, [request, decideOne, readOperation]);
   useEffect(() => {
     activeRequest.current = request; generation.current++;
     const sessionOperations = tracked.current;
@@ -295,8 +294,9 @@ function DecisionButtons({ group, queue }: { group: ConfirmationGroup; queue: Qu
 }
 
 function operationLabel(snapshot: SystemAction) {
-  if (systemActionNeedsPolling(snapshot) && !["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(snapshot.state || "")) return "Уточняю результат";
-  return ({ queued: "В очереди", running: "Выполняется", succeeded: "Выполнено", failed: "Ошибка выполнения", cancelled: "Отменено", unknown: "Уточняем состояние" } as Record<string, string>)[snapshot.state || "unknown"] || "Состояние не подтверждено";
+  const state = systemOperationNotification(snapshot, "", true).state;
+  if (snapshot.state === "queued" && state === "running") return "В очереди";
+  return { running: "Выполняется", success: "Выполнено", error: "Ошибка выполнения", cancelled: "Отменено", unknown: "Уточняю результат", info: "Операция пропущена" }[state];
 }
 
 export function ConfirmationCards({ actor, active = true, embedded = false, turnId, ownerFor }: { actor: string; active?: boolean; embedded?: boolean; turnId?: number; ownerFor?: (ids: string[]) => number | undefined }) {
@@ -307,10 +307,11 @@ export function ConfirmationCards({ actor, active = true, embedded = false, turn
   const groups = confirmationGroups(queue.actions.filter(item => (item.actor || "panel") === (actor || "panel"))).filter(group => belongs(group.actions.flatMap(action => action.operation_id ? [action.operation_id] : [])));
   const activities = (queue.activities ?? []).filter(item => item.actor === (actor || "panel") && belongs(item.snapshot.id ? [item.snapshot.id] : []));
   const messages = activities.filter(item => !item.dismissed);
-  const inlineIds = [...groups.map(group => `nodera-confirm:${group.key}`), ...activities.map(item => `operation:system:${item.snapshot.id}`)].join('|');
+  const decisions = (queue.context || []).filter(item => item.actor === (actor || "panel") && belongs(item.operation_id ? [item.operation_id] : []) && !(queue.activities || []).some(activity => activity.snapshot.id === item.operation_id));
+  const inlineIds = [...groups.map(group => `nodera-confirm:${group.key}`), ...activities.map(item => `operation:system:${item.snapshot.id}`), ...decisions.map(item => `nodera-decision:${item.key}`)].join('|');
   useEffect(() => { notifications.setInline?.(inlineOwner.current, active && inlineIds ? inlineIds.split('|') : []); }, [notifications, active, inlineIds]);
   useEffect(() => { const owner = inlineOwner.current; return () => notifications.setInline?.(owner, []); }, [notifications]);
-  if (!active || !groups.length && !messages.length) return null;
+  if (!active || !groups.length && !messages.length && !decisions.length) return null;
   const message = (key: string, title: string, content: ReactNode) => embedded
     ? <section key={key} className="mcpCommandReply" aria-label={title}>{content}</section>
     : <div key={key} className="mcpTurn"><article className="mcpAnswer" aria-label={title}><small>Nodera</small><div className="mcpCommandReply">{content}</div></article></div>;
@@ -334,5 +335,6 @@ export function ConfirmationCards({ actor, active = true, embedded = false, turn
         <details className="mcpCommandDetails"><summary>Подробности выполнения</summary><p>ID: <code>{item.snapshot.id}</code></p></details>
         {!systemActionNeedsPolling(item.snapshot) && <button type="button" className="ghostButton" aria-label={`Закрыть: ${item.title}`} onClick={() => queue.dismissActivity(item.snapshot.id!)}>Закрыть результат</button>}
       </>))}
+      {decisions.map(item => message(`decision:${item.key}`, item.title || "Результат решения", <AssistantAnswer text={item.answer}/>))}
   </section>;
 }

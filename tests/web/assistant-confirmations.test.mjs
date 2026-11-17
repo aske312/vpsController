@@ -161,7 +161,7 @@ function mount(initial, options={}) {
   const actual=createRequire(import.meta.url),exports={};
   const source=readFileSync(new URL('../../src/features/assistant/confirmation-queue.tsx',import.meta.url),'utf8');
   const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}});
-  const require=name=>name==='react'?hooks:name.endsWith('/command-message-state')?commandMessages:name.endsWith('/use-dialog-focus')?{useDialogFocus:()=>({current:null})}:name.endsWith('/notification-center')?{useNotifications:()=>store,useNotifier:()=>notify}:name.endsWith('/system-operation')?operations:name.endsWith('/api-request')?{mutationFailureState}:actual(name);
+  const require=name=>name==='react'?hooks:name==='./assistant-answer'?{AssistantAnswer(){}}:name.endsWith('/command-message-state')?commandMessages:name.endsWith('/use-dialog-focus')?{useDialogFocus:()=>({current:null})}:name.endsWith('/notification-center')?{useNotifications:()=>store,useNotifier:()=>notify}:name.endsWith('/system-operation')?operations:name.endsWith('/api-request')?{mutationFailureState}:actual(name);
   new Function('require','exports',compiled.outputText)(require,exports);
   const request=async(path,init)=>{
     if(path.startsWith('/assistant/pending-action')){
@@ -203,7 +203,7 @@ test('confirmation display uses formatted text while notifications keep plain te
     assert.equal(await app.queue.decide(app.queue.actions[0],'reject'),formatted);
     await app.settle();
     assert.equal(app.queue.context[0].answer,formatted);
-    assert(app.messages.includes('Accepted aabbccdd'));
+    assert(app.store.getSnapshot().some(item=>item.id==='nodera-decision:panel:aabbccdd'&&item.message==='Accepted aabbccdd'));
     assert.equal(app.calls.length,1);
   }finally{app.dispose();}
 });

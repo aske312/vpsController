@@ -599,6 +599,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const commandTurns = new Set([
     ...confirmationGroups(confirmations.actions.filter(item => (item.actor || "panel") === (actor || "panel"))).map(group => commandOwnerFor(group.actions.flatMap(item => item.operation_id ? [item.operation_id] : []))),
     ...(confirmations.activities || []).filter(item => !item.dismissed && item.actor === (actor || "panel")).map(item => commandOwnerFor(item.snapshot.id ? [item.snapshot.id] : [])),
+    ...(confirmations.context || []).filter(item => item.actor === (actor || "panel") && !(confirmations.activities || []).some(activity => activity.snapshot.id === item.operation_id)).map(item => commandOwnerFor(item.operation_id ? [item.operation_id] : [])),
   ]);
   return <div hidden={!active} className={`mcpWorkspace noderaWorkspace ${active && isChat ? "isChat" : ""}`}>
     {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
