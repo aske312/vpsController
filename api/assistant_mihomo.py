@@ -71,6 +71,16 @@ def request(method, path, body=None, operation_id=None, *, timeout=35):
             message = 'Mihomo: неверные параметры. Попросите ИИ исправить запрос и подготовить новое подтверждение.'
             try: detail = json.loads(exc.read(16000)).get('detail')
             except (ValueError, OSError, AttributeError): detail = None
+            if isinstance(detail, list):
+                from assistant_trace import safe_field
+                issues = {'missing': 'Обязательное поле', 'dict_type': 'Нужен объект', 'list_type': 'Нужен список', 'string_type': 'Нужна строка', 'string_pattern_mismatch': 'Неверный формат строки', 'int_type': 'Нужно целое число', 'bool_type': 'Нужно true или false'}
+                fields = []
+                for row in detail[:8]:
+                    if not isinstance(row, dict) or not isinstance(row.get('loc'), list): continue
+                    field = safe_field('.'.join(str(part) for part in row['loc'] if part != 'body')) or '*'
+                    issue = 'Возьмите актуальную ревизию из GET: 64 hex-символа' if field.endswith('expected_revision') else issues.get(row.get('type'), 'Проверьте значение по схеме')
+                    fields.append({'field': field, 'issue': issue})
+                raise HTTPException(422, {'code': 'mihomo_validation_error', 'message': 'Mihomo: проверьте параметры запроса — ' + '; '.join(row['field'] + ': ' + row['issue'] for row in fields), 'fields': fields}) from None
             if isinstance(detail, dict) and detail.get('code') == 'invalid_routing_policy':
                 fields = [field for field in detail.get('fields', []) if isinstance(field, str) and re.fullmatch(r'(?:groups|rules)(?:\.[0-9]{1,3})?(?:\.(?:id|name|type|members|strategy|url|interval|timeout|max_failed_times|tolerance|kind|value|target))?(?:\.[0-9]{1,3})?', field)]
                 message = 'Mihomo: проверьте поля правил и групп' + (': ' + ', '.join(fields[:8]) if fields else '') + '. Исправьте запрос перед новым подтверждением.'

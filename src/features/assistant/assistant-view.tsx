@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
 import { useNotifier, useNotifications } from "../../shared/notifications/notification-center";
@@ -9,10 +9,10 @@ import { mutationFailureState } from "../../shared/lib/api-request";
 import { observeChatJob, rememberChat, savedChat, chatStage, ChatJobError, type ChatJob, type ChatOutput } from "./chat-jobs";
 import { ConfirmationCards, useAssistantConfirmations, type PendingAction } from "./confirmation-queue";
 import { ChatIcon } from "./chat-icon";
-import { AssistantAnswer } from "./assistant-answer";
+import { ChatTurnRow, type ChatTurn as Turn } from "./chat-turn";
 import { conversationMarkdown } from "./answer-format";
 import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
-import { readChatSession, saveChatSession, savedActor, rememberActor, chatProvider } from "./chat-session";
+import { readChatSession, createChatSessionWriter, savedActor, rememberActor, chatProvider } from "./chat-session";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
 import { ChatCommandMenu } from "./chat-command-menu";
@@ -31,7 +31,6 @@ type Props = {
   admitOperation: (path: string, options: RequestInit) => Promise<SystemAction | null | undefined>;
   onOperation: (operation: SystemAction) => void;
 };
-type Turn = { queue_state?: "queued" | "running"; pending_action?: PendingAction; pending_actions?: PendingAction[]; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string; context_safe?: boolean };
 type Conversation = { id: string; title: string; updated_at: string; turns: number };
 function shortTitle(title: string) {
   const characters = Array.from(title);
@@ -83,6 +82,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const commandRunning = useRef(false);
   const commandVersion = useRef(0);
   const promptInput = useRef<HTMLTextAreaElement>(null);
+  const promptFrame = useRef<number | null>(null);
+  useEffect(() => () => { if (promptFrame.current !== null) cancelAnimationFrame(promptFrame.current); }, []);
   const [catalog, setCatalog] = useState<string[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState("");
@@ -98,9 +99,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const [files, setFiles] = useState<ChatFile[]>([]);
   const [readingFiles, setReadingFiles] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [copied, setCopied] = useState<number>();
   const fileInput = useRef<HTMLInputElement>(null);
   const transcript = useRef<HTMLDivElement>(null);
+  const followTranscript = useRef(true);
+  const sessionWriter = useRef<ReturnType<typeof createChatSessionWriter> | null>(null);
   const modelButton = useRef<HTMLButtonElement>(null);
   const modelMenuPanel = useRef<HTMLDivElement>(null);
   const fileRead = useRef(false);
@@ -127,7 +129,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const chatRequestId = useRef("");
   const [chatQueue, setChatQueue] = useState<{state: string; position: number; waiting?: number} | null>(null);
   const dirtyRef = useRef(false);
-  const dirty = changed(draft, status?.settings);
+  const dirty = useMemo(() => changed(draft, status?.settings), [draft, status?.settings]);
+  const availableModels = useMemo(() => status ? chatModels(status.settings, catalog.length ? catalog : model ? [model] : []) : [], [status, catalog, model]);
   useEffect(() => {
     if (!active && dirty && status) setDraft(makeDraft(status.settings));
   }, [active, dirty, status]);
@@ -151,10 +154,24 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     setSessionReady(true);
   }, [status, request, sessionReady]);
   useEffect(() => {
+    const writer = createChatSessionWriter(request, actor);
+    sessionWriter.current = writer;
+    const flush = () => writer.flush();
+    const hidden = () => { if (document.hidden) writer.flush(); };
+    if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", hidden);
+    return () => {
+      if (typeof window !== "undefined") window.removeEventListener("pagehide", flush);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", hidden);
+      writer.dispose(); if (sessionWriter.current === writer) sessionWriter.current = null;
+    };
+  }, [request, actor]);
+  const sessionProvider = status ? chatProvider(status.settings) : "";
+  useEffect(() => { if (sessionReady) rememberActor(request, actor); }, [request, sessionReady, actor]);
+  useEffect(() => {
     if (!sessionReady || !status || activeActor.current !== actor) return;
-    rememberActor(request, actor);
-    saveChatSession(request, actor, { model, provider: chatProvider(status.settings), streaming, conversation_id: conversationId, prompt, turns });
-  }, [request, sessionReady, status, actor, model, streaming, conversationId, prompt, turns]);
+    sessionWriter.current?.schedule({ model, provider: sessionProvider, streaming, conversation_id: conversationId, prompt, turns });
+  }, [request, sessionReady, sessionProvider, actor, model, streaming, conversationId, prompt, turns, status]);
   useEffect(() => { client.current = request; }, [request]);
   useEffect(() => { dirtyRef.current = dirty; if (active) onDirtyChange(dirty); }, [dirty, active, onDirtyChange]);
   useEffect(() => () => { version.current += 1; onDirtyChange(false); }, [onDirtyChange]);
@@ -269,7 +286,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       setChatStageText(chatStage(job.stage));
       if (!inserted) {
         inserted = true;
-        setTurns(current => [...current, { id: turnId, question: job.question, model: job.model, files: [], queue_state: "running" }]);
+        setTurns(current => [...current, { id: turnId, request_id: identity, question: job.question, model: job.model, files: [], queue_state: "running" }]);
       }
       if (streaming) setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, answer: job.partial || undefined } : turn));
     }, controller.signal).then(result => {
@@ -289,13 +306,36 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     return () => { controller.abort(); chatRunning.current = false; setChatBusy(false); };
   }, [request, actor, status?.chat_jobs, streaming, recoveryKey, ingestConfirmations, sessionReady]);
   useEffect(() => {
-    setTurns(current => current.map(turn => {
+    setTurns(current => {
+      const next = current.map(turn => {
       const actions = turn.pending_actions ?? (turn.pending_action ? [turn.pending_action] : []);
       const text = actions.map(action => confirmations.results[`${action.actor || actor || "panel"}:${action.code}`]).filter(Boolean).join("\n");
       return text && text !== turn.action_result ? { ...turn, action_result: text } : turn;
-    }));
+      });
+      return next.some((turn, index) => turn !== current[index]) ? next : current;
+    });
   }, [confirmations.results, actor]);
-  useEffect(() => { transcript.current?.scrollTo({ top: transcript.current.scrollHeight }); }, [turns, panel]);
+  useEffect(() => { followTranscript.current = true; }, [actor, conversationId, panel]);
+  useEffect(() => {
+    if (!followTranscript.current || panel !== "chat" || typeof requestAnimationFrame === "undefined") return;
+    const frame = requestAnimationFrame(() => {
+      if (followTranscript.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [turns, panel, actor, conversationId]);
+  const retryTurn = useCallback((turn: Turn) => { setPrompt(turn.question); setFiles(turn.files); }, []);
+  const cancelTurn = useCallback((id: number) => {
+    pendingTurns.current = pendingTurns.current.filter(item => item.id !== id);
+    setTurns(current => current.filter(item => item.id !== id));
+  }, []);
+  const downloadTrace = useCallback(async (identity: string) => {
+    try {
+      const trace = await request(`/assistant/requests/${identity}/trace${actor ? `?telegram_id=${actor}` : ""}`, { cache: "no-store" });
+      if (client.current !== request || activeActor.current !== actor) return;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(trace, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a"); link.href = url; link.download = `nodera-request-${identity}.json`; link.click(); URL.revokeObjectURL(url);
+    } catch (cause) { if (client.current === request && activeActor.current === actor) notify.error(cause instanceof Error ? cause.message : "Журнал запроса недоступен"); }
+  }, [request, actor, notify]);
   async function attachFiles(incoming: File[]) {
     if (!incoming.length || fileRead.current || writing.current) return;
     if (!status?.chat_attachments) { setError("Для файлов обновите Nodera в Обзоре"); return; }
@@ -444,7 +484,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         const { id, question, files: attached } = next;
         chatRequestId.current = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
         setChatQueue({state: "submitting", position: 0});
-        setTurns(current => current.map(item => item.id === id ? { ...item, queue_state: "running" } : item));
+        const diagnosticRequestId = chatRequestId.current;
+        setTurns(current => current.map(item => item.id === id ? { ...item, request_id: diagnosticRequestId, queue_state: "running" } : item));
         try {
           const identity = chatRequestId.current;
           const decisions = (confirmations.context ?? []).filter(item => item.actor === (actor || "panel") && !context.some(turn => turn.question === item.question && turn.answer === item.answer));
@@ -501,7 +542,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   if (!status || !draft) return <section hidden={!active} className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
   const selectedComponent = status.modules.find(item => item.id === "ai-agent");
   const botComponent = status.modules.find(item => item.id === "nodera-bot");
-  const availableModels = chatModels(status.settings, catalog.length ? catalog : model ? [model] : []);
   const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : availableModels.includes(status.settings.model) ? status.settings.model : "") : status.settings.model;
   const managedComponent = selectedComponent?.installed ? selectedComponent : botComponent;
   if (!managedComponent?.installed) return <section hidden={!active} className="mcpWorkspace"><p>Установите Nodera в разделе «Обзор → Компоненты».</p></section>;
@@ -518,10 +558,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const matchingCommands = commandMatches(commands, prompt);
   const activeCommandIndex = Math.min(commandIndex, Math.max(0, matchingCommands.length - 1));
   const conflict = status.settings.revision !== draft.expected_revision;
-  const chooseActor = (value: string) => { const saved = readChatSession(request, value); setCommandMenu(false); setCommandIndex(0); setCommands([]); memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(saved?.provider === chatProvider(status.settings) ? saved.model : ""); setTurns(saved?.turns ?? []); nextTurn.current = Math.max(0, ...(saved?.turns ?? []).map(turn => turn.id)); setFiles([]); setPrompt(saved?.prompt ?? ""); setStreaming(saved?.streaming ?? streaming); setConversationId(saved?.conversation_id ?? null); selectedConversation.current = saved ? saved.conversation_id : undefined; setMemoryBusy(false); setCopied(undefined); setMemoryError(''); };
+  const chooseActor = (value: string) => { const saved = readChatSession(request, value); setCommandMenu(false); setCommandIndex(0); setCommands([]); memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(saved?.provider === chatProvider(status.settings) ? saved.model : ""); setTurns(saved?.turns ?? []); nextTurn.current = Math.max(0, ...(saved?.turns ?? []).map(turn => turn.id)); setFiles([]); setPrompt(saved?.prompt ?? ""); setStreaming(saved?.streaming ?? streaming); setConversationId(saved?.conversation_id ?? null); selectedConversation.current = saved ? saved.conversation_id : undefined; setMemoryBusy(false); setMemoryError(''); };
   const actorName = status.settings.accounts.find(item => String(item.telegram_id) === actor)?.name || actor || "Администратор";
   const actorSelect = <label className="mcpActor">Контур<select aria-label="Контур" title={actorName} value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id}</option>)}</select></label>;
-  const newChat = () => { memoryGeneration.current++; interacted.current = true; selectedConversation.current = null; setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setCopied(undefined); setMemoryError(''); };
+  const newChat = () => { memoryGeneration.current++; interacted.current = true; selectedConversation.current = null; setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setMemoryError(''); };
   async function removeConversation() {
     if (!conversationId || !await confirmAction({ title: 'Удалить диалог?', message: 'Диалог и его вложения будут удалены из кеша на сервере.', confirmLabel: 'Удалить', danger: true })) return;
     try { await request(`/assistant/conversations/${conversationId}${actor ? `?telegram_id=${actor}` : ''}`, { method: 'DELETE' }); newChat(); await loadConversations(); }
@@ -583,15 +623,17 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       {catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}
       {apiConnection.state === "error" && <p className="mcpNotice" role="status">Проверка повторяется автоматически. Сохранённая модель и последний каталог доступны. <button type="button" className="ghostButton" onClick={() => void loadModels()}>Проверить API сейчас</button></p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
-      <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite">
+      <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite" onScroll={event => {
+        const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+      }}>
         {!turns.length && !confirmations.actions.some(item => (item.actor || "panel") === (actor || "panel")) && <div className="mcpChatEmpty"><ProtocolIcon protocol="nodera"/><h2>Чем помочь?</h2>{commands.some(item => ["/status", "/services"].includes(item.command)) && <div>{commands.some(item => item.command === "/status") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/status", false)}>Состояние сервера</button>}{commands.some(item => item.command === "/services") && <button type="button" disabled={commandBlocked} onClick={() => void runCommand("/services", false)}>Службы</button>}</div>}</div>}
-        {turns.map(turn => <div className="mcpTurn" key={turn.id}><div className="mcpUserMessage">{turn.files.length > 0 && <div className="mcpFileList">{turn.files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span></span>)}</div>}{turn.question}{turn.files_expired && <small className="mcpExpiredFiles">Вложения удалены из кеша по лимиту</small>}</div><article className={`mcpAnswer ${turn.error ? "error" : ""}`}><small>Nodera</small>{turn.error || turn.answer ? <AssistantAnswer text={turn.error ? "?? **????? ????????**\n\n" + turn.error : turn.answer || ""}/> : <div className="mcpThinking" role="status"><span className="mcpThinkingDots" aria-hidden="true"><i/><i/><i/></span><span>{pendingLabel(turn)}</span></div>}{turn.queue_state === "queued" && <button type="button" className="ghostButton" onClick={() => { pendingTurns.current = pendingTurns.current.filter(item => item.id !== turn.id); setTurns(current => current.filter(item => item.id !== turn.id)); }}>Убрать из очереди</button>}{turn.tools?.length ? <p className="mcpToolList">{turn.tools.join(" · ")}</p> : null}{turn.error && <button type="button" className="ghostButton" disabled={blocked} onClick={() => { setPrompt(turn.question); setFiles(turn.files); }}>Повторить</button>}</article>{turn.action_result && <div className="mcpActionResult" role="status"><AssistantAnswer text={turn.action_result}/></div>}<div className="mcpAnswerActions">{turn.answer && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied === turn.id ? "Скопировано" : "Скопировать ответ"} onClick={() => { void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(turn.id)).catch(() => setError("Не удалось скопировать ответ")); }}><ChatIcon name={copied === turn.id ? "check" : "copy"}/></button>}</div></div>)}
+        {turns.map(turn => <ChatTurnRow key={turn.id} turn={turn} waiting={turn.answer || turn.error ? "" : pendingLabel(turn)} canRetry={Boolean(turn.error) && !blocked} onRetry={retryTurn} onCancel={cancelTurn} onError={notify.error} onTrace={downloadTrace}/>)}
       </div>
       <div className="mcpDecisionDock"><ConfirmationCards actor={actor}/></div>
       <div className="mcpComposer">
         {commandMenu && <ChatCommandMenu items={matchingCommands} loading={commandLoading} error={commandError} activeIndex={activeCommandIndex} onSelect={chooseCommand} onRetry={() => void loadCommands()}/>}
         {files.length > 0 && <div className="mcpFileList">{files.map(file => <span className="mcpFileChip" key={file.id}>{file.mime.startsWith("image/") ? <img src={`data:${file.mime};base64,${file.data}`} alt={file.name}/> : <ChatIcon name="file"/>}<span>{file.name}</span><button type="button" className="mcpIconButton" aria-label={`Удалить файл ${file.name}`} disabled={composerBlocked} onClick={() => setFiles(current => current.filter(item => item.id !== file.id))}><ChatIcon name="close"/></button></span>)}</div>}
-        <label className="mcpPrompt">Сообщение<textarea ref={promptInput} value={prompt} maxLength={12000} rows={2} disabled={promptBlocked} aria-controls={commandMenu ? "mcp-command-menu" : undefined} aria-activedescendant={commandMenu && matchingCommands.length ? `mcp-command-${activeCommandIndex}` : undefined} onChange={event => { interacted.current = true; setPrompt(event.target.value); setCommandMenu(/^\/[^\s]*$/.test(event.target.value.trimStart())); setCommandIndex(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`; }} onPaste={event => { const incoming = Array.from(event.clipboardData.files); if (incoming.length) { event.preventDefault(); void attachFiles(incoming); } }} onKeyDown={event => {
+        <label className="mcpPrompt">Сообщение<textarea ref={promptInput} value={prompt} maxLength={12000} rows={2} disabled={promptBlocked} aria-controls={commandMenu ? "mcp-command-menu" : undefined} aria-activedescendant={commandMenu && matchingCommands.length ? `mcp-command-${activeCommandIndex}` : undefined} onChange={event => { interacted.current = true; setPrompt(event.target.value); setCommandMenu(/^\/[^\s]*$/.test(event.target.value.trimStart())); setCommandIndex(0); if (typeof requestAnimationFrame !== "undefined" && promptFrame.current === null) promptFrame.current = requestAnimationFrame(() => { promptFrame.current = null; const input = promptInput.current; if (input) { input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 160)}px`; } }); }} onPaste={event => { const incoming = Array.from(event.clipboardData.files); if (incoming.length) { event.preventDefault(); void attachFiles(incoming); } }} onKeyDown={event => {
           if (commandMenu && event.key === "Escape") { event.preventDefault(); setCommandMenu(false); return; }
           if (commandMenu && ["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); setCommandIndex(current => Math.max(0, Math.min(matchingCommands.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)))); return; }
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) {

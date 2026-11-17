@@ -62,6 +62,9 @@ def communicate(process, payload, timeout=255):
                 if size > 32 * 1024 * 1024: raise ValueError('Runtime output limit')
                 value = json.loads(line)
                 if value.get('event') == 'progress': assistant_jobs.emit(value)
+                elif value.get('event') == 'diagnostic':
+                    import assistant_trace
+                    assistant_trace.record(value)
                 else: output.append(value)
         except Exception as exc:
             failures.append(exc)

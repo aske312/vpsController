@@ -15,6 +15,17 @@ import assistant_mihomo as bridge
 
 
 class MihomoRequestErrors(unittest.TestCase):
+    def test_request_validation_identifies_revision_field_without_echoing_input_or_context(self):
+        detail = {'detail': [{'loc': ['body', 'expected_revision'], 'type': 'string_pattern_mismatch', 'input': 'PRIVATE INPUT', 'msg': 'PRIVATE MESSAGE', 'ctx': {'pattern': 'PRIVATE PATTERN'}},
+                             {'loc': ['body', 'values', 'PRIVATE FIELD'], 'type': 'dict_type'}]}
+        error = bridge.urllib.error.HTTPError('http://127.0.0.1', 422, 'invalid', {}, io.BytesIO(json.dumps(detail).encode()))
+        with patch.dict('os.environ', {'ADMIN_PASSWORD': 'fixture'}), patch.object(bridge.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(api.HTTPException) as caught: bridge.request('POST', '/routing/validate', {})
+        self.assertEqual(caught.exception.detail['fields'][0]['field'], 'expected_revision')
+        self.assertIn('64 hex', caught.exception.detail['fields'][0]['issue'])
+        self.assertNotIn('PRIVATE', json.dumps(caught.exception.detail))
+
     def test_policy_errors_expose_only_allowlisted_fields_and_never_upstream_secrets(self):
         detail = {'detail': {'code': 'invalid_routing_policy', 'fields': ['rules.0.kind', 'groups.1.members.0', 'private_key', 'secret-value'], 'message': 'password=private-secret'}}
         error = bridge.urllib.error.HTTPError('http://127.0.0.1', 422, 'invalid', {}, io.BytesIO(json.dumps(detail).encode()))

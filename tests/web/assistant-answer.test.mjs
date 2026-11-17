@@ -9,6 +9,12 @@ import { answerBlocks, conversationMarkdown } from '../../src/features/assistant
 const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
 const { AssistantAnswer } = await loader.ssrLoadModule('/src/features/assistant/assistant-answer.tsx');
+const { ChatTurnRow } = await loader.ssrLoadModule('/src/features/assistant/chat-turn.tsx');
+
+test('a failed message renders readable feedback and exposes its request trace without interpreting HTML',()=>{
+  const html=renderToStaticMarkup(createElement(ChatTurnRow,{turn:{id:1,request_id:'a'.repeat(32),question:'Check',model:'m',files:[],error:'<script>bad()</script>'},waiting:'',canRetry:true,onRetry(){},onCancel(){},onError(){},onTrace(){}}));
+  assert(html.includes('Нужна проверка'));assert(html.includes('Журнал запроса'));assert(html.includes('&lt;script&gt;'));assert(!html.includes('<script>'));
+});
 
 test('multiline code and symbols stay literal, including unfinished fences and Windows newlines', () => {
   const blocks = answerBlocks('Before\r\n```py\r\nx = "<>&_*"\r\ny = 2\r\n```\r\nAfter');

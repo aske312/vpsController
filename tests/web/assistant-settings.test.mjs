@@ -14,7 +14,7 @@ import * as providerDetails from '../../src/features/assistant/provider-details.
 
 // Render the real form with controlled hooks and I/O, including disabled ancestors.
 function mount(status, catalog = [], overrides = {}) {
-  const slots = [], effects = [], writes = [], notifications = [];
+  const slots = [], effects = [], writes = [], notifications = [], persistence = [];
   let cursor = 0;
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const hooks = {
@@ -31,6 +31,12 @@ function mount(status, catalog = [], overrides = {}) {
       if (!same(slots[index]?.deps, deps)) slots[index] = { deps, fn };
       return slots[index].fn;
     },
+    useMemo(fn, deps) {
+      const index = cursor++;
+      if (!same(slots[index]?.deps, deps)) slots[index] = { deps, value: fn() };
+      return slots[index].value;
+    },
+    memo: component => component,
     useEffect(fn, deps) {
       const index = cursor++;
       if (!same(slots[index]?.deps, deps)) { slots[index] = { deps }; effects.push(fn); }
@@ -40,9 +46,10 @@ function mount(status, catalog = [], overrides = {}) {
   const source = readFileSync(new URL('../../src/features/assistant/assistant-view.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {}, alerts = {};
-  const confirmationModule = {}, commandMenuModule = {};
+  const confirmationModule = {}, commandMenuModule = {}, turnModule = {};
+  const sessionHelpers = { ...chatSession, createChatSessionWriter(...args) { const writer = chatSession.createChatSessionWriter(...args); persistence.push(writer); return writer; } };
   const confirmations = { actions: [], working: [], results: {}, errors: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
-  const require = name => name === 'react' ? hooks : name === './chat-session' ? chatSession : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name === 'react' ? hooks : name === './chat-session' ? sessionHelpers : name === './chat-turn' ? turnModule : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const alertsSource = readFileSync(new URL('../../src/features/assistant/telegram-alerts.tsx', import.meta.url), 'utf8');
   const compiledAlerts = ts.transpileModule(alertsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
@@ -56,6 +63,9 @@ function mount(status, catalog = [], overrides = {}) {
   const commandMenuSource = readFileSync(new URL('../../src/features/assistant/chat-command-menu.tsx', import.meta.url), 'utf8');
   const commandMenuCompiled = ts.transpileModule(commandMenuSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', commandMenuCompiled.outputText)(require, commandMenuModule);
+  const turnSource = readFileSync(new URL('../../src/features/assistant/chat-turn.tsx', import.meta.url), 'utf8');
+  const turnCompiled = ts.transpileModule(turnSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  new Function('require', 'exports', turnCompiled.outputText)(require, turnModule);
   new Function('require', 'exports', outputText)(require, exported);
   const jobs = overrides.jobs ?? new Map();
   const request = async (path, options) => {
@@ -84,13 +94,13 @@ function mount(status, catalog = [], overrides = {}) {
   };
   request.sessionKey = overrides.sessionKey;
   const props = { active: true, onOpenChat: overrides.onOpenChat || (() => {}), request, busy: overrides.busy ?? false, refreshKey: 0, onDirtyChange() {}, confirmAction: async () => false, admitOperation() {}, onOperation() {} };
-  return { writes, notifications, setActive(value) { props.active = value; }, setBusy(value) { props.busy = value; }, render() {
+  return { writes, notifications, flushSession() { for (const writer of persistence) writer.flush(); }, setActive(value) { props.active = value; }, setBusy(value) { props.busy = value; }, render() {
     cursor = 0;
     const tree = exported.AssistantView(props);
     const expand = node => {
       if (Array.isArray(node)) return node.map(expand);
       if (!node?.props) return node;
-      if (node.type === commandMenuModule.ChatCommandMenu || node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
+      if (node.type === turnModule.ChatTurnRow || node.type === commandMenuModule.ChatCommandMenu || node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
       return { ...node, props: { ...node.props, children: expand(node.props.children) } };
     };
     const expanded = expand(tree);
@@ -111,6 +121,28 @@ const shortcuts = [
   {command:'/service',label:'Управление службой',syntax:'/service <ID> <start|stop|restart>',insert:'/service ',needs_args:true,kind:'direct'},
   {command:'/ai',label:'Вопрос AI',syntax:'/ai <вопрос>',insert:'/ai ',needs_args:true,kind:'ai'},
 ];
+
+test('new answers preserve the reader position until the transcript is scrolled back to the bottom',async()=>{
+  const previousFrame=globalThis.requestAnimationFrame,previousCancel=globalThis.cancelAnimationFrame;
+  let frames=[];globalThis.requestAnimationFrame=fn=>(frames.push(fn),frames.length);globalThis.cancelAnimationFrame=()=>{};
+  const flushFrames=()=>{const pending=frames;frames=[];for(const fn of pending)fn();};
+  try{
+    const status=fixture();Object.assign(status.settings,{model:'m',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
+    const view=mount(status);view.render();await Promise.resolve();let tree=view.render();
+    const log=nodes(tree,n=>n.props.className==='mcpTranscript')[0].node;
+    const scroller={scrollHeight:1000,clientHeight:200,scrollTop:100};log.props.ref.current=scroller;
+    log.props.onScroll({currentTarget:scroller});flushFrames();
+    const send=async question=>{
+      nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:question}});tree=view.render();
+      nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();
+      view.render();await new Promise(setImmediate);tree=view.render();flushFrames();
+    };
+    await send('First question');assert.equal(scroller.scrollTop,100);
+    scroller.scrollTop=800;log.props.onScroll({currentTarget:scroller});
+    await send('Second question');assert.equal(scroller.scrollTop,1000);
+    assert.equal(view.writes.length,2);
+  }finally{globalThis.requestAnimationFrame=previousFrame;globalThis.cancelAnimationFrame=previousCancel;}
+});
 
 test('the empty chat server suggestion runs a direct shortcut instead of preparing an AI question',async()=>{
   const view=mount(fixture(),[],{commands:shortcuts});view.render();await Promise.resolve();let tree=view.render();
@@ -207,7 +239,7 @@ test('a browser reload restores actor, model, draft, streaming and transcript ev
     assert.match(JSON.stringify(tree),/Earlier answer/);assert.match(JSON.stringify(nodes(tree,n=>n.props.className==='noderaChatScope')[0].node),/Selected actor/);
     assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Draft before reload');
     assert.match(JSON.stringify(nodes(tree,n=>n.props['aria-label']==='Модель для запроса')[0].node),/chosen-model/);
-    nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'Draft edited before next reload',style:{},scrollHeight:48}});first.render();
+    nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'Draft edited before next reload',style:{},scrollHeight:48}});first.render();first.flushSession();
     const second=await restored();tree=second.render();assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Draft edited before next reload');assert.equal(second.writes.length,0);
     nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);second.render();
     assert.equal(second.writes[0].telegram_id,11);assert.equal(second.writes[0].model,'chosen-model');assert.equal(second.writes[0].stream,true);

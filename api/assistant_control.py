@@ -337,7 +337,7 @@ class Check(BaseModel):
 
 class ToolCall(BaseModel):
     model_config = {'extra': 'forbid'}
-    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect', 'relay_read', 'relay_prepare']
+    name: Literal['telegram_prepare', 'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_user', 'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation', 'ai_dialog_trace', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'vps_compare', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect', 'relay_read', 'relay_prepare']
     service: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
@@ -654,7 +654,7 @@ def status(api):
                           (['vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics'] if agent_version >= (1, 10, 0) else []) + (['vps_access'] if agent_version >= (1, 11, 0) else []) +
                           (['vps_observability'] if agent_version >= (1, 13, 0) else []) +
                           (['vps_changes', 'vps_incident', 'vps_probe'] + (['vps_compare'] if agent_version < (1, 15, 0) else []) if agent_version >= (1, 14, 0) else []) +
-                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []) + (['relay_read', 'relay_prepare'] if agent_version >= (1, 29, 0) else []),
+                          (['application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check'] if agent_version >= (1, 18, 0) else []) + (['vps_terminal'] if agent_version >= (1, 19, 0) else []) + (['operation_inventory', 'developer_inspect'] if agent_version >= (1, 22, 0) else []) + (['relay_read', 'relay_prepare'] if agent_version >= (1, 29, 0) else []) + (['ai_dialog_trace'] if agent_version >= (1, 37, 0) else []),
                       'mihomo-mcp': (['mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_compare', 'mihomo_operation'] +
                           (['mihomo_read', 'mihomo_settings', 'mihomo_groups', 'mihomo_group_update', 'mihomo_group_delete', 'mihomo_profile_update', 'mihomo_group_select'] if agent_version >= (1, 26, 0) else []) +
                           (['mihomo_profile_create', 'mihomo_profile_delete', 'mihomo_subscription_rotate', 'mihomo_accounts', 'mihomo_profile_assign'] if agent_version >= (1, 36, 0) else [])) if agent_version >= (1, 15, 0) else []}}
@@ -849,6 +849,22 @@ def model_catalog(api, payload):
 
 
 def chat_request(api, payload, actor='panel', channel='panel', *, settings=None):
+    import assistant_trace
+    identity = payload.request_id or uuid.uuid4().hex
+    payload = payload.model_copy(update={'request_id': identity})
+    with assistant_trace.capture(api, identity, actor, channel):
+        assistant_trace.record({'stage': 'request_started', 'prompt_chars': len(payload.prompt), 'history_turns': len(payload.history), 'attachments': len(payload.attachments)})
+        try:
+            output = _admitted_chat(api, payload, actor, channel, settings=settings)
+            output['diagnostic_request_id'] = identity
+            assistant_trace.record({'stage': 'request_finished', 'status': output.get('result', {}).get('status', 'success')})
+            return output
+        except Exception as exc:
+            assistant_trace.record({'stage': 'request_finished', 'status': 'failed', 'error_code': getattr(exc, 'error_code', 'request_failed')})
+            raise
+
+
+def _admitted_chat(api, payload, actor='panel', channel='panel', *, settings=None):
     import assistant_broker
     initial = read(api) if settings is None else settings
     if actor != 'panel': roles.require(initial, actor, 'chat')
@@ -878,7 +894,7 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
         roles.require(settings, actor, 'model_select')
     settings = {**settings, 'memory_enabled': settings.get('memory_enabled', True) and roles.allows(settings, actor, 'memory')}
     files = [item.model_dump() for item in payload.attachments]
-    body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files, 'stream': payload.stream,
+    body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files, 'stream': payload.stream, 'request_id': payload.request_id,
             'history': [item.model_dump() for item in payload.history]}
     if channel == 'bot' and settings.get('model_mode') == 'catalog' and not body['model']:
         preference = operations.read(bot_model_path(api, actor))
@@ -1105,6 +1121,11 @@ def _runtime_request(api, mode, body):
     env = {key: os.environ[key] for key in ('PATH', 'LANG', 'SYSTEMROOT', 'SSL_CERT_FILE') if key in os.environ}
     if not _runtime_slots.acquire(timeout=10):
         raise HTTPException(429, 'Два запроса к модулям уже выполняются; дождитесь завершения')
+    if mode == '--chat':
+        import assistant_trace
+        try: runtime_version = (runtime_directory(component) / 'version').read_text().strip()
+        except OSError: runtime_version = ''
+        assistant_trace.record({'stage': 'runtime_started', 'model_id': value.get('model'), 'runtime_version': runtime_version})
     try:
         with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               text=True, env=env, start_new_session=os.name == 'posix') as process:
@@ -1209,6 +1230,12 @@ def control_tool(api, name, arguments=None, actor='panel'):
         return (assistant_relay.read if name == 'relay_read' else assistant_relay.prepare)(api, actor, arguments.get('body', {}))
     if name == 'telegram_prepare':
         return assistant_telegram.prepare(api, actor, arguments.get('body', {}))
+    if name == 'ai_dialog_trace':
+        import assistant_trace
+        settings = read(api)
+        for permission in ('server_read', 'diagnostics'): roles.require(settings, actor, permission)
+        identity = arguments.get('body', {}).get('request_id')
+        return assistant_trace.read(api, identity) if identity else assistant_trace.listing(api)
     if name == 'mihomo_operation':
         identity = arguments.get('operation_id', '')
         if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity): raise HTTPException(422, 'Укажите ID операции Mihomo')

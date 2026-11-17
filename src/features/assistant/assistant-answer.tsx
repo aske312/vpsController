@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, memo, useState, type ReactNode } from 'react';
 import { answerBlocks, tableRows } from './answer-format';
 import { ChatIcon } from './chat-icon';
 
@@ -44,7 +44,7 @@ function prose(text: string) {
   }
   return content;
 }
-export function AssistantAnswer({ text }: { text: string }) {
+export const AssistantAnswer = memo(function AssistantAnswer({ text }: { text: string }) {
   const [copied, setCopied] = useState<number>();
   return <div className="mcpAnswerContent">{answerBlocks(text).map((block, index) => block.type === 'code' ? <div className="mcpCodeBlock" key={index}><header><span>{block.language || 'Код'}</span><button type="button" className="mcpIconButton" aria-label="Скопировать код" title={copied === index ? 'Скопировано' : 'Скопировать код'} onClick={() => { void navigator.clipboard.writeText(block.text).then(() => setCopied(index)).catch(() => setCopied(undefined)); }}><ChatIcon name={copied === index ? 'check' : 'copy'}/></button></header><pre><code>{block.text}</code></pre></div> : <Fragment key={index}>{prose(block.text)}</Fragment>)}</div>;
-}
+});

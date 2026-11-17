@@ -1,9 +1,29 @@
 import type { createApiClient } from "../../shared/lib/api-request";
 
 type Client = Pick<ReturnType<typeof createApiClient>, "sessionKey">;
-export type SessionTurn = { id: number; question: string; model: string; answer?: string; error?: string; tools?: string[]; context_safe?: boolean; files: [] };
+export type SessionTurn = { request_id?: string; id: number; question: string; model: string; answer?: string; error?: string; tools?: string[]; context_safe?: boolean; files: [] };
 export type ChatSession = { model: string; provider: string; streaming: boolean; conversation_id: string | null; prompt: string; turns: SessionTurn[] };
 const MAX_CHARS = 240000;
+type Snapshot = Parameters<typeof saveChatSession>[2];
+type Writer = { schedule: (value: Snapshot) => void; flush: () => void; dispose: (flush?: boolean) => void };
+const writers = new Map<Writer, string | undefined>();
+
+export function createChatSessionWriter(client: Client, actor: string, delay = 300): Writer {
+  let pending: Snapshot | undefined, timer: ReturnType<typeof setTimeout> | undefined, active = true;
+  const flush = () => {
+    clearTimeout(timer); timer = undefined;
+    if (!active || !pending) return;
+    const value = pending; pending = undefined;
+    saveChatSession(client, actor, value);
+  };
+  const writer: Writer = {
+    schedule(value) { if (!active) return; pending = value; clearTimeout(timer); timer = setTimeout(flush, delay); },
+    flush,
+    dispose(save = true) { if (save) flush(); active = false; pending = undefined; clearTimeout(timer); writers.delete(writer); },
+  };
+  writers.set(writer, client.sessionKey);
+  return writer;
+}
 export function chatProvider(settings: { active_provider?: string | null; provider_url: string; model_mode?: string }) {
   return JSON.stringify([settings.active_provider || "", settings.provider_url, settings.model_mode || "single"]);
 }
@@ -27,20 +47,25 @@ export function readChatSession(client: Client, actor: string): ChatSession | un
     if (typeof value.model !== "string" || typeof value.provider !== "string" || typeof value.streaming !== "boolean" || typeof value.prompt !== "string" || value.prompt.length > 12000 || !Array.isArray(value.turns) || value.turns.length > 40) return;
     if (value.conversation_id !== null && !/^[a-f0-9]{32}$/.test(value.conversation_id)) return;
     if (value.turns.some((turn: SessionTurn) => !Number.isSafeInteger(turn.id) || turn.id < 1 || typeof turn.question !== "string" || typeof turn.model !== "string" || turn.answer !== undefined && typeof turn.answer !== "string" || turn.error !== undefined && typeof turn.error !== "string")) return;
-    return { ...value, turns: value.turns.map((turn: SessionTurn) => ({ id: turn.id, question: turn.question, model: turn.model, answer: turn.answer, error: turn.error, tools: Array.isArray(turn.tools) ? turn.tools.filter(tool => typeof tool === "string") : [], context_safe: typeof turn.context_safe === "boolean" ? turn.context_safe : undefined, files: [] })) };
+    return { ...value, turns: value.turns.map((turn: SessionTurn) => ({ ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), id: turn.id, question: turn.question, model: turn.model, answer: turn.answer, error: turn.error, tools: Array.isArray(turn.tools) ? turn.tools.filter(tool => typeof tool === "string") : [], context_safe: typeof turn.context_safe === "boolean" ? turn.context_safe : undefined, files: [] })) };
   } catch { /* A damaged snapshot must not block server history. */ }
 }
 export function saveChatSession(client: Client, actor: string, value: Omit<ChatSession, "turns"> & { turns: (Omit<SessionTurn, "files"> & { files?: unknown[]; queue_state?: "queued" | "running" })[] }) {
   const identity = key(client, actor);
   if (!identity) return;
-  const turns: SessionTurn[] = value.turns.filter(turn => turn.queue_state !== "running").slice(-40).map(turn => ({ id: turn.id, question: turn.question.slice(0, 12000), model: turn.model, answer: turn.answer?.slice(0, 20000), tools: turn.tools, context_safe: turn.context_safe, files: [],
+  const turns: SessionTurn[] = value.turns.filter(turn => turn.queue_state !== "running").slice(-40).map(turn => ({ ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), id: turn.id, question: turn.question.slice(0, 12000), model: turn.model, answer: turn.answer?.slice(0, 20000), tools: turn.tools, context_safe: turn.context_safe, files: [],
     error: turn.queue_state === "queued" ? "Не отправлено после обновления страницы. Отправьте сообщение вручную." : turn.error?.slice(0, 2000) }));
   const snapshot = { ...value, turns };
-  while (JSON.stringify(snapshot).length > MAX_CHARS && turns.length) turns.shift();
+  let size = JSON.stringify({ ...value, turns: [] }).length;
+  const sizes = turns.map(turn => JSON.stringify(turn).length + 1);
+  size += sizes.reduce((sum, length) => sum + length, 0);
+  while (size > MAX_CHARS && turns.length) { turns.shift(); size -= sizes.shift()!; }
   try { sessionStorage.setItem(identity, JSON.stringify(snapshot)); } catch { /* Server history remains authoritative. */ }
 }
 export function clearChatSessions(client: Client) {
   if (!client.sessionKey) return;
+  // Logout must also cancel buffered drafts; unmount cannot restore them later.
+  for (const [writer, scope] of writers) if (scope === client.sessionKey) writer.dispose(false);
   try {
     for (let index = sessionStorage.length - 1; index >= 0; index--) {
       const identity = sessionStorage.key(index);

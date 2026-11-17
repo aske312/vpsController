@@ -508,6 +508,14 @@ def assistant_result(identity: str, telegram_id: int | None = None, _: None = De
     return assistant_jobs.get(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
 
 
+@app.get('/api/assistant/requests/{identity}/trace')
+def assistant_request_trace(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
+    import assistant_trace
+    actor = str(telegram_id) if telegram_id else 'panel'
+    if actor != 'panel': assistant_control.roles.require(assistant_control.read(sys.modules[__name__]), actor, 'chat')
+    return assistant_trace.read(sys.modules[__name__], identity, actor)
+
+
 @app.get('/api/assistant/requests/{identity}/stream')
 def assistant_stream(identity: str, request: Request, telegram_id: int | None = None, _: None = Depends(require_token)):
     import assistant_jobs

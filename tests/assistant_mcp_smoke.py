@@ -66,7 +66,7 @@ async def main():
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     names = {tool.name for tool in (await session.list_tools()).tools}
-                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect', 'relay_read', 'relay_prepare'}, names
+                    assert names == {'vps_overview', 'vps_services', 'vps_components', 'vps_metrics', 'vps_panel', 'vps_service_action', 'vps_operation', 'vps_api', 'vps_logs', 'vps_network', 'vps_security', 'vps_diagnostics', 'vps_access', 'vps_observability', 'vps_changes', 'vps_incident', 'vps_probe', 'application_diagnostics', 'operation_timeline', 'integration_probe', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'operation_inventory', 'developer_inspect', 'relay_read', 'relay_prepare', 'ai_dialog_trace'}, names
                     vps_names = names
                     assert (await session.call_tool('mihomo_api', {'method': 'GET', 'path': '/profiles'})).isError
                     result = await session.call_tool('vps_overview', {})
@@ -79,15 +79,15 @@ async def main():
                                             ('relay_read', {'view': 'inventory'}),
                                             ('relay_prepare', {'action': 'configure_host', 'host_id': 'c' * 32, 'expected_revision': 'd' * 32, 'changes': {'client_address': 'relay.example'}}),
                                             ('integration_probe', {'integration_id': 'ai:' + 'b' * 32, 'mode': 'tls'}),
-                                            ('vps_probe', {'kind': 'service', 'service': 'api'})]:
+                                            ('vps_probe', {'kind': 'service', 'service': 'api'}), ('ai_dialog_trace', {})]:
                         result = await session.call_tool(name, arguments)
                         assert not result.isError, result
                     assert (await session.call_tool('relay_prepare', {'action': 'delete_host', 'host_id': 'c' * 32, 'expected_revision': 'd' * 32})).isError
                     rejected = await session.call_tool('shell', {'cmd': 'whoami'})
                     assert rejected.isError
             assert Endpoint.seen[:2] == [{'name': 'vps_overview'}, {'name': 'vps_observability', 'method': 'GET', 'path': '/events', 'body': {'minutes': 15, 'errors': True}}]
-            assert [item['name'] for item in Endpoint.seen[2:]] == ['vps_changes', 'vps_incident', 'application_diagnostics', 'operation_timeline', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'relay_read', 'relay_prepare', 'integration_probe', 'vps_probe']
-            assert Endpoint.seen[-1]['body']['service'] == 'api'
+            assert [item['name'] for item in Endpoint.seen[2:]] == ['vps_changes', 'vps_incident', 'application_diagnostics', 'operation_timeline', 'diagnostic_baseline', 'diagnostic_alerts', 'diagnostic_alert_rules', 'component_check', 'vps_terminal', 'relay_read', 'relay_prepare', 'integration_probe', 'vps_probe', 'ai_dialog_trace']
+            assert Endpoint.seen[-2]['body']['service'] == 'api'
             print('stdio SDK handshake, scoped HTTP tool call and unknown-tool rejection: passed')
             settings['mcp']['vps-controller-mcp'] = False
             config.write_text(json.dumps(settings))

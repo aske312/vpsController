@@ -18,6 +18,7 @@
         "mihomo_api",
         "mihomo_compare",
         "mihomo_operation",
+        "ai_dialog_trace",
         "vps_logs",
         "vps_network",
         "vps_security",
