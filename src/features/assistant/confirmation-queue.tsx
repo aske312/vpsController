@@ -5,12 +5,27 @@ import { createApiClient, mutationFailureState } from "../../shared/lib/api-requ
 import { systemActionSnapshot, systemAdmissionSnapshot, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "../../control-panel/system-operation";
 import { useNotifications, useNotifier } from "../../shared/notifications/notification-center";
 
-export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string } };
+export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string; request_id?: string; operation_ids?: string[] } };
 type Client = ReturnType<typeof createApiClient>;
 export const confirmationKey = (action: PendingAction) => `${action.actor || "panel"}:${action.code}`;
+export type ConfirmationGroup = { key: string; actions: PendingAction[]; presentation?: PendingAction["confirmation_request"] };
+export function confirmationGroups(actions: PendingAction[]): ConfirmationGroup[] {
+  const groups = new Map<string, ConfirmationGroup>();
+  for (const action of actions) {
+    const presentation = action.confirmation_request;
+    const grouped = presentation?.request_id && /^[a-f0-9]{32}$/.test(presentation.request_id) && action.operation_id && presentation.operation_ids?.includes(action.operation_id);
+    const key = grouped ? `plan:${action.actor || "panel"}:${presentation.request_id}` : confirmationKey(action);
+    const group = groups.get(key) ?? { key, actions: [], presentation: grouped ? presentation : undefined };
+    group.actions.push(action); groups.set(key, group);
+  }
+  for (const group of groups.values()) if (group.presentation) group.actions.sort((a, b) => group.presentation!.operation_ids!.indexOf(a.operation_id!) - group.presentation!.operation_ids!.indexOf(b.operation_id!));
+  return [...groups.values()];
+}
+
 type DecisionContext = { key: string; actor: string; question: string; answer: string };
 type Queue = { context: DecisionContext[]; actions: PendingAction[]; working: string[]; results: Record<string, string>; errors: Record<string, string>;
   decide: (action: PendingAction, decision: "confirm" | "reject") => Promise<string | undefined>;
+  decideGroup: (group: ConfirmationGroup, decision: "confirm" | "reject") => Promise<void>;
   ingest: (actor: string, actions: PendingAction[]) => void };
 const Context = createContext<Queue | null>(null);
 export function useAssistantConfirmations() {
@@ -28,6 +43,9 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
   const [results, setResults] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const writing = useRef(new Set<string>());
+  const batching = useRef(new Set<string>());
+  const currentActions = useRef(actions);
+  currentActions.current = actions;
   const settled = useRef(new Set<string>());
   const generation = useRef(0);
   const activeRequest = useRef<Client | null>(request);
@@ -61,12 +79,14 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
     setActions(current => [...current.filter(item => (item.actor || "panel") !== actor),
       ...incoming.map(item => ({ ...item, actor })).filter(item => !settled.current.has(confirmationKey(item)) && item.expires * 1000 > Date.now())]);
   }, []);
-  const decide = useCallback(async (action: PendingAction, decision: "confirm" | "reject") => {
+  const decideOne = useCallback(async (action: PendingAction, decision: "confirm" | "reject", batchKey?: string) => {
     const key = confirmationKey(action);
+    const planKey = confirmationGroups([action])[0].key;
+    if (batching.current.has(planKey) && batchKey !== planKey) return;
     if (activeRequest.current !== request || writing.current.has(key) || settled.current.has(key) || action.expires * 1000 <= Date.now()) return;
     writing.current.add(key); generation.current++;
     setErrors(current => { const next = { ...current }; delete next[key]; return next; });
-    setWorking([...writing.current]);
+    setWorking([...writing.current, ...batching.current]);
     try {
       const result = await request<{ text: string; operation?: SystemAction | null }>("/assistant/service-confirm", {
         method: "POST", body: JSON.stringify({ code: action.code, decision, telegram_id: action.actor && action.actor !== "panel" ? Number(action.actor) : null }),
@@ -81,8 +101,8 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
         trackOperation(snapshot, `Nodera · ${action.action} · ${action.service}`);
         operation.current(snapshot);
       }
-      else notify.info(result.text);
-      return result.text;
+      else if (!batchKey) notify.info(result.text);
+      return result;
     } catch (cause) {
       if (activeRequest.current !== request) return;
       if (mutationFailureState(cause) === "unknown") {
@@ -99,13 +119,45 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
         else notify.error(text);
       } else setErrors(current => ({ ...current, [key]: cause instanceof Error ? cause.message : "Действие не выполнено" }));
     } finally {
-      if (activeRequest.current === request) { writing.current.delete(key); setWorking([...writing.current]); }
+      if (activeRequest.current === request) { writing.current.delete(key); setWorking([...writing.current, ...batching.current]); }
     }
   }, [request, notify, trackOperation]);
+  const decide = useCallback(async (action: PendingAction, decision: "confirm" | "reject") => (await decideOne(action, decision))?.text, [decideOne]);
+  const decideGroup = useCallback(async (group: ConfirmationGroup, decision: "confirm" | "reject") => {
+    if (!group.presentation || batching.current.has(group.key) || activeRequest.current !== request) return;
+    const selected = group.actions.filter(item => !settled.current.has(confirmationKey(item)));
+    if (!selected.length || selected.some(item => writing.current.has(confirmationKey(item)) || !currentActions.current.some(current => confirmationKey(current) === confirmationKey(item)))) return;
+    batching.current.add(group.key); generation.current++;
+    setWorking([...writing.current, ...batching.current]);
+    setErrors(current => { const next = { ...current }; delete next[group.key]; return next; });
+    const stopped = () => setErrors(current => ({ ...current, [group.key]: "План остановлен. Уже отправленные действия не повторяем; оставшиеся ожидают вашего решения." }));
+    try {
+      for (const action of selected) {
+        if (activeRequest.current !== request) return;
+        const result = await decideOne(action, decision, group.key);
+        if (activeRequest.current !== request) return;
+        if (!result) { stopped(); return; }
+        if (decision !== "confirm" || !result.operation?.id) continue;
+        const id = result.operation.id;
+        // Respect the existing admission worker: wait for success before the next mutation.
+        while (activeRequest.current === request) {
+          await readOperation(id);
+          if (activeRequest.current !== request) return;
+          const snapshot = tracked.current.get(id)?.snapshot;
+          if (snapshot?.state === "succeeded") break;
+          if (!snapshot || !["queued", "running"].includes(snapshot.state || "") || selected.some(item => item.expires * 1000 <= Date.now())) { stopped(); return; }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      if (activeRequest.current === request) notify.info(`${decision === "confirm" ? "План выполнен" : "План отклонён"}: ${group.presentation.title} · ${selected.length}`);
+    } finally {
+      if (activeRequest.current === request) { batching.current.delete(group.key); setWorking([...writing.current, ...batching.current]); }
+    }
+  }, [request, decideOne, readOperation, notify]);
   useEffect(() => {
     activeRequest.current = request; generation.current++;
     const sessionOperations = tracked.current;
-    writing.current.clear(); settled.current.clear(); tracked.current.clear();
+    writing.current.clear(); batching.current.clear(); settled.current.clear(); tracked.current.clear();
     queueMicrotask(() => { if (activeRequest.current === request) { setActions([]); setContext([]); setWorking([]); setResults({}); setErrors({}); } });
     let stopped = false, reading = false;
     const poll = async () => {
@@ -134,7 +186,20 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
   }, [request, trackOperation, readOperation, notifications]);
   useEffect(() => {
     const ids = new Set<string>();
-    for (const action of actions) {
+    for (const group of confirmationGroups(actions)) {
+      if (group.presentation) {
+        const id = `nodera-confirm:${group.key}`;
+        const busy = working.includes(group.key);
+        ids.add(id);
+        notifications.upsert({ id, source: "nodera", title: group.presentation.title, state: "info", kind: "confirmation",
+          message: `${errors[group.key] ? errors[group.key] + " " : ""}${busy ? "Выполняем план. " : ""}${group.presentation.reason}`,
+          confirmationItems: group.actions.map(item => `${item.action} · ${item.service}${errors[confirmationKey(item)] ? " — " + errors[confirmationKey(item)] : ""}`),
+          details: group.actions.filter(item => item.changes).map(item => `${item.action} · ${item.service}\n${JSON.stringify(item.changes, null, 2)}`).join("\n\n") || undefined,
+          action: busy ? undefined : { label: `Подтвердить все (${group.actions.length})`, run: async () => { await decideGroup(group, "confirm"); } },
+          secondaryAction: busy ? undefined : { label: `Отклонить все (${group.actions.length})`, run: async () => { await decideGroup(group, "reject"); } } });
+        continue;
+      }
+      const action = group.actions[0];
       const id = `nodera-confirm:${confirmationKey(action)}`;
       ids.add(id);
       notifications.upsert({ id, source: "nodera", title: action.confirmation_request?.title || "Nodera · Подтверждение", state: "info", kind: "confirmation",
@@ -149,9 +214,9 @@ export function AssistantConfirmations({ request, onOperation, children }: { req
       else notifications.resolve(id);
     }
     registered.current = ids;
-  }, [actions, errors, notifications, decide]);
+  }, [actions, errors, working, notifications, decide, decideGroup]);
   useEffect(() => () => { for (const id of registered.current) notifications.resolve(id); }, [notifications, request]);
-  const value = useMemo(() => ({ context, actions, working, results, errors, decide, ingest }), [context, actions, working, results, errors, decide, ingest]);
+  const value = useMemo(() => ({ context, actions, working, results, errors, decide, decideGroup, ingest }), [context, actions, working, results, errors, decide, decideGroup, ingest]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -160,14 +225,26 @@ export function ConfirmationCards({ actor }: { actor: string }) {
   const actions = queue.actions.filter(item => (item.actor || "panel") === (actor || "panel"));
   if (!actions.length) return null;
   return <section className="mcpConfirmations" role="region" aria-label="Подтверждение действий">
-    <header><strong>Ожидают подтверждения · {actions.length}</strong><small>Каждое действие подтверждается отдельно</small></header>
-    {actions.map(action => <article key={confirmationKey(action)} className="mcpConfirmationCard" aria-label={`${action.action} · ${action.service}`}>
+    <header><strong>Ожидают подтверждения · {actions.length}</strong><small>Выберите действие или подтвердите весь план</small></header>
+    {confirmationGroups(actions).map(group => group.presentation ? <article key={group.key} className="mcpConfirmationCard" aria-label={group.presentation.title}>
+      <div><strong>{group.presentation.title}</strong><span>{group.actions[0].actor_name}</span></div>
+      <p>{group.presentation.reason}</p>
+      <ol className="mcpConfirmationItems">{group.actions.map(action => <li key={confirmationKey(action)}>
+        <strong>{action.action} · {action.service}</strong>
+        {action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
+        {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}
+      </li>)}</ol>
+      <small>По порядку, пока приложение открыто · До {new Date(Math.min(...group.actions.map(item => item.expires)) * 1000).toLocaleTimeString("ru-RU")}</small>
+      {queue.errors[group.key] && <p className="error" role="alert">{queue.errors[group.key]}</p>}
+      <footer><button type="button" className="primaryButton" disabled={queue.working.includes(group.key) || group.actions.some(item => queue.working.includes(confirmationKey(item)))} onClick={() => void queue.decideGroup(group, "confirm")}>{queue.working.includes(group.key) ? "Выполняем план…" : `Подтвердить все (${group.actions.length})`}</button>
+        <button type="button" className="ghostButton" disabled={queue.working.includes(group.key) || group.actions.some(item => queue.working.includes(confirmationKey(item)))} onClick={() => void queue.decideGroup(group, "reject")}>Отклонить все ({group.actions.length})</button></footer>
+    </article> : group.actions.map(action => <article key={confirmationKey(action)} className="mcpConfirmationCard" aria-label={`${action.action} · ${action.service}`}>
       {action.confirmation_request && <div><strong>{action.confirmation_request.title}</strong><p>{action.confirmation_request.reason}</p></div>}
       <div><strong>{action.action}</strong><span>{action.service}</span><small>До {new Date(action.expires * 1000).toLocaleTimeString("ru-RU")}</small></div>
       {action.changes && <details><summary>Изменения</summary><pre>{JSON.stringify(action.changes, null, 2)}</pre></details>}
       {queue.errors[confirmationKey(action)] && <p className="error" role="alert">{queue.errors[confirmationKey(action)]}</p>}
       <footer><button type="button" className="primaryButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "confirm")}>Подтвердить</button>
         <button type="button" className="ghostButton" disabled={queue.working.includes(confirmationKey(action))} onClick={() => void queue.decide(action, "reject")}>Отказать</button></footer>
-    </article>)}
+    </article>))}
   </section>;
 }

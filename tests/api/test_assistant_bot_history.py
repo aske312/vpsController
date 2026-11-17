@@ -202,7 +202,7 @@ class BotHistoryTransportTests(unittest.IsolatedAsyncioTestCase):
             if len(seen) == 1:
                 self.assertIn('request_confirmation', [row['function']['name'] for row in tools])
                 return {'tool_calls': [{'id': 'present', 'type': 'function', 'function': {'name': 'request_confirmation',
-                    'arguments': json.dumps({'operation_id': identity, 'title': 'Apply routing', 'reason': 'Reconnect clients'})}}]}
+                    'arguments': json.dumps({'operation_ids': [identity, 'b'*32, 'c'*32, 'd'*32, 'e'*32], 'title': 'Apply routing', 'reason': 'Reconnect clients'})}}]}
             self.assertIn('awaiting_user', messages[-1]['content'])
             return {'content': 'Waiting for your decision'}
         def transport(request):
@@ -217,7 +217,7 @@ class BotHistoryTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0].url.path, '/api/assistant/confirmation-request')
         self.assertEqual(calls[0].headers['Authorization'], 'Bearer scoped-confirmation')
         self.assertEqual(calls[0].headers['X-MCP-Actor'], 'panel')
-        self.assertEqual(json.loads(calls[0].content)['operation_id'], identity)
+        self.assertEqual(json.loads(calls[0].content)['operation_ids'], [identity, 'b'*32, 'c'*32, 'd'*32, 'e'*32])
         self.assertNotIn('request_confirmation', runner.native_connections({**settings, 'confirmation_request_token': ''}, 'panel'))
 
     async def test_successful_send_is_recorded_once_and_history_failure_never_replays_delivery(self):

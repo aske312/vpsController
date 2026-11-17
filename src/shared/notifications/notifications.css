@@ -171,3 +171,5 @@
 .operationEvidence dd { margin:4px 0 0; font-size:12px; overflow-wrap:anywhere; }
 
 .gateConfirmationDetails { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
+
+.gateConfirmationItems { list-style:decimal; display:grid; gap:6px; margin:8px 0; padding-left:22px; max-height:240px; overflow:auto; overflow-wrap:anywhere; font-size:12px; }

@@ -96,3 +96,61 @@ class ConfirmationRequestTests(unittest.TestCase):
             control._chat_request(api, control.Chat(prompt='Explain output', history=history + private, conversation_id='a'*32), 'panel', settings=settings)
         self.assertEqual([{key: row[key] for key in ('role', 'content')} for row in runtime.call_args.args[2]['history']], [{'role': 'user', 'content': 'Earlier AI question'}, {'role': 'assistant', 'content': 'Stored AI answer'}] + history)
         self.assertEqual(runtime.call_args.args[2]['context_conversation'], 'a'*32)
+
+    def group(self, codes, actor='11', **changes):
+        ids = [control.operations.read(commands.pending_path(api, '11', code=code))['operation_id'] for code in codes]
+        token = control.mcp_transport_token(control.read(api)['control_token'], 'nodera-confirmations', actor)
+        return self.client.post('/api/assistant/confirmation-request', json={
+            'operation_ids': ids, 'title': 'Repair connections', 'reason': 'Apply the prepared actions in order', **changes},
+            headers={'Authorization': 'Bearer ' + token, 'X-MCP-Actor': actor})
+
+    def test_one_call_presents_five_exact_operations_atomically_and_preserves_order(self):
+        codes = [self.prepare() for _ in range(5)]
+        records = [control.operations.read(commands.pending_path(api, '11', code=code)) for code in codes]
+        with patch.object(control, 'require_installed'), patch.object(api, 'manage_service') as mutate:
+            result = self.group(codes)
+            self.assertEqual(result.status_code, 200, result.text)
+            value = result.json()
+            self.assertEqual(value['operation_ids'], [row['operation_id'] for row in records])
+            self.assertEqual(value['expires'], min(row['expires'] for row in records))
+            self.assertNotIn('code', str(value))
+            self.assertEqual(self.group(codes).json(), value)
+            self.assertEqual(len(confirmations.plans(api, '11')), 1)
+            self.assertEqual(self.group(codes, title='Different plan').status_code, 409)
+            self.assertEqual(self.group(list(reversed(codes))).status_code, 409)
+            self.assertEqual(self.group(codes[:2]).status_code, 409)
+            rows = commands.pending_actions(api, '11')
+            self.assertEqual({row['confirmation_request']['request_id'] for row in rows}, {value['request_id']})
+            self.assertEqual(confirmations.for_model(api, 'panel'), [])
+            mutate.assert_not_called()
+            self.assertEqual(self.call('/cancel ' + codes[1]).status_code, 200)
+            remaining = commands.pending_actions(api, '11')
+            self.assertEqual(len(remaining), 4)
+            self.assertEqual({row['confirmation_request']['request_id'] for row in remaining}, {value['request_id']})
+
+    def test_invalid_group_never_creates_partial_presentations_or_foreign_members(self):
+        codes = [self.prepare() for _ in range(5)]
+        with patch.object(control, 'require_installed'):
+            self.assertEqual(self.group(codes, actor='panel').status_code, 409)
+            self.assertEqual(self.group(codes, operation_ids=['f'*32]).status_code, 409)
+            identity = control.operations.read(commands.pending_path(api, '11', code=codes[0]))['operation_id']
+            for changes in ({'operation_ids': []}, {'operation_ids': [identity]*2}, {'operation_ids': [identity]*33},
+                            {'operation_id': identity}, {'operation_ids': ['../bad']}):
+                self.assertEqual(self.group(codes, **changes).status_code, 422)
+            path = commands.pending_path(api, '11', code=codes[-1])
+            record = control.operations.read(path)
+            control.operations.atomic_json(path, {**record, 'expires': time.time()-1})
+            self.assertEqual(self.group(codes).status_code, 409)
+            self.assertEqual(confirmations.plans(api, '11'), [])
+            self.assertTrue(all('confirmation_request' not in row for row in commands.pending_actions(api, '11')))
+
+    def test_group_binding_blocks_a_changed_operation_before_any_mutation(self):
+        codes = [self.prepare() for _ in range(4)]
+        with patch.object(control, 'require_installed'):
+            self.assertEqual(self.group(codes).status_code, 200)
+        path = commands.pending_path(api, '11', code=codes[2])
+        row = control.operations.read(path)
+        control.operations.atomic_json(path, {**row, 'action': 'stop'})
+        with patch.object(api, 'manage_service') as mutate:
+            self.assertEqual(self.call('/confirm ' + codes[2]).status_code, 409)
+            mutate.assert_not_called()

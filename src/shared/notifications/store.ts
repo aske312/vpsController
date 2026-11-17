@@ -9,6 +9,7 @@ export type NotificationInput = {
   kind?: "message" | "operation" | "confirmation";
   secondaryAction?: NotificationAction;
   details?: string;
+  confirmationItems?: string[];
   progress?: number;
   startedAt?: number;
   action?: NotificationAction;
@@ -23,7 +24,7 @@ export function notificationFailure(cause: unknown, fallback: string) {
 }
 
 export const isPending = (item: Pick<Notification, "state" | "kind">) => item.kind === "confirmation" || item.state === "running" || item.state === "unknown";
-const fingerprint = (item: NotificationInput) => JSON.stringify([item.kind, item.state, item.title, item.message, item.progress, item.startedAt, item.action?.label, item.secondaryAction?.label, item.details, Boolean(item.onCancel)]);
+const fingerprint = (item: NotificationInput) => JSON.stringify([item.kind, item.state, item.title, item.message, item.progress, item.startedAt, item.action?.label, item.secondaryAction?.label, item.details, item.confirmationItems, Boolean(item.onCancel)]);
 
 /** One store per mounted application. Nothing is shared between SSR requests. */
 export function createNotificationStore(now = Date.now) {

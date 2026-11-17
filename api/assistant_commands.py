@@ -187,7 +187,8 @@ def pending_actions(api, actor, *, settings=None):
             row['confirmation_request'] = {key: record['confirmation_request'][key] for key in ('title', 'reason')}
         row['has_changes'] = 'body' in record
         result.append(row)
-    return result
+    import assistant_confirmations
+    return assistant_confirmations.annotate(api, actor, result, settings)
 
 
 def pending_action(api, actor):
@@ -323,7 +324,7 @@ def execute(api, actor, prompt, *, source='bot'):
                     path.unlink()
                     raise HTTPException(403, 'Действие больше недоступно через Nodera')
             import assistant_confirmations
-            assistant_confirmations.validate(record)
+            assistant_confirmations.validate(record, api, actor)
             record['submitted'] = True
             control.operations.atomic_json(path, record)
         # Use the panel's durable, idempotent service worker and admission lock.

@@ -117,8 +117,10 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
       {item.state === "unknown" && item.action && <button type="button" className="gateNotificationMore" disabled={checking} aria-label={item.action.label} title={item.action.label} onClick={() => void runAction()}>↻</button>}
       {item.kind === "message" && item.action && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction()}>{item.action.label}</button>}
       <button type="button" className="gateNotificationMore" aria-expanded={detailsOpen} aria-label={`Подробности: ${item.title}`} title="Подробности и действия" onClick={() => setDetailsOpen(value => !value)}>···</button>
+      {item.kind === "confirmation" && <button type="button" className="gateNotificationMore" aria-label={`Свернуть запрос: ${item.title}`} title="Свернуть запрос" onClick={() => setHidden(true)}>−</button>}
       {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
     </div>
+    {item.kind === "confirmation" && item.confirmationItems && <ol className="gateConfirmationItems">{item.confirmationItems.map((text, index) => <li key={index}>{text}</li>)}</ol>}
     {item.kind === "confirmation" && <div className="gateOperationActions">
       {item.action && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction()}>{item.action.label}</button>}
       {item.secondaryAction && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction(item.secondaryAction)}>{item.secondaryAction.label}</button>}
