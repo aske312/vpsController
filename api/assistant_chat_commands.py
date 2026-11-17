@@ -49,6 +49,32 @@ def catalog(api, actor):
     return result
 
 
+def response_actions(api, name, text, entries):
+    """Explicit command buttons; execution always rechecks the actor's live ACL."""
+    allowed = {row['command'] for row in entries}
+    actions = []
+    def add(label, command):
+        if command.split()[0] in allowed and len(command) <= 256:
+            actions.append({'label': label, 'command': command})
+    if name == '/models' and text.startswith('Модели · страница '):
+        for model in text.split('\n\n', 1)[0].splitlines()[1:]:
+            add(model, '/model ' + model)
+        page = re.search(r'страница (\d+)/(\d+)', text)
+        if page:
+            current, total = map(int, page.groups())
+            if current > 1: add('← Назад', f'/models {current - 1}')
+            if current < total: add('Далее →', f'/models {current + 1}')
+        add('AI по умолчанию', '/model default')
+    if name == '/services' and '/service' in allowed:
+        labels = {'start': 'Запустить', 'stop': 'Остановить', 'restart': 'Перезапустить'}
+        for identity, definition in api.managed_services().items():
+            for action in commands.controls(identity, definition):
+                add(f'{labels[action]} · {identity}', f'/service {identity} {action}')
+    for identity in dict.fromkeys(re.findall(r'/operation ([0-9a-f]{32})', text)):
+        add('Проверить результат', '/operation ' + identity)
+    return actions
+
+
 def execute(api, payload):
     actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
     parts = payload.command.strip().split()
@@ -104,4 +130,5 @@ def execute(api, payload):
         if result['text'].startswith('Неизвестная команда или неверные аргументы.'):
             raise HTTPException(422, 'Неверный формат команды. Используйте /help')
     result['pending_actions'] = commands.pending_actions(api, actor)
+    result['actions'] = response_actions(api, name, result.get('text', ''), entries)
     return result
