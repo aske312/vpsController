@@ -62,8 +62,8 @@ export function readChatSession(client: Client, actor: string): ChatSession | un
 export function saveChatSession(client: Client, actor: string, value: Omit<ChatSession, "turns"> & { turns: (Omit<SessionTurn, "files"> & { files?: unknown[]; queue_state?: "queued" | "running"; pending_action?: { operation_id?: string }; pending_actions?: { operation_id?: string }[] })[] }) {
   const identity = key(client, actor);
   if (!identity) return;
-  const turns: SessionTurn[] = value.turns.filter(turn => turn.queue_state !== "running").slice(-40).map(turn => ({ ...replyState(turn), ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), ...(turn.system_event === true ? { system_event: true } : {}), ...commandLinks(turn), id: turn.id, question: turn.question.slice(0, 12000), model: turn.model, answer: turn.answer?.slice(0, 20000), tools: turn.tools, context_safe: turn.context_safe, files: [],
-    error: turn.queue_state === "queued" ? "Не отправлено после обновления страницы. Отправьте сообщение вручную." : turn.error?.slice(0, 2000) }));
+  const turns: SessionTurn[] = value.turns.filter(turn => turn.queue_state !== "running" && turn.queue_state !== "queued").slice(-40).map(turn => ({ ...replyState(turn), ...(turn.request_id && /^[a-f0-9]{32}$/.test(turn.request_id) ? { request_id: turn.request_id } : {}), ...(turn.system_event === true ? { system_event: true } : {}), ...commandLinks(turn), id: turn.id, question: turn.question.slice(0, 12000), model: turn.model, answer: turn.answer?.slice(0, 20000), tools: turn.tools, context_safe: turn.context_safe, files: [],
+    error: turn.error?.slice(0, 2000) }));
   const snapshot = { ...value, turns };
   let size = JSON.stringify({ ...value, turns: [] }).length;
   const sizes = turns.map(turn => JSON.stringify(turn).length + 1);

@@ -2,7 +2,7 @@
 import { test, afterEach } from 'node:test';
 import { createApiClient, invalidateApiSession } from '../../src/shared/lib/api-request.ts';
 import { readEventStream } from '../../src/shared/lib/event-stream.ts';
-import { observeChatJob, rememberChat, savedChat, ChatJobError } from '../../src/features/assistant/chat-jobs.ts';
+import { observeChatJob, rememberChat, savedChat, savedChats, forgetChat, ChatJobError } from '../../src/features/assistant/chat-jobs.ts';
 import { observedApplicationRequest } from '../../src/control-panel/application-snapshot.ts';
 import { observedServicesRequest } from '../../src/control-panel/services-snapshot.ts';
 const originalFetch=globalThis.fetch;
@@ -70,5 +70,18 @@ test('pending references are scoped to login and actor and contain no prompts or
  try{const first=createApiClient('sse-test');const second=createApiClient('independent-session');rememberChat(first,'11',id);
  assert.equal(savedChat(first,'11'),id);assert.equal(savedChat(first,'12'),null);assert.equal(savedChat(second,'11'),null);
  assert(!JSON.stringify([...map]).includes('sse-test'));rememberChat(first,'11',null);assert.equal(savedChat(first,'11'),null);
+ }finally{globalThis.sessionStorage=previous;}
+});
+
+test('completing one durable request preserves every later queued identity across reload',()=>{
+ const map=new Map(),previous=globalThis.sessionStorage;
+ globalThis.sessionStorage={setItem:(k,v)=>map.set(k,v),getItem:k=>map.get(k),removeItem:k=>map.delete(k)};
+ try {
+  const client=createApiClient('queue-session'),second='b'.repeat(32),third='c'.repeat(32);
+  rememberChat(client,'11',id);rememberChat(client,'11',second);rememberChat(client,'11',third);rememberChat(client,'11',second);
+  assert.deepEqual(savedChats(client,'11'),[id,second,third]);
+  forgetChat(client,'11',id);assert.equal(savedChat(client,'11'),second);
+  forgetChat(client,'11',second);assert.deepEqual(savedChats(client,'11'),[third]);
+  assert(!JSON.stringify([...map]).includes('queue-session'));
  }finally{globalThis.sessionStorage=previous;}
 });

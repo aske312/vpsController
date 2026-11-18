@@ -69,6 +69,7 @@ function mount(status, catalog = [], overrides = {}) {
   new Function('require', 'exports', turnCompiled.outputText)(require, turnModule);
   new Function('require', 'exports', outputText)(require, exported);
   const jobs = overrides.jobs ?? new Map();
+  const cancellations = new Map();
   const request = async (path, options) => {
     if (path.startsWith('/assistant/conversations')) return overrides.conversations ? overrides.conversations(path) : {enabled:true,items:[]};
     if (path.startsWith('/assistant/commands')) {
@@ -87,10 +88,14 @@ function mount(status, catalog = [], overrides = {}) {
       const result=Promise.resolve(overrides.chat ? overrides.chat(options) : {result:{answer:'OK',tools_used:[]}}).then(
         output=>({...accepted,seq:1,state:'done',stage:'complete',output}),
         error=>({...accepted,seq:1,state:'failed',stage:'error',error:{code:'provider_transport_error',message:error.message}}));
-      jobs.set(payload.request_id,result);
+      jobs.set(payload.request_id,Promise.race([result,new Promise(resolve=>cancellations.set(payload.request_id,()=>resolve({...accepted,seq:1,state:'failed',stage:'cancelled',error:{code:'cancelled',message:'cancelled'}})))]));
       return accepted;
     }
-    if (path.startsWith('/assistant/requests/')) return jobs.get(path.split('/')[3].split('?')[0]);
+    if (path.startsWith('/assistant/requests/')) {
+      const identity=path.split('/')[3].split('?')[0];
+      if(options?.method==='DELETE'){cancellations.get(identity)?.();return {};}
+      return jobs.get(identity);
+    }
     return status;
   };
   request.sessionKey = overrides.sessionKey;
@@ -309,7 +314,7 @@ test('a pending background chat shows acceptance and submits the question only o
   nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:'hello',style:{},scrollHeight:48}});
   tree = view.render();
   nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
-  view.render(); await Promise.resolve(); tree = view.render();
+  view.render(); await new Promise(setImmediate); tree = view.render();
   assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('В очереди AI')).length, 1);
   assert.match(view.writes[0].request_id, /^[0-9a-f]{32}$/);
   resolve({result:{answer:'finished', tools_used:[]}});
@@ -335,6 +340,7 @@ test('pending turn survives inactive page and answer notification opens chat wit
   view.setActive(true); tree = view.render();
   assert.match(JSON.stringify(tree), /pending question/);
   view.setActive(false); view.render();
+  await new Promise(setImmediate);
   resolve({result:{answer:'completed answer', tools_used:[]}});
   await new Promise(setImmediate);
   assert.equal(view.writes.length, 1);
@@ -347,7 +353,7 @@ test('pending turn survives inactive page and answer notification opens chat wit
   assert.match(JSON.stringify(tree), /completed answer/);
 });
 
-test('follow-ups are serialized with preceding answers and conversation ID, and queued messages can be removed', async () => {
+test('follow-ups are durably admitted with predecessor IDs and queued messages can be removed', async () => {
   const status = fixture();
   status.chat_attachments = true;
   Object.assign(status.settings, {model:'fixture-model', memory_enabled:false, modules:{'ai-agent':true,'nodera-bot':true}});
@@ -364,38 +370,39 @@ test('follow-ups are serialized with preceding answers and conversation ID, and 
     send.node.props.onClick();
   }
   submit('first'); submit('second'); submit('remove me'); submit('third');
-  assert.equal(view.writes.length, 1);
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length, 4);
   let tree = view.render();
   const removals = nodes(tree, n => n.type === 'button' && n.props.children === 'Убрать из очереди');
-  assert.equal(removals.length, 3);
-  removals[1].node.props.onClick();
+  assert.equal(removals.length, 4);
+  await removals[2].node.props.onClick();
   assert.doesNotMatch(JSON.stringify(view.render()), /remove me/);
   view.setActive(false); view.render();
   replies[0]({result:{answer:'first answer',tools_used:[]},conversation_id:'conversation-one'});
   await new Promise(setImmediate);
-  assert.equal(view.writes.length, 2);
+  assert.equal(view.writes.length, 4);
   assert.equal(view.writes[1].prompt, 'second');
-  assert.equal(view.writes[1].conversation_id, 'conversation-one');
-  assert.deepEqual(view.writes[1].history.map(item => item.content), ['first','first answer']);
+  assert.equal(view.writes[1].previous_request_id, view.writes[0].request_id);
+  assert.deepEqual(view.writes[1].history, []);
   replies[1]({result:{answer:'second answer',tools_used:[]},conversation_id:'conversation-one'});
   await new Promise(setImmediate);
-  assert.equal(view.writes.length, 3);
-  assert.equal(view.writes[2].prompt, 'third');
-  assert.deepEqual(view.writes[2].history.map(item => item.content), ['first','first answer','second','second answer']);
-  assert.equal(new Set(view.writes.map(item => item.request_id)).size, 3);
-  replies[2]({result:{answer:'third answer',tools_used:[]}});
+  assert.equal(view.writes.length, 4);
+  assert.equal(view.writes[3].prompt, 'third');
+  assert.equal(view.writes[3].previous_request_id, view.writes[2].request_id);
+  assert.equal(new Set(view.writes.map(item => item.request_id)).size, 4);
+  replies[3]({result:{answer:'third answer',tools_used:[]}});
   await new Promise(setImmediate);
   view.setActive(true); tree = view.render();
   assert.match(JSON.stringify(tree), /third answer/);
   assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Убрать из очереди').length, 0);
 });
 
-test('confirmation pauses follow-ups so another request cannot replace an unconfirmed action', async () => {
+test('confirmation preserves follow-ups on the server queue and keeps the decision card', async () => {
   const status = fixture();
   Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
   Object.assign(status.modules[0], {enabled:true, configured:true});
-  let resolve;
-  const view = mount(status, [], {chat: () => new Promise(done => resolve = done)});
+  const replies=[];
+  const view = mount(status, [], {chat: () => new Promise(done => replies.push(done))});
   view.render(); await Promise.resolve();
   for (const question of ['action','follow-up']) {
     let tree = view.render();
@@ -403,39 +410,44 @@ test('confirmation pauses follow-ups so another request cannot replace an unconf
     tree = view.render();
     nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
   }
-  resolve({result:{answer:'confirmation needed',tools_used:[]},pending_action:{service:'ssh',action:'restart',code:'pending',expires:9999999999}});
+  await new Promise(setImmediate);
+  replies[0]({result:{answer:'confirmation needed',tools_used:[]},pending_action:{service:'ssh',action:'restart',code:'pending',expires:9999999999}});
   await new Promise(setImmediate);
   const tree = view.render();
-  assert.equal(view.writes.length, 1);
+  assert.equal(view.writes.length, 2);
   const confirmation = nodes(tree, n => n.props.role === 'region')[0].node;
   assert.equal(nodes(confirmation, n => n.type === 'button' && n.props.children === 'Подтвердить').length, 1);
   assert.equal(nodes(confirmation, n => n.type === 'button' && n.props.children === 'Отказать').length, 1);
-  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 1);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 0);
+  replies[1]({result:{answer:'follow-up answer',tools_used:[]}}); await new Promise(setImmediate);
 });
 
-test('incomplete chat pauses queued questions while retaining the partial answer', async () => {
+test('incomplete chat retains its partial answer and the queued question receives an answer', async () => {
   const status=fixture();Object.assign(status.settings,{model:'fixture-model',modules:{'ai-agent':true,'nodera-bot':true}});
   Object.assign(status.modules[0],{enabled:true,configured:true});
-  let finish;
-  const view=mount(status,[],{chat:()=>new Promise(resolve=>{finish=resolve;})});
+  const finish=[];
+  const view=mount(status,[],{chat:()=>new Promise(resolve=>{finish.push(resolve);})});
   view.render();await Promise.resolve();
   for(const question of ['audit','follow-up']) {
     nodes(view.render(),n=>n.type==='textarea')[0].node.props.onChange({target:{value:question,style:{},scrollHeight:48}});
     nodes(view.render(),n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();
   }
-  finish({result:{answer:'Only part of the audit is available',tools_used:['mihomo_read'],status:'incomplete'}});
   await new Promise(setImmediate);
-  assert.equal(view.writes.length,1);
+  finish[0]({result:{answer:'Only part of the audit is available',tools_used:['mihomo_read'],status:'incomplete'}});
+  await new Promise(setImmediate);
+  assert.equal(view.writes.length,2);
   assert.match(JSON.stringify(view.render()),/Only part of the audit is available/);
-  assert.match(JSON.stringify(view.render()),/Не отправлено/);
+  assert.doesNotMatch(JSON.stringify(view.render()),/Не отправлено/);
+  finish[1]({result:{answer:'follow-up processed',tools_used:[]}}); await new Promise(setImmediate);
+  assert.match(JSON.stringify(view.render()),/follow-up processed/);
 });
 
-test('failed chat stops queued follow-ups without repeating any POST and keeps unsent questions', async () => {
+test('failed chat does not discard accepted follow-ups or repeat a generation POST', async () => {
   const status = fixture();
   Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
   Object.assign(status.modules[0], {enabled:true, configured:true});
-  let reject;
-  const view = mount(status, [], {chat: () => new Promise((_, fail) => reject = fail)});
+  const rejects=[],replies=[];
+  const view = mount(status, [], {chat: () => new Promise((done, fail) => {replies.push(done);rejects.push(fail);})});
   view.render(); await Promise.resolve();
   for (const question of ['first','follow-up']) {
     let tree = view.render();
@@ -443,13 +455,16 @@ test('failed chat stops queued follow-ups without repeating any POST and keeps u
     tree = view.render();
     nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
   }
-  reject(new Error('connection lost'));
+  await new Promise(setImmediate);
+  rejects[0](new Error('connection lost'));
   await new Promise(setImmediate);
   const tree = view.render();
-  assert.equal(view.writes.length, 1);
+  assert.equal(view.writes.length, 2);
   assert.match(JSON.stringify(tree), /follow-up/);
-  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 2);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Повторить').length, 1);
   assert.equal(nodes(tree, n => n.type === 'textarea')[0].disabled, false);
+  replies[1]({result:{answer:'second request completed',tools_used:[]}}); await new Promise(setImmediate);
+  assert.match(JSON.stringify(view.render()),/second request completed/);
 });
 
 test('all MCP cards show their actual tool counts', async () => {

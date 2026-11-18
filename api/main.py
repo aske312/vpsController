@@ -48,6 +48,7 @@ import application_recovery
 import operation_policy
 import assistant_control
 import component_checks
+import assistant_jobs
 import assistant_personalization
 import assistant_contacts
 import assistant_commands
@@ -131,6 +132,7 @@ async def lifespan(_: FastAPI):
     relay_recovery_task = None
     component_health_task = None
     owner_alert_task = None
+    chat_queue_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
         migration_task = asyncio.create_task(migrate_legacy_components())
@@ -140,9 +142,14 @@ async def lifespan(_: FastAPI):
         component_health_task = asyncio.create_task(component_checks.monitor(sys.modules[__name__]))
         import telegram_alerts
         owner_alert_task = asyncio.create_task(telegram_alerts.monitor(sys.modules[__name__]))
+        chat_queue_task = asyncio.create_task(assistant_jobs.monitor(sys.modules[__name__]))
     try:
         yield
     finally:
+        if chat_queue_task is not None:
+            chat_queue_task.cancel()
+            try: await chat_queue_task
+            except asyncio.CancelledError: pass
         if owner_alert_task is not None:
             owner_alert_task.cancel()
             try: await owner_alert_task
@@ -508,6 +515,11 @@ def assistant_result(identity: str, telegram_id: int | None = None, _: None = De
     return assistant_jobs.get(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
 
 
+@app.delete('/api/assistant/requests/{identity}', dependencies=[Depends(require_token)])
+def assistant_request_cancel(identity: str, telegram_id: int | None = None) -> dict:
+    return assistant_jobs.cancel(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+
+
 @app.get('/api/assistant/requests/{identity}/trace')
 def assistant_request_trace(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     import assistant_trace
@@ -588,6 +600,21 @@ def nodera_chat(payload: assistant_control.Chat, settings: dict = Depends(requir
     return assistant_control.chat_request(sys.modules[__name__], payload, actor, 'bot', settings=settings)
 
 
+@app.post('/api/assistant/bot-requests', status_code=202)
+def nodera_request_submit(payload: assistant_control.Chat, settings: dict = Depends(require_nodera_bot_transport),
+                          actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    assistant_control.require_bot_actor(settings, actor, chat=True)
+    if not payload.request_id: raise HTTPException(422, 'Нужен ID сообщения')
+    return assistant_jobs.submit(sys.modules[__name__], payload, actor=actor, channel='bot')
+
+
+@app.get('/api/assistant/bot-requests/{identity}')
+def nodera_request_get(identity: str, settings: dict = Depends(require_nodera_bot_transport),
+                       actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    assistant_control.require_bot_actor(settings, actor, chat=True)
+    return assistant_jobs.get(sys.modules[__name__], identity, actor, channel='bot')
+
+
 @app.get('/api/assistant/bot-queue')
 def nodera_queue(request_id: str | None = None, settings: dict = Depends(require_nodera_bot_transport),
                  actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
@@ -632,7 +659,7 @@ def nodera_command(payload: assistant_commands.Command, settings: dict = Depends
     confirmation_command = bool(command and command[0].split('@')[0].lower() in ('/confirm', '/cancel', '/operation'))
     import assistant_roles
     model_command = bool(command and command[0].split('@')[0].lower() in ('/models', '/model'))
-    if command and command[0].split('@')[0].lower() in ('/subscription', '/profile', '/profiles', '/devices', '/traffic'):
+    if command and command[0].split('@')[0].lower() in ('/subscription', '/profile', '/profiles', '/devices', '/traffic', '/apps', '/connect'):
         assistant_roles.require(settings, actor, 'subscription_read')
     elif not confirmation_command:
         assistant_control.require_bot_actor(settings, actor, chat=model_command)

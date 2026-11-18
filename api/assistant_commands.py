@@ -20,7 +20,7 @@ class Command(BaseModel):
 
 
 COMMAND_PERMISSIONS = {'/subscription': 'subscription_read', '/profile': 'subscription_read', '/profiles': 'subscription_read',
-    '/devices': 'subscription_read', '/traffic': 'subscription_read', '/connect': 'subscription_read', '/models': 'model_select',
+    '/devices': 'subscription_read', '/traffic': 'subscription_read', '/connect': 'subscription_read', '/apps': 'subscription_read', '/models': 'model_select',
     '/model': 'model_select', '/status': 'server_read', '/resources': 'server_read', '/services': 'server_read',
     '/components': 'server_read', '/service': 'server_manage', '/network': 'network_read', '/security': 'security_read',
     '/diagnostics': 'diagnostics', '/logs': 'logs_read', '/ai': 'chat'}
@@ -205,8 +205,11 @@ def execute(api, actor, prompt, *, source='bot'):
     if permission: roles.require(settings, actor, permission)
     if command in ('/id', '/userid') and not args:
         return 'Веб-чат администратора. Telegram ID не выбран.' if actor == 'panel' else 'Telegram ID: ' + actor
+    if command == '/apps' and len(args) <= 1:
+        import connection_apps
+        return connection_apps.guide(args[0].lower() if args else None)
     if command == '/connect' and not args:
-        return 'Подключение Mihomo:\n1. Получите ссылку: /subscription.\n2. Импортируйте подписку по URL в совместимом клиенте Mihomo.\n3. Обновите подписку, выберите профиль и включите подключение.\nПосле изменения настроек обновите подписку в клиенте.'
+        return 'Подключение Mihomo:\n1. Выберите приложение: /apps. Для Windows рекомендуем наш Nodera: https://github.com/aske312/NoderaClient.\n2. Получите ссылку: /subscription.\n3. Добавьте подписку по URL в приложении (в Nodera нажмите «+»).\n4. Выберите сервер и включите подключение.\nПосле изменения настроек обновите подписку в клиенте.'
     if command in ('/confirm', '/operation'):
         pending = control.operations.read(pending_path(api, actor, code=args[0] if command == '/confirm' and args else None,
                                                        operation_id=args[0] if command == '/operation' and args else None))

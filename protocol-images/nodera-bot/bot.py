@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
 from pathlib import Path
 import sys
 import tempfile
@@ -63,9 +64,9 @@ def telegram_chunks(text):
     return chunks
 
 PUBLIC_COMMANDS = [('id', 'Мой Telegram ID')]
-MEMBER_COMMANDS = [('start', 'Приветствие'), ('help', 'Справка')] + PUBLIC_COMMANDS
+MEMBER_COMMANDS = [('menu', 'Открыть меню'), ('start', 'Приветствие'), ('help', 'Справка')] + PUBLIC_COMMANDS
 SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка Mihomo'), ('profile', 'Параметры моей подписки'),
-    ('devices', 'Устройства подписки'), ('traffic', 'Трафик подписки'), ('connect', 'Как подключиться')]
+    ('devices', 'Устройства подписки'), ('traffic', 'Трафик подписки'), ('connect', 'Как подключиться'), ('apps', 'Приложения для подключения')]
 CHAT_COMMANDS = MEMBER_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI'), ('ai', 'Вопрос AI-ассистенту')]
 ADMIN_COMMANDS = SUBSCRIPTION_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
@@ -82,6 +83,10 @@ FILE_TYPES = {'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'we
 
 class AttachmentError(ValueError):
     pass
+
+
+class DeliveryPending(RuntimeError):
+    """Keep accepted work on disk until API admission/delivery can be reconciled."""
 
 
 def message_file(message):
@@ -158,6 +163,8 @@ async def attachment_reply(settings, sender, prompt, messages, access):
             return await agent_request(settings, sender['id'], prompt or 'Проанализируй приложенные файлы.', attachments=files)
     except AttachmentError as exc:
         return str(exc)
+    except DeliveryPending:
+        raise
     except Exception:
         return 'Не получилось обработать вложения. Проверьте формат и повторите отправку. Для изображений выберите модель с поддержкой зрения.'
 
@@ -179,6 +186,7 @@ DIRECT_PHRASES = {
     '/devices': ('мои устройства', 'устройства подписки', 'список устройств', 'устройства'),
     '/traffic': ('мой трафик', 'трафик', 'трафик подписки', 'сколько трафика использовано', 'расход трафика'),
     '/connect': ('как подключиться', 'как подключить vpn', 'как подключить mihomo', 'как импортировать подписку', 'как обновить подписку'),
+    '/apps': ('приложения', 'приложения для подключения', 'скачать клиент', 'скачать приложение'),
     '/models': ('модели', 'модели ai', 'список моделей', 'доступные модели', 'какие модели доступны'),
     '/model': ('текущая модель', 'какая модель выбрана', 'какая сейчас модель'),
     '/model default': ('ai по умолчанию', 'модель по умолчанию'),
@@ -188,7 +196,7 @@ DIRECT_PHRASES = {
     '/logs': ('логи', 'журнал приложения', 'логи приложения', 'последние логи'),
 }
 DIRECT_COMMANDS = {phrase: command for command, phrases in DIRECT_PHRASES.items() for phrase in phrases}
-SUBSCRIPTION_READS = ('/subscription', '/profile', '/devices', '/traffic', '/connect')
+SUBSCRIPTION_READS = ('/subscription', '/profile', '/devices', '/traffic', '/connect', '/apps')
 
 
 def direct_prompt(prompt):
@@ -300,28 +308,38 @@ async def bot_api(settings, method, **payload):
 
 async def agent_request(settings, actor, prompt, attachments=None, alert=None):
     headers = {'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)}
-    request_id = secrets.token_hex(16)
-    async with httpx.AsyncClient(timeout=960, trust_env=False) as client:
+    request_id = incoming_request.get() or secrets.token_hex(16)
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         payload = {'prompt': prompt, 'request_id': request_id}
         if attachments: payload['attachments'] = attachments
         if alert: payload['alert'] = alert
-        task = asyncio.create_task(client.post('http://127.0.0.1:8000/api/assistant/bot-chat', headers=headers, json=payload))
-        notified = False
         try:
-            while not task.done():
-                await asyncio.wait({task}, timeout=3)
-                if not task.done() and not notified:
+            response = await client.post('http://127.0.0.1:8000/api/assistant/bot-requests', headers=headers, json=payload)
+        except httpx.TransportError:
+            raise DeliveryPending() from None
+        if response.status_code in (429, 502, 503, 504): raise DeliveryPending()
+        if response.status_code == 202:
+            notified = False
+            waiting_since = time.monotonic()
+            while True:
+                try:
+                    response = await client.get('http://127.0.0.1:8000/api/assistant/bot-requests/' + request_id, headers=headers, timeout=10)
+                except httpx.TransportError:
+                    await asyncio.sleep(3); continue
+                if response.status_code in (502, 503, 504):
+                    await asyncio.sleep(3); continue
+                if response.status_code != 200: break
+                job = response.json()
+                if job.get('state') == 'done':
+                    response = httpx.Response(200, json=job['output']); break
+                if job.get('state') in ('failed', 'unknown'):
+                    return job.get('error', {}).get('message') or 'Результат запроса не подтверждён. Проверьте состояние перед повтором.'
+                if job.get('state') == 'queued' and not notified and time.monotonic() - waiting_since >= 2:
                     try:
-                        queue = await client.get('http://127.0.0.1:8000/api/assistant/bot-queue', headers=headers, params={'request_id': request_id}, timeout=5)
-                        if queue.status_code == 200 and queue.json().get('state') == 'queued':
-                            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Запрос в очереди AI', 'Дождитесь ответа; повторять сообщение не нужно.', '⏳')), parse_mode='HTML')
-                            notified = True
+                        await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди', QUEUE_NOTICE, '⏳')), parse_mode='HTML')
+                        notified = True
                     except Exception: pass
-            response = await task
-        finally:
-            if not task.done():
-                task.cancel()
-                with suppress(asyncio.CancelledError): await task
+                await asyncio.sleep(1)
         if response.status_code != 200:
             if alert and response.status_code in (403, 404, 429):
                 detail = response.json().get('detail')
@@ -352,6 +370,9 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
             answer += f"\n\n`/confirm {pending['code']}` — подтвердить\n`/cancel {pending['code']}` — отклонить"
         return answer
 
+
+incoming_request = ContextVar('nodera_incoming_request', default=None)
+delivery_record = ContextVar('nodera_delivery_record', default=None)
 
 QUEUE_NOTICE = 'Сообщение принято в очередь. Сначала отвечу на ваши предыдущие вопросы.'
 BUSY_NOTICE = 'Слишком много сообщений. Дождитесь ответа на предыдущий вопрос; это сообщение не принято в очередь.'
@@ -387,6 +408,68 @@ class MessageDispatcher:
         self.tasks.clear(); self.pending.clear(); self.locks.clear()
 
 
+class DurableInbox:
+    """Small private Telegram envelopes survive polling and bot restarts."""
+    def __init__(self, root):
+        self.root = root / 'inbox'
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.root.chmod(0o700)
+        self.inflight, self.retry_at, self.offset = set(), {}, 0
+
+    def read(self, key):
+        return json.loads((self.root / (key + '.json')).read_text(encoding='utf-8'))
+
+    def save(self, key, row):
+        if not re.fullmatch(r'[a-z0-9-]{1,100}', key): raise ValueError('Invalid inbox key')
+        path = self.root / (key + '.json')
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(row, ensure_ascii=False), encoding='utf-8')
+        temporary.chmod(0o600); temporary.replace(path)
+
+    def put(self, key, row):
+        path = self.root / (key + '.json')
+        if path.exists(): return True
+        if len(list(self.root.glob('*.json'))) >= 256: return False
+        self.save(key, row)
+        return True
+
+    def amend(self, key, **values):
+        row = self.read(key); row.update(values); self.save(key, row)
+
+    def acknowledge(self, offset):
+        self.offset = offset
+        for path in self.root.glob('*.json'):
+            row = self.read(path.stem)
+            if row.get('delivered') and row['order'] < offset: path.unlink(missing_ok=True)
+
+    def waiting(self, actor, command=False):
+        return sum(row.get('sender', {}).get('id') == actor and bool(row.get('command')) == command and not row.get('delivered')
+                   for row in (self.read(path.stem) for path in self.root.glob('*.json')))
+
+    def pump(self, dispatcher, deliver):
+        rows = [(path.stem, json.loads(path.read_text(encoding='utf-8'))) for path in self.root.glob('*.json')]
+        seen = set()
+        for key, row in sorted(rows, key=lambda item: item[1]['order']):
+            if row.get('delivered'): continue
+            actor = row['sender']['id']
+            stream = (actor, 'command') if row.get('command') else actor
+            if stream in seen: continue
+            seen.add(stream)
+            if key in self.inflight or row.get('not_before', 0) > time.time() or self.retry_at.get(key, 0) > time.monotonic(): continue
+            async def run(key=key):
+                try:
+                    await deliver(self.read(key), key)
+                    self.amend(key, delivered=True)
+                    if self.read(key)['order'] < self.offset: (self.root / (key + '.json')).unlink(missing_ok=True)
+                    self.retry_at.pop(key, None)
+                except asyncio.CancelledError: raise
+                except Exception:
+                    self.retry_at[key] = time.monotonic() + 3
+                    logging.error('NoderaBot accepted message remains queued for delivery')
+                finally: self.inflight.discard(key)
+            if dispatcher.submit(stream, run): self.inflight.add(key)
+
+
 _profile_cache = {}
 
 
@@ -418,6 +501,7 @@ async def identify(settings, sender):
                   'language_code': sender.get('language_code', '')[:35], 'is_premium': sender.get('is_premium'),
                   **details, 'is_bot': sender.get('is_bot', False)})
         if response.status_code != 200:
+            if response.status_code not in (401, 403): raise DeliveryPending()
             return False
         access = response.json()
         return True if access.get('admin') is True else ('chat-subscription' if access.get('subscription') else 'chat') if access.get('chat') is True else 'subscription' if access.get('subscription') else False
@@ -436,7 +520,7 @@ def assistant_help(admin=False, subscription=False):
             '\n\n**Как общаться**\nТиповые запросы выполняю без AI: можно писать «мой трафик», «моя подписка» или выбирать кнопки. Для вопроса к AI используйте `/ai <вопрос>`.\n\n'
             '**Фото и документы**\nДобавьте вопрос в подпись к файлу. Можно прислать до 4 файлов: 2 МБ каждый, 6 МБ суммарно. Для изображений нужна модель с поддержкой зрения.\n\n'
             'Команды:\n/id — ваш Telegram ID\n/models — доступные модели\n/model — текущая модель')
-    if subscription: text += '\n/subscription — ваша подписка Mihomo\n/profile — параметры и лимиты\n/devices — устройства\n/traffic — трафик\n/connect — как подключиться'
+    if subscription: text += '\n/subscription — ваша подписка Mihomo\n/profile — параметры и лимиты\n/devices — устройства\n/traffic — трафик\n/apps — приложения для подключения\n/connect — как подключиться'
     if admin:
         text += '\n/status — состояние сервера\n/resources — ресурсы\n/services — состояние служб\n/components — компоненты\n/profiles — профили Mihomo\n/network — сеть\n/security — безопасность\n/logs [служба] — последние логи\n/diagnostics — пассивная диагностика'
     return text
@@ -458,10 +542,11 @@ async def reply(settings, sender, prompt, access):
     command = prompt.split()[0].split('@')[0].lower()
     if not access: return public_reply(sender, command)
     if command in ('/id', '/userid'): return public_reply(sender, '/id')
+    if command == '/menu': return menu_text(prompt, access)
     if access == 'subscription' and command in ('/start', '/help'):
         return ('Команды вашей подписки Mihomo работают без AI:\n'
                 '/subscription — ссылка\n/profile — параметры, лимиты и срок\n'
-                '/devices — устройства\n/traffic — учтённый трафик\n/connect — как подключиться\n/id — ваш Telegram ID.\n'
+                '/devices — устройства\n/traffic — учтённый трафик\n/apps — приложения для подключения\n/connect — как подключиться\n/id — ваш Telegram ID.\n'
                 'Можно писать обычным текстом: «мой трафик», «мои устройства», «моя подписка».')
     if access == 'subscription' and command not in (*SUBSCRIPTION_READS, '/confirm', '/cancel', '/operation'):
         return 'Доступна ваша подписка Mihomo: /subscription. AI-ассистент для этой учётной записи не подключён.'
@@ -470,7 +555,7 @@ async def reply(settings, sender, prompt, access):
     if command == '/hello': return 'Здравствуйте! /help — возможности и команды. Типовые запросы выполняются без AI.'
     if command == '/thanks': return 'Пожалуйста!'
     if command == '/connect':
-        return ('Подключение Mihomo:\n1. Получите свою ссылку: /subscription.\n'
+        return ('Подключение Mihomo:\n/apps — приложения для подключения. Наш Nodera для Windows: https://github.com/aske312/NoderaClient.\n1. Получите свою ссылку: /subscription.\n'
                 '2. В совместимом клиенте Mihomo выберите импорт подписки по URL и вставьте ссылку.\n'
                 '3. Обновите подписку, выберите профиль и включите подключение.\n'
                 'После изменения настроек в панели обновите подписку в клиенте. Не передавайте ссылку другим людям.')
@@ -488,6 +573,8 @@ async def reply(settings, sender, prompt, access):
     try:
         async with typing(settings, sender['id']):
             return await agent_request(settings, sender['id'], prompt)
+    except DeliveryPending:
+        raise
     except Exception:
         return 'Сейчас не получилось подготовить ответ. Попробуйте немного позже.'
 
@@ -496,20 +583,24 @@ BUTTON_COMMANDS = {'Моя подписка': '/subscription', 'Сервер': '
                    'Компоненты': '/components', 'Модели AI': '/models',
                    'Текущая модель': '/model', 'AI по умолчанию': '/model default', 'Помощь': '/help',
                    'Мой профиль': '/profile', 'Мои устройства': '/devices', 'Мой трафик': '/traffic',
-                   'Как подключиться': '/connect', 'Сеть': '/network', 'Безопасность': '/security', 'Логи': '/logs', 'Диагностика': '/diagnostics'}
+                   'Меню': '/menu', 'Приложения': '/apps', 'Как подключиться': '/connect', 'Сеть': '/network', 'Безопасность': '/security', 'Логи': '/logs', 'Диагностика': '/diagnostics'}
+
+
+def menu_text(prompt, access):
+    section = prompt.split(maxsplit=1)[1] if len(prompt.split(maxsplit=1)) > 1 else ''
+    if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
+        return 'Подписка и подключение. Выберите нужное действие ниже.'
+    if section == 'server' and access is True:
+        return 'Сервер. Состояние и диагностика без обращения к AI.'
+    if section == 'ai' and access in (True, 'chat', 'chat-subscription'):
+        return 'AI-ассистент. Напишите вопрос, приложите файл или выберите модель. Сообщения обрабатываются по очереди.'
+    return 'Меню Nodera. Выберите раздел. Вопросы можно писать обычным сообщением.'
 
 
 def reply_keyboard(access):
-    rows = [['Модели AI', 'Текущая модель'], ['Помощь']]
-    if access is True:
-        rows = [['Сервер', 'Ресурсы'], ['Службы', 'Компоненты'], ['Сеть', 'Безопасность'], ['Логи', 'Диагностика']] + rows
-    subscription_rows = [['Моя подписка', 'Мой профиль'], ['Мои устройства', 'Мой трафик'], ['Как подключиться']]
-    if access == 'subscription': rows = subscription_rows + [['Помощь']]
-    elif access in (True, 'chat-subscription'): rows = subscription_rows + rows
-    if not access:
-        return {'remove_keyboard': True}
-    return {'keyboard': [[{'text': text} for text in row] for row in rows],
-            'resize_keyboard': True, 'is_persistent': True, 'input_field_placeholder': 'Команды подписки Mihomo' if access == 'subscription' else 'Напишите вопрос Нодере…'}
+    if not access: return {'remove_keyboard': True}
+    return {'keyboard': [[{'text': 'Меню'}]], 'resize_keyboard': True, 'is_persistent': True,
+            'input_field_placeholder': 'Напишите сообщение или откройте меню…'}
 
 
 def inline_keyboard(answer, prompt, access, actions):
@@ -520,6 +611,24 @@ def inline_keyboard(answer, prompt, access, actions):
         actions[key] = command
         return {'text': text[:60], 'callback_data': 'nd:' + key}
     command = prompt.split()[0].split('@')[0].lower()
+    if access and command in ('/menu', '/start', '/help'):
+        section = prompt.split(maxsplit=1)[1] if command == '/menu' and len(prompt.split(maxsplit=1)) > 1 else ''
+        if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
+            for labels in [(('Ссылка подписки','/subscription'),('Профиль','/profile')), (('Устройства','/devices'),('Трафик','/traffic')), (('Приложения','/apps'),('Как подключиться','/connect'))]:
+                rows.append([button(label, action) for label, action in labels])
+        elif section == 'server' and access is True:
+            for labels in [(('Состояние','/status'),('Ресурсы','/resources')), (('Службы','/services'),('Компоненты','/components')), (('Сеть','/network'),('Безопасность','/security')), (('Логи','/logs'),('Диагностика','/diagnostics'))]:
+                rows.append([button(label, action) for label, action in labels])
+        elif section == 'ai' and access in (True, 'chat', 'chat-subscription'):
+            rows.append([button('Выбрать модель','/models'),button('Текущая модель','/model')])
+        else:
+            if access in (True, 'subscription', 'chat-subscription'): rows.append([button('Подписка и подключение','/menu subscription')])
+            if access in (True, 'chat', 'chat-subscription'): rows.append([button('AI-ассистент','/menu ai')])
+            if access is True: rows.append([button('Сервер','/menu server')])
+            rows.append([button('Мой ID','/id')])
+        if section: rows.append([button('← Главное меню','/menu')])
+    if access and command == '/apps' and len(prompt.split()) == 1:
+        rows += [[button(label, '/apps ' + key)] for key,label in [('windows','Windows ? Nodera'),('android','Android'),('ios','iPhone / iPad'),('macos','macOS'),('linux','Linux')]]
     if access and command == '/models' and answer.startswith('Модели · страница '):
         for model in answer.split('\n\n', 1)[0].splitlines()[1:]:
             rows.append([button(model, '/model ' + model)])
@@ -551,16 +660,17 @@ async def bot(settings):
     state_root = Path(os.environ.get('STATE_DIRECTORY', tempfile.gettempdir()))
     state_file = state_root / 'offset.json'
     offset = json.loads(state_file.read_text()).get('offset', 0) if state_file.exists() else 0
-    last = {}
     menus = {}
     callbacks = {}
     media_groups = {}
     dispatcher = MessageDispatcher()
+    inbox = DurableInbox(state_root)
+    inbox.acknowledge(offset)
     notices = {}
     async def deliver(sender, prompt, messages=None, alert=None, context=None):
         actor = sender['id']
         try: access = await identify(settings, sender)
-        except Exception: access = False
+        except Exception: raise DeliveryPending() from None
         if context: await remember_incoming(settings, context)
         if not prompt and not messages: return
         admin = access is True
@@ -571,13 +681,19 @@ async def bot(settings):
                 if len(menus) >= 1000: menus.clear()
                 menus[actor] = role
             except Exception: logging.error('NoderaBot private command menu could not be updated')
-        if alert:
+        cached = delivery_record.get()
+        cached_row = inbox.read(cached) if cached else {}
+        if 'answer' in cached_row:
+            answer = cached_row['answer'] if cached_row.get('answer_access') == access else 'Доступ изменился. Откройте /menu для доступных действий.'
+        elif alert:
             if access is not True:
                 answer = 'Разбор алерта доступен владельцу с доступом к ИИ.'
             else:
                 try:
                     async with typing(settings, actor):
                         answer = await agent_request(settings, actor, '', alert=alert)
+                except DeliveryPending:
+                    raise
                 except Exception:
                     answer = 'Не удалось запустить разбор алерта. Проверьте доступность AI-ассистента и повторите позже.'
         else:
@@ -585,43 +701,69 @@ async def bot(settings):
         if access:
             # A request can outlive a permission change.
             try: current_access = await identify(settings, sender)
-            except Exception: current_access = False
+            except Exception: raise DeliveryPending() from None
             if current_access != access:
                 access = False
                 answer = public_reply(sender, '')
         if not answer: return
+        if cached: inbox.amend(cached, answer=answer, answer_access=access)
         if len(callbacks) >= 1000: callbacks.clear()
         actions = {}
         markup = inline_keyboard(answer, prompt or 'Вложения', access, actions)
-        if actions: callbacks[actor] = actions
+        if actions:
+            callbacks.setdefault(actor, {}).update(actions)
+            while len(callbacks[actor]) > 256: callbacks[actor].pop(next(iter(callbacks[actor])))
         answer = styled_message(direct_prompt(prompt or '') or '', answer)
-        for chunk in telegram_chunks(answer):
+        for index,chunk in enumerate(telegram_chunks(answer)):
+            if index < cached_row.get('sent', 0): continue
             await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=reply_keyboard(access))
-        if markup:
+            if cached: inbox.amend(cached, sent=index + 1)
+        if markup and not cached_row.get('menu_sent'):
             await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Выберите действие', 'Нажмите на подходящий вариант ниже.', '👇')), parse_mode='HTML', reply_markup=markup)
-    async def deliver_album(sender, key, album):
-        # Telegram sends an album as separate updates. Coalesce a short burst
-        # before downloading, so the album consumes one AI turn and one queue slot.
-        await asyncio.sleep(1)
-        if media_groups.get(key) is album: media_groups.pop(key)
-        prompt = '\n'.join(row.get('caption', '').strip() for row in album if row.get('caption')).strip()
-        for message in album: await remember_incoming(settings, message)
-        await deliver(sender, prompt, album)
+            if cached: inbox.amend(cached, menu_sent=True)
+    async def deliver_saved(row, key):
+        identity = incoming_request.set(row['request_id'])
+        cached = delivery_record.set(key)
+        try:
+            if row.get('edited'):
+                await remember_incoming(settings, row['context']); return
+            messages = row.get('messages')
+            prompt = row['prompt']
+            if row.get('album'):
+                media_groups.pop(row['album'], None)
+                prompt = '\n'.join(message.get('caption', '').strip() for message in messages if message.get('caption'))
+                for message in messages: await remember_incoming(settings, message)
+            await deliver(row['sender'], prompt, messages, row.get('alert'), context=row.get('context'))
+        finally:
+            incoming_request.reset(identity); delivery_record.reset(cached)
+    async def flush_inbox():
+        while True:
+            try: inbox.pump(dispatcher, deliver_saved)
+            except (OSError, ValueError): logging.error('NoderaBot inbox could not be read')
+            await asyncio.sleep(.5)
+    pump_task = asyncio.create_task(flush_inbox())
+    def accept(update, sender, prompt, messages=None, alert=None, context=None, command=False, edited=False, album=None):
+        actor = sender['id']
+        key = 'album-' + hashlib.sha256(f'{actor}:{album}'.encode()).hexdigest()[:32] if album else 'message-' + str(update['update_id'])
+        record = {'order':update['update_id'], 'sender':sender, 'prompt':prompt, 'messages':messages,
+                  'context':context, 'alert':alert, 'command':command, 'edited':edited,
+                  'request_id':hashlib.sha256((settings.get('bot_token','') + ':' + str(actor) + ':' + key).encode()).hexdigest()[:32]}
+        if album: record.update(album=album, not_before=time.time() + 1)
+        accepted = inbox.put(key, record)
+        if accepted: inbox.pump(dispatcher, deliver_saved)
+        return accepted, key
     try:
         while True:
             try:
                 updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'edited_message', 'callback_query'])
                 for update in updates:
-                    offset = max(offset, update['update_id'] + 1)
-                    temporary = state_file.with_suffix('.tmp')
-                    temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
                     callback = update.get('callback_query')
                     message = callback.get('message', {}) if callback else update.get('message', update.get('edited_message', {}))
                     sender = callback.get('from', {}) if callback else message.get('from', {})
                     actor = sender.get('id')
                     if message.get('chat', {}).get('type') != 'private' or type(actor) is not int or actor <= 0 or sender.get('is_bot'): continue
                     if update.get('edited_message'):
-                        dispatcher.submit((actor, 'command'), lambda message=message: remember_incoming(settings, message))
+                        accept(update, sender, '', context=message, command=True, edited=True)
                         continue  # Edits update context without executing commands again.
                     messages = None
                     alert = None
@@ -645,36 +787,33 @@ async def bot(settings):
                     if album_key in media_groups:
                         # Retain one overflow entry to reject oversized albums;
                         # never grow memory with an unbounded group of updates.
-                        if len(media_groups[album_key]) < 5: media_groups[album_key].append(message)
+                        if len(media_groups[album_key][0]) < 5 and (not message.get('message_id') or all(old.get('message_id') != message['message_id'] for old in media_groups[album_key][0])):
+                            media_groups[album_key][0].append(message)
+                            inbox.amend(media_groups[album_key][1], messages=media_groups[album_key][0])
                         continue
                     is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() != '/ai'
-                    if not is_command and time.monotonic() - last.get(actor, 0) < 3:
-                        if time.monotonic() - notices.get(actor, 0) >= 10:
-                            notices[actor] = time.monotonic()
-                            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Очередь заполнена', BUSY_NOTICE, '⏳')), parse_mode='HTML')
-                        continue
-                    if len(last) >= 1000:
-                        last = {key: at for key, at in last.items() if time.monotonic() - at < 60}
-                        if len(last) >= 1000: continue
-                    if not is_command:
-                        last[actor] = time.monotonic()
                     # Explicit commands remain responsive while this user's AI
                     # dialog waits; commands themselves keep their own ordering.
                     stream = (actor, 'command') if is_command else actor
-                    if album_key:
-                        media_groups[album_key] = messages
-                        accepted = dispatcher.submit(stream, lambda sender=sender, key=album_key, album=messages: deliver_album(sender, key, album))
-                        if not accepted: media_groups.pop(album_key, None)
-                    else:
-                        accepted = dispatcher.submit(stream, lambda sender=sender, prompt=prompt, messages=messages, alert=alert, message=message, callback=callback: deliver(sender, prompt, messages, alert, context=None if callback else message))
-                    if (not accepted or dispatcher.pending.get(stream, 0) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
+                    accepted, inbox_key = accept(update, sender, prompt, messages, alert,
+                        context=None if callback or album_key else message, command=is_command,
+                        album=str(message['media_group_id']) if album_key else None)
+                    if album_key and accepted: media_groups[album_key] = (messages, inbox_key)
+                    if (not accepted or inbox.waiting(actor, is_command) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()
                         if len(notices) > 1000: notices = {actor: time.monotonic()}
                         await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
+                if updates:
+                    offset = max(offset, max(update['update_id'] for update in updates) + 1)
+                    temporary = state_file.with_suffix('.tmp')
+                    temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
+                    inbox.acknowledge(offset)
             except Exception:
                 logging.error('NoderaBot polling or delivery failed')
                 await asyncio.sleep(5)
     finally:
+        pump_task.cancel()
+        with suppress(asyncio.CancelledError): await pump_task
         await dispatcher.close()
         media_groups.clear()
 

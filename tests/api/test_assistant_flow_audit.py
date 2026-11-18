@@ -240,7 +240,8 @@ class ProviderEnvelopeTests(unittest.TestCase):
             result = asyncio.run(runner.chat(SETTINGS, 'panel', 'Продолжаем', history=history))
         self.assertEqual(result['answer'], 'Продолжаем разбор.')
         messages = provider.call_args.args[1]
-        self.assertIn('Document 0', messages[1]['content'])
-        self.assertNotIn('x' * 100, json.dumps(messages))
+        self.assertIn('Document 0', json.dumps(messages[1]['content']))
+        self.assertIn('x' * 100, json.dumps(messages))
+        self.assertNotIn('x' * 17000, json.dumps(messages))
         self.assertIn('z' * 100, json.dumps(messages))
 

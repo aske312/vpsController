@@ -290,6 +290,7 @@ class Chat(BaseModel):
     stream: StrictBool = False
     prompt: str = Field(default='', max_length=12000)
     request_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    previous_request_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
     history: list[ChatMessage] = Field(default_factory=list, max_length=40)
     telegram_id: int | None = Field(default=None, strict=True, gt=0)
@@ -933,6 +934,18 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
             identity = uuid.uuid4().hex
     body['context_conversation'] = identity
     body['settings_revision'] = settings['revision']
+    if payload.previous_request_id:
+        import assistant_jobs
+        previous = operations.read(assistant_jobs.path(api, payload.previous_request_id))
+        if previous.get('actor') == actor and previous.get('channel', 'panel') == channel:
+            prior_status = previous.get('output', {}).get('result', {}).get('status')
+            if previous.get('state') in ('failed', 'unknown') or prior_status:
+                state = ('Действие ожидает подтверждения человека; само по себе оно не выполнено.' if prior_status == 'awaiting_confirmation'
+                         else 'Предыдущий запрос завершился без полного подтверждённого результата. Сначала проверь состояние операций; не повторяй изменение автоматически.')
+                body['history'] = (body['history'] + [
+                    {'role':'user', 'content':(previous.get('question') or 'Файлы')[:8000]},
+                    {'role':'assistant', 'content': state + ' Журнал запроса ИИ: ' + payload.previous_request_id + '.'}])[-40:]
+                while sum(len(row['content']) for row in body['history']) > 48000: body['history'] = body['history'][2:]
     import assistant_commands
     previous_pending = {row['operation_id'] for row in assistant_commands.pending_actions(api, actor)}
     output = runtime_request(api, '--chat', body)

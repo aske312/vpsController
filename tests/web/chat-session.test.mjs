@@ -76,12 +76,12 @@ test('a refreshed client restores its actor and chat without crossing account or
     assert.equal(readChatSession(refreshed,'11'),undefined);assert(readChatSession(other,'11'));
   }finally{globalThis.sessionStorage=previous;}
 });
-test('reload snapshots exclude file bodies and in-flight jobs, and never replay unsent queued messages',()=>{
+test('reload snapshots exclude file bodies and server-owned queued jobs rather than declaring them unsent',()=>{
   const previous=globalThis.sessionStorage,store=storage();globalThis.sessionStorage=store;
   try{
     const client={sessionKey:'test-scope'};
     saveChatSession(client,'',{...snapshot,turns:[{...snapshot.turns[0],files:[{data:'private-file-body'}]},{id:2,question:'running',model:'m',queue_state:'running'},{id:3,question:'queued',model:'m',queue_state:'queued'}]});
-    const restored=readChatSession(client,'');assert.equal(restored.turns.length,2);assert.equal(restored.turns[1].question,'queued');assert.match(restored.turns[1].error,/Не отправлено/);
+    const restored=readChatSession(client,'');assert.equal(restored.turns.length,1);assert.doesNotMatch(JSON.stringify(restored),/Не отправлено/);
     assert(!JSON.stringify([...store.entries]).includes('private-file-body'));assert(!JSON.stringify(restored).includes('queue_state'));
     const identity=[...store.entries.keys()].find(k=>k.endsWith(':panel'));store.setItem(identity,'{broken');assert.equal(readChatSession(client,''),undefined);
   }finally{globalThis.sessionStorage=previous;}

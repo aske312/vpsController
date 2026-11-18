@@ -1,0 +1,174 @@
+[
+  {
+    "id": "nodera",
+    "name": "Nodera",
+    "url": "https://github.com/aske312/NoderaClient",
+    "label": "WINDOWS 10/11 · x64",
+    "platforms": [
+      "windows"
+    ],
+    "note": "Наш клиент · установка и импорт подписки по ссылке ↗"
+  },
+  {
+    "id": "client-0",
+    "name": "Clash Verge Rev",
+    "url": "https://github.com/clash-verge-rev/clash-verge-rev/releases",
+    "label": "PC · WINDOWS / LINUX",
+    "platforms": [
+      "windows",
+      "linux"
+    ],
+    "note": "Официальные релизы ↗"
+  },
+  {
+    "id": "client-1",
+    "name": "Clash Mi",
+    "url": "https://apps.apple.com/us/app/clash-mi/id6744321968",
+    "label": "IPHONE / IPAD",
+    "platforms": [
+      "ios"
+    ],
+    "note": "Скачать в App Store ↗"
+  },
+  {
+    "id": "client-2",
+    "name": "Clash Meta for Android",
+    "url": "https://github.com/MetaCubeX/ClashMetaForAndroid/releases",
+    "label": "ANDROID",
+    "platforms": [
+      "android"
+    ],
+    "note": "Официальные APK-релизы ↗"
+  },
+  {
+    "id": "client-3",
+    "name": "Clash Verge Rev",
+    "url": "https://github.com/clash-verge-rev/clash-verge-rev/releases",
+    "label": "MAC · INTEL / APPLE SILICON",
+    "platforms": [
+      "macos"
+    ],
+    "note": "Скачать DMG ↗"
+  },
+  {
+    "id": "client-4",
+    "name": "Karing",
+    "url": "https://apps.apple.com/us/app/karing/id6472431552",
+    "label": "IPHONE / IPAD · YAML",
+    "platforms": [
+      "ios"
+    ],
+    "note": "Для отдельного устройства включите X-HWID ↗"
+  },
+  {
+    "id": "client-5",
+    "name": "Hiddify",
+    "url": "https://github.com/hiddify/hiddify-app",
+    "label": "МОБИЛЬНЫЕ / ПК · YAML",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos",
+      "android",
+      "ios"
+    ],
+    "note": "Официальные загрузки ↗"
+  },
+  {
+    "id": "client-6",
+    "name": "Karing",
+    "url": "https://github.com/KaringX/karing/releases",
+    "label": "Windows / macOS / Linux · YAML",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Для отдельного устройства включите X-HWID ↗"
+  },
+  {
+    "id": "client-7",
+    "name": "FlClashX",
+    "url": "https://github.com/pluralplay/FlClashX/releases",
+    "label": "Windows / macOS / Linux · YAML · HWID",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Оставьте включённым «Отправлять HWID» ↗"
+  },
+  {
+    "id": "client-8",
+    "name": "Prizrak-Box",
+    "url": "https://github.com/legiz-ru/Prizrak-Box/releases",
+    "label": "Windows / macOS / Linux · YAML · HWID",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Оставьте включённой отправку HWID ↗"
+  },
+  {
+    "id": "client-9",
+    "name": "FlClash",
+    "url": "https://github.com/chen08209/FlClash/releases",
+    "label": "ANDROID / ПК · YAML",
+    "platforms": [
+      "android",
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Официальные релизы ↗"
+  },
+  {
+    "id": "client-10",
+    "name": "Clash Party",
+    "url": "https://github.com/mihomo-party-org/clash-party/releases",
+    "label": "ПК · YAML",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Ранее Mihomo Party ↗"
+  },
+  {
+    "id": "client-11",
+    "name": "Clash Nyanpasu",
+    "url": "https://github.com/libnyanpasu/clash-nyanpasu/releases",
+    "label": "ПК · YAML · ЯДРО MIHOMO",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Официальные релизы ↗"
+  },
+  {
+    "id": "client-12",
+    "name": "Koala Clash",
+    "url": "https://github.com/coolcoala/koala-clash/releases",
+    "label": "Windows / macOS / Linux · YAML · HWID",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Официальные релизы ↗"
+  },
+  {
+    "id": "client-13",
+    "name": "Sparkle",
+    "url": "https://github.com/xishang0128/sparkle/releases",
+    "label": "ПК · YAML",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "note": "Официальные релизы ↗"
+  }
+]

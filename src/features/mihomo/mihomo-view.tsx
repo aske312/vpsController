@@ -8,6 +8,7 @@ import { clientCapabilities, compatibleClientRouting, clientConnectionSupported 
 import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-groups";
 import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
 import { RuleLeaveDialog } from "./rule-leave-dialog";
+import clientApps from "../../../protocol-images/mihomo/client-apps.json" with { type: "json" };
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { AdvancedRouting, BalanceStrategy, ProfilePolicyGroups, libraryRoute } from "./advanced-routing";
@@ -1587,22 +1588,10 @@ export function MihomoPage({
           </div>
           <section className="mihomoClientGuide">
             <header><h3>Настройка и подключение</h3></header>
+            <p>Для Windows 10/11 x64 рекомендуем наш клиент <a href="https://github.com/aske312/NoderaClient" target="_blank" rel="noreferrer">Nodera</a>: установите приложение, нажмите «+» и вставьте ссылку подписки.</p>
             <ol><li><b>1</b><span>Нажмите «Скопировать подписку» у нужного профиля.</span></li><li><b>2</b><span>В клиенте добавьте удалённый профиль по URL.</span></li><li><b>3</b><span>После изменений обновите профиль в клиенте.</span></li></ol>
             <details className="mihomoClientAppsDetails"><summary>Приложения для подключения</summary><div className="mihomoClientApps">
-              <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>PC · WINDOWS / LINUX</small><strong>Clash Verge Rev</strong><span>Официальные релизы ↗</span></a>
-              <a href="https://apps.apple.com/us/app/clash-mi/id6744321968" target="_blank" rel="noreferrer"><small>IPHONE / IPAD</small><strong>Clash Mi</strong><span>Скачать в App Store ↗</span></a>
-              <a href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases" target="_blank" rel="noreferrer"><small>ANDROID</small><strong>Clash Meta for Android</strong><span>Официальные APK-релизы ↗</span></a>
-              <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>MAC · INTEL / APPLE SILICON</small><strong>Clash Verge Rev</strong><span>Скачать DMG ↗</span></a>
-              <a href="https://apps.apple.com/us/app/karing/id6472431552" target="_blank" rel="noreferrer"><small>IPHONE / IPAD · YAML</small><strong>Karing</strong><span>Для отдельного устройства включите X-HWID ↗</span></a>
-              <a href="https://github.com/hiddify/hiddify-app" target="_blank" rel="noreferrer"><small>МОБИЛЬНЫЕ / ПК · YAML</small><strong>Hiddify</strong><span>Официальные загрузки ↗</span></a>
-              <a href="https://github.com/KaringX/karing/releases" target="_blank" rel="noreferrer"><small>Windows / macOS / Linux · YAML</small><strong>Karing</strong><span>Для отдельного устройства включите X-HWID ↗</span></a>
-              <a href="https://github.com/pluralplay/FlClashX/releases" target="_blank" rel="noreferrer"><small>Windows / macOS / Linux · YAML · HWID</small><strong>FlClashX</strong><span>Оставьте включённым «Отправлять HWID» ↗</span></a>
-              <a href="https://github.com/legiz-ru/Prizrak-Box/releases" target="_blank" rel="noreferrer"><small>Windows / macOS / Linux · YAML · HWID</small><strong>Prizrak-Box</strong><span>Оставьте включённой отправку HWID ↗</span></a>
-              <a href="https://github.com/chen08209/FlClash/releases" target="_blank" rel="noreferrer"><small>ANDROID / ПК · YAML</small><strong>FlClash</strong><span>Официальные релизы ↗</span></a>
-              <a href="https://github.com/mihomo-party-org/clash-party/releases" target="_blank" rel="noreferrer"><small>ПК · YAML</small><strong>Clash Party</strong><span>Ранее Mihomo Party ↗</span></a>
-              <a href="https://github.com/libnyanpasu/clash-nyanpasu/releases" target="_blank" rel="noreferrer"><small>ПК · YAML · ЯДРО MIHOMO</small><strong>Clash Nyanpasu</strong><span>Официальные релизы ↗</span></a>
-              <a href="https://github.com/coolcoala/koala-clash/releases" target="_blank" rel="noreferrer"><small>Windows / macOS / Linux · YAML · HWID</small><strong>Koala Clash</strong><span>Официальные релизы ↗</span></a>
-              <a href="https://github.com/xishang0128/sparkle/releases" target="_blank" rel="noreferrer"><small>ПК · YAML</small><strong>Sparkle</strong><span>Официальные релизы ↗</span></a>
+              {clientApps.map(app => <a key={app.id} href={app.url} target="_blank" rel="noreferrer"><small>{app.label}</small><strong>{app.name}</strong><span>{app.note}</span></a>)}
             </div></details>
           </section>
         </article>

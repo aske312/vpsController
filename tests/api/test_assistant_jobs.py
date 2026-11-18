@@ -79,17 +79,64 @@ class ChatJobsTests(unittest.TestCase):
         event = next(row for row in rows if row.get('request_id') == self.payload.request_id)
         self.assertEqual(event['status'], 502)
         self.assertEqual(event['error_code'], 'chat_incomplete')
-    def test_settings_change_prevents_generation(self):
+    def test_queued_request_uses_current_authorized_settings_instead_of_discarding_it(self):
         jobs.submit(api,self.payload)
-        with patch.object(control,'read',return_value={'revision':'changed'}),patch.object(control,'chat_request') as chat:
+        with patch.object(control,'read',return_value={'revision':'changed'}),patch.object(control,'chat_request', return_value={'result':{'answer':'current','tools_used':[]}}) as chat:
             jobs.execute(api,self.payload.request_id)
-        chat.assert_not_called();self.assertEqual(jobs.get(api,self.payload.request_id)['state'],'failed')
+        chat.assert_called_once();self.assertEqual(jobs.get(api,self.payload.request_id)['state'],'done')
     def test_stopped_worker_is_unknown_not_restarted(self):
         jobs.submit(api,self.payload)
-        file=jobs.path(api,self.payload.request_id);record=operations.read(file);record['created_at']-=40;operations.atomic_json(file,record)
+        file=jobs.path(api,self.payload.request_id);record=operations.read(file);record.update(state='running', created_at=record['created_at']-40);operations.atomic_json(file,record)
         with patch.object(api,'observe_service',return_value={'unit_present':False,'state':'inactive'}): value=jobs.get(api,self.payload.request_id)
         self.assertEqual(value['state'],'unknown');self.assertEqual(self.launch.call_count,1)
         with patch.object(control,'chat_request') as chat:jobs.execute(api,self.payload.request_id)
+        chat.assert_not_called()
+
+    def test_fifo_survives_failed_and_partial_answers_without_discarding_followups(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                first = self.payload.model_copy(update={'request_id': ('b' if failed else 'c') * 32})
+                second = self.payload.model_copy(update={'request_id': ('d' if failed else 'e') * 32, 'previous_request_id': first.request_id, 'prompt':'follow-up'})
+                jobs.submit(api, first); jobs.submit(api, second)
+                with patch.object(control, 'chat_request') as chat:
+                    jobs.execute(api, second.request_id)
+                    chat.assert_not_called()
+                self.assertEqual(jobs.get(api, second.request_id)['state'], 'queued')
+                with patch.object(control, 'chat_request', side_effect=HTTPException(502,'provider failed') if failed else None,
+                                  return_value={'result':{'answer':'partial','tools_used':[], 'status':'incomplete'}}):
+                    jobs.execute(api, first.request_id)
+                with patch.object(control, 'chat_request', return_value={'result':{'answer':'second answer','tools_used':[]}}):
+                    jobs.execute(api, second.request_id)
+                self.assertEqual(jobs.get(api, second.request_id)['output']['result']['answer'], 'second answer')
+
+    def test_queued_worker_can_recover_before_generation_but_running_worker_is_not_replayed(self):
+        jobs.submit(api, self.payload)
+        file = jobs.path(api, self.payload.request_id)
+        row = operations.read(file); row['created_at'] -= 40; operations.atomic_json(file, row)
+        with patch.object(api, 'observe_service', return_value={'unit_present':False,'state':'inactive'}):
+            self.assertEqual(jobs.get(api, self.payload.request_id)['state'], 'queued')
+        self.assertEqual(self.launch.call_count, 2)
+        with patch.object(control, 'chat_request', return_value={'result':{'answer':'once','tools_used':[]}}) as chat:
+            jobs.execute(api, self.payload.request_id); jobs.execute(api, self.payload.request_id)
+        chat.assert_called_once()
+
+    def test_queue_wait_does_not_discard_an_accepted_request_or_its_files(self):
+        jobs.submit(api, self.payload)
+        error = HTTPException(429, 'not started'); error.error_code = 'provider_queue_wait'
+        with patch.object(control, 'chat_request', side_effect=error): jobs.execute(api, self.payload.request_id)
+        self.assertEqual(jobs.get(api, self.payload.request_id)['state'], 'queued')
+        self.assertTrue(jobs.input_path(api, self.payload.request_id).exists())
+        self.assertEqual(self.launch.call_count, 1)
+
+    def test_cancel_only_unstarted_request_and_parent_is_scoped_to_actor_and_channel(self):
+        jobs.submit(api, self.payload)
+        cancelled = jobs.cancel(api, self.payload.request_id)
+        self.assertEqual(cancelled['error']['code'], 'cancelled')
+        self.assertFalse(jobs.input_path(api, self.payload.request_id).exists())
+        second = self.payload.model_copy(update={'request_id':'f'*32, 'previous_request_id': self.payload.request_id})
+        with patch.object(control.roles, 'require'):
+            with self.assertRaises(HTTPException): jobs.submit(api, second, actor='11', channel='bot')
+        with patch.object(control, 'chat_request') as chat: jobs.execute(api, self.payload.request_id)
         chat.assert_not_called()
     def test_terminal_retention_and_private_file_modes(self):
         jobs.submit(api,self.payload);jobs.update(api,self.payload.request_id,state='failed',error={'code':'test'})

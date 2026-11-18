@@ -38,7 +38,9 @@ def admission(api, provider, *, wait_seconds=90):
                         break
                     assistant_jobs.emit({'stage': 'waiting_provider'})
                     if time.monotonic() >= deadline:
-                        raise HTTPException(429, 'Провайдер занят. Этот запрос к модели ещё не отправлялся')
+                        error = HTTPException(429, 'Провайдер занят. Этот запрос к модели ещё не отправлялся')
+                        error.error_code = 'provider_queue_wait'
+                        raise error
                     time.sleep(.5)
             finally:
                 for candidate in candidates:

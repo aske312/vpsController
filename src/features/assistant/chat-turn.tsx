@@ -10,10 +10,9 @@ import type { ChatReplyStatus } from "./chat-jobs";
 
 export type ChatTurn = { status?: ChatReplyStatus; command_ids?: string[]; system_event?: boolean; request_id?: string; queue_state?: "queued" | "running"; pending_action?: PendingAction; pending_actions?: PendingAction[]; action_result?: string; id: number; question: string; model: string; files: ChatFile[]; files_expired?: boolean; answer?: string; tools?: string[]; error?: string; context_safe?: boolean };
 
-export const ChatTurnRow = memo(function ChatTurnRow({ turn, canRetry, onRetry, onCancel, onError, onTrace, children, activityLabel }: {
+export const ChatTurnRow = memo(function ChatTurnRow({ turn, canRetry, onRetry, onCancel, onError, children, activityLabel }: {
   turn: ChatTurn; canRetry: boolean; children?: ReactNode; activityLabel?: string;
   onRetry: (turn: ChatTurn) => void; onCancel: (id: number) => void; onError: (message: string) => void;
-  onTrace: (id: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   return <div className="mcpTurn">
@@ -31,6 +30,6 @@ export const ChatTurnRow = memo(function ChatTurnRow({ turn, canRetry, onRetry, 
     {turn.queue_state === "queued" && <button type="button" className="ghostButton" onClick={() => onCancel(turn.id)}>Убрать из очереди</button>}
     <div className="mcpAnswerActions">{turn.answer && !turn.error && <button type="button" className="mcpIconButton" aria-label="Скопировать ответ" title={copied ? "Скопировано" : "Скопировать ответ"} onClick={() => {
       void navigator.clipboard.writeText(turn.answer!).then(() => setCopied(true)).catch(() => onError("Не удалось скопировать ответ"));
-    }}><ChatIcon name={copied ? "check" : "copy"}/></button>}{turn.request_id && <button type="button" className="ghostButton" title={`Журнал запроса ${turn.request_id}`} onClick={() => onTrace(turn.request_id!)}>Журнал запроса</button>}</div>
+    }}><ChatIcon name={copied ? "check" : "copy"}/></button>}</div>
   </div>;
 });

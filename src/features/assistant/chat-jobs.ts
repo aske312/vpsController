@@ -17,14 +17,30 @@ export function pendingChatKey(client: Client, actor: string) { return `nodera-p
 export function rememberChat(client: Client, actor: string, id: string | null) {
   if (!client.sessionKey) return;
   try {
-    if (id) sessionStorage.setItem(pendingChatKey(client, actor), id);
+    if (id) sessionStorage.setItem(pendingChatKey(client, actor), JSON.stringify([...new Set([...savedChats(client, actor), id])].slice(0, 16)));
     else sessionStorage.removeItem(pendingChatKey(client, actor));
   } catch { /* Server result remains available if browser storage is disabled. */ }
 }
 export function savedChat(client: Client, actor: string) {
-  if (!client.sessionKey) return null;
-  try { const id = sessionStorage.getItem(pendingChatKey(client, actor)); return id && /^[0-9a-f]{32}$/.test(id) ? id : null; }
-  catch { return null; }
+  return savedChats(client, actor)[0] ?? null;
+}
+export function savedChats(client: Client, actor: string): string[] {
+  if (!client.sessionKey) return [];
+  try {
+    const raw = sessionStorage.getItem(pendingChatKey(client, actor));
+    if (!raw) return [];
+    if (/^[0-9a-f]{32}$/.test(raw)) return [raw];
+    const ids: unknown = JSON.parse(raw);
+    return Array.isArray(ids) ? [...new Set(ids.filter((id): id is string => typeof id === 'string' && /^[0-9a-f]{32}$/.test(id)))].slice(0,16) : [];
+  } catch { return []; }
+}
+export function forgetChat(client: Client, actor: string, id: string) {
+  const ids = savedChats(client, actor).filter(value => value !== id);
+  if (!client.sessionKey) return;
+  try {
+    if (ids.length) sessionStorage.setItem(pendingChatKey(client, actor), JSON.stringify(ids));
+    else sessionStorage.removeItem(pendingChatKey(client, actor));
+  } catch { /* Server queue remains authoritative. */ }
 }
 export const chatStage = (stage: string) => ({ queued: "В очереди AI", waiting_provider: "Ожидает свободного провайдера", starting: "Думает…",
   waiting_model: "Думает…", receiving: "Печатает…", tools: "Думает…", reconnecting: "Восстанавливает связь…" }[stage] ?? "Думает…");
@@ -73,7 +89,7 @@ export async function observeChatJob(client: Client, id: string, actor: string, 
       if (signal.aborted) throw cause;
       if (cause instanceof ChatJobProtocolError) throw cause;
       if (cause instanceof ApiRequestError && [401, 403, 404, 410].includes(cause.status ?? 0)) {
-        if ([404, 410].includes(cause.status ?? 0)) rememberChat(client, actor, null);
+        if ([404, 410].includes(cause.status ?? 0)) forgetChat(client, actor, id);
         throw cause;
       }
       failures++;
@@ -86,7 +102,7 @@ export async function observeChatJob(client: Client, id: string, actor: string, 
     });
   }
   if (!terminal) throw new Error(`Связь с AI не восстановлена. Результат сохранён под ID ${id}; повторной отправки не было`);
-  rememberChat(client, actor, null);
+  forgetChat(client, actor, id);
   if (terminal.state !== "done" || !terminal.output) throw new ChatJobError(terminal);
   return terminal.output;
 }

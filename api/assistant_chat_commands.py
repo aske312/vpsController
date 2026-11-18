@@ -23,7 +23,7 @@ ROWS = [
     ('logs', 'Последние логи', ' [служба]', False), ('profiles', 'Доступные профили Mihomo', '', False),
     ('subscription', 'Ссылка подписки', ' [ID]', False), ('profile', 'Параметры подписки', ' [ID]', False),
     ('devices', 'Устройства подписки', ' [ID]', False), ('traffic', 'Трафик подписки', ' [ID]', False),
-    ('connect', 'Как подключиться', '', False), ('models', 'Каталог моделей AI', ' [страница]', False),
+    ('connect', 'Как подключиться', '', False), ('apps', 'Приложения для подключения', ' [windows|android|ios|macos|linux]', False), ('models', 'Каталог моделей AI', ' [страница]', False),
     ('model', 'Модель веб-чата', ' [ID|default]', False),
     ('service', 'Подготовить управление службой', ' <ID> <start|stop|restart>', True),
     ('confirm', 'Подтвердить действие', ' <код>', True), ('cancel', 'Отказать в выполнении', ' [код]', False),

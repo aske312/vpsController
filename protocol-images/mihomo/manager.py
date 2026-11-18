@@ -4383,6 +4383,7 @@ def profile_schema() -> dict[str, Any]:
 # "like ClashMeta v2ray sing-box" in its User-Agent. Recognition is separate
 # from application verification in client-verification.json.
 CLIENT_SIGNATURES = (
+    (r"\bnodera\b", "Nodera", ("mihomo",)),
     (r"\bv2rage\b", "v2RAGE", ("uri",)),
     (r"\brocketvpn\b", "RocketVPN", ("uri",)),
     (r"\bhapp\b", "Happ", ("xray",)),
@@ -4457,6 +4458,10 @@ def client_identity_key(metadata: dict[str, Any]) -> str:
 
 def device_matches_client(device: dict[str, Any], metadata: dict[str, Any]) -> bool:
     saved = device.get("client_identity_key") or client_identity_key(device)
+    # Before Nodera was recognized, its Mihomo UA used the generic family key.
+    # Only migrate devices whose retained metadata proves they already used Nodera.
+    if saved == "mihomo / clash" and client_identity_key(device) == "nodera" and client_identity_key(metadata) == "nodera":
+        return True
     return saved == client_identity_key(metadata) or (saved == "undefined" and not device.get("client_identity_key"))
 
 

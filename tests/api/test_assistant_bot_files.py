@@ -87,7 +87,8 @@ class BotFileTests(unittest.IsolatedAsyncioTestCase):
         files = [{'name': 'notes.txt', 'mime': 'text/plain', 'data': 'dGV4dA=='}]
         def transport(request):
             calls.append(request)
-            return httpx.Response(200, json={'result': {'answer': 'Прочитано'}})
+            if request.method == 'POST': return httpx.Response(202, json={'state':'queued'})
+            return httpx.Response(200, json={'state':'done', 'output':{'result': {'answer': 'Прочитано'}}})
         with patch.object(bot.httpx, 'AsyncClient', self.client_factory(transport)):
             result = await bot.agent_request({'control_token': 'fixture'}, 11, '/status', attachments=files)
         self.assertEqual(result, 'Прочитано')
@@ -96,7 +97,8 @@ class BotFileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body['attachments'], files)
         self.assertEqual(body['prompt'], '/status')
         self.assertEqual(calls[0].headers['X-MCP-Actor'], '11')
-        self.assertEqual(calls[0].url.path, '/api/assistant/bot-chat')
+        self.assertEqual(calls[0].url.path, '/api/assistant/bot-requests')
+        self.assertEqual(calls[1].method, 'GET')
 
     async def test_captionless_file_and_explicit_ai_caption_use_the_attachment_handler(self):
         file = {'name': 'notes.txt', 'mime': 'text/plain', 'data': 'dGV4dA=='}

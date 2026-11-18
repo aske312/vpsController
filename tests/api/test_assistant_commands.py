@@ -150,7 +150,9 @@ class ServerCommandTests(unittest.TestCase):
         self.assertIn('/model ' + model, actions.values())
         self.assertIn('/models 2', actions.values())
         self.assertNotIn('Службы', str(bot.reply_keyboard('chat')))
-        self.assertIn('Службы', str(bot.reply_keyboard(True)))
+        self.assertEqual(bot.reply_keyboard(True)['keyboard'], [[{'text':'Меню'}]])
+        menu = bot.inline_keyboard('', '/menu server', True, {})
+        self.assertIn('Службы', str(menu))
         self.assertEqual(bot.reply_keyboard(False), {'remove_keyboard': True})
 
     def test_telegram_menu_routes_model_callback_and_plain_text_with_live_permissions(self):

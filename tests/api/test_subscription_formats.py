@@ -139,6 +139,25 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(self.store[0]["connections"], previous)
         self.assertEqual(self.store[0]["devices"][1]["client_identity_key"], "karing")
 
+    def test_nodera_recognition_preserves_existing_device_credentials(self):
+        self.fetch("Nodera/0.0.4 (Windows; Mihomo)")
+        device = self.store[0]["devices"][1]
+        previous_id = device["id"]
+        device["client_identity_key"] = "mihomo / clash"
+        connections = deepcopy(self.store[0]["connections"])
+        self.fetch("Nodera/0.0.5 (Windows; Mihomo)")
+        self.assertEqual(len(self.store[0]["devices"]), 2)
+        self.assertEqual(self.store[0]["devices"][1]["id"], previous_id)
+        self.assertEqual(self.store[0]["devices"][1]["client_identity_key"], "nodera")
+        self.assertEqual(self.store[0]["connections"], connections)
+        self.assertEqual(self.provision.call_count, 1)
+
+    def test_nodera_does_not_reuse_another_mihomo_application_device(self):
+        self.fetch("Mihomo/1.19")
+        self.fetch("Nodera/0.0.4 (Windows; Mihomo)")
+        self.assertEqual(len(self.store[0]["devices"]), 3)
+        self.assertEqual(self.provision.call_count, 2)
+
 
     def setUp(self):
         managed_mihomo_fixture(self)
