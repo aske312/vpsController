@@ -25,6 +25,10 @@
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }
+    handle /api/assistant/telegram-setup {
+        header -X-Frame-Options
+        reverse_proxy 127.0.0.1:8000
+    }
     handle /api/mihomo/* {
         reverse_proxy 127.0.0.1:8791
     }

@@ -906,6 +906,9 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     files = [item.model_dump() for item in payload.attachments]
     body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files, 'stream': payload.stream, 'request_id': payload.request_id,
             'history': [item.model_dump() for item in payload.history]}
+    if (channel == 'bot' and actor != 'panel' and roles.allows(settings, actor, 'roles_manage')
+            and not files and not payload.alert and getattr(api, 'PUBLIC_DOMAIN', '')):
+        body['offer_telegram_setup'] = True
     if channel == 'bot' and settings.get('model_mode') == 'catalog' and not body['model']:
         preference = operations.read(bot_model_path(api, actor))
         if roles.allows(settings, actor, 'model_select') and model_preference_matches(preference, settings):
@@ -1066,6 +1069,8 @@ def _runtime_request(api, mode, body):
         raise HTTPException(409, 'Обновите компонент Nodera для потоковых ответов')
     value['streaming'] = streaming
     grants = roles.effective(value, str(body.get('actor', 'panel')))
+    if body.pop('offer_telegram_setup', False) and 'roles_manage' in grants:
+        value['offer_telegram_setup'] = True
     value['web_enabled'] = value.get('web_enabled', True) and 'web' in grants
     value['personalization_enabled'] = value.get('personalization_enabled', True) and 'memory' in grants
     value['accounts'] = [{**row, 'effective_permissions': sorted(roles.account_grants(value, row)), 'bot_access': roles.allows(value, str(row['telegram_id']), 'subscriptions_admin'), 'bot_chat_access': roles.allows(value, str(row['telegram_id']), 'chat'), 'vps_access': bool(roles.account_grants(value, row) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), 'telegram_access': roles.allows(value, str(row['telegram_id']), 'telegram_read')} for row in value['accounts']]

@@ -191,7 +191,8 @@ DIRECT_PHRASES = {
     '/traffic': ('мой трафик', 'трафик', 'трафик подписки', 'сколько трафика использовано', 'расход трафика'),
     '/connect': ('как подключиться', 'как подключить vpn', 'как подключить mihomo', 'как импортировать подписку', 'как обновить подписку'),
     '/apps': ('приложения', 'приложения для подключения', 'скачать клиент', 'скачать приложение'),
-    '/telegram session': ('как настроить telegram api', 'настроить telegram api', 'как подключить telegram api', 'подключить telegram api', 'помоги настроить telegram api'),
+    '/telegram configure': ('как настроить telegram api', 'настроить telegram api', 'помоги настроить telegram api', 'настрой telegram api'),
+    '/telegram session': ('как подключить telegram api', 'подключить telegram api'),
     '/telegram': ('telegram api', 'телеграм api'),
     '/models': ('модели', 'модели ai', 'список моделей', 'доступные модели', 'какие модели доступны'),
     '/model': ('текущая модель', 'какая модель выбрана', 'какая сейчас модель'),
@@ -374,6 +375,9 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
         value = response.json()
         answer = value['result']['answer']
         pending_items = value.get('pending_actions') or ([value['pending_action']] if value.get('pending_action') else [])
+        if (not pending_items and 'offer_telegram_setup' in value['result'].get('tools_used', [])
+                and 'roles_manage' in (access_details.get() or {}).get('permissions', [])):
+            command_view.set({'buttons': [[{'text': 'Настроить Telegram MCP', 'command': '/telegram configure'}]]})
         for pending in pending_items:
             action = {'start': 'Запуск', 'stop': 'Остановка', 'restart': 'Перезапуск'}.get(pending['action'], pending['action'])
             path = pending['service'].removeprefix('Mihomo ')
@@ -745,6 +749,8 @@ def inline_keyboard_content(answer, prompt, access, actions):
             for item in row[:3]:
                 if isinstance(item.get('url'),str) and item['url'].startswith('https://'):
                     buttons.append({'text':str(item['text'])[:60],'url':item['url']})
+                elif isinstance(item.get('web_app'), str) and item['web_app'].startswith('https://'):
+                    buttons.append({'text': str(item['text'])[:60], 'web_app': {'url': item['web_app']}})
                 elif isinstance(item.get('command'),str) and item['command'].startswith('/') and len(item['command'])<=256:
                     buttons.append(button(item['text'],item['command']))
             if buttons: rows.append(buttons)

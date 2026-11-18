@@ -55,6 +55,7 @@ import assistant_commands
 import assistant_chat_commands
 import assistant_bot_history
 import assistant_confirmations
+import assistant_telegram_setup
 import observability
 import diagnostic_tools
 import network_routes
@@ -662,6 +663,21 @@ def nodera_telegram_settings(payload: assistant_contacts.ProfileDialog, settings
     import assistant_bot_telegram
     return assistant_bot_telegram.view(sys.modules[__name__], actor, '/telegram input ' + payload.text, payload.request_id)
 
+
+@app.get('/api/assistant/telegram-setup')
+def telegram_setup_page():
+    return assistant_telegram_setup.page()
+
+
+def require_telegram_setup_owner(init_data: str | None = Header(default=None, alias='X-Telegram-Init-Data')):
+    actor = assistant_telegram_setup.authorize(sys.modules[__name__], init_data)
+    return init_data, actor
+
+
+@app.post('/api/assistant/telegram-setup')
+def telegram_setup_save(payload: assistant_telegram_setup.Credentials, auth: tuple[str, str] = Depends(require_telegram_setup_owner)):
+    init_data, actor = auth
+    return assistant_telegram_setup.save(sys.modules[__name__], init_data, actor, payload)
 
 @app.post('/api/assistant/bot-command')
 def nodera_command(payload: assistant_commands.Command, settings: dict = Depends(require_nodera_bot_transport),

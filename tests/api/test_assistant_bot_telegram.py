@@ -1,9 +1,13 @@
 import asyncio
+import hashlib
+import hmac
 import json
+import time
 import unittest
 import sys
 import types
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from fastapi import HTTPException
@@ -75,8 +79,8 @@ class BotTelegramSettingsTests(unittest.TestCase):
         settings.pop('telegram_api_hash', None)
         control.store(api, settings)
 
-        command = bot.direct_prompt('Помоги настроить Telegram API')
-        self.assertEqual(command, '/telegram session')
+        self.assertEqual(bot.direct_prompt('Помоги настроить Telegram API'), '/telegram configure')
+        command = '/telegram session'
         guide = self.submit(command).json()
         self.assertIn('API ID, API hash', guide['text'])
         self.assertEqual(guide['buttons'][0][0]['url'], 'https://my.telegram.org/apps')
@@ -85,9 +89,54 @@ class BotTelegramSettingsTests(unittest.TestCase):
         settings = control.read(api)
         settings.update(telegram_api_id=1234, telegram_api_hash='a'*32)
         control.store(api, settings)
-        ready = self.submit(guide['buttons'][1][0]['command']).json()
+        retry = next(item for row in guide['buttons'] for item in row if item['text'] == 'Проверить настройки')
+        ready = self.submit(retry['command']).json()
         self.assertIn('StringSession', ready['text'])
         self.assertTrue(contacts.profile(api, control.read(api), '11').get('telegram_dialog'))
+
+    def test_only_owner_can_save_mcp_credentials_through_the_bot_form(self):
+        self.assertEqual(self.submit('/telegram configure').status_code, 403)
+        settings = control.read(api)
+        settings['accounts'][0].update(role='owner', permission_overrides={})
+        control.store(api, settings)
+        with patch.object(api, 'PUBLIC_DOMAIN', 'panel.example.com'):
+            command = self.submit('/telegram configure', 'a'*32)
+            self.assertEqual(command.status_code, 200, command.text)
+            self.assertEqual(self.submit('/telegram configure', 'a'*32).json(), command.json())
+        url = urlsplit(command.json()['buttons'][0][0]['web_app'])
+        self.assertEqual(url.hostname, 'panel.example.com')
+        page = self.client.get(url.path + '?' + url.query)
+        self.assertIn('Сохранить параметры', page.text)
+        self.assertEqual(page.headers['cache-control'], 'no-store')
+
+        def launch_data(actor, age=0):
+            fields = {'auth_date': str(int(time.time()) - age), 'user': json.dumps({'id': actor})}
+            key = hmac.digest(b'WebAppData', settings['bot_token'].encode(), 'sha256')
+            message = '\n'.join(f'{key}={value}' for key, value in sorted(fields.items()))
+            fields['hash'] = hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
+            return urlencode(fields)
+
+        payload = {'setup': parse_qs(url.query)['setup'][0], 'api_id': 4321, 'api_hash': 'c'*32}
+        valid = launch_data(11)
+        for launch, status in ((valid + '&user=invalid', 401), (launch_data(11, 700), 401), (launch_data(22), 403)):
+            self.assertEqual(self.client.post(url.path, json=payload, headers={'X-Telegram-Init-Data': launch}).status_code, status)
+        header = {'X-Telegram-Init-Data': valid}
+        self.assertEqual(self.client.post(url.path, json={**payload, 'setup': 'b'*32}, headers=header).status_code, 409)
+        first = self.client.post(url.path, json=payload, headers=header)
+        self.assertEqual(first.json(), {'saved': True}, first.text)
+        self.assertEqual(self.client.post(url.path, json=payload, headers=header).status_code, 409)
+        updated = control.read(api)
+        self.assertEqual((updated['telegram_api_id'], updated['telegram_api_hash']), (4321, 'c'*32))
+        self.assertEqual(updated['accounts'][0]['session'], settings['accounts'][0]['session'])
+
+    def test_agent_setup_tool_offers_form_without_saving(self):
+        from tests.api.test_assistant_control import runner
+        settings = {'accounts': [], 'personalization_enabled': False}
+        self.assertNotIn('offer_telegram_setup', runner.native_connections(settings, '11'))
+        session, tool = runner.native_connections({**settings, 'offer_telegram_setup': True}, '11')['offer_telegram_setup']
+        self.assertEqual(tool.inputSchema['properties'], {})
+        output = asyncio.run(session.call_tool(tool.name, {}))
+        self.assertEqual(json.loads(output.content[0].text)['saved'], False)
 
     def test_verified_session_is_private_actor_scoped_and_lost_reply_reconciles(self):
         self.assertEqual(self.submit('/telegram session').status_code,200)

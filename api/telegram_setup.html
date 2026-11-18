@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Настройка Telegram MCP</title>
+<script nonce="__NONCE__" src="https://telegram.org/js/telegram-web-app.js"></script>
+<style nonce="__NONCE__">
+  :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
+  body { margin: 0; background: var(--tg-theme-bg-color, Canvas); color: var(--tg-theme-text-color, CanvasText); }
+  main { max-width: 28rem; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.45rem; }
+  p, label { line-height: 1.45; }
+  form, label { display: grid; gap: .5rem; }
+  form { gap: 1rem; }
+  input, button { box-sizing: border-box; font: inherit; padding: .7rem .8rem; border-radius: .45rem; }
+  input { border: 1px solid GrayText; min-width: 0; }
+  button { border: none; background: var(--tg-theme-button-color, #2464bc); color: var(--tg-theme-button-text-color, white); }
+  button:disabled { opacity: .5; }
+</style>
+<main>
+  <h1>Настройка Telegram MCP</h1>
+  <p>Сохранение заменит общие параметры для всех подключений Telegram MCP на этом сервере.</p>
+  <p><a href="https://my.telegram.org/apps" rel="noreferrer noopener" target="_blank">Получить API ID и API hash в Telegram</a></p>
+  <form method="post">
+    <label>API ID
+      <input name="api_id" type="text" inputmode="numeric" pattern="[0-9]{1,10}" required autocomplete="off">
+    </label>
+    <label>API hash
+      <input name="api_hash" type="password" pattern="[0-9a-fA-F]{32}" required autocomplete="off" spellcheck="false">
+    </label>
+    <button disabled>Сохранить параметры</button>
+  </form>
+  <p id="status" role="status">Откройте форму кнопкой в личном чате с ботом.</p>
+</main>
+<script nonce="__NONCE__">
+  const webApp = window.Telegram?.WebApp;
+  const setup = new URLSearchParams(window.location.search).get('setup');
+  const form = document.querySelector('form');
+  const button = form.querySelector('button');
+  const status = document.querySelector('#status');
+  if (webApp?.initData && /^[a-f0-9]{32}$/.test(setup || '')) {
+    webApp.ready();
+    button.disabled = false;
+    status.textContent = '';
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (button.disabled) return;
+      button.disabled = true;
+      status.textContent = 'Сохраняем параметры…';
+      try {
+        const response = await fetch(location.pathname, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': webApp.initData },
+          credentials: 'omit',
+          body: JSON.stringify({ setup, api_id: Number(form.elements.api_id.value), api_hash: form.elements.api_hash.value }),
+        });
+        if (response.ok && (await response.json()).saved === true) {
+          form.reset();
+          status.textContent = 'Параметры сохранены. Вернитесь в бот и откройте /telegram.';
+          return;
+        }
+        if ([401, 403, 409].includes(response.status)) {
+          form.reset();
+          status.textContent = 'Форма недоступна или устарела. Откройте её заново из бота.';
+          return;
+        }
+        status.textContent = response.status === 422 ? 'Проверьте формат API ID и API hash.' : 'Не удалось подтвердить сохранение. Проверьте состояние в боте.';
+        button.disabled = response.status !== 422;
+      } catch {
+        form.reset();
+        status.textContent = 'Связь прервалась. Проверьте состояние в боте перед повтором.';
+      }
+    });
+  }
+</script>
+</html>

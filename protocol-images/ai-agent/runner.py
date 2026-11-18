@@ -596,7 +596,11 @@ class NativeTools:
         self.settings, self.actor = settings, actor
 
     async def call_tool(self, name, arguments):
-        if name == 'request_confirmation':
+        if name == 'offer_telegram_setup':
+            if not self.settings.get('offer_telegram_setup'):
+                raise PermissionError('Настройка доступна владельцу в личном чате с ботом')
+            result = {'offered': True, 'saved': False, 'next': 'Владелец вводит API ID и API hash и подтверждает сохранение в форме.'}
+        elif name == 'request_confirmation':
             if not self.settings.get('confirmation_request_token'): raise PermissionError('Запрос подтверждения недоступен')
             async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
                 response = await client.post('http://127.0.0.1:8000/api/assistant/confirmation-request', json=arguments,
@@ -641,6 +645,8 @@ def native_connections(settings, actor):
     def add(name, description, properties, required=()):
         result[name] = (session, SimpleNamespace(name=name, description=description,
             inputSchema={'type': 'object', 'properties': properties, 'required': list(required), 'additionalProperties': False}))
+    if settings.get('offer_telegram_setup'):
+        add('offer_telegram_setup', 'Добавить в ответ владельцу кнопку настройки общих API ID и API hash Telegram MCP. Вызывай по просьбе настроить или заменить эти параметры. Инструмент не получает секреты и не сохраняет данные. Попроси владельца самостоятельно ввести параметры в форме и подтвердить сохранение.', {})
     if settings.get('confirmation_request_token'):
         add('request_confirmation', 'Показать в чате и уведомлении единый план из 1–32 подготовленных операций с кнопками подтвердить все или отклонить все. Сначала подготовь действие профильным инструментом и возьми operation_id из его ответа. Укажи понятное название, причину и последствия. Передай operation_ids всех действий одного плана в нужном порядке: пользователь подтвердит весь список одним нажатием. Не включай несвязанные операции. Не выполняет и не подтверждает действие; решение принимает пользователь. Не повторяй подготовку уже ожидающего действия.',
             {'operation_ids': {'type': 'array', 'items': {'type': 'string', 'pattern': '^[a-f0-9]{32}$'}, 'minItems': 1, 'maxItems': 32, 'uniqueItems': True},
