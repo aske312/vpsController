@@ -19,6 +19,7 @@ type ServerInfo = {
   country_code?: string;
   public_endpoint?: string;
   public_ip?: string;
+  public_domain?: string;
 };
 
 type SystemAction = {

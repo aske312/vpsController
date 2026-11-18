@@ -14,6 +14,7 @@ type ServerInfo = {
   country?: string;
   public_endpoint?: string;
   public_ip?: string;
+  public_domain?: string;
 };
 
 type Props = {
@@ -35,12 +36,13 @@ export function GateNavigation({
 }: Props) {
   const mihomoInstalled = protocolImages.some((item) => item.id === "mihomo" && item.installed);
   const noderaInstalled = protocolImages.some(item => item.id === "nodera" && item.installed);
+  const domain = server?.public_domain?.trim() || "312.net";
 
   return (
     <aside className="gateSidebar">
       <button className="gateBrand" type="button" onClick={() => onNavigate("overview")} aria-label="Открыть обзор">
         <span className="gateBrandMark"><BrandGlyph /></span>
-        <span><strong>312node<span>.net</span></strong><small>INFRASTRUCTURE</small></span>
+        <span><strong title={domain}>{domain}</strong><small>INFRASTRUCTURE</small></span>
       </button>
 
       <nav className="gateNav" aria-label="Основная навигация">

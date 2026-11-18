@@ -197,8 +197,10 @@
 }
 
 .gateBrand strong {
-  font: 750 21px/1 var(--font-sans);
+  font: 750 21px/1.2 var(--font-sans);
   letter-spacing: -.8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .gateBrand strong span {
