@@ -8,11 +8,10 @@ import { cdnSecuritySnapshot, type CdnSecurityStatus } from "../shared/lib/cdn-s
 import { RefreshNotices, refreshFailure } from "./components/refresh-notices";
 import type { RefreshFailure } from "./components/refresh-notices";
 import type { ApplicationMetadata } from "../shared/types/control-plane";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmationDialog } from "../shared/components/confirmation-dialog";
 import { LegalFooter } from "../shared/components/legal-footer";
 import { basicCredentials } from "../features/auth/basic-credentials";
-import { MihomoPage } from "../features/mihomo/mihomo-view";
 import type { SectionLeaveGuard } from "../features/mihomo/rule-leave-guard";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
@@ -20,12 +19,11 @@ import { OperationHistory } from "./components/operation-history";
 import { OperationHistorySettings, useOperationHistorySettings } from "../features/services/operation-history-settings";
 import { ServicesDashboard } from "../features/services/services-view";
 import { ObservabilityPanel } from "../features/services/observability-panel";
-import { NetworkView, type NetworkListState } from "../features/network/network-view";
+import type { NetworkListState } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { LoginView } from "../features/auth/login-view";
 import { AssistantConfirmations } from "../features/assistant/confirmation-queue";
-import { AssistantView } from "../features/assistant/assistant-view";
 import { clearChatSessions } from "../features/assistant/chat-session";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, ConfirmationRequest, LoggingSettings, Overview, ProtocolImage, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
 import { actionLabels, bytes, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
@@ -39,6 +37,14 @@ import { applicationMetadataSnapshot, applicationMetadataUnavailable } from "./a
 import { applicationVersionState } from "../features/application/version-state";
 import { appendResources, networkSample as sampleNetwork, usedBytes, usedPercent } from "../shared/lib/resource-metrics";
 import type { AdoptionPlan, ComponentManagement, MetricsSettings } from "../shared/types/control-plane";
+
+const MihomoPage = lazy(() => import("../features/mihomo/mihomo-view").then((module) => ({ default: module.MihomoPage })));
+const NetworkView = lazy(() => import("../features/network/network-view").then((module) => ({ default: module.NetworkView })));
+const AssistantView = lazy(() => import("../features/assistant/assistant-view").then((module) => ({ default: module.AssistantView })));
+
+function SectionLoading() {
+  return <div role="status" aria-live="polite">Загрузка раздела…</div>;
+}
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
@@ -1462,6 +1468,7 @@ export function ControlPanel() {
       )}
 
       {tab === "mihomo" && (
+        <Suspense fallback={<SectionLoading />}>
         <MihomoPage
           refreshKey={mihomoRefreshKey}
           onSystemOperation={acceptSystemOperation}
@@ -1480,11 +1487,12 @@ export function ControlPanel() {
             if (image) await removeProtocol(image, true);
           }}
         />
+        </Suspense>
       )}
 
-      {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} cloudflare={{ change: cdnCommand.change, pending: cdnCommand.pending, blocked: busy || application?.recovery?.application_required === true }} />}
+      {tab === "network" && <Suspense fallback={<SectionLoading />}><NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} cloudflare={{ change: cdnCommand.change, pending: cdnCommand.pending, blocked: busy || application?.recovery?.application_required === true }} /></Suspense>}
 
-      {(tab === "nodera" || noderaVisited) && <AssistantView active={tab === "nodera"} onOpenChat={() => { void navigateTo("nodera"); }} request={request} refreshKey={mcpRefreshKey} busy={busy || actionNeedsPolling} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} />}
+      {(tab === "nodera" || noderaVisited) && <Suspense fallback={tab === "nodera" ? <SectionLoading /> : null}><AssistantView active={tab === "nodera"} onOpenChat={() => { void navigateTo("nodera"); }} request={request} refreshKey={mcpRefreshKey} busy={busy || actionNeedsPolling} onDirtyChange={setSectionDirty} confirmAction={askConfirmation} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} /></Suspense>}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}
