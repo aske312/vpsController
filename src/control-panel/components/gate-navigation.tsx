@@ -37,12 +37,13 @@ export function GateNavigation({
   const mihomoInstalled = protocolImages.some((item) => item.id === "mihomo" && item.installed);
   const noderaInstalled = protocolImages.some(item => item.id === "nodera" && item.installed);
   const domain = server?.public_domain?.trim() || "312.net";
+  const zoneStart = domain.lastIndexOf(".");
 
   return (
     <aside className="gateSidebar">
       <button className="gateBrand" type="button" onClick={() => onNavigate("overview")} aria-label="Открыть обзор">
         <span className="gateBrandMark"><BrandGlyph /></span>
-        <span><strong title={domain}>{domain}</strong><small>INFRASTRUCTURE</small></span>
+        <span><strong title={domain}>{zoneStart > 0 ? <>{domain.slice(0, zoneStart)}<span>{domain.slice(zoneStart)}</span></> : domain}</strong><small>INFRASTRUCTURE</small></span>
       </button>
 
       <nav className="gateNav" aria-label="Основная навигация">
