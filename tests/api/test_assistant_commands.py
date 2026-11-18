@@ -297,5 +297,6 @@ class ServerCommandTests(unittest.TestCase):
                 self.assertNotIn('confirm', published)
                 self.assertNotIn('cancel', published)
                 await bot.command_menu({}, 22, False)
-                self.assertEqual([row['command'] for row in transport.call_args.kwargs['commands']], ['id'])
+                self.assertEqual([row['command'] for row in transport.call_args.kwargs['commands']], ['start', 'myprofile', 'setup', 'id'])
+                self.assertEqual(len(published), len(set(published)))
         asyncio.run(check())

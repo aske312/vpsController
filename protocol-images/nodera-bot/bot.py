@@ -63,8 +63,8 @@ def telegram_chunks(text):
         chunks.append(current + ''.join('</' + name + '>' for name in reversed(stack)))
     return chunks
 
-PUBLIC_COMMANDS = [('id', 'Мой Telegram ID')]
-MEMBER_COMMANDS = [('menu', 'Открыть меню'), ('start', 'Приветствие'), ('help', 'Справка')] + PUBLIC_COMMANDS
+PUBLIC_COMMANDS = [('start', 'Начать знакомство'), ('myprofile', 'Мой профиль Nodera'), ('setup', 'Заполнить профиль'), ('id', 'Мой Telegram ID')]
+MEMBER_COMMANDS = [('menu', 'Открыть меню'), ('help', 'Справка')] + PUBLIC_COMMANDS
 SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка Mihomo'), ('profile', 'Параметры моей подписки'),
     ('devices', 'Устройства подписки'), ('traffic', 'Трафик подписки'), ('connect', 'Как подключиться'), ('apps', 'Приложения для подключения')]
 CHAT_COMMANDS = MEMBER_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI'), ('ai', 'Вопрос AI-ассистенту')]
@@ -87,6 +87,10 @@ class AttachmentError(ValueError):
 
 class DeliveryPending(RuntimeError):
     """Keep accepted work on disk until API admission/delivery can be reconciled."""
+
+
+class ContactBlocked(PermissionError):
+    pass
 
 
 def message_file(message):
@@ -373,6 +377,7 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
 
 incoming_request = ContextVar('nodera_incoming_request', default=None)
 delivery_record = ContextVar('nodera_delivery_record', default=None)
+profile_state = ContextVar('nodera_profile_state', default=None)
 
 QUEUE_NOTICE = 'Сообщение принято в очередь. Сначала отвечу на ваши предыдущие вопросы.'
 BUSY_NOTICE = 'Слишком много сообщений. Дождитесь ответа на предыдущий вопрос; это сообщение не принято в очередь.'
@@ -504,10 +509,26 @@ async def identify(settings, sender):
             if response.status_code not in (401, 403): raise DeliveryPending()
             return False
         access = response.json()
+        if access.get('blocked'): raise ContactBlocked()
+        profile_state.set(access.get('onboarding'))
         return True if access.get('admin') is True else ('chat-subscription' if access.get('subscription') else 'chat') if access.get('chat') is True else 'subscription' if access.get('subscription') else False
 
 
+async def profile_reply(settings, actor, prompt):
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        try:
+            response = await client.post('http://127.0.0.1:8000/api/assistant/bot-profile',
+                headers={'Authorization':'Bearer ' + settings['control_token'], 'X-MCP-Actor':str(actor)},
+                json={'text':prompt, 'request_id':incoming_request.get() or secrets.token_hex(16)})
+        except httpx.TransportError: raise DeliveryPending() from None
+        if response.status_code == 403: raise ContactBlocked()
+        if response.status_code != 200: raise DeliveryPending()
+        return response.json().get('text')
+
+
 def public_reply(sender, command):
+    if command == '/_refresh_menu':
+        return notice('Обновите меню', 'Это меню устарело. Откройте раздел кнопкой ниже или используйте /start.', '↻')
     if command == '/id':
         tag = '\nТег: @' + sender['username'] if sender.get('username') else ''
         return f"Ваш Telegram ID: {sender['id']}{tag}\nДля доступа передайте этот ID владельцу."
@@ -541,6 +562,7 @@ async def reply(settings, sender, prompt, access):
     if not prompt: return ''
     command = prompt.split()[0].split('@')[0].lower()
     if not access: return public_reply(sender, command)
+    if command == '/_refresh_menu': return public_reply(sender, command)
     if command in ('/id', '/userid'): return public_reply(sender, '/id')
     if command == '/menu': return menu_text(prompt, access)
     if access == 'subscription' and command in ('/start', '/help'):
@@ -611,7 +633,11 @@ def inline_keyboard(answer, prompt, access, actions):
         actions[key] = command
         return {'text': text[:60], 'callback_data': 'nd:' + key}
     command = prompt.split()[0].split('@')[0].lower()
-    if access and command in ('/menu', '/start', '/help'):
+    if '/skip' in answer and profile_state.get() in ('new', 'name', 'birthdate'):
+        return {'inline_keyboard': [[button('Пропустить вопрос', '/skip'), button('Пропустить опрос', '/skipall')]]}
+    if command == '/myprofile':
+        return {'inline_keyboard': [[button('Изменить профиль', '/setup')]]}
+    if access and command in ('/menu', '/start', '/help', '/_refresh_menu'):
         section = prompt.split(maxsplit=1)[1] if command == '/menu' and len(prompt.split(maxsplit=1)) > 1 else ''
         if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
             for labels in [(('Ссылка подписки','/subscription'),('Профиль','/profile')), (('Устройства','/devices'),('Трафик','/traffic')), (('Приложения','/apps'),('Как подключиться','/connect'))]:
@@ -628,7 +654,7 @@ def inline_keyboard(answer, prompt, access, actions):
             rows.append([button('Мой ID','/id')])
         if section: rows.append([button('← Главное меню','/menu')])
     if access and command == '/apps' and len(prompt.split()) == 1:
-        rows += [[button(label, '/apps ' + key)] for key,label in [('windows','Windows ? Nodera'),('android','Android'),('ios','iPhone / iPad'),('macos','macOS'),('linux','Linux')]]
+        rows += [[button(label, '/apps ' + key)] for key,label in [('windows','Windows · Nodera'),('android','Android'),('ios','iPhone / iPad'),('macos','macOS'),('linux','Linux')]]
     if access and command == '/models' and answer.startswith('Модели · страница '):
         for model in answer.split('\n\n', 1)[0].splitlines()[1:]:
             rows.append([button(model, '/model ' + model)])
@@ -670,6 +696,7 @@ async def bot(settings):
     async def deliver(sender, prompt, messages=None, alert=None, context=None):
         actor = sender['id']
         try: access = await identify(settings, sender)
+        except ContactBlocked: return
         except Exception: raise DeliveryPending() from None
         if context: await remember_incoming(settings, context)
         if not prompt and not messages: return
@@ -685,6 +712,13 @@ async def bot(settings):
         cached_row = inbox.read(cached) if cached else {}
         if 'answer' in cached_row:
             answer = cached_row['answer'] if cached_row.get('answer_access') == access else 'Доступ изменился. Откройте /menu для доступных действий.'
+        elif not messages and not alert and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
+                profile_state.get() in ('name', 'birthdate') or prompt.split(maxsplit=1)[0].split('@')[0].lower() in ('/start', '/myprofile', '/setup', '/skip', '/skipall'))):
+            # Remember routing before sending: a lost final-profile reply must
+            # reconcile the same receipt even when the questionnaire is now done.
+            if cached: inbox.amend(cached, profile_dialog=True)
+            answer = await profile_reply(settings, actor, prompt)
+            if answer is None: answer = await reply(settings, sender, prompt, access)
         elif alert:
             if access is not True:
                 answer = 'Разбор алерта доступен владельцу с доступом к ИИ.'
@@ -701,6 +735,7 @@ async def bot(settings):
         if access:
             # A request can outlive a permission change.
             try: current_access = await identify(settings, sender)
+            except ContactBlocked: return
             except Exception: raise DeliveryPending() from None
             if current_access != access:
                 access = False
@@ -777,8 +812,9 @@ async def bot(settings):
                         else:
                             prompt = callbacks.get(actor, {}).get(key[3:], '') if key.startswith('nd:') else ''
                         if not prompt:
-                            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Обновите меню', 'Это меню устарело. Откройте раздел кнопкой ниже.', '↻')), parse_mode='HTML')
-                            continue
+                            # Refresh through the normal delivery path so an old
+                            # callback cannot bypass current guest blocking.
+                            prompt = '/_refresh_menu'
                     else:
                         messages = [message] if message.get('photo') or message.get('document') else None
                         prompt = (message.get('caption', '') if messages else message.get('text', '')).strip()
@@ -791,7 +827,7 @@ async def bot(settings):
                             media_groups[album_key][0].append(message)
                             inbox.amend(media_groups[album_key][1], messages=media_groups[album_key][0])
                         continue
-                    is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() != '/ai'
+                    is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() not in ('/ai', '/start', '/setup', '/myprofile', '/skip', '/skipall')
                     # Explicit commands remain responsive while this user's AI
                     # dialog waits; commands themselves keep their own ordering.
                     stream = (actor, 'command') if is_command else actor
@@ -802,6 +838,8 @@ async def bot(settings):
                     if (not accepted or inbox.waiting(actor, is_command) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()
                         if len(notices) > 1000: notices = {actor: time.monotonic()}
+                        try: await identify(settings, sender)
+                        except ContactBlocked: continue
                         await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
                 if updates:
                     offset = max(offset, max(update['update_id'] for update in updates) + 1)

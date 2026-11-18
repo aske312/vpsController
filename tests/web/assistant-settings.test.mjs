@@ -77,7 +77,11 @@ function mount(status, catalog = [], overrides = {}) {
       return { items: overrides.commands ?? [] };
     }
     if (path === '/assistant/mihomo-profiles') return { items: [{id: 'own', name: 'Моя подписка'}] };
-    if (path === '/assistant/bot-users') return { items: [] };
+    if (path === '/assistant/bot-users') return { items: overrides.contacts ?? [] };
+    if (path.startsWith('/assistant/bot-users/')) {
+      writes.push({path, method:options.method, ...(options.body ? JSON.parse(options.body) : {})});
+      return overrides.contact ? overrides.contact(path, options) : {};
+    }
     if (path === '/assistant/models') return overrides.models ? overrides.models(options) : { models: catalog };
     if (path.startsWith('/assistant/queue?')) return overrides.queue ? overrides.queue(path) : {state:'running', position:0, waiting:0};
     if (options?.method === 'PUT' || path === '/assistant/requests') writes.push(JSON.parse(options.body));
@@ -148,6 +152,55 @@ test('new answers preserve the reader position until the transcript is scrolled 
     await send('Second question');assert.equal(scroller.scrollTop,1000);
     assert.equal(view.writes.length,2);
   }finally{globalThis.requestAnimationFrame=previousFrame;globalThis.cancelAnimationFrame=previousCancel;}
+});
+
+test('guest profile edits save an optional-year birthday without adding permissions',async()=>{
+  const guest={telegram_id:77,name:'Visitor',username:'visitor',seen_at:1000,birthdate:null};
+  const view=mount(fixture(),[],{contacts:[guest],contact:(_path,options)=>({...guest,...JSON.parse(options.body)})});
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor')[0].node.props.onClick();
+  let tree=view.render();
+  nodes(tree,n=>n.props['aria-label']==='Дата рождения')[0].node.props.onChange({target:{value:'29.02'}});
+  tree=view.render();nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Профиль Nodera')[0].node.props.submit();
+  await new Promise(setImmediate);tree=view.render();
+  assert.deepEqual(view.writes,[{path:'/assistant/bot-users/77',method:'PATCH',display_name:'',birthdate:{day:29,month:2,year:null}}]);
+  assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Профиль Nodera').length,0);
+  assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить'&&!n.props.disabled).length,0);
+});
+
+test('observed guests can be blocked, unblocked and deleted without creating an account',async()=>{
+  const guest={telegram_id:77,name:'Visitor',username:'visitor',seen_at:1000,blocked:false};
+  const view=mount(fixture(),[],{contacts:[guest],contact:(_path,options)=>({...guest,...(options.body?JSON.parse(options.body):{})})});
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя')[0].node.props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(view.writes[0].blocked,true);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Разблокировать')[0].node.props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(view.writes[1].blocked,false);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Удалить гостя')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Подтвердить удаление гостя')[0].node.props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(view.writes[2].method,'DELETE');
+  assert.equal(nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor').length,0);
+});
+
+test('a failed guest mutation preserves the profile and reports the error',async()=>{
+  const guest={telegram_id:77,name:'Visitor',username:'visitor',seen_at:1000};
+  const view=mount(fixture(),[],{contacts:[guest],contact:()=>{throw new Error('temporary failure');}});
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя')[0].node.props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(nodes(view.render(),n=>n.props.role==='alert'&&n.props.children==='temporary failure').length,1);
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя').length,1);
 });
 
 test('the empty chat server suggestion runs a direct shortcut instead of preparing an AI question',async()=>{

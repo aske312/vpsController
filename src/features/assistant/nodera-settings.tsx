@@ -17,7 +17,7 @@ export type Panel = typeof panels[number]["id"];
 type AccountDraft = Draft["accounts"][number];
 type Check = { ok: boolean; text: string; revision: string; actor: string; username?: string };
 type ProviderCheck = ProviderObservation & { text: string; failed?: boolean; checking?: boolean };
-type BotContact = { telegram_id: number; username: string; name: string; seen_at: number; last_name?: string; language_code?: string; is_premium?: boolean | null; bio?: string; birthdate?: { day: number; month: number; year?: number | null } | null };
+type BotContact = { telegram_id: number; username: string; name: string; seen_at: number; profile_name?: string; blocked?: boolean; last_name?: string; language_code?: string; is_premium?: boolean | null; bio?: string; birthdate?: { day: number; month: number; year?: number | null } | null };
 type Props = {
   apiConnection?: ProviderConnection;
   panel: Exclude<Panel, "chat">;
@@ -105,6 +105,11 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const [lookupError, setLookupError] = useState("");
   const [contacts, setContacts] = useState<{ revision: string; rows: BotContact[]; error?: string }>();
   const [contactsLimit, setContactsLimit] = useState(20);
+  const [profileEdit, setProfileEdit] = useState<{ contact: BotContact; name: string; birthday: string }>();
+  const [profileBusy, setProfileBusy] = useState(false);
+  const profileWriting = useRef(false);
+  const [profileError, setProfileError] = useState("");
+  const [deleteProfile, setDeleteProfile] = useState(false);
   const [subscriptions, setSubscriptions] = useState<{ items: {id: string; name: string}[]; error?: string }>({ items: [] });
 
   const providers = draft.providers ?? [];
@@ -166,6 +171,33 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const botCredentialsLocked = botLocked;
   const account = userEdit?.value;
   const accountGrants = account ? accountPermissions(draft, account) : new Set<Permission>();
+
+  function openProfile(contact: BotContact) {
+    const date = contact.birthdate;
+    setProfileEdit({ contact, name: contact.profile_name ?? "", birthday: date ? `${String(date.day).padStart(2, "0")}.${String(date.month).padStart(2, "0")}${date.year ? `.${date.year}` : ""}` : "" });
+    setProfileError(""); setDeleteProfile(false);
+  }
+  async function changeProfile(action: "save" | "block" | "delete") {
+    if (!profileEdit || profileWriting.current || blocked) return;
+    let body: Record<string, unknown> = {};
+    if (action === "save") {
+      const match = /^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$/.exec(profileEdit.birthday.trim());
+      if (profileEdit.birthday.trim() && !match) { setProfileError("Дата рождения: ДД.ММ.ГГГГ или ДД.ММ без года"); return; }
+      body = { display_name: profileEdit.name.trim(), birthdate: match ? { day: Number(match[1]), month: Number(match[2]), year: match[3] ? Number(match[3]) : null } : null };
+    } else if (action === "block") body = { blocked: !profileEdit.contact.blocked };
+    profileWriting.current = true; setProfileBusy(true); setProfileError("");
+    try {
+      const result = await request<BotContact>(`/assistant/bot-users/${profileEdit.contact.telegram_id}`, { method: action === "delete" ? "DELETE" : "PATCH", ...(action === "delete" ? {} : { body: JSON.stringify(body) }) });
+      setContacts(current => current && { ...current, rows: action === "delete" ? current.rows.filter(row => row.telegram_id !== profileEdit.contact.telegram_id) : [...current.rows.filter(row => row.telegram_id !== result.telegram_id), result] });
+      if (action === "delete") {
+        if (draft.accounts.some(row => row.telegram_id === profileEdit.contact.telegram_id)) patch({ accounts: draft.accounts.filter(row => row.telegram_id !== profileEdit.contact.telegram_id) });
+        setProfileEdit(undefined);
+      } else if (action === "block") setProfileEdit(current => current && { ...current, contact: result });
+      else setProfileEdit(undefined);
+      notify.success(action === "delete" ? "Профиль гостя удалён" : action === "block" ? result.blocked ? "Гость заблокирован" : "Пользователь разблокирован" : "Профиль сохранён");
+    } catch (cause) { setProfileError(cause instanceof Error ? cause.message : "Профиль не изменён"); }
+    finally { profileWriting.current = false; setProfileBusy(false); }
+  }
 
   function editAccount(value: Partial<AccountDraft>) {
     setUserEdit(current => current && { ...current, value: { ...current.value, ...value } });
@@ -438,13 +470,13 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
           const contact = contactsById.get(item.telegram_id);
           return <tr key={item.telegram_id}>
           <th scope="row"><strong>{item.name || contact?.name || item.telegram_id}</strong><small>{contact?.username ? `@${contact.username} · ` : ""}{item.telegram_id}</small></th>
-          <td>{roleNames[accountRole(item)]}</td>
+          <td>{roleNames[accountRole(item)]}{contact?.blocked && " · Заблокирован"}</td>
           <td><div className="noderaTags">{accountProducts(item).includes("assistant") && <span className="noderaTag isSelected">AI-ассистент</span>}{accountPermissions(draft, item).has("telegram_read") && <span className="noderaTag">Telegram MCP</span>}{["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read", "roles_manage"].some(key => accountPermissions(draft, item).has(key as Permission)) && <span className="noderaTag">VPS MCP</span>}{accountProducts(item).includes("mihomo") && <span className="noderaTag isSelected">Mihomo · {subscriptions.items.find(profile => profile.id === item.mihomo_profile_id)?.name || item.mihomo_profile_id || "не привязана"}</span>}</div></td>
-          <td><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} title="Настроить пользователя" disabled={blocked} onClick={() => setUserEdit({ index, value: item })}><ChatIcon name="gear"/></button></td>
+          <td><button type="button" className="ghostButton" aria-label={`Профиль бота ${item.name || item.telegram_id}`} disabled={blocked} onClick={() => openProfile(contact ?? {telegram_id:item.telegram_id, name:item.name, username:"", seen_at:0})}>Профиль</button><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} title="Настроить пользователя" disabled={blocked} onClick={() => setUserEdit({ index, value: item })}><ChatIcon name="gear"/></button></td>
         </tr>;})}
         {guests.slice(0, contactsLimit).map(item => <tr key={item.telegram_id}>
-          <th scope="row"><strong>{item.name || item.telegram_id}</strong><small>{item.username ? `@${item.username} · ` : ""}{item.telegram_id}</small></th><td>Гость</td><td>—</td>
-          <td><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} title="Настроить пользователя" disabled={blocked || draft.accounts.length >= 30} onClick={() => {
+          <th scope="row"><strong>{item.profile_name || item.name || item.telegram_id}</strong><small>{item.username ? `@${item.username} · ` : ""}{item.telegram_id}</small></th><td>Гость{item.blocked && " · Заблокирован"}</td><td>—</td>
+          <td><button type="button" className="ghostButton" aria-label={`Профиль бота ${item.name || item.telegram_id}`} disabled={blocked} onClick={() => openProfile(item)}>Профиль</button><button type="button" className="mcpIconButton" aria-label={`Настроить пользователя ${item.name || item.telegram_id}`} title="Настроить пользователя" disabled={blocked || draft.accounts.length >= 30} onClick={() => {
               setLookup(""); setLookupError(""); setUserEdit({ index: -1, observed: true, value: { ...blankAccount(), telegram_id: item.telegram_id, name: item.name || item.username } });
             }}><ChatIcon name="gear"/></button></td>
         </tr>)}
@@ -453,6 +485,21 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     {subscriptions.error && <small role="status">{subscriptions.error}</small>}
     {contacts?.revision === revision && contacts.error && <small role="status">{contacts.error}</small>}
     {guests.length > contactsLimit && <button type="button" className="ghostButton noderaMoreContacts" onClick={() => setContactsLimit(value => value + 20)}>Ещё пользователи</button>}
+    {profileEdit && <SettingsDialog title="Профиль Nodera" submitLabel="Сохранить профиль" dismissible={!profileBusy} blocked={blocked || profileBusy} close={() => { if (!profileWriting.current) setProfileEdit(undefined); }} submit={() => void changeProfile("save")}>
+      <p>{profileEdit.contact.name || profileEdit.contact.telegram_id} · {profileEdit.contact.telegram_id}</p>
+      <label>Имя в профиле<input value={profileEdit.name} maxLength={80} onChange={event => setProfileEdit({ ...profileEdit, name:event.target.value })}/></label>
+      <label>Дата рождения<input aria-label="Дата рождения" value={profileEdit.birthday} maxLength={10} placeholder="ДД.ММ.ГГГГ или ДД.ММ" onChange={event => setProfileEdit({ ...profileEdit, birthday:event.target.value })}/></label>
+      <small>Год можно не указывать. Пустое поле удаляет дату из профиля Nodera. Изменения профиля сохраняются сразу.</small>
+      {profileError && <p role="alert">{profileError}</p>}
+      {(profileEdit.contact.blocked || accountRole(draft.accounts.find(row => row.telegram_id === profileEdit.contact.telegram_id) ?? blankAccount()) === "guest") && <>
+        <button type="button" className="ghostButton" disabled={blocked || profileBusy || dirty} onClick={() => void changeProfile("block")}>{profileEdit.contact.blocked ? "Разблокировать" : "Заблокировать гостя"}</button>
+        {accountRole(draft.accounts.find(row => row.telegram_id === profileEdit.contact.telegram_id) ?? blankAccount()) === "guest" && <>
+          <button type="button" className="dangerButton" disabled={blocked || profileBusy || dirty} onClick={() => setDeleteProfile(true)}>Удалить гостя</button>
+          {deleteProfile && <div role="alert"><p>Удалить профиль? При новом обращении гость появится снова. Для запрета обращений используйте блокировку.</p><button type="button" className="dangerButton" disabled={blocked || profileBusy} onClick={() => void changeProfile("delete")}>Подтвердить удаление гостя</button></div>}
+        </>}
+        {dirty && <small>Сначала сохраните изменения прав доступа.</small>}
+      </>}
+    </SettingsDialog>}
     {userEdit && account && <SettingsDialog title={userEdit.index < 0 ? "Добавить пользователя" : "Пользователь"} wide close={() => { setUserEdit(undefined); setUserSection("profile"); setPermissionSearch(""); }}
       blocked={blocked || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
       submit={() => {
@@ -568,18 +615,18 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{alerts}{roleSettings}{users}</>}</div>;
 }
 
-export function SettingsDialog({ title, close, submit, blocked, children, wide = false }: {
-  wide?: boolean; title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode;
+export function SettingsDialog({ title, close, submit, blocked, children, wide = false, submitLabel = "Применить", dismissible = true }: {
+  wide?: boolean; title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode; submitLabel?: string; dismissible?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const id = useId();
   useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className={`noderaDialog${wide ? " noderaDialogWide" : ""}`} aria-labelledby={id} onClose={close}>
+  return <dialog ref={dialog} className={`noderaDialog${wide ? " noderaDialogWide" : ""}`} aria-labelledby={id} onClose={close} onCancel={event => { if (!dismissible) event.preventDefault(); }}>
     <form onSubmit={event => { event.preventDefault(); if (!blocked) submit?.(); }}>
-      <header><h2 id={id}>{title}</h2><button type="button" className="mcpIconButton" aria-label="Закрыть" onClick={close}><ChatIcon name="close"/></button></header>
+      <header><h2 id={id}>{title}</h2><button type="button" className="mcpIconButton" aria-label="Закрыть" disabled={!dismissible} onClick={close}><ChatIcon name="close"/></button></header>
       <div className="noderaDialogFields">{children}</div>
-      <footer>{submit && <button type="submit" className="primaryButton" disabled={blocked}>Применить</button>}
-        <button type="button" className="ghostButton" onClick={close}>{submit ? "Отмена" : "Готово"}</button></footer>
+      <footer>{submit && <button type="submit" className="primaryButton" disabled={blocked}>{submitLabel}</button>}
+        <button type="button" className="ghostButton" disabled={!dismissible} onClick={close}>{submit ? "Отмена" : "Готово"}</button></footer>
     </form>
   </dialog>;
 }

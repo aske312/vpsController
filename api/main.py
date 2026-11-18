@@ -589,8 +589,12 @@ def assistant_models(payload: assistant_control.Catalog, _: None = Depends(requi
     return assistant_control.model_catalog(sys.modules[__name__], payload)
 
 
-def require_nodera_bot_transport(authorization: str | None = Header(default=None)) -> dict:
-    return assistant_control.authorize_bot_transport(sys.modules[__name__], authorization)
+def require_nodera_bot_transport(request: Request, authorization: str | None = Header(default=None),
+                                 actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    settings = assistant_control.authorize_bot_transport(sys.modules[__name__], authorization)
+    if request.url.path != '/api/assistant/bot-contact':
+        assistant_contacts.require_unblocked(sys.modules[__name__], settings, actor)
+    return settings
 
 
 @app.post('/api/assistant/bot-chat')
@@ -674,6 +678,12 @@ def nodera_contact(payload: assistant_contacts.Contact, settings: dict = Depends
     return assistant_contacts.remember(sys.modules[__name__], settings, payload, actor)
 
 
+@app.post('/api/assistant/bot-profile')
+def nodera_profile_dialog(payload: assistant_contacts.ProfileDialog, settings: dict = Depends(require_nodera_bot_transport),
+                          actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_contacts.profile_dialog(sys.modules[__name__], settings, actor, payload)
+
+
 @app.get('/api/assistant/mihomo-profiles')
 def assistant_mihomo_profiles(_: None = Depends(require_token)) -> dict:
     import assistant_mihomo
@@ -689,6 +699,16 @@ def nodera_user_lookup(payload: assistant_contacts.Lookup, _: None = Depends(req
 @app.get('/api/assistant/bot-users')
 def nodera_bot_users(_: None = Depends(require_token)) -> dict:
     return {'items': assistant_contacts.list_recent(sys.modules[__name__])}
+
+
+@app.patch('/api/assistant/bot-users/{identity}')
+def nodera_user_edit(identity: int, payload: assistant_contacts.ProfileEdit, _: None = Depends(require_token)) -> dict:
+    return assistant_contacts.edit_profile(sys.modules[__name__], identity, payload)
+
+
+@app.delete('/api/assistant/bot-users/{identity}')
+def nodera_user_delete(identity: int, _: None = Depends(require_token)) -> dict:
+    return assistant_contacts.edit_profile(sys.modules[__name__], identity, delete=True)
 
 
 def require_assistant_control(authorization: str | None = Header(default=None),
