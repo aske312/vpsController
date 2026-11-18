@@ -17,6 +17,7 @@ import assistant_roles as roles
 class Command(BaseModel):
     model_config = {'extra': 'forbid'}
     command: str = Field(min_length=1, max_length=256)
+    request_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
 
 
 COMMAND_PERMISSIONS = {'/subscription': 'subscription_read', '/profile': 'subscription_read', '/profiles': 'subscription_read',
@@ -217,7 +218,11 @@ def execute(api, actor, prompt, *, source='bot'):
             raise HTTPException(403, 'Доступен только результат собственной операции')
         if pending.get('kind') == 'roles': roles.require(settings, actor, 'roles_manage')
         elif pending.get('kind') == 'telegram': roles.require(settings, actor, 'telegram_read')
-        elif pending.get('kind') == 'mihomo': roles.require(settings, actor, 'subscription_manage' if command == '/confirm' else 'subscription_read')
+        elif pending.get('kind') == 'mihomo':
+            if command == '/confirm':
+                import assistant_mihomo
+                assistant_mihomo.authorize(settings,actor,pending['method'],pending['path'],pending['body'])
+            else: roles.require(settings, actor, 'subscription_read')
         else: roles.require(settings, actor, 'server_manage' if command == '/confirm' else 'server_read')
     if command == '/subscription' and len(args) <= 1:
         import assistant_mihomo
@@ -310,7 +315,7 @@ def execute(api, actor, prompt, *, source='bot'):
                 raise HTTPException(409, 'Неверный код подтверждения')
             if record.get('completed_text'):
                 return record['completed_text']
-            if record.get('kind') == 'mihomo' and not settings.get('mcp', {}).get('mihomo-mcp', settings.get('mcp', {}).get('vps-controller-mcp', False)):
+            if record.get('kind') == 'mihomo' and record.get('source') != 'bot-command' and not settings.get('mcp', {}).get('mihomo-mcp', settings.get('mcp', {}).get('vps-controller-mcp', False)):
                 raise HTTPException(403, 'Контур Mihomo MCP выключен; изменение не отправлено')
             if record.get('kind') == 'relay':
                 import assistant_relay

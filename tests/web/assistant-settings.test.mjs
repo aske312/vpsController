@@ -227,17 +227,31 @@ test('observed guests can be blocked, unblocked and deleted without creating an 
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
   view.render();await new Promise(setImmediate);
   nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
-  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(view.writes[0].blocked,true);
   nodes(view.render(),n=>n.type==='button'&&n.props.children==='Разблокировать')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(view.writes[1].blocked,false);
-  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Удалить гостя')[0].node.props.onClick();
-  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Подтвердить удаление гостя')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Удалить пользователя')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Подтвердить удаление')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(view.writes[2].method,'DELETE');
   assert.equal(nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor').length,0);
+});
+
+test('blocking and deleting are available in user editors for every Telegram role',async()=>{
+  for(const role of ['owner','administrator','moderator','user','guest']) {
+    const status=fixture();status.settings.accounts=[{telegram_id:11,name:'Role fixture',role,products:role==='guest'?[]:['assistant','mihomo'],excluded_dialogs:[],permission_overrides:{}}];
+    const view=mount(status);view.render();await new Promise(setImmediate);
+    nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+    view.render();await new Promise(setImmediate);
+    nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Role fixture')[0].node.props.onClick();
+    const tree=view.render();
+    assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Заблокировать')[0].disabled,false);
+    assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Удалить пользователя').length,1);
+    assert.equal(nodes(tree,n=>n.props.className==='noderaUserActions').length,1);
+  }
 });
 
 test('a failed guest mutation preserves the profile and reports the error',async()=>{
@@ -247,10 +261,10 @@ test('a failed guest mutation preserves the profile and reports the error',async
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
   view.render();await new Promise(setImmediate);
   nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
-  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя')[0].node.props.onClick();
+  nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(nodes(view.render(),n=>n.props.role==='alert'&&n.props.children==='temporary failure').length,1);
-  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя').length,1);
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать').length,1);
 });
 
 test('the empty chat server suggestion runs a direct shortcut instead of preparing an AI question',async()=>{

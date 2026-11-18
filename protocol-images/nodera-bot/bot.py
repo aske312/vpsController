@@ -65,8 +65,8 @@ def telegram_chunks(text):
 
 PUBLIC_COMMANDS = [('start', 'Начать знакомство'), ('myprofile', 'Мой профиль Nodera'), ('setup', 'Заполнить профиль'), ('id', 'Мой Telegram ID')]
 MEMBER_COMMANDS = [('menu', 'Открыть меню'), ('help', 'Справка')] + PUBLIC_COMMANDS
-SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка Mihomo'), ('profile', 'Параметры моей подписки'),
-    ('devices', 'Устройства подписки'), ('traffic', 'Трафик подписки'), ('connect', 'Как подключиться'), ('apps', 'Приложения для подключения')]
+SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка'), ('profile', 'Статус подписки'),
+    ('devices', 'Устройства подписки'), ('connect', 'Как подключиться'), ('apps', 'Приложения для подключения')]
 CHAT_COMMANDS = MEMBER_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI'), ('ai', 'Вопрос AI-ассистенту')]
 ADMIN_COMMANDS = SUBSCRIPTION_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
@@ -245,8 +245,8 @@ async def typing(settings, actor):
 
 async def command_menu(settings, actor=None, admin=False, chat=False, subscription=False):
     scope = {'type': 'chat', 'chat_id': actor} if actor else {'type': 'all_private_chats'}
-    await bot_api(settings, 'setMyCommands', scope=scope,
-                  commands=[{'command': name, 'description': description} for name, description in (ADMIN_COMMANDS if admin else (CHAT_COMMANDS + (SUBSCRIPTION_COMMANDS[len(MEMBER_COMMANDS):] if subscription else [])) if chat else SUBSCRIPTION_COMMANDS if subscription else PUBLIC_COMMANDS)])
+    items = available_commands() if actor and access_details.get() is not None else (ADMIN_COMMANDS if admin else (CHAT_COMMANDS + (SUBSCRIPTION_COMMANDS[len(MEMBER_COMMANDS):] if subscription else [])) if chat else SUBSCRIPTION_COMMANDS if subscription else PUBLIC_COMMANDS)
+    await bot_api(settings, 'setMyCommands', scope=scope, commands=[{'command': name, 'description': description} for name, description in items])
 
 
 async def server_command(settings, actor, prompt):
@@ -255,15 +255,17 @@ async def server_command(settings, actor, prompt):
     async with httpx.AsyncClient(timeout=45, trust_env=False) as client:
         response = await client.post('http://127.0.0.1:8000/api/assistant/bot-command',
             headers={'Authorization': 'Bearer ' + settings['control_token'], 'X-MCP-Actor': str(actor)},
-            json={'command': prompt})
+            json={'command': prompt, **({'request_id':incoming_request.get()} if incoming_request.get() else {})})
         if response.status_code != 200:
             if response.status_code in (401, 403):
                 return 'Недостаточно прав для этого действия.'
-            if response.status_code in (404, 409):
+            if response.status_code in (404, 409, 422):
                 detail = response.json().get('detail')
                 if isinstance(detail, str): return detail[:1000]
             return 'Команда не выполнена. Проверьте состояние в панели; если подтверждение уже отправлено, используйте /operation с ID операции.'
-        return response.json()['text']
+        value = response.json()
+        if 'buttons' in value or 'document' in value: command_view.set(value)
+        return value['text']
 
 
 async def remember_message(settings, message, role):
@@ -302,11 +304,17 @@ async def remember_incoming(settings, message):
 
 async def bot_api(settings, method, **payload):
     async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
-        response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload)
+        if method == 'sendDocument':
+            document = payload.pop('document')
+            data = {key:json.dumps(value) if isinstance(value,dict) else str(value) for key,value in payload.items()}
+            response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", data=data,
+                files={'document':(document['name'],document['text'].encode('utf-8'),'text/plain; charset=utf-8')})
+        else:
+            response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload)
         if response.status_code != 200 or not response.json().get('ok'):
             raise RuntimeError('Telegram Bot API вернул HTTP ' + str(response.status_code))
         result = response.json()['result']
-    if method == 'sendMessage': await remember_message(settings, result, 'assistant')
+    if method in ('sendMessage','sendDocument'): await remember_message(settings, result, 'assistant')
     return result
 
 
@@ -378,6 +386,8 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
 incoming_request = ContextVar('nodera_incoming_request', default=None)
 delivery_record = ContextVar('nodera_delivery_record', default=None)
 profile_state = ContextVar('nodera_profile_state', default=None)
+access_details = ContextVar('nodera_access_details', default=None)
+command_view = ContextVar('nodera_command_view', default=None)
 
 QUEUE_NOTICE = 'Сообщение принято в очередь. Сначала отвечу на ваши предыдущие вопросы.'
 BUSY_NOTICE = 'Слишком много сообщений. Дождитесь ответа на предыдущий вопрос; это сообщение не принято в очередь.'
@@ -510,6 +520,7 @@ async def identify(settings, sender):
             return False
         access = response.json()
         if access.get('blocked'): raise ContactBlocked()
+        access_details.set(access if 'permissions' in access else None)
         profile_state.set(access.get('onboarding'))
         return True if access.get('admin') is True else ('chat-subscription' if access.get('subscription') else 'chat') if access.get('chat') is True else 'subscription' if access.get('subscription') else False
 
@@ -523,7 +534,62 @@ async def profile_reply(settings, actor, prompt):
         except httpx.TransportError: raise DeliveryPending() from None
         if response.status_code == 403: raise ContactBlocked()
         if response.status_code != 200: raise DeliveryPending()
-        return response.json().get('text')
+        value = response.json()
+        if value.get('text') is not None: command_view.set(value)
+        return value.get('text')
+
+
+COMMAND_GRANTS = {'subscription':'subscription_read','profile':'subscription_read','devices':'subscription_read','apps':'subscription_read','connect':'subscription_read',
+    'models':'model_select','model':'model_select','ai':'chat','status':'server_read','resources':'server_read','services':'server_read','components':'server_read',
+    'network':'network_read','security':'security_read','diagnostics':'diagnostics','logs':'logs_read','logfile':'logs_read','admin':'subscriptions_admin','service':'server_manage'}
+
+
+def available_commands():
+    detail = access_details.get() or {}; sections = detail.get('sections', {}); grants = set(detail.get('permissions', []))
+    items = list(PUBLIC_COMMANDS)
+    if sections.get('ai') or sections.get('server') or sections.get('subscription') or sections.get('admin'):
+        items = MEMBER_COMMANDS.copy()
+    candidates = []
+    if sections.get('subscription'): candidates += SUBSCRIPTION_COMMANDS[len(MEMBER_COMMANDS):]
+    if sections.get('ai'): candidates += CHAT_COMMANDS[len(MEMBER_COMMANDS):]
+    if sections.get('server'): candidates += [(key,label) for key,label in ADMIN_COMMANDS if key in ('status','services','network','security','diagnostics','logs')]
+    if sections.get('admin'): candidates += [('admin','Администрирование Mihomo')]
+    items += [(key,label) for key,label in candidates if COMMAND_GRANTS.get(key) in grants]
+    return list(dict(items).items())
+
+
+def access_signature(access):
+    detail = access_details.get()
+    return json.dumps({key:detail.get(key) for key in ('permissions','products','linked_profile')} if detail else access,sort_keys=True)
+
+
+async def scoped_reply(settings, sender, prompt, access):
+    detail = access_details.get(); sections=detail.get('sections', {}); grants=set(detail.get('permissions', []))
+    command=prompt.split()[0].split('@')[0].lower()
+    if command in ('/id','/userid'): return public_reply(sender,'/id')
+    if command in ('/myprofile','/setup','/skip'): return await profile_reply(settings,sender['id'],prompt)
+    if command in ('/menu','/_refresh_menu','/start','/help'):
+        if detail.get('admin_dialog'):
+            await server_command(settings,sender['id'],'/admin cancel'); command_view.set(None)
+        if command=='/help': return 'Доступные команды:\n' + '\n'.join('/'+key+' — '+label for key,label in available_commands())
+        return menu_text(prompt,access)
+    if command in ('/hello','/thanks'): return 'Здравствуйте! Откройте /menu.' if any(sections.values()) else 'Здравствуйте! Ваш профиль — /myprofile.'
+    if command=='/traffic': command='/subscription'; prompt='/subscription'
+    permission=COMMAND_GRANTS.get(command.removeprefix('/'))
+    if permission and permission not in grants: return 'Это действие недоступно для вашей учётной записи.'
+    if command=='/connect':
+        command_view.set({'buttons':[[{'text':'Моя подписка','command':'/subscription'},{'text':'Приложения','command':'/apps'}]]})
+        return '1. Установите клиент Mihomo.\n2. Скопируйте ссылку своей подписки и добавьте её в клиент по URL.\n3. Обновите подписку, выберите сервер и включите подключение.'
+    if command.startswith('/') and command!='/ai':
+        if command not in ('/confirm','/cancel','/operation') and permission is None: return 'Откройте /help — доступные команды.'
+        return await server_command(settings,sender['id'],prompt)
+    if detail.get('admin_dialog') and not command.startswith('/'):
+        if len(prompt)>220: return 'Введите короткое значение, до 220 символов.'
+        return await server_command(settings,sender['id'],'/admin input '+prompt)
+    if not sections.get('ai'): return 'AI-ассистент не подключён. Ваш профиль — /myprofile.'
+    if command=='/ai': prompt=prompt.split(maxsplit=1)[1] if len(prompt.split(maxsplit=1))>1 else ''
+    if not prompt: return 'Напишите вопрос после /ai.'
+    async with typing(settings,sender['id']): return await agent_request(settings,sender['id'],prompt)
 
 
 def public_reply(sender, command):
@@ -561,6 +627,7 @@ async def reply(settings, sender, prompt, access):
     prompt = direct_prompt(prompt)
     if not prompt: return ''
     command = prompt.split()[0].split('@')[0].lower()
+    if access_details.get() is not None: return await scoped_reply(settings,sender,prompt,access)
     if not access: return public_reply(sender, command)
     if command == '/_refresh_menu': return public_reply(sender, command)
     if command in ('/id', '/userid'): return public_reply(sender, '/id')
@@ -610,6 +677,9 @@ BUTTON_COMMANDS = {'Моя подписка': '/subscription', 'Сервер': '
 
 def menu_text(prompt, access):
     section = prompt.split(maxsplit=1)[1] if len(prompt.split(maxsplit=1)) > 1 else ''
+    if access_details.get() is not None:
+        sections=access_details.get().get('sections', {})
+        return {'subscription':'Подписка и подключение','server':'Сервер','ai':'AI-ассистент: напишите вопрос или выберите модель.','admin':'Администрирование Mihomo'}.get(section,'Меню Nodera') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
     if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
         return 'Подписка и подключение. Выберите нужное действие ниже.'
     if section == 'server' and access is True:
@@ -633,8 +703,36 @@ def inline_keyboard(answer, prompt, access, actions):
         actions[key] = command
         return {'text': text[:60], 'callback_data': 'nd:' + key}
     command = prompt.split()[0].split('@')[0].lower()
+    view=command_view.get()
+    if view is not None and 'buttons' in view:
+        for row in view['buttons'][:32]:
+            buttons=[]
+            for item in row[:3]:
+                if isinstance(item.get('url'),str) and item['url'].startswith('https://'):
+                    buttons.append({'text':str(item['text'])[:60],'url':item['url']})
+                elif isinstance(item.get('command'),str) and item['command'].startswith('/') and len(item['command'])<=256:
+                    buttons.append(button(item['text'],item['command']))
+            if buttons: rows.append(buttons)
+        if rows: return {'inline_keyboard':rows}
+    if access_details.get() is not None and command in ('/menu','/start','/help','/_refresh_menu'):
+        detail=access_details.get(); sections=detail.get('sections',{}); grants=set(detail['permissions'])
+        section=prompt.split(maxsplit=1)[1] if command=='/menu' and len(prompt.split(maxsplit=1))>1 else ''
+        groups={'subscription':[(('Моя подписка','/subscription'),('Статус','/profile')),(('Устройства','/devices'),('Приложения','/apps')),(('Как подключиться','/connect'),)],
+                'server':[(('Состояние','/status'),('Службы','/services')),(('Сеть','/network'),('Безопасность','/security')),(('Логи','/logs'),('Диагностика','/diagnostics'))],
+                'ai':[(('Выбрать модель','/models'),('Текущая модель','/model'))]}
+        if section in groups and sections.get(section):
+            for pair in groups[section]:
+                row=[button(label,cmd) for label,cmd in pair if COMMAND_GRANTS.get(cmd[1:]) in grants]
+                if row: rows.append(row)
+        elif section=='admin' and sections.get('admin'): rows.append([button('Подписки','/admin list'),button('Создать','/admin create')] if 'subscriptions_create' in grants else [button('Подписки','/admin list')])
+        elif not section:
+            for key,label in [('subscription','Подписка и подключение'),('ai','AI-ассистент'),('server','Сервер'),('admin','Администрирование')]:
+                if sections.get(key): rows.append([button(label,'/menu '+key)])
+            if not any(sections.values()): rows.append([button('Мой профиль','/myprofile')] + ([button('Мой ID','/id')] if detail.get('role','guest')=='guest' else []))
+        if section: rows.append([button('← Главное меню','/menu')])
+        return {'inline_keyboard':rows} if rows else None
     if '/skip' in answer and profile_state.get() in ('new', 'name', 'birthdate'):
-        return {'inline_keyboard': [[button('Пропустить вопрос', '/skip'), button('Пропустить опрос', '/skipall')]]}
+        return {'inline_keyboard': [[button('Пропустить', '/skip')]]}
     if command == '/myprofile':
         return {'inline_keyboard': [[button('Изменить профиль', '/setup')]]}
     if access and command in ('/menu', '/start', '/help', '/_refresh_menu'):
@@ -693,6 +791,14 @@ async def bot(settings):
     inbox = DurableInbox(state_root)
     inbox.acknowledge(offset)
     notices = {}
+    ui_file = state_root / 'dialog-messages.json'
+    ui_messages = json.loads(ui_file.read_text(encoding='utf-8')) if ui_file.exists() else {}
+    def remember_ui(actor, identity):
+        ui_messages.pop(str(actor),None)
+        if identity: ui_messages[str(actor)] = identity
+        while len(ui_messages)>1000: ui_messages.pop(next(iter(ui_messages)))
+        temporary=ui_file.with_suffix('.tmp')
+        temporary.write_text(json.dumps(ui_messages),encoding='utf-8'); temporary.chmod(0o600); temporary.replace(ui_file)
     async def deliver(sender, prompt, messages=None, alert=None, context=None):
         actor = sender['id']
         try: access = await identify(settings, sender)
@@ -701,7 +807,8 @@ async def bot(settings):
         if context: await remember_incoming(settings, context)
         if not prompt and not messages: return
         admin = access is True
-        role = 'admin' if admin else str(access) if access else 'guest'
+        scope = access_signature(access)
+        role = scope
         if menus.get(actor) != role:
             try:
                 await command_menu(settings, actor, admin, access in ('chat', 'chat-subscription'), access in (True, 'subscription', 'chat-subscription'))
@@ -710,9 +817,18 @@ async def bot(settings):
             except Exception: logging.error('NoderaBot private command menu could not be updated')
         cached = delivery_record.get()
         cached_row = inbox.read(cached) if cached else {}
+        deterministic = not messages and not alert and (prompt.startswith('/') and not prompt.startswith(('/ai','/confirm','/cancel','/operation')) or profile_state.get() in ('name','birthdate') or (access_details.get() or {}).get('admin_dialog'))
+        cleanup = list(cached_row.get('cleanup', []))
+        if not cleanup and deterministic:
+            cleanup = [ui_messages.get(str(actor)), cached_row.get('replace_message_id')]
+            if profile_state.get() in ('name','birthdate') and context and context.get('chat',{}).get('id')==actor: cleanup.append(context.get('message_id'))
+            cleanup = list(dict.fromkeys(identity for identity in cleanup if type(identity) is int and identity>0))
+            if cached: inbox.amend(cached, cleanup=cleanup)
         if 'answer' in cached_row:
-            answer = cached_row['answer'] if cached_row.get('answer_access') == access else 'Доступ изменился. Откройте /menu для доступных действий.'
-        elif not messages and not alert and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
+            same_scope = cached_row.get('answer_scope',scope if access_details.get() is None else None)==scope
+            answer = cached_row['answer'] if cached_row.get('answer_access') == access and same_scope else 'Доступ изменился. Откройте /menu для доступных действий.'
+            command_view.set(cached_row.get('view') if same_scope else None)
+        elif not messages and not alert and not (access_details.get() or {}).get('admin_dialog') and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
                 profile_state.get() in ('name', 'birthdate') or prompt.split(maxsplit=1)[0].split('@')[0].lower() in ('/start', '/myprofile', '/setup', '/skip', '/skipall'))):
             # Remember routing before sending: a lost final-profile reply must
             # reconcile the same receipt even when the questionnaire is now done.
@@ -720,7 +836,7 @@ async def bot(settings):
             answer = await profile_reply(settings, actor, prompt)
             if answer is None: answer = await reply(settings, sender, prompt, access)
         elif alert:
-            if access is not True:
+            if access is not True or access_details.get() is not None and 'chat' not in access_details.get().get('permissions',[]):
                 answer = 'Разбор алерта доступен владельцу с доступом к ИИ.'
             else:
                 try:
@@ -732,33 +848,45 @@ async def bot(settings):
                     answer = 'Не удалось запустить разбор алерта. Проверьте доступность AI-ассистента и повторите позже.'
         else:
             answer = await attachment_reply(settings, sender, prompt, messages, access) if messages else await reply(settings, sender, prompt, access)
-        if access:
+        if access or access_details.get() is not None:
             # A request can outlive a permission change.
             try: current_access = await identify(settings, sender)
             except ContactBlocked: return
             except Exception: raise DeliveryPending() from None
-            if current_access != access:
+            if current_access != access or access_signature(current_access)!=scope:
                 access = False
-                answer = public_reply(sender, '')
+                answer = 'Доступ изменился. Откройте /menu для доступных действий.'
+                command_view.set(None)
         if not answer: return
-        if cached: inbox.amend(cached, answer=answer, answer_access=access)
+        if cached: inbox.amend(cached, answer=answer, answer_access=access, answer_scope=access_signature(access), view=command_view.get())
         if len(callbacks) >= 1000: callbacks.clear()
         actions = {}
         markup = inline_keyboard(answer, prompt or 'Вложения', access, actions)
         if actions:
             callbacks.setdefault(actor, {}).update(actions)
             while len(callbacks[actor]) > 256: callbacks[actor].pop(next(iter(callbacks[actor])))
-        answer = styled_message(direct_prompt(prompt or '') or '', answer)
+        if command_view.get() is None: answer = styled_message(direct_prompt(prompt or '') or '', answer)
+        document = (command_view.get() or {}).get('document')
+        sent_id = cached_row.get('sent_message_id')
         for index,chunk in enumerate(telegram_chunks(answer)):
             if index < cached_row.get('sent', 0): continue
-            await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=reply_keyboard(access))
-            if cached: inbox.amend(cached, sent=index + 1)
-        if markup and not cached_row.get('menu_sent'):
-            await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Выберите действие', 'Нажмите на подходящий вариант ниже.', '👇')), parse_mode='HTML', reply_markup=markup)
-            if cached: inbox.amend(cached, menu_sent=True)
+            if document and index==0:
+                sent = await bot_api(settings,'sendDocument',chat_id=actor,document=document,caption=chunk[:1000],parse_mode='HTML',reply_markup=markup or reply_keyboard(access))
+            else:
+                sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=markup if index==0 and markup else reply_keyboard(access))
+            if isinstance(sent,dict) and type(sent.get('message_id')) is int: sent_id=sent['message_id']
+            if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id)
+        if deterministic and sent_id: remember_ui(actor,sent_id)
+        for identity in cleanup:
+            if identity==sent_id: continue
+            try: await bot_api(settings,'deleteMessage',chat_id=actor,message_id=identity)
+            except Exception:
+                try: await bot_api(settings,'editMessageReplyMarkup',chat_id=actor,message_id=identity,reply_markup={'inline_keyboard':[]})
+                except Exception: pass
     async def deliver_saved(row, key):
         identity = incoming_request.set(row['request_id'])
         cached = delivery_record.set(key)
+        detail_token=access_details.set(None); view_token=command_view.set(None)
         try:
             if row.get('edited'):
                 await remember_incoming(settings, row['context']); return
@@ -770,18 +898,18 @@ async def bot(settings):
                 for message in messages: await remember_incoming(settings, message)
             await deliver(row['sender'], prompt, messages, row.get('alert'), context=row.get('context'))
         finally:
-            incoming_request.reset(identity); delivery_record.reset(cached)
+            incoming_request.reset(identity); delivery_record.reset(cached); access_details.reset(detail_token); command_view.reset(view_token)
     async def flush_inbox():
         while True:
             try: inbox.pump(dispatcher, deliver_saved)
             except (OSError, ValueError): logging.error('NoderaBot inbox could not be read')
             await asyncio.sleep(.5)
     pump_task = asyncio.create_task(flush_inbox())
-    def accept(update, sender, prompt, messages=None, alert=None, context=None, command=False, edited=False, album=None):
+    def accept(update, sender, prompt, messages=None, alert=None, context=None, command=False, edited=False, album=None, replace_message_id=None):
         actor = sender['id']
         key = 'album-' + hashlib.sha256(f'{actor}:{album}'.encode()).hexdigest()[:32] if album else 'message-' + str(update['update_id'])
         record = {'order':update['update_id'], 'sender':sender, 'prompt':prompt, 'messages':messages,
-                  'context':context, 'alert':alert, 'command':command, 'edited':edited,
+                  'context':context, 'alert':alert, 'command':command, 'edited':edited, 'replace_message_id':replace_message_id,
                   'request_id':hashlib.sha256((settings.get('bot_token','') + ':' + str(actor) + ':' + key).encode()).hexdigest()[:32]}
         if album: record.update(album=album, not_before=time.time() + 1)
         accepted = inbox.put(key, record)
@@ -827,13 +955,14 @@ async def bot(settings):
                             media_groups[album_key][0].append(message)
                             inbox.amend(media_groups[album_key][1], messages=media_groups[album_key][0])
                         continue
-                    is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() not in ('/ai', '/start', '/setup', '/myprofile', '/skip', '/skipall')
+                    is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() not in ('/ai', '/start', '/setup', '/myprofile', '/skip', '/skipall', '/menu', '/admin')
                     # Explicit commands remain responsive while this user's AI
                     # dialog waits; commands themselves keep their own ordering.
                     stream = (actor, 'command') if is_command else actor
                     accepted, inbox_key = accept(update, sender, prompt, messages, alert,
                         context=None if callback or album_key else message, command=is_command,
-                        album=str(message['media_group_id']) if album_key else None)
+                        album=str(message['media_group_id']) if album_key else None,
+                        replace_message_id=message.get('message_id') if callback and not alert and str(message.get('from',{}).get('id'))==settings['bot_token'].split(':')[0] else None)
                     if album_key and accepted: media_groups[album_key] = (messages, inbox_key)
                     if (not accepted or inbox.waiting(actor, is_command) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()

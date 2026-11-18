@@ -215,7 +215,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         if (draft.accounts.some(row => row.telegram_id === profileEdit.contact.telegram_id)) patch({ accounts: draft.accounts.filter(row => row.telegram_id !== profileEdit.contact.telegram_id) });
         setProfileEdit(undefined); setUserEdit(undefined);
       } else if (action === "block") setProfileEdit(current => current && { ...current, contact: result });
-      notify.success(action === "delete" ? "Профиль гостя удалён" : action === "block" ? result.blocked ? "Гость заблокирован" : "Пользователь разблокирован" : "Профиль сохранён");
+      notify.success(action === "delete" ? "Профиль пользователя удалён" : action === "block" ? result.blocked ? "Пользователь заблокирован" : "Пользователь разблокирован" : "Профиль сохранён");
       return true;
     } catch (cause) { setProfileError(cause instanceof Error ? cause.message : "Профиль не изменён"); return false; }
     finally { profileWriting.current = false; setProfileBusy(false); }
@@ -577,19 +577,13 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </div></div>
       {profileError && <p role="alert">{profileError}</p>}
       {profileEdit && <>
-      {(profileEdit.contact.blocked || accountRole(draft.accounts.find(row => row.telegram_id === profileEdit.contact.telegram_id) ?? blankAccount()) === "guest") && <>
-        <button type="button" className="ghostButton" disabled={blocked || profileBusy || dirty} onClick={() => void changeProfile("block")}>{profileEdit.contact.blocked ? "Разблокировать" : "Заблокировать гостя"}</button>
-        {accountRole(draft.accounts.find(row => row.telegram_id === profileEdit.contact.telegram_id) ?? blankAccount()) === "guest" && <>
-          <button type="button" className="dangerButton" disabled={blocked || profileBusy || dirty} onClick={() => setDeleteProfile(true)}>Удалить гостя</button>
-          {deleteProfile && <div role="alert"><p>Удалить профиль? При новом обращении гость появится снова. Для запрета обращений используйте блокировку.</p><button type="button" className="dangerButton" disabled={blocked || profileBusy} onClick={() => void changeProfile("delete")}>Подтвердить удаление гостя</button></div>}
-        </>}
+        <div className="noderaUserActions">
+          <button type="button" className="ghostButton" disabled={blocked || profileBusy || dirty} onClick={() => void changeProfile("block")}>{profileEdit.contact.blocked ? "Разблокировать" : "Заблокировать"}</button>
+          <button type="button" className="dangerButton" disabled={blocked || profileBusy || dirty} onClick={() => setDeleteProfile(true)}>Удалить пользователя</button>
+        </div>
+        {deleteProfile && <div role="alert"><p>Удалить профиль? Для запрета обращений используйте блокировку.</p><button type="button" className="dangerButton" disabled={blocked || profileBusy} onClick={() => void changeProfile("delete")}>Подтвердить удаление</button></div>}
         {dirty && <small>Сначала сохраните изменения прав доступа.</small>}
       </>}
-      </>}
-      {userEdit.index >= 0 && (accountRole(account) !== "guest" || !profileEdit) && <button type="button" className="ghostButton" disabled={blocked || profileBusy} onClick={() => {
-        patch({ accounts: draft.accounts.filter((_, index) => index !== userEdit.index) });
-        closeUser();
-      }}>Удалить пользователя</button>}
     </SettingsDialog>}
   </section>;
 

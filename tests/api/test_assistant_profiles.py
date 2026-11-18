@@ -56,11 +56,11 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(self.edit(blocked=False).status_code, 200)
         self.assertNotIn('blocked', self.contact().json())
 
-    def test_non_guests_cannot_be_blocked_or_deleted_by_guest_management(self):
+    def test_administrators_can_also_be_blocked_or_deleted(self):
         self.approve()
-        self.assertEqual(self.edit(blocked=True).status_code, 409)
+        self.assertEqual(self.edit(blocked=True).status_code, 200)
         with patch.dict(api.app.dependency_overrides, {api.require_token:lambda:None}):
-            self.assertEqual(self.client.delete('/api/assistant/bot-users/11').status_code, 409)
+            self.assertEqual(self.client.delete('/api/assistant/bot-users/11').status_code, 200)
         self.assertFalse(contacts.profile(api, control.read(api), '11').get('blocked'))
 
     def test_manual_birthday_survives_telegram_refresh_and_can_be_cleared(self):

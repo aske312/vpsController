@@ -1,4 +1,4 @@
-"""Owner-only durable notifications, independent of the dialogue/model workers."""
+"""Administrator notifications, independent of the dialogue/model workers."""
 import asyncio
 import hashlib
 import json
@@ -39,15 +39,17 @@ def load(api):
             'queue': [], 'seen': [], 'analysis': {}, 'boot_id': '', 'revision': '0' * 64, 'last_delivery': None, **value}
 
 
-def owners(settings):
-    return {row['telegram_id']: row for row in settings.get('accounts', []) if roles.role(row) == 'owner'}
+def owners(settings, api=None):
+    import assistant_contacts
+    return {row['telegram_id']: row for row in settings.get('accounts', []) if roles.role(row) in ('owner', 'administrator')
+            and (api is None or not assistant_contacts.profile(api,settings,str(row['telegram_id'])).get('blocked'))}
 
 
 def status(api):
     settings = control.read(api)
     with operations.locked(api.DATA_DIR): value = load(api)
     return {'settings': value['settings'], 'revision': value['revision'],
-            'owners': [{'telegram_id': key, 'name': row.get('name', '')} for key, row in owners(settings).items()],
+            'owners': [{'telegram_id': key, 'name': row.get('name', '')} for key, row in owners(settings, api).items()],
             'token_configured': bool(settings.get('bot_token')), 'pending': len(value['queue']),
             'last_delivery': value['last_delivery'], 'dropped': value.get('dropped', 0)}
 
@@ -63,8 +65,8 @@ def history(api):
 
 def configure(api, payload):
     settings = control.read(api)
-    if payload.enabled and (payload.owner_id not in owners(settings) or not settings.get('bot_token')):
-        raise HTTPException(422, 'Выберите сохранённого владельца и настройте токен Telegram-бота')
+    if payload.enabled and (payload.owner_id not in owners(settings, api) or not settings.get('bot_token')):
+        raise HTTPException(422, 'Выберите владельца или администратора и настройте токен Telegram-бота')
     rows, boot = history(api), operations.boot_id()
     with operations.locked(api.DATA_DIR):
         value = load(api)
@@ -107,7 +109,7 @@ def analysis_prompt(api, settings, actor, token, mode):
     if mode not in ('brief', 'deep') or not re.fullmatch(r'[0-9a-f]{32}', token):
         raise HTTPException(422, 'Некорректная кнопка алерта')
     roles.require(settings, actor, 'chat')
-    if str(actor) not in {str(key) for key in owners(settings)}:
+    if str(actor) not in {str(key) for key in owners(settings, api)}:
         raise HTTPException(403, 'Разбор алерта доступен его владельцу')
     with operations.locked(api.DATA_DIR):
         value = load(api)
@@ -230,7 +232,7 @@ def test(api):
     settings = control.read(api)
     with operations.locked(api.DATA_DIR):
         value = load(api)
-        if not value['settings']['enabled'] or value['settings']['owner_id'] not in owners(settings):
+        if not value['settings']['enabled'] or value['settings']['owner_id'] not in owners(settings, api):
             raise HTTPException(422, 'Сначала включите алерты для сохранённого владельца')
         now = time.time()
         if now - value.get('last_test', 0) < 60: raise HTTPException(429, 'Тест доступен раз в минуту')
@@ -274,7 +276,7 @@ def deliver(api):
             value['last_delivery'] = {'state': 'unknown', 'at': now}
             value['queue'] = [row for row in value['queue'] if row['state'] != 'sending']
         config = value['settings']
-        if not config['enabled'] or config['owner_id'] not in owners(settings):
+        if not config['enabled'] or config['owner_id'] not in owners(settings, api):
             if not value['queue'] and not stranded: return
             value['queue'] = []
             operations.atomic_json(path(api), value)

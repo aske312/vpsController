@@ -91,7 +91,7 @@ def profiles_path(api, settings):
 
 def profiles(api, settings):
     # Only the owner list enumerates profiles; receipts stay out of that list.
-    return {file.stem: {key:value for key,value in control.operations.read(file).items() if key != 'receipts'}
+    return {file.stem: {key:value for key,value in control.operations.read(file).items() if key not in ('receipts','admin_receipts')}
             for file in profiles_path(api, settings).glob('*.json') if re.fullmatch(r'[1-9][0-9]{0,15}', file.stem)}
 
 
@@ -127,8 +127,6 @@ def edit_profile(api, identity, edit=None, *, delete=False):
         settings = control._read(api)  # Storage lock is already held.
         if not settings.get('bot_token'): raise HTTPException(409, 'Бот не настроен')
         account = next((row for row in settings['accounts'] if row['telegram_id'] == identity), {})
-        if (delete or edit and edit.blocked is True) and roles.role(account) != 'guest':
-            raise HTTPException(409, 'Удаление и блокировка здесь доступны только для гостей')
         known = observed(api, settings)
         previous = profile(api, settings, actor)
         contact = next((row for row in known if row['telegram_id'] == identity), previous.get('snapshot', {}))
@@ -190,10 +188,13 @@ def remember(api, settings, contact, actor):
         raise HTTPException(403, 'Контакт не соответствует отправителю')
     user = next((a for a in settings['accounts'] if a['telegram_id'] == contact.telegram_id), {})
     access = {'admin': bool(roles.effective(settings, actor) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read', 'subscriptions_admin', 'roles_manage'}), 'chat': roles.allows(settings, actor, 'chat'), 'subscription': roles.allows(settings, actor, 'subscription_read')}
+    import assistant_bot_views
+    access.update(assistant_bot_views.capabilities(api, settings, actor))
     with control.operations.locked(api.DATA_DIR):
         saved = profile(api, settings, actor)
         if saved.get('blocked'): return {'admin':False, 'chat':False, 'subscription':False, 'blocked':True}
         access['onboarding'] = saved.get('onboarding', 'new')
+        access['admin_dialog'] = bool(saved.get('admin_dialog')) and roles.allows(settings,actor,'subscriptions_admin')
         known = observed(api, settings)
         previous = next((row for row in known if row['telegram_id'] == contact.telegram_id), None)
         details = contact.model_dump(exclude={'is_bot'})
@@ -228,6 +229,10 @@ def profile_dialog(api, settings, actor, payload):
             date = contact.get('birthdate')
             date_text = f"{date['day']:02}.{date['month']:02}" + (f".{date['year']}" if date.get('year') else '') if date else 'не указана'
             output = {'text': 'Профиль Nodera\nИмя: ' + (value.get('display_name') or contact.get('name') or 'не указано') + '\nДата рождения: ' + date_text + '\n/setup — изменить профиль.'}
+        elif step in ('name','birthdate') and command.startswith('/') and command not in ('/start','/setup','/skip','/skipall'):
+            value['onboarding']='done'
+            save_profile(api,settings,actor,value)
+            return {'text':None}
         elif command == '/setup' or command == '/start' and step in ('new', 'name', 'birthdate'):
             if command == '/setup' or step == 'new': step = 'name'
         elif command == '/start':
@@ -248,15 +253,16 @@ def profile_dialog(api, settings, actor, payload):
                     if date.year and datetime.date(date.year, date.month, date.day) > datetime.date.today(): raise ValueError()
                     value['birthdate'] = date.model_dump()
                 except ValueError:
-                    output = {'text':'Укажите существующую дату: ДД.ММ.ГГГГ или ДД.ММ без года. /skip — пропустить, /skipall — закончить.'}
+                    output = {'text':'Укажите существующую дату: ДД.ММ.ГГГГ или ДД.ММ без года.'}
             if not output: step = 'done'
         else:
             return {'text': None}
         value['onboarding'] = step
         if not output:
-            output = {'text': ('Профиль Nodera · знакомство\nКак к вам обращаться? Напишите имя.\n/skip — пропустить вопрос, /skipall — пропустить опрос.' if step == 'name' else
-                              'Профиль Nodera · дата рождения\nНапишите ДД.ММ.ГГГГ или ДД.ММ без года.\n/skip — пропустить вопрос, /skipall — закончить.' if step == 'birthdate' else
-                              'Профиль Nodera сохранён. /myprofile — посмотреть или изменить. /menu — меню, /id — ваш Telegram ID.')}
+            output = {'text': ('Профиль Nodera · знакомство\nКак к вам обращаться? Напишите имя.\n' if step == 'name' else
+                              'Профиль Nodera · дата рождения\nНапишите ДД.ММ.ГГГГ или ДД.ММ без года.\n' if step == 'birthdate' else
+                              'Профиль Nodera сохранён.')}
+        output['buttons'] = [[{'text':'Изменить профиль','command':'/setup'}]] if command=='/myprofile' else [[{'text':'Пропустить','command':'/skip'}]] if step in ('name','birthdate') else [[{'text':'Мой профиль','command':'/myprofile'}]]
         receipts = dict(value.get('receipts', {})); receipts[payload.request_id] = {'fingerprint':fingerprint, 'output':output}
         value['receipts'] = dict(list(receipts.items())[-32:])
         save_profile(api, settings, actor, value)

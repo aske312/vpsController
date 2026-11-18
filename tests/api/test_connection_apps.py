@@ -24,7 +24,10 @@ class ConnectionAppsTests(unittest.TestCase):
     def test_bot_apps_route_accepts_subscription_users_without_admin_access(self):
         with patch.object(assistant_commands.roles, 'require') as require, \
              patch.object(assistant_control, 'require_bot_actor') as admin, \
+             patch.object(assistant_control, 'read', return_value={}), \
              patch.object(assistant_commands, 'execute', return_value='apps'):
-            self.assertEqual(api.nodera_command(assistant_commands.Command(command='/apps windows'), {}, '11'), {'text':'apps'})
+            result = api.nodera_command(assistant_commands.Command(command='/apps windows'), {}, '11')
+            self.assertIn('Windows', result['text'])
+            self.assertTrue(any('Nodera' in button['text'] for row in result['buttons'] for button in row))
         require.assert_called_once_with({}, '11', 'subscription_read')
         admin.assert_not_called()

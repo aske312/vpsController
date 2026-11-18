@@ -61,11 +61,28 @@ class OwnerAlertsTests(unittest.TestCase):
         alerts.test(self.env)
         self.configure(enabled=False)
         self.assertEqual(alerts.load(self.env)['queue'], [])
+
         self.configure()
         self.rows += [{'id': 'new', 'at': 'now', 'transition': 'firing'}]
         alerts.sample(self.env)
-        self.settings['accounts'][0]['role'] = 'administrator'
+        self.settings['accounts'][0]['role'] = 'moderator'
         with patch.object(alerts, 'send') as send: alerts.deliver(self.env)
+        send.assert_not_called()
+        self.assertEqual(alerts.load(self.env)['queue'], [])
+
+
+    def test_administrator_can_receive_alerts_but_blocking_cancels_delivery(self):
+        self.settings['accounts'][0]['role']='administrator'
+        self.assertEqual(alerts.status(self.env)['owners'][0]['telegram_id'],123)
+        self.configure(); alerts.test(self.env)
+        with patch.object(alerts,'send',return_value={'state':'sent'}) as send:
+            alerts.deliver(self.env)
+        send.assert_called_once()
+        self.rows.append({'id':'blocked-new','transition':'firing','at':'now'})
+        alerts.sample(self.env)
+        import assistant_contacts
+        assistant_contacts.save_profile(self.env,self.settings,'123',{'blocked':True})
+        with patch.object(alerts,'send') as send: alerts.deliver(self.env)
         send.assert_not_called()
         self.assertEqual(alerts.load(self.env)['queue'], [])
 
@@ -155,7 +172,7 @@ class OwnerAlertsTests(unittest.TestCase):
                 alerts.analysis_prompt(self.env, self.settings, actor, token, 'brief')
         self.settings['accounts'].append({'telegram_id': 456, 'role': 'owner'})
         with self.assertRaises(alerts.HTTPException): alerts.analysis_prompt(self.env, self.settings, '456', token, 'brief')
-        self.settings['accounts'][0]['role'] = 'administrator'
+        self.settings['accounts'][0]['role'] = 'moderator'
         with self.assertRaises(alerts.HTTPException): alerts.analysis_prompt(self.env, self.settings, '123', token, 'brief')
         self.settings['accounts'][0]['role'] = 'owner'
         with patch.object(alerts.time, 'time', return_value=time.time() + 8 * 86400):

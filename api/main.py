@@ -659,6 +659,9 @@ def nodera_history_read(payload: assistant_bot_history.Read, settings: dict = De
 @app.post('/api/assistant/bot-command')
 def nodera_command(payload: assistant_commands.Command, settings: dict = Depends(require_nodera_bot_transport),
                    actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    import assistant_bot_views
+    presentation = assistant_bot_views.view(sys.modules[__name__], actor, payload.command, payload.request_id)
+    if presentation is not None: return presentation
     command = payload.command.strip().split(maxsplit=1)
     confirmation_command = bool(command and command[0].split('@')[0].lower() in ('/confirm', '/cancel', '/operation'))
     import assistant_roles

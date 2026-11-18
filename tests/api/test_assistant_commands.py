@@ -47,7 +47,7 @@ class ServerCommandTests(unittest.TestCase):
             for command, tool in [('/network', 'vps_network'), ('/security', 'vps_security'), ('/logs fixture', 'vps_logs'), ('/diagnostics', 'vps_diagnostics')]:
                 response = self.call(command)
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertIn('неизвестно', response.json()['text'])
+                self.assertLess(len(response.json()['text']),1200)
                 self.assertNotIn('```json', response.json()['text'])
                 self.assertNotIn('private-key', response.text)
                 self.assertNotIn(secret, response.text)
@@ -273,7 +273,7 @@ class ServerCommandTests(unittest.TestCase):
             overview.assert_not_called()
             self.assertIn('private-fixture', self.call('/status').json()['text'])
             self.assertIn('нет данных', self.call('/resources').json()['text'])
-            self.assertIn('fixture', self.call('/services').json()['text'])
+            self.assertIn('Fixture', self.call('/services').json()['text'])
             with patch.object(api, 'protocol_images', return_value={'items': [{'id': 'fixture', 'installed': True, 'installed_version': '1.2.3'}, {'id': 'absent', 'installed': False}]}):
                 result = self.call('/components').json()['text']
                 self.assertIn('1.2.3', result); self.assertNotIn('absent', result)

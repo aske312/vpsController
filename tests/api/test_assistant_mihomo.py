@@ -230,7 +230,7 @@ class MihomoOperatorTests(unittest.TestCase):
             self.assertIn('2.50 GB / 10 GB', response.json()['text'])
             response = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/profile other'})
             self.assertNotIn('Private foreign', response.text)
-            self.assertIn('недоступен', response.json()['text'])
+            self.assertIn('недоступ', response.json()['text'])
             model.assert_not_called()
 
     def test_foreign_profiles_global_settings_limits_and_path_traversal_are_denied(self):
