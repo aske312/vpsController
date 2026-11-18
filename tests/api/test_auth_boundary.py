@@ -20,8 +20,6 @@ class AuthenticationBoundaryTests(unittest.TestCase):
                     continue
                 path = re.sub(r'\{[^}]+\}', 'audit-fixture', route.path)
                 for method in route.methods & {'GET', 'POST', 'PUT', 'PATCH', 'DELETE'}:
-                    if route.path == '/api/assistant/telegram-setup' and method == 'GET':
-                        continue  # The public form has no data; its POST requires signed Telegram launch data.
                     with self.subTest(method=method, path=route.path):
                         response = client.request(method, path, json={})
                         self.assertEqual(response.status_code, 401, response.text)

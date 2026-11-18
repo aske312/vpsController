@@ -105,9 +105,11 @@ class BotTelegramSettingsTests(unittest.TestCase):
             self.assertEqual(self.submit('/telegram configure', 'a'*32).json(), command.json())
         url = urlsplit(command.json()['buttons'][0][0]['web_app'])
         self.assertEqual(url.hostname, 'panel.example.com')
+        self.assertEqual(url.path, '/telegram-mcp-setup')
         page = self.client.get(url.path + '?' + url.query)
         self.assertIn('Сохранить параметры', page.text)
         self.assertEqual(page.headers['cache-control'], 'no-store')
+        endpoint = '/api/assistant/telegram-setup'
 
         def launch_data(actor, age=0):
             fields = {'auth_date': str(int(time.time()) - age), 'user': json.dumps({'id': actor})}
@@ -119,12 +121,12 @@ class BotTelegramSettingsTests(unittest.TestCase):
         payload = {'setup': parse_qs(url.query)['setup'][0], 'api_id': 4321, 'api_hash': 'c'*32}
         valid = launch_data(11)
         for launch, status in ((valid + '&user=invalid', 401), (launch_data(11, 700), 401), (launch_data(22), 403)):
-            self.assertEqual(self.client.post(url.path, json=payload, headers={'X-Telegram-Init-Data': launch}).status_code, status)
+            self.assertEqual(self.client.post(endpoint, json=payload, headers={'X-Telegram-Init-Data': launch}).status_code, status)
         header = {'X-Telegram-Init-Data': valid}
-        self.assertEqual(self.client.post(url.path, json={**payload, 'setup': 'b'*32}, headers=header).status_code, 409)
-        first = self.client.post(url.path, json=payload, headers=header)
+        self.assertEqual(self.client.post(endpoint, json={**payload, 'setup': 'b'*32}, headers=header).status_code, 409)
+        first = self.client.post(endpoint, json=payload, headers=header)
         self.assertEqual(first.json(), {'saved': True}, first.text)
-        self.assertEqual(self.client.post(url.path, json=payload, headers=header).status_code, 409)
+        self.assertEqual(self.client.post(endpoint, json=payload, headers=header).status_code, 409)
         updated = control.read(api)
         self.assertEqual((updated['telegram_api_id'], updated['telegram_api_hash']), (4321, 'c'*32))
         self.assertEqual(updated['accounts'][0]['session'], settings['accounts'][0]['session'])

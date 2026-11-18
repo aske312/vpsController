@@ -39,7 +39,7 @@ def issue(api, settings, actor, state):
         raise HTTPException(409, 'Для формы настройки из Telegram задайте HTTPS-домен панели')
     identity = uuid.uuid4().hex
     state['telegram_setup'] = {'id': identity, 'revision': settings['revision'], 'expires': time.time() + TTL}
-    return f'https://{domain}/api/assistant/telegram-setup?setup={identity}'
+    return f'https://{domain}/telegram-mcp-setup?setup={identity}'
 
 
 def signed_actor(raw, bot_token):

@@ -664,7 +664,7 @@ def nodera_telegram_settings(payload: assistant_contacts.ProfileDialog, settings
     return assistant_bot_telegram.view(sys.modules[__name__], actor, '/telegram input ' + payload.text, payload.request_id)
 
 
-@app.get('/api/assistant/telegram-setup')
+@app.get('/telegram-mcp-setup')
 def telegram_setup_page():
     return assistant_telegram_setup.page()
 

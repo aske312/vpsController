@@ -21,7 +21,7 @@
   <h1>Настройка Telegram MCP</h1>
   <p>Сохранение заменит общие параметры для всех подключений Telegram MCP на этом сервере.</p>
   <p><a href="https://my.telegram.org/apps" rel="noreferrer noopener" target="_blank">Получить API ID и API hash в Telegram</a></p>
-  <form method="post">
+  <form action="/api/assistant/telegram-setup" method="post">
     <label>API ID
       <input name="api_id" type="text" inputmode="numeric" pattern="[0-9]{1,10}" required autocomplete="off">
     </label>
@@ -48,7 +48,7 @@
       button.disabled = true;
       status.textContent = 'Сохраняем параметры…';
       try {
-        const response = await fetch(location.pathname, {
+        const response = await fetch(form.action, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': webApp.initData },
           credentials: 'omit',
