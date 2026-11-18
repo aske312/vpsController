@@ -2113,7 +2113,7 @@ def health() -> dict:
 
 @app.get("/api/auth/status")
 def auth_status() -> dict:
-    return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD)}
+    return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD), "public_domain": PUBLIC_DOMAIN}
 
 
 @app.put("/api/security/admin-password", dependencies=[Depends(require_short_mutation)])

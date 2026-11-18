@@ -84,6 +84,7 @@ export function ControlPanel() {
   const [loginUser, setLoginUser] = useState("admin");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
+  const [loginDomain, setLoginDomain] = useState("");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [security, setSecurity] = useState<Record<string, unknown> | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
@@ -195,6 +196,21 @@ export function ControlPanel() {
       sessionStorage.removeItem("312-notice");
     }
   }, [notifySuccess]);
+
+  useEffect(() => {
+    if (token) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/status", { cache: "no-store", credentials: "omit", signal: controller.signal });
+        const status = response.ok ? await response.json() : null;
+        if (!controller.signal.aborted) setLoginDomain(typeof status?.public_domain === "string" ? status.public_domain : "");
+      } catch {
+        if (!controller.signal.aborted) setLoginDomain("");
+      }
+    })();
+    return () => controller.abort();
+  }, [token]);
 
   useEffect(() => {
     function closeSettings(event: PointerEvent) {
@@ -1271,6 +1287,7 @@ export function ControlPanel() {
 
   if (!token) {
     return <LoginView
+      domain={loginDomain}
       loginUser={loginUser}
       loginPassword={loginPassword}
       loginPasswordVisible={loginPasswordVisible}

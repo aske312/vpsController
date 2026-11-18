@@ -41,9 +41,9 @@ class PrivacyTests(unittest.TestCase):
     def test_public_api_does_not_disclose_identity_or_schema(self):
         from fastapi.testclient import TestClient
         client = TestClient(api.app)
-        with patch.object(api, "ADMIN_USER", "private-admin"), patch.object(api, "ADMIN_PASSWORD", "secret"):
+        with patch.object(api, "ADMIN_USER", "private-admin"), patch.object(api, "ADMIN_PASSWORD", "secret"), patch.object(api, "PUBLIC_DOMAIN", "panel.example.com"):
             self.assertEqual(client.get("/api/health").json(), {"ok": True})
-            self.assertEqual(client.get("/api/auth/status").json(), {"configured": True})
+            self.assertEqual(client.get("/api/auth/status").json(), {"configured": True, "public_domain": "panel.example.com"})
         for path in ("/openapi.json", "/docs", "/redoc"):
             self.assertEqual(client.get(path).status_code, 404)
         self.assertEqual(client.get("/api/clients").status_code, 401)
