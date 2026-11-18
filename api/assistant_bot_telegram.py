@@ -20,6 +20,29 @@ def button(text, command):
     return {'text': text, 'command': command}
 
 
+def setup_guide(settings, selected):
+    if roles.role(selected) == 'owner':
+        text = ('1. Откройте my.telegram.org и войдите в свой аккаунт. В разделе API development tools '
+                'зарегистрируйте приложение или откройте существующее.\n'
+                '2. В панели откройте Nodera → Настройки → Настройки AI → MCP. '
+                'Включите Telegram MCP, нажмите «Настроить Telegram MCP» и заполните API ID и API hash. '
+                'Закройте окно и сохраните настройки Nodera.\n'
+                '3. Вернитесь сюда и нажмите «Проверить настройки».')
+        links = [[{'text': 'API development tools', 'url': 'https://my.telegram.org/apps'}]]
+    else:
+        text = ('Попросите владельца панели включить Telegram MCP и заполнить API ID и API hash. '
+                'Затем вернитесь сюда и нажмите «Проверить настройки».')
+        links = []
+    if not settings.get('mcp', {}).get('telegram-mcp'):
+        status = 'Telegram MCP выключен.'
+    else:
+        missing = [label for key, label in (('telegram_api_id', 'API ID'), ('telegram_api_hash', 'API hash')) if not settings.get(key)]
+        status = 'В панели не заполнены: ' + ', '.join(missing) + '.'
+    return result('Telegram API · настройка\n' + status + '\n\n' + text +
+                  '\n\nAPI hash вводите только в панели Nodera. Коды входа и пароль вводите только в Telegram.',
+                  links + [[button('Проверить настройки', '/telegram session'), button('← Telegram API', '/telegram')]])
+
+
 def account(settings, actor):
     roles.require(settings, actor, 'telegram_read')
     selected = next((row for row in settings['accounts'] if str(row['telegram_id']) == actor), None)
@@ -33,6 +56,7 @@ def view(api, actor, prompt, request_id):
     argument = parts[2] if len(parts) > 2 else ''
     settings = control.read(api)
     selected = account(settings, actor)
+    ready = bool(settings.get('telegram_api_id') and settings.get('telegram_api_hash') and settings.get('mcp', {}).get('telegram-mcp'))
     fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
     with control.operations.locked(api.DATA_DIR):
         state = contacts.profile(api, settings, actor)
@@ -44,13 +68,20 @@ def view(api, actor, prompt, request_id):
 
     changes = {}
     if action == 'session':
-        if not settings.get('telegram_api_id') or not settings.get('telegram_api_hash') or not settings.get('mcp', {}).get('telegram-mcp'):
-            return result('Telegram API\nПодключение пока недоступно: владелец должен включить MCP Telegram и настроить Telegram API ID и API hash.', [[button('← Telegram API', '/telegram')]])
+        if not ready:
+            return setup_guide(settings, selected)
         dialog = {'expires': time.time() + 600}
-        output = result('Telegram API · подключение\nОтправьте строку Telethon StringSession своего аккаунта. Она будет проверена и сохранена только для вас. Сообщение со строкой удалится после обработки.\n\nПароли и коды входа сюда отправлять не нужно. Ожидание: 10 минут.', [[button('Отмена', '/telegram cancel')]])
+        output = result('Telegram API · подключение\nСоздайте StringSession своего аккаунта в доверенной локальной копии Telethon '
+                        'с API ID и API hash, настроенными в Nodera. Отправьте только строку StringSession отдельным сообщением. '
+                        'Бот сначала удалит сообщение, затем проверит и сохранит сессию.\n\n'
+                        'Пароли и коды входа сюда отправлять не нужно. Ожидание: 10 минут.',
+                        [[{'text': 'Как создать StringSession', 'url': 'https://docs.telethon.dev/en/stable/concepts/sessions.html#string-sessions'}],
+                         [button('Отмена', '/telegram cancel')]])
     elif action == 'input':
         if dialog.get('expires', 0) <= time.time():
             return result('Telegram API\nВремя подключения истекло. Начните заново.', [[button('Подключить', '/telegram session')]])
+        if not ready:
+            return setup_guide(settings, selected)
         try: session = control.Account(telegram_id=int(actor), name='', session=argument).session
         except (ValueError, ValidationError):
             return result('Telegram API · подключение\nНужна строка Telethon StringSession. Проверьте формат или отмените подключение.', [[button('Отмена', '/telegram cancel')]])
@@ -105,15 +136,14 @@ def view(api, actor, prompt, request_id):
         output = result(f'Telegram API · права ИИ\nСтраница {page}/{pages} · включено {len(effective)}/{len(items)}\n\nНажмите инструмент, чтобы включить или отключить его. Доступ ограничен разрешениями администратора; действия требуют подтверждения.', rows)
     elif action in ('', 'cancel'):
         dialog = {}
-        ready = bool(settings.get('telegram_api_id') and settings.get('telegram_api_hash') and settings.get('mcp', {}).get('telegram-mcp'))
         output = result('Telegram API\nПодключение: ' + ('сессия сохранена' if selected.get('session') else 'не подключено') +
                         '\nMCP Telegram: ' + ('настроен' if ready else 'требует настройки владельцем') +
                         f'\nИнструментов ИИ включено: {len(telegram.enabled(selected))}\n\nНастройки относятся только к вашему аккаунту.',
-                        [[button('Заменить подключение' if selected.get('session') else 'Подключить', '/telegram session')],
+                        [[button(('Заменить подключение' if selected.get('session') else 'Подключить') if ready else 'Как настроить', '/telegram session')],
                          [button('Права ИИ', '/telegram tools')]] + ([[button('Отключить', '/telegram disconnect')]] if selected.get('session') else []))
     else: raise HTTPException(422, 'Выберите действие в разделе Telegram API')
 
-    if action not in ('', 'cancel', 'session') and not any(item['command'] == '/telegram' for row in output['buttons'] for item in row):
+    if action not in ('', 'cancel', 'session') and not any(item.get('command') == '/telegram' for row in output['buttons'] for item in row):
         output['buttons'].append([button('← Telegram API', '/telegram')])
 
     with control.operations.locked(api.DATA_DIR):
@@ -131,7 +161,9 @@ def view(api, actor, prompt, request_id):
             current['revision'] = uuid.uuid4().hex
             control.store(api, current)
         for row in output['buttons']:
-            for item in row: item['command'] = item['command'].replace('REVISION', current['revision'])
+            for item in row:
+                if 'command' in item:
+                    item['command'] = item['command'].replace('REVISION', current['revision'])
         state['telegram_dialog'] = dialog
         state.pop('admin_dialog', None)
         if request_id:

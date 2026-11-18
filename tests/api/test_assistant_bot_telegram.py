@@ -68,6 +68,27 @@ class BotTelegramSettingsTests(unittest.TestCase):
         self.assertEqual(self.submit(command).status_code,409)
         self.assertEqual(self.submit('/telegram','d'*32).status_code,409)
 
+    def test_missing_api_credentials_open_setup_guide_and_can_be_rechecked(self):
+        settings = control.read(api)
+        settings['accounts'][0].update(role='owner', permission_overrides={})
+        settings['telegram_api_id'] = None
+        settings.pop('telegram_api_hash', None)
+        control.store(api, settings)
+
+        command = bot.direct_prompt('Помоги настроить Telegram API')
+        self.assertEqual(command, '/telegram session')
+        guide = self.submit(command).json()
+        self.assertIn('API ID, API hash', guide['text'])
+        self.assertEqual(guide['buttons'][0][0]['url'], 'https://my.telegram.org/apps')
+        self.assertFalse(contacts.profile(api, control.read(api), '11').get('telegram_dialog'))
+
+        settings = control.read(api)
+        settings.update(telegram_api_id=1234, telegram_api_hash='a'*32)
+        control.store(api, settings)
+        ready = self.submit(guide['buttons'][1][0]['command']).json()
+        self.assertIn('StringSession', ready['text'])
+        self.assertTrue(contacts.profile(api, control.read(api), '11').get('telegram_dialog'))
+
     def test_verified_session_is_private_actor_scoped_and_lost_reply_reconciles(self):
         self.assertEqual(self.submit('/telegram session').status_code,200)
         secret='1'+'b'*110
@@ -142,7 +163,16 @@ class BotTelegramSettingsTests(unittest.TestCase):
         self.assertTrue(sent)
 
     def test_lost_session_reply_is_reconciled_after_dialog_has_finished(self):
+        self.check_session_delivery(True)
+
+    def test_session_is_not_validated_when_telegram_refuses_deletion(self):
+        self.check_session_delivery(False)
+
+    def check_session_delivery(self, allow_delete):
         actual=httpx.AsyncClient; sent=[]; deleted=[]; requests=[]; secret='1'+'b'*110
+        settings = control.read(api)
+        profile = contacts.profile(api, settings, '11')
+        contacts.save_profile(api, settings, '11', {**profile, 'onboarding': 'name'})
         async def run():
             polls=0
             async def telegram_api(settings,method,**payload):
@@ -156,11 +186,15 @@ class BotTelegramSettingsTests(unittest.TestCase):
                     if polls>2: raise asyncio.CancelledError()
                     return [{'update_id':polls,'message':{'message_id':polls,'from':{'id':11},'chat':{'id':11,'type':'private'},'text':('/telegram session',secret)[polls-1]}}]
                 if method=='sendMessage': sent.append(payload); return {'message_id':100+len(sent)}
-                if method=='deleteMessage': deleted.append(payload['message_id'])
+                if method=='deleteMessage':
+                    if payload['message_id'] == 2 and not allow_delete:
+                        raise RuntimeError('Telegram refused to delete the message')
+                    deleted.append(payload['message_id'])
                 return True
             def transport(request):
                 response=self.client.post(request.url.path,headers=dict(request.headers),json=json.loads(request.content))
                 if request.url.path.endswith('/bot-telegram'):
+                    self.assertIn(2, deleted)
                     requests.append(json.loads(request.content)['request_id'])
                     if len(requests)==1: raise httpx.ReadTimeout('lost reply',request=request)
                 return httpx.Response(response.status_code,json=response.json())
@@ -172,6 +206,11 @@ class BotTelegramSettingsTests(unittest.TestCase):
                 with self.assertRaises(asyncio.CancelledError): await asyncio.wait_for(bot.bot(control.read(api)),20)
         with patch.object(control,'runtime_request',return_value={'result':{'authorized':True,'telegram_id':11}}) as runtime:
             asyncio.run(run())
+            if not allow_delete:
+                runtime.assert_not_called()
+                self.assertFalse(requests)
+                self.assertIn('Не удалось удалить сообщение', sent[-1]['text'])
+                return
             runtime.assert_called_once()
         self.assertEqual(len(requests),2)
         self.assertEqual(requests[0],requests[1])

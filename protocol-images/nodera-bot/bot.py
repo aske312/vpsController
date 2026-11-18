@@ -191,6 +191,8 @@ DIRECT_PHRASES = {
     '/traffic': ('мой трафик', 'трафик', 'трафик подписки', 'сколько трафика использовано', 'расход трафика'),
     '/connect': ('как подключиться', 'как подключить vpn', 'как подключить mihomo', 'как импортировать подписку', 'как обновить подписку'),
     '/apps': ('приложения', 'приложения для подключения', 'скачать клиент', 'скачать приложение'),
+    '/telegram session': ('как настроить telegram api', 'настроить telegram api', 'как подключить telegram api', 'подключить telegram api', 'помоги настроить telegram api'),
+    '/telegram': ('telegram api', 'телеграм api'),
     '/models': ('модели', 'модели ai', 'список моделей', 'доступные модели', 'какие модели доступны'),
     '/model': ('текущая модель', 'какая модель выбрана', 'какая сейчас модель'),
     '/model default': ('ai по умолчанию', 'модель по умолчанию'),
@@ -578,6 +580,9 @@ async def scoped_reply(settings, sender, prompt, access):
     if detail.get('telegram_dialog') and command in ('/menu','/_refresh_menu','/start','/help','/admin','/myprofile','/setup'):
         await server_command(settings,sender['id'],'/telegram cancel'); command_view.set(None)
     if detail.get('telegram_dialog') and not command.startswith('/'):
+        if not re.fullmatch(r'1[A-Za-z0-9_=-]{100,4095}', prompt):
+            command_view.set({'buttons': [[{'text': 'Отмена', 'command': '/telegram cancel'}]]})
+            return 'Telegram API\nОтправьте только строку Telethon StringSession отдельным сообщением.'
         async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
             try:
                 response = await client.post('http://127.0.0.1:8000/api/assistant/bot-telegram',
@@ -876,7 +881,6 @@ async def bot(settings):
         try: access = await identify(settings, sender)
         except ContactBlocked: return
         except Exception: raise DeliveryPending() from None
-        if context: await remember_incoming(settings, context)
         if not prompt and not messages: return
         admin = access is True
         scope = access_signature(access)
@@ -892,7 +896,11 @@ async def bot(settings):
         if (cached_row.get('telegram_input') and access_details.get() is not None and
                 'telegram_read' in access_details.get().get('permissions', [])):
             access_details.set({**access_details.get(), 'telegram_dialog':True})
-        if (access_details.get() or {}).get('telegram_dialog') and not prompt.startswith('/') and not messages and not alert:
+        telegram_input = (access_details.get() or {}).get('telegram_dialog') and not prompt.startswith('/') and not messages and not alert
+        session_message = not messages and not alert and re.fullmatch(r'1[A-Za-z0-9_=-]{100,4095}', prompt)
+        if context and not telegram_input and not session_message:
+            await remember_incoming(settings, context)
+        if telegram_input:
             if cached: inbox.amend(cached, telegram_input=True)
         command = prompt.split()[0].split('@')[0].lower() if prompt else ''
         deterministic = cached_row.get('bot_interaction', not messages and not alert and command != '/ai' and (
@@ -909,11 +917,29 @@ async def bot(settings):
                 cleanup.append(context.get('message_id'))
             cleanup = list(dict.fromkeys(identity for identity in cleanup if type(identity) is int and identity>0))
             if cached: inbox.amend(cached, cleanup=cleanup)
+        session_removed = cached_row.get('session_message_removed', False)
+        if session_message and not session_removed and 'answer' not in cached_row:
+            if context and context.get('chat', {}).get('id') == actor and context.get('from', {}).get('id') == actor:
+                try:
+                    await bot_api(settings, 'deleteMessage', chat_id=actor, message_id=context['message_id'])
+                except Exception:
+                    pass
+                else:
+                    session_removed = True
+                    if cached: inbox.amend(cached, session_message_removed=True)
         if 'answer' in cached_row:
             same_scope = cached_row.get('answer_scope',scope if access_details.get() is None else None)==scope
             answer = cached_row['answer'] if cached_row.get('answer_access') == access and same_scope else 'Доступ изменился. Откройте /menu для доступных действий.'
             command_view.set(cached_row.get('view') if same_scope else None)
-        elif not messages and not alert and not (access_details.get() or {}).get('admin_dialog') and not (access_details.get() or {}).get('telegram_dialog') and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
+        elif session_message and not session_removed:
+            answer = ('Telegram API\nНе удалось удалить сообщение со строкой сессии. Эта строка не была обработана. '
+                      'Удалите сообщение вручную и завершите соответствующий сеанс в Telegram → Настройки → Устройства. '
+                      'Затем создайте новую StringSession и начните подключение заново.')
+            command_view.set({'buttons': [[{'text': 'Начать заново', 'command': '/telegram session'}]]})
+        elif session_message and not telegram_input:
+            answer = 'Telegram API\nСообщение удалено. Сначала откройте настройку подключения, затем отправьте строку заново.'
+            command_view.set({'buttons': [[{'text': 'Настроить подключение', 'command': '/telegram session'}]]})
+        elif command != '/telegram' and not messages and not alert and not (access_details.get() or {}).get('admin_dialog') and not (access_details.get() or {}).get('telegram_dialog') and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
                 profile_state.get() in ('name', 'birthdate') or prompt.split(maxsplit=1)[0].split('@')[0].lower() in ('/start', '/myprofile', '/setup', '/skip', '/skipall'))):
             # Remember routing before sending: a lost final-profile reply must
             # reconcile the same receipt even when the questionnaire is now done.
@@ -969,6 +995,7 @@ async def bot(settings):
         remember_ui(actor,sent_ids if deterministic else None)
         for identity in cleanup:
             if identity in sent_ids: continue
+            if session_message and context and identity == context.get('message_id'): continue
             try: await bot_api(settings,'deleteMessage',chat_id=actor,message_id=identity)
             except Exception:
                 try: await bot_api(settings,'editMessageReplyMarkup',chat_id=actor,message_id=identity,reply_markup={'inline_keyboard':[]})
