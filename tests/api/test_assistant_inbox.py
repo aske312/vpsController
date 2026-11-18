@@ -50,6 +50,33 @@ class DurableInboxTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(list(inbox.root.glob('*.json')))
             await dispatcher.close()
 
+    async def test_reply_with_unknown_delivery_is_not_resent_after_restart(self):
+        import httpx
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            inbox = bot.DurableInbox(path)
+            for index in (1, 2):
+                inbox.put(f'message-{index}', {'order': index, 'sender': {'id': 11}})
+            with patch.object(bot, 'bot_api', side_effect=httpx.ReadTimeout('response lost')):
+                with self.assertRaises(httpx.ReadTimeout):
+                    await bot.send_reply_part(inbox, 'message-1', {}, 'sendMessage')
+            self.assertTrue(inbox.read('message-1')['delivery_in_flight'])
+
+            restarted = bot.DurableInbox(path)
+            restarted.acknowledge(3)
+            dispatcher = bot.MessageDispatcher()
+            seen = []
+
+            async def deliver(row, key):
+                seen.append(row['order'])
+
+            for _ in range(2):
+                restarted.pump(dispatcher, deliver)
+                await asyncio.gather(*list(dispatcher.tasks))
+            self.assertEqual(seen, [2])
+            self.assertFalse(list(restarted.root.glob('*.json')))
+            await dispatcher.close()
+
     async def test_transient_permission_lookup_keeps_the_message_queued(self):
         import httpx
         actual = httpx.AsyncClient
@@ -110,7 +137,7 @@ class DurableInboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('/apps windows',actions.values())
         self.assertEqual(sum(map(len,apps['inline_keyboard'])),5)
 
-    async def test_bot_polls_the_same_durable_request_and_reports_waiting_once(self):
+    async def test_bot_polls_the_same_durable_request_and_reports_waiting_once_after_a_lost_ack(self):
         import httpx
         actual = httpx.AsyncClient
         calls, notices = [], []
@@ -121,9 +148,11 @@ class DurableInboxTests(unittest.IsolatedAsyncioTestCase):
             calls.append(request)
             if request.method == 'POST': return httpx.Response(202, json={'id':identity,'state':'queued'})
             reads += 1
-            if reads == 1: return httpx.Response(200, json={'id':identity,'state':'queued'})
+            if reads <= 2: return httpx.Response(200, json={'id':identity,'state':'queued'})
             return httpx.Response(200, json={'id':identity,'state':'done','output':{'result':{'answer':'ready'}}})
-        async def notice(*args, **kwargs): notices.append(kwargs)
+        async def notice(*args, **kwargs):
+            notices.append(kwargs)
+            raise httpx.ReadTimeout('Telegram received the notice but the acknowledgement was lost')
         clock=iter([1,4])
         with patch.object(bot.httpx, 'AsyncClient', side_effect=lambda **kwargs: actual(transport=httpx.MockTransport(transport), **kwargs)), \
              patch.object(bot,'bot_api',side_effect=notice), patch.object(bot,'time',SimpleNamespace(monotonic=lambda:next(clock))):

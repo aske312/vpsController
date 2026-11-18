@@ -48,7 +48,8 @@ async def main():
     with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY': folder}), patch.object(bot, 'bot_api', transport), patch.object(bot, 'identify', identify), patch.object(bot, 'server_command', new=AsyncMock(return_value='NoderaBot server status')) as server, patch.object(bot, 'agent_request', new=AsyncMock(side_effect=AssertionError('Unexpected AI request'))):
         try: await bot.bot(settings)
         except asyncio.CancelledError: pass
-        assert json.loads((Path(folder) / 'offset.json').read_text())['offset'] == 6
+        state = bot.bot_state_directory(Path(folder), settings['bot_token'])
+        assert json.loads((state / 'offset.json').read_text())['offset'] == 6
         server.assert_awaited_once_with(settings, 11, '/status')
     assert len(sent) == 2
     assert 24 in seen

@@ -362,11 +362,13 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
                 if job.get('state') in ('failed', 'unknown'):
                     return job.get('error', {}).get('message') or 'Результат запроса не подтверждён. Проверьте состояние перед повтором.'
                 if job.get('state') == 'queued' and not notified and time.monotonic() - waiting_since >= 2:
-                    try:
-                        sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди', QUEUE_NOTICE, '⏳')), parse_mode='HTML')
-                        if transient_sink.get(): transient_sink.get()(actor, sent)
-                        notified = True
-                    except Exception: pass
+                    notified = True
+                    claim = queue_notice_claim.get()
+                    if claim is None or claim():
+                        try:
+                            sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди', QUEUE_NOTICE, '⏳')), parse_mode='HTML')
+                            if transient_sink.get(): transient_sink.get()(actor, sent)
+                        except Exception: pass
                 await asyncio.sleep(1)
         if response.status_code != 200:
             if alert and response.status_code in (403, 404, 429):
@@ -410,6 +412,7 @@ command_view = ContextVar('nodera_command_view', default=None)
 
 QUEUE_NOTICE = 'Сообщение принято в очередь. Сначала отвечу на ваши предыдущие вопросы.'
 transient_sink = ContextVar('transient_sink', default=None)
+queue_notice_claim = ContextVar('queue_notice_claim', default=None)
 BUSY_NOTICE = 'Слишком много сообщений. Дождитесь ответа на предыдущий вопрос; это сообщение не принято в очередь.'
 
 
@@ -494,7 +497,11 @@ class DurableInbox:
             async def run(key=key):
                 try:
                     try:
-                        await deliver(self.read(key), key)
+                        row = self.read(key)
+                        if row.get('delivery_in_flight'):
+                            logging.warning('NoderaBot delivery outcome unknown; reply not resent')
+                        else:
+                            await deliver(row, key)
                     except TelegramAPIError as error:
                         if error.method not in ('sendMessage', 'sendDocument') or error.status not in (400, 403):
                             raise
@@ -511,6 +518,21 @@ class DurableInbox:
                     logging.error('NoderaBot accepted message remains queued for delivery')
                 finally: self.inflight.discard(key)
             if dispatcher.submit(stream, run): self.inflight.add(key)
+
+
+async def send_reply_part(inbox, key, settings, method, **payload):
+    # Record the attempt before calling Telegram. A disconnect or process exit
+    # after transmission leaves an ambiguous outcome that cannot be reconciled.
+    if key: inbox.amend(key, delivery_in_flight=True)
+    try:
+        return await bot_api(settings, method, **payload)
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+        if key: inbox.amend(key, delivery_in_flight=False)
+        raise
+    except TelegramAPIError as error:
+        if key and 400 <= error.status < 500:
+            inbox.amend(key, delivery_in_flight=False)
+        raise
 
 
 _profile_cache = {}
@@ -911,7 +933,7 @@ async def bot(settings):
     dispatcher = MessageDispatcher()
     inbox = DurableInbox(state_root)
     inbox.acknowledge(offset)
-    notices = {}
+    notices = set()
     ui_file = state_root / 'dialog-messages.json'
     ui_messages = json.loads(ui_file.read_text(encoding='utf-8')) if ui_file.exists() else {}
     def remember_ui(actor, identity):
@@ -1029,14 +1051,15 @@ async def bot(settings):
         document = (command_view.get() or {}).get('document')
         sent_id = cached_row.get('sent_message_id')
         sent_ids = list(cached_row.get('sent_message_ids', [sent_id] if sent_id else []))
-        for index,chunk in enumerate(telegram_chunks(answer)):
+        chunks = telegram_chunks(answer)
+        for index,chunk in enumerate(chunks):
             if index < cached_row.get('sent', 0): continue
             if document and index==0:
-                sent = await bot_api(settings,'sendDocument',chat_id=actor,document=document,caption=chunk[:1000],parse_mode='HTML',reply_markup=markup or reply_keyboard(access))
+                sent = await send_reply_part(inbox,cached,settings,'sendDocument',chat_id=actor,document=document,caption=chunk[:1000],parse_mode='HTML',reply_markup=markup or reply_keyboard(access))
             else:
                 keyboard = markup if index == 0 and markup else reply_keyboard(access)
                 try:
-                    sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=keyboard)
+                    sent = await send_reply_part(inbox, cached, settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=keyboard)
                 except TelegramAPIError as error:
                     if error.status != 400 or index != 0:
                         raise
@@ -1045,14 +1068,14 @@ async def bot(settings):
                     text = ('Telegram отклонил кнопку открытия формы. Откройте настройки Telegram MCP в панели Nodera.'
                             if web_app else 'Telegram отклонил оформление ответа. Если команда меняла настройки, проверьте её результат в панели.')
                     # A confirmed HTTP 400 means the original message was not accepted.
-                    sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=text)
+                    sent = await send_reply_part(inbox, cached, settings, 'sendMessage', chat_id=actor, text=text)
                     if isinstance(sent, dict) and type(sent.get('message_id')) is int:
                         sent_ids.append(sent['message_id'])
-                    if cached: inbox.amend(cached, sent=len(telegram_chunks(answer)), sent_message_ids=sent_ids)
+                    if cached: inbox.amend(cached, sent=len(chunks), sent_message_ids=sent_ids, delivery_in_flight=False)
                     break
             if isinstance(sent,dict) and type(sent.get('message_id')) is int:
                 sent_id=sent['message_id']; sent_ids.append(sent_id)
-            if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id, sent_message_ids=sent_ids)
+            if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id, sent_message_ids=sent_ids, delivery_in_flight=False)
         previous = ui_messages.get(str(actor), [])
         cleanup = list(dict.fromkeys(cleanup + (previous if isinstance(previous,list) else [previous])))
         if cached: inbox.amend(cached,cleanup=cleanup)
@@ -1072,10 +1095,17 @@ async def bot(settings):
                 try: await bot_api(settings,'editMessageReplyMarkup',chat_id=actor,message_id=identity,reply_markup={'inline_keyboard':[]})
                 except Exception: pass
     async def deliver_saved(row, key):
+        def claim_notice():
+            if inbox.read(key).get('queue_notice_attempted'):
+                return False
+            inbox.amend(key, queue_notice_attempted=True)
+            return True
+
         identity = incoming_request.set(row['request_id'])
         cached = delivery_record.set(key)
         detail_token=access_details.set(None); view_token=command_view.set(None)
         sink_token=transient_sink.set(remember_notice)
+        notice_token=queue_notice_claim.set(claim_notice)
         try:
             if row.get('edited'):
                 await remember_incoming(settings, row['context']); return
@@ -1088,6 +1118,7 @@ async def bot(settings):
             await deliver(row['sender'], prompt, messages, row.get('alert'), context=row.get('context'))
         finally:
             incoming_request.reset(identity); delivery_record.reset(cached); access_details.reset(detail_token); command_view.reset(view_token); transient_sink.reset(sink_token)
+            queue_notice_claim.reset(notice_token)
     async def flush_inbox():
         while True:
             try: inbox.pump(dispatcher, deliver_saved)
@@ -1163,9 +1194,13 @@ async def bot(settings):
                         album=str(message['media_group_id']) if album_key else None,
                         replace_message_id=message.get('message_id') if callback and not alert and str(message.get('from',{}).get('id'))==settings['bot_token'].split(':')[0] else None)
                     if album_key and accepted: media_groups[album_key] = (messages, inbox_key)
-                    if fresh and (not accepted or inbox.waiting(actor, is_command) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
-                        notices[actor] = time.monotonic()
-                        if len(notices) > 1000: notices = {actor: time.monotonic()}
+                    queue_busy = not accepted or inbox.waiting(actor, is_command) > 1
+                    stream = (actor, is_command)
+                    if fresh and not queue_busy:
+                        notices.discard(stream)
+                    if fresh and queue_busy and stream not in notices:
+                        if len(notices) >= 1000: notices.pop()
+                        notices.add(stream)
                         try:
                             await identify(settings, sender)
                             sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
