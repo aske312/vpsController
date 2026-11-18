@@ -20,13 +20,13 @@
     }
     header {
         X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }
+    @panelFrameDenied not path /telegram-mcp-setup
+    header @panelFrameDenied X-Frame-Options "DENY"
     handle /telegram-mcp-setup {
-        header -X-Frame-Options
         reverse_proxy 127.0.0.1:8000
     }
     handle /api/mihomo/* {

@@ -12,6 +12,44 @@ bot = load_module('durable_inbox_bot', 'protocol-images/nodera-bot/bot.py')
 
 
 class DurableInboxTests(unittest.IsolatedAsyncioTestCase):
+    def test_switching_bot_uses_its_own_offset_and_verified_legacy_messages(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            legacy = bot.DurableInbox(base)
+            (base / 'offset.json').write_text('{"offset": 1000}')
+            for identity, token in enumerate(('123:old', '456:new'), 1):
+                key = f'message-{identity}'
+                legacy.put(key, {'order': identity, 'sender': {'id': 11}, 'request_id': bot.bot_request_id(token, 11, key)})
+            new = bot.bot_state_directory(base, '456:new')
+            self.assertFalse((new / 'offset.json').exists())
+            self.assertEqual([path.stem for path in (new / 'inbox').glob('*.json')], ['message-2'])
+            self.assertEqual([path.stem for path in legacy.root.glob('*.json')], ['message-1'])
+            self.assertEqual(bot.bot_state_directory(base, '456:rotated'), new)
+            old = bot.bot_state_directory(base, '123:old')
+            self.assertNotEqual(old, new)
+            self.assertEqual([path.stem for path in (old / 'inbox').glob('*.json')], ['message-1'])
+
+    async def test_permanent_telegram_rejection_does_not_block_next_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inbox = bot.DurableInbox(Path(directory))
+            for index in (1, 2):
+                inbox.put(f'message-{index}', {'order': index, 'sender': {'id': 11}})
+            inbox.acknowledge(3)
+            dispatcher = bot.MessageDispatcher()
+            seen = []
+
+            async def deliver(row, key):
+                seen.append(row['order'])
+                if row['order'] == 1:
+                    raise bot.TelegramAPIError('sendMessage', 403)
+
+            for _ in range(2):
+                inbox.pump(dispatcher, deliver)
+                await asyncio.gather(*list(dispatcher.tasks))
+            self.assertEqual(seen, [1, 2])
+            self.assertFalse(list(inbox.root.glob('*.json')))
+            await dispatcher.close()
+
     async def test_transient_permission_lookup_keeps_the_message_queued(self):
         import httpx
         actual = httpx.AsyncClient

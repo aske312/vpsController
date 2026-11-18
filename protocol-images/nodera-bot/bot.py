@@ -89,6 +89,13 @@ class DeliveryPending(RuntimeError):
     """Keep accepted work on disk until API admission/delivery can be reconciled."""
 
 
+class TelegramAPIError(RuntimeError):
+    def __init__(self, method, status):
+        self.method = method
+        self.status = status
+        super().__init__(f'Telegram {method}: HTTP {status}')
+
+
 class ContactBlocked(PermissionError):
     pass
 
@@ -320,7 +327,7 @@ async def bot_api(settings, method, **payload):
         else:
             response = await client.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload)
         if response.status_code != 200 or not response.json().get('ok'):
-            raise RuntimeError('Telegram Bot API вернул HTTP ' + str(response.status_code))
+            raise TelegramAPIError(method, response.status_code)
         result = response.json()['result']
     if method in ('sendMessage','sendDocument'): await remember_message(settings, result, 'assistant')
     return result
@@ -486,11 +493,19 @@ class DurableInbox:
             if key in self.inflight or row.get('not_before', 0) > time.time() or self.retry_at.get(key, 0) > time.monotonic(): continue
             async def run(key=key):
                 try:
-                    await deliver(self.read(key), key)
+                    try:
+                        await deliver(self.read(key), key)
+                    except TelegramAPIError as error:
+                        if error.method not in ('sendMessage', 'sendDocument') or error.status not in (400, 403):
+                            raise
+                        logging.warning('NoderaBot delivery rejected: %s', error)
                     self.amend(key, delivered=True)
                     if self.read(key)['order'] < self.offset: (self.root / (key + '.json')).unlink(missing_ok=True)
                     self.retry_at.pop(key, None)
                 except asyncio.CancelledError: raise
+                except TelegramAPIError as error:
+                    self.retry_at[key] = time.monotonic() + 3
+                    logging.error('NoderaBot accepted message remains queued for delivery: %s', error)
                 except Exception:
                     self.retry_at[key] = time.monotonic() + 3
                     logging.error('NoderaBot accepted message remains queued for delivery')
@@ -852,6 +867,33 @@ def bot_message(text):
     return '**' + heading + '**' + ('\n\n' + body if body else '')
 
 
+def bot_request_id(token, actor, key):
+    return hashlib.sha256(f'{token}:{actor}:{key}'.encode()).hexdigest()[:32]
+
+
+def bot_state_directory(base, token):
+    bot_id = token.split(':', 1)[0]
+    identity = hashlib.sha256(bot_id.encode()).hexdigest()[:24]
+    directory = base / 'bots' / identity
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    imported = directory / '.legacy-inbox-imported'
+    if imported.exists():
+        return directory
+    # The previous offset and menu message IDs have no owner marker. Recover
+    # only inbox entries whose request IDs identify the current token.
+    inbox = DurableInbox(directory)
+    for path in (base / 'inbox').glob('*.json'):
+        try:
+            row = json.loads(path.read_text(encoding='utf-8'))
+            actor = row['sender']['id']
+            if row['request_id'] == bot_request_id(token, actor, path.stem) and inbox.put(path.stem, row):
+                path.unlink()
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    imported.touch(mode=0o600)
+    return directory
+
+
 async def bot(settings):
     if not settings['modules']['nodera-bot'] or not settings.get('bot_token'):
         raise ValueError('Нужен токен включённого NoderaBot')
@@ -859,7 +901,8 @@ async def bot(settings):
         raise ValueError('У бота установлен webhook; long polling не запущен')
     try: await command_menu(settings)
     except Exception: logging.error('NoderaBot command menu could not be updated')
-    state_root = Path(os.environ.get('STATE_DIRECTORY', tempfile.gettempdir()))
+    base_state = Path(os.environ.get('STATE_DIRECTORY', tempfile.gettempdir()))
+    state_root = bot_state_directory(base_state, settings['bot_token'])
     state_file = state_root / 'offset.json'
     offset = json.loads(state_file.read_text()).get('offset', 0) if state_file.exists() else 0
     menus = {}
@@ -991,7 +1034,22 @@ async def bot(settings):
             if document and index==0:
                 sent = await bot_api(settings,'sendDocument',chat_id=actor,document=document,caption=chunk[:1000],parse_mode='HTML',reply_markup=markup or reply_keyboard(access))
             else:
-                sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=markup if index==0 and markup else reply_keyboard(access))
+                keyboard = markup if index == 0 and markup else reply_keyboard(access)
+                try:
+                    sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=keyboard)
+                except TelegramAPIError as error:
+                    if error.status != 400 or index != 0:
+                        raise
+                    logging.warning('NoderaBot formatted reply rejected: %s', error)
+                    web_app = any('web_app' in item for row in (markup or {}).get('inline_keyboard', []) for item in row)
+                    text = ('Telegram отклонил кнопку открытия формы. Откройте настройки Telegram MCP в панели Nodera.'
+                            if web_app else 'Telegram отклонил оформление ответа. Если команда меняла настройки, проверьте её результат в панели.')
+                    # A confirmed HTTP 400 means the original message was not accepted.
+                    sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=text)
+                    if isinstance(sent, dict) and type(sent.get('message_id')) is int:
+                        sent_ids.append(sent['message_id'])
+                    if cached: inbox.amend(cached, sent=len(telegram_chunks(answer)), sent_message_ids=sent_ids)
+                    break
             if isinstance(sent,dict) and type(sent.get('message_id')) is int:
                 sent_id=sent['message_id']; sent_ids.append(sent_id)
             if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id, sent_message_ids=sent_ids)
@@ -1041,11 +1099,12 @@ async def bot(settings):
         key = 'album-' + hashlib.sha256(f'{actor}:{album}'.encode()).hexdigest()[:32] if album else 'message-' + str(update['update_id'])
         record = {'order':update['update_id'], 'sender':sender, 'prompt':prompt, 'messages':messages,
                   'context':context, 'alert':alert, 'command':command, 'edited':edited, 'replace_message_id':replace_message_id,
-                  'request_id':hashlib.sha256((settings.get('bot_token','') + ':' + str(actor) + ':' + key).encode()).hexdigest()[:32]}
+                  'request_id':bot_request_id(settings['bot_token'], actor, key)}
         if album: record.update(album=album, not_before=time.time() + 1)
+        fresh = not (inbox.root / (key + '.json')).exists()
         accepted = inbox.put(key, record)
         if accepted: inbox.pump(dispatcher, deliver_saved)
-        return accepted, key
+        return accepted, key, fresh
     try:
         while True:
             try:
@@ -1062,10 +1121,19 @@ async def bot(settings):
                     messages = None
                     alert = None
                     if callback:
-                        await bot_api(settings, 'answerCallbackQuery', callback_query_id=callback['id'])
+                        expired = False
+                        try:
+                            await bot_api(settings, 'answerCallbackQuery', callback_query_id=callback['id'])
+                        except TelegramAPIError as error:
+                            expired = error.status in (400, 403)
+                            logging.warning('NoderaBot callback acknowledgement rejected: %s', error)
+                        except httpx.TransportError:
+                            logging.warning('NoderaBot callback acknowledgement connection failed')
                         key = callback.get('data', '')
                         match = re.fullmatch(r'alert:([0-9a-f]{32}):(brief|deep)', key)
-                        if match and message.get('chat', {}).get('id') == actor:
+                        if expired:
+                            prompt = '/_refresh_menu'
+                        elif match and message.get('chat', {}).get('id') == actor:
                             alert = {'token': match[1], 'mode': match[2]}
                             prompt = 'Разбор алерта с ИИ'
                         else:
@@ -1090,23 +1158,30 @@ async def bot(settings):
                     # Explicit commands remain responsive while this user's AI
                     # dialog waits; commands themselves keep their own ordering.
                     stream = (actor, 'command') if is_command else actor
-                    accepted, inbox_key = accept(update, sender, prompt, messages, alert,
+                    accepted, inbox_key, fresh = accept(update, sender, prompt, messages, alert,
                         context=None if callback or album_key else message, command=is_command,
                         album=str(message['media_group_id']) if album_key else None,
                         replace_message_id=message.get('message_id') if callback and not alert and str(message.get('from',{}).get('id'))==settings['bot_token'].split(':')[0] else None)
                     if album_key and accepted: media_groups[album_key] = (messages, inbox_key)
-                    if (not accepted or inbox.waiting(actor, is_command) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
+                    if fresh and (not accepted or inbox.waiting(actor, is_command) > 1) and time.monotonic() - notices.get(actor, 0) >= 10:
                         notices[actor] = time.monotonic()
                         if len(notices) > 1000: notices = {actor: time.monotonic()}
-                        try: await identify(settings, sender)
-                        except ContactBlocked: continue
-                        sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
-                        remember_notice(actor,sent)
+                        try:
+                            await identify(settings, sender)
+                            sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
+                            remember_notice(actor,sent)
+                        except ContactBlocked:
+                            continue
+                        except (TelegramAPIError, httpx.TransportError, DeliveryPending):
+                            logging.warning('NoderaBot queue notice could not be delivered')
                 if updates:
                     offset = max(offset, max(update['update_id'] for update in updates) + 1)
                     temporary = state_file.with_suffix('.tmp')
                     temporary.write_text(json.dumps({'offset': offset})); temporary.chmod(0o600); temporary.replace(state_file)
                     inbox.acknowledge(offset)
+            except TelegramAPIError as error:
+                logging.error('NoderaBot polling or delivery failed: %s', error)
+                await asyncio.sleep(5)
             except Exception:
                 logging.error('NoderaBot polling or delivery failed')
                 await asyncio.sleep(5)

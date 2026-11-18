@@ -164,6 +164,8 @@ class ServerCommandTests(unittest.TestCase):
             async def transport(settings, method, **payload):
                 nonlocal polls
                 if method == 'getWebhookInfo': return {'url': ''}
+                if method == 'answerCallbackQuery' and payload['callback_query_id'] == '3':
+                    raise bot.TelegramAPIError(method, 400)
                 if method in ('setMyCommands', 'answerCallbackQuery'): return True
                 if method == 'sendMessage':
                     sent.append(payload)
@@ -195,7 +197,8 @@ class ServerCommandTests(unittest.TestCase):
                 except asyncio.CancelledError: pass
                 self.assertEqual([call.args[2] for call in server.await_args_list], ['/models', '/model selected-model'])
                 agent.assert_awaited_once_with(settings, 11, 'Обычный вопрос')
-                self.assertEqual(json.loads((Path(folder) / 'offset.json').read_text())['offset'], 5)
+                state = bot.bot_state_directory(Path(folder), settings['bot_token'])
+                self.assertEqual(json.loads((state / 'offset.json').read_text())['offset'], 5)
                 self.assertTrue(any(row.get('chat_id') == 22 and 'устарело' in row.get('text', '') for row in sent))
         asyncio.run(run())
 
