@@ -61,6 +61,29 @@ class ClientReportTests(unittest.TestCase):
                 self.assertEqual(self.send(**kwargs).status_code, expected)
         self.assertEqual(self.send(token=token).status_code, 200)
 
+    def test_reissued_links_keep_reporting_for_the_registered_device(self):
+        device = self.store[0]['devices'][-1]['id']
+        self.fetch('Nodera/0.0.4 (Windows; Mihomo)', 'another-pc',
+                   extra_headers=((b'x-client-name', b'Nodera'), (b'x-device-os', b'windows')))
+        payload = report()
+        self.assertEqual(self.send(payload).status_code, 200)
+        old_bound = manager.device_subscription_token('test-token', device)
+        manager.rotate_profile_subscription('profile', manager.profile_revision(self.store[0]), 'a' * 32)
+        new_token = self.store[0]['subscription_token']
+        new_bound = manager.device_subscription_token(new_token, device)
+        before = deepcopy(self.store)
+
+        for revoked in ('test-token', old_bound):
+            self.assertEqual(self.send(payload, token=revoked).status_code, 404)
+        self.assertEqual(self.send(payload, token=new_token, hwid='unregistered').status_code, 403)
+        self.assertEqual(self.send(payload, token=new_bound, hwid='another-pc').status_code, 403)
+        for token, prefix in ((new_token, '/s'), (new_bound, '/api/mihomo/subscriptions')):
+            with self.subTest(prefix=prefix):
+                result = self.send(payload, token=token, prefix=prefix)
+                self.assertEqual(result.status_code, 200, result.text)
+                self.assertTrue(result.json()['duplicate'])
+        self.assertEqual(self.store, before)
+
     def test_invalid_payload_and_raw_logs_are_rejected(self):
         cases = [dict(version=2), dict(counters={'upload': -1}), dict(counters={'download': True}),
                  dict(counters={'upload': 2**63}), dict(events=[{}] * 101),

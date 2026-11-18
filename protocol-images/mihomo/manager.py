@@ -5617,8 +5617,12 @@ def record_common_subscription_access(profile: dict[str, Any], metadata: dict[st
     return normalized
 
 
+def subscription_identity_secret(profile: dict[str, Any], subscription_token: str) -> str:
+    return str(profile.get("device_identity_secret") or subscription_token)
+
+
 def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, metadata: dict[str, str], *, read_only=False) -> tuple[dict[str, Any], str]:
-    identity_secret = str(profile.get("device_identity_secret") or token)
+    identity_secret = subscription_identity_secret(profile, token)
     hwid_hash = hmac.new(identity_secret.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
     normalized = normalize_profile(profile)
     existing = next((device for device in normalized["devices"] if hmac.compare_digest(str(device.get("hwid_hash") or ""), hwid_hash) and device_matches_client(device, metadata)), None)
@@ -5764,7 +5768,8 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                             request.state.evidence_reason = 'subscription_client_mismatch'
                             raise HTTPException(status_code=403, detail="Ссылка привязана к другому приложению. Добавьте общую ссылку профиля")
                         saved_hash = device.get("hwid_hash")
-                        hwid_hash = hmac.new(str(latest.get("device_identity_secret") or latest["subscription_token"]).encode(), raw_hwid.encode(), hashlib.sha256).hexdigest() if raw_hwid else None
+                        identity_secret = subscription_identity_secret(latest, latest["subscription_token"])
+                        hwid_hash = hmac.new(identity_secret.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest() if raw_hwid else None
                         if saved_hash and (not hwid_hash or not hmac.compare_digest(str(saved_hash), hwid_hash)):
                             raise HTTPException(status_code=403, detail="Ссылка привязана к другому HWID или клиент не передал HWID")
                         if hwid_hash and not saved_hash:
@@ -5929,21 +5934,22 @@ def registered_command_device(token: str, request: Request):
         raise HTTPException(403, "Требуется зарегистрированный HWID устройства")
     metadata = subscription_device_metadata(request)
     for stored in profiles():
-        secret = stored.get("subscription_token")
-        if not isinstance(secret, str) or not secret:
+        subscription_token = stored.get("subscription_token")
+        if not isinstance(subscription_token, str) or not subscription_token:
             continue
         profile = normalize_profile(deepcopy(stored))
-        common = hmac.compare_digest(secret, token)
+        common = hmac.compare_digest(subscription_token, token)
         bound = None if common else next((str(d["id"]) for d in profile["devices"]
-            if hmac.compare_digest(device_subscription_token(secret, str(d["id"])), token)), None)
+            if hmac.compare_digest(device_subscription_token(subscription_token, str(d["id"])), token)), None)
         if not common and bound is None:
             continue
         access = subscription_limits.status(profile, DATA_ROOT / "subscription-limits")
         if access["state"] in {"expired", "exhausted"}:
             raise HTTPException(403, "Подписка истекла или исчерпан лимит трафика")
-        digest = hmac.new(secret.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
+        identity_secret = subscription_identity_secret(profile, subscription_token)
+        hwid_hash = hmac.new(identity_secret.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
         device = next((d for d in profile["devices"] if d.get("hwid_hash")
-            and hmac.compare_digest(str(d["hwid_hash"]), digest)
+            and hmac.compare_digest(str(d["hwid_hash"]), hwid_hash)
             and (bound is None or str(d["id"]) == bound)
             and device_matches_client(d, metadata)), None)
         if device is None:
