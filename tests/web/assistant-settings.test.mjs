@@ -160,14 +160,64 @@ test('guest profile edits save an optional-year birthday without adding permissi
   view.render();await new Promise(setImmediate);
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
   view.render();await new Promise(setImmediate);
-  nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor')[0].node.props.onClick();
+  nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
   let tree=view.render();
   nodes(tree,n=>n.props['aria-label']==='Дата рождения')[0].node.props.onChange({target:{value:'29.02'}});
-  tree=view.render();nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Профиль Nodera')[0].node.props.submit();
+  tree=view.render();nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node.props.submit();
   await new Promise(setImmediate);tree=view.render();
   assert.deepEqual(view.writes,[{path:'/assistant/bot-users/77',method:'PATCH',display_name:'',birthdate:{day:29,month:2,year:null}}]);
-  assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Профиль Nodera').length,0);
+  assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь').length,0);
   assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить'&&!n.props.disabled).length,0);
+});
+
+test('one user dialog applies profile and access edits together and keeps them on a profile error',async()=>{
+  for (const fail of [false,true]) {
+    const guest={telegram_id:77,name:'Visitor',username:'visitor',seen_at:1000,birthdate:null};
+    const view=mount(fixture(),[],{contacts:[guest],contact:(_path,options)=>{if(fail)throw new Error('profile unavailable');return {...guest,...JSON.parse(options.body)};}});
+    view.render();await new Promise(setImmediate);
+    nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+    view.render();await new Promise(setImmediate);
+    let tree=view.render();
+    assert.equal(nodes(tree,n=>n.props['aria-label']==='Профиль бота Visitor').length,0);
+    assert.equal(nodes(tree,n=>n.props['aria-label']==='Настроить пользователя Visitor').length,1);
+    nodes(tree,n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
+    tree=view.render();
+    assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь').length,1);
+    nodes(tree,n=>n.props['aria-label']==='Дата рождения')[0].node.props.onChange({target:{value:'29.02'}});
+    nodes(view.render(),n=>n.type==='button'&&n.props.children?.props?.children==='Пользователь')[0].node.props.onClick();
+    nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node.props.submit();
+    await new Promise(setImmediate);tree=view.render();
+    assert.equal(view.writes.length,1);
+    if (fail) {
+      assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь').length,1);
+      assert.equal(nodes(tree,n=>n.props['aria-label']==='Дата рождения')[0].node.props.value,'29.02');
+      assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children?.props?.children==='Пользователь')[0].node.props['aria-pressed'],true);
+      assert.equal(nodes(tree,n=>n.props.role==='alert'&&n.props.children==='profile unavailable').length,1);
+    } else {
+      assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь').length,0);
+      nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить')[0].node.props.onClick();
+      await new Promise(setImmediate);
+      assert.equal(view.writes[1].accounts[0].role,'user');
+      assert.equal(view.writes[1].accounts[0].telegram_id,77);
+    }
+  }
+});
+
+test('cancelling the unified user editor discards profile and access changes',async()=>{
+  const guest={telegram_id:77,name:'Visitor',username:'visitor',seen_at:1000,birthdate:null};
+  const view=mount(fixture(),[],{contacts:[guest]});
+  view.render();await new Promise(setImmediate);
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
+  view.render();await new Promise(setImmediate);
+  const open=()=>nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
+  open();
+  nodes(view.render(),n=>n.props['aria-label']==='Дата рождения')[0].node.props.onChange({target:{value:'29.02'}});
+  nodes(view.render(),n=>n.type==='button'&&n.props.children?.props?.children==='Пользователь')[0].node.props.onClick();
+  nodes(view.render(),n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node.props.close();
+  open();
+  assert.equal(nodes(view.render(),n=>n.props['aria-label']==='Дата рождения')[0].node.props.value,'');
+  assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children?.props?.children==='Гость')[0].node.props['aria-pressed'],true);
+  assert.equal(view.writes.length,0);
 });
 
 test('observed guests can be blocked, unblocked and deleted without creating an account',async()=>{
@@ -176,7 +226,7 @@ test('observed guests can be blocked, unblocked and deleted without creating an 
   view.render();await new Promise(setImmediate);
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
   view.render();await new Promise(setImmediate);
-  nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor')[0].node.props.onClick();
+  nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
   nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(view.writes[0].blocked,true);
@@ -187,7 +237,7 @@ test('observed guests can be blocked, unblocked and deleted without creating an 
   nodes(view.render(),n=>n.type==='button'&&n.props.children==='Подтвердить удаление гостя')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(view.writes[2].method,'DELETE');
-  assert.equal(nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor').length,0);
+  assert.equal(nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor').length,0);
 });
 
 test('a failed guest mutation preserves the profile and reports the error',async()=>{
@@ -196,7 +246,7 @@ test('a failed guest mutation preserves the profile and reports the error',async
   view.render();await new Promise(setImmediate);
   nodes(view.render(),n=>n.type==='button'&&n.props.children?.[1]==='Доступ')[0].node.props.onClick();
   view.render();await new Promise(setImmediate);
-  nodes(view.render(),n=>n.props['aria-label']==='Профиль бота Visitor')[0].node.props.onClick();
+  nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
   nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать гостя')[0].node.props.onClick();
   await new Promise(setImmediate);
   assert.equal(nodes(view.render(),n=>n.props.role==='alert'&&n.props.children==='temporary failure').length,1);
