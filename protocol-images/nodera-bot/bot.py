@@ -264,7 +264,9 @@ async def server_command(settings, actor, prompt):
                 if isinstance(detail, str): return detail[:1000]
             return 'Команда не выполнена. Проверьте состояние в панели; если подтверждение уже отправлено, используйте /operation с ID операции.'
         value = response.json()
-        if 'buttons' in value or 'document' in value: command_view.set(value)
+        if prompt.split(maxsplit=1)[0].split('@')[0].lower() in ('/confirm','/cancel'):
+            value['decision_complete'] = True
+        if 'buttons' in value or 'document' in value or value.get('decision_complete'): command_view.set(value)
         return value['text']
 
 
@@ -858,6 +860,10 @@ async def bot(settings):
                 answer = 'Доступ изменился. Откройте /menu для доступных действий.'
                 command_view.set(None)
         if not answer: return
+        if (command_view.get() or {}).get('decision_complete'):
+            identity=cached_row.get('replace_message_id')
+            if type(identity) is int and identity>0 and identity not in cleanup: cleanup.append(identity)
+            if cached: inbox.amend(cached,cleanup=cleanup)
         if cached: inbox.amend(cached, answer=answer, answer_access=access, answer_scope=access_signature(access), view=command_view.get())
         if len(callbacks) >= 1000: callbacks.clear()
         actions = {}
@@ -877,6 +883,7 @@ async def bot(settings):
             if isinstance(sent,dict) and type(sent.get('message_id')) is int: sent_id=sent['message_id']
             if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id)
         if deterministic and sent_id: remember_ui(actor,sent_id)
+        elif ui_messages.get(str(actor)) in cleanup: remember_ui(actor,None)
         for identity in cleanup:
             if identity==sent_id: continue
             try: await bot_api(settings,'deleteMessage',chat_id=actor,message_id=identity)
