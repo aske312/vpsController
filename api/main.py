@@ -656,6 +656,13 @@ def nodera_history_read(payload: assistant_bot_history.Read, settings: dict = De
     return assistant_bot_history.read(api, settings, actor, payload)
 
 
+@app.post('/api/assistant/bot-telegram')
+def nodera_telegram_settings(payload: assistant_contacts.ProfileDialog, settings: dict = Depends(require_nodera_bot_transport),
+                            actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    import assistant_bot_telegram
+    return assistant_bot_telegram.view(sys.modules[__name__], actor, '/telegram input ' + payload.text, payload.request_id)
+
+
 @app.post('/api/assistant/bot-command')
 def nodera_command(payload: assistant_commands.Command, settings: dict = Depends(require_nodera_bot_transport),
                    actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:

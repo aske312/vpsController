@@ -20,6 +20,8 @@ test("Telegram tools remain opt-in, explicit denial persists, and target editing
   draft.accounts[0].telegram_action_targets_text = '42, @example';
   assert.deepEqual(settingsPayload(draft).accounts[0].telegram_action_targets, ['42', '@example']);
   assert.deepEqual(settingsPayload(draft).accounts[0].telegram_tools, ['tg_send_message', 'tg_get_contacts']);
+  draft.accounts[0].telegram_disabled_tools = ['tg_get_contacts'];
+  assert.deepEqual(settingsPayload(draft).accounts[0].telegram_disabled_tools, ['tg_get_contacts']);
 });
 
 test("drafts preserve saved secrets without reading them back and detect actual changes", () => {

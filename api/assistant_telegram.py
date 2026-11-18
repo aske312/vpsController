@@ -22,7 +22,7 @@ class PreparedAction(BaseModel):
 
 def enabled(account):
     selected = account.get('telegram_tools')
-    return list(DEFAULT_TOOLS if selected is None else selected)
+    return [name for name in (DEFAULT_TOOLS if selected is None else selected) if name not in account.get('telegram_disabled_tools', [])]
 
 
 def require(settings, actor, name):

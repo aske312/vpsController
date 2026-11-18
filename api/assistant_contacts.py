@@ -91,7 +91,7 @@ def profiles_path(api, settings):
 
 def profiles(api, settings):
     # Only the owner list enumerates profiles; receipts stay out of that list.
-    return {file.stem: {key:value for key,value in control.operations.read(file).items() if key not in ('receipts','admin_receipts')}
+    return {file.stem: {key:value for key,value in control.operations.read(file).items() if key not in ('receipts','admin_receipts','telegram_receipts')}
             for file in profiles_path(api, settings).glob('*.json') if re.fullmatch(r'[1-9][0-9]{0,15}', file.stem)}
 
 
@@ -195,6 +195,7 @@ def remember(api, settings, contact, actor):
         if saved.get('blocked'): return {'admin':False, 'chat':False, 'subscription':False, 'blocked':True}
         access['onboarding'] = saved.get('onboarding', 'new')
         access['admin_dialog'] = bool(saved.get('admin_dialog')) and roles.allows(settings,actor,'subscriptions_admin')
+        access['telegram_dialog'] = bool(saved.get('telegram_dialog', {}).get('expires', 0) > time.time()) and roles.allows(settings,actor,'telegram_read')
         known = observed(api, settings)
         previous = next((row for row in known if row['telegram_id'] == contact.telegram_id), None)
         details = contact.model_dump(exclude={'is_bot'})

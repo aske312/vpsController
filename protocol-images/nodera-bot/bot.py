@@ -280,6 +280,8 @@ async def remember_message(settings, message, role):
     if not text and (message.get('photo') or message.get('document')):
         text = '[Вложение: ' + str((message.get('document') or {}).get('file_name') or 'изображение')[:200] + ']'
     if not text: return
+    # Session strings must never enter history later supplied to a model.
+    text = re.sub(r'(?<![A-Za-z0-9_=-])1[A-Za-z0-9_=-]{100,4095}(?![A-Za-z0-9_=-])', '[Telegram API: скрытые данные]', text)
     body = {'message_id': identity, 'role': role, 'text': text[:12000], 'date': message.get('date', int(time.time()))}
     reply = message.get('reply_to_message', {})
     if type(reply.get('message_id')) is int and reply['message_id'] > 0: body['reply_to_message_id'] = reply['message_id']
@@ -287,6 +289,7 @@ async def remember_message(settings, message, role):
             and str(reply.get('from', {}).get('id')) == settings['bot_token'].split(':')[0]
             and reply.get('chat', {}).get('id') == actor):
         body['reply_to_text'] = (reply.get('text') or reply.get('caption') or '')[:8000]
+        body['reply_to_text'] = re.sub(r'(?<![A-Za-z0-9_=-])1[A-Za-z0-9_=-]{100,4095}(?![A-Za-z0-9_=-])', '[Telegram API: скрытые данные]', body['reply_to_text'])
     try:
         async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
             response = await client.post('http://127.0.0.1:8000/api/assistant/bot-history/message', json=body,
@@ -545,16 +548,18 @@ async def profile_reply(settings, actor, prompt):
 
 COMMAND_GRANTS = {'subscription':'subscription_read','profile':'subscription_read','devices':'subscription_read','apps':'subscription_read','connect':'subscription_read',
     'models':'model_select','model':'model_select','ai':'chat','status':'server_read','resources':'server_read','services':'server_read','components':'server_read',
-    'network':'network_read','security':'security_read','diagnostics':'diagnostics','logs':'logs_read','logfile':'logs_read','admin':'subscriptions_admin','service':'server_manage'}
+    'network':'network_read','security':'security_read','diagnostics':'diagnostics','logs':'logs_read','logfile':'logs_read','admin':'subscriptions_admin','service':'server_manage','telegram':'telegram_read'}
 
 
 def available_commands():
     detail = access_details.get() or {}; sections = detail.get('sections', {}); grants = set(detail.get('permissions', []))
     items = list(PUBLIC_COMMANDS)
-    if sections.get('ai') or sections.get('server') or sections.get('subscription') or sections.get('admin'):
+    if any(sections.values()):
         items = MEMBER_COMMANDS.copy()
     candidates = []
     if sections.get('subscription'): candidates += SUBSCRIPTION_COMMANDS[len(MEMBER_COMMANDS):]
+    elif sections.get('subscription_setup'): candidates += [('subscription','Оформить подписку Mihomo')]
+    if sections.get('telegram'): candidates += [('telegram','Telegram API')]
     if sections.get('ai'): candidates += CHAT_COMMANDS[len(MEMBER_COMMANDS):]
     if sections.get('server'): candidates += [(key,label) for key,label in ADMIN_COMMANDS if key in ('status','services','network','security','diagnostics','logs')]
     if sections.get('admin'): candidates += [('admin','Администрирование Mihomo')]
@@ -570,6 +575,22 @@ def access_signature(access):
 async def scoped_reply(settings, sender, prompt, access):
     detail = access_details.get(); sections=detail.get('sections', {}); grants=set(detail.get('permissions', []))
     command=prompt.split()[0].split('@')[0].lower()
+    if detail.get('telegram_dialog') and command in ('/menu','/_refresh_menu','/start','/help','/admin','/myprofile','/setup'):
+        await server_command(settings,sender['id'],'/telegram cancel'); command_view.set(None)
+    if detail.get('telegram_dialog') and not command.startswith('/'):
+        async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
+            try:
+                response = await client.post('http://127.0.0.1:8000/api/assistant/bot-telegram',
+                    headers={'Authorization':'Bearer ' + settings['control_token'], 'X-MCP-Actor':str(sender['id'])},
+                    json={'text':prompt, 'request_id':incoming_request.get() or secrets.token_hex(16)})
+            except httpx.TransportError: raise DeliveryPending() from None
+        if response.status_code != 200:
+            if response.status_code >= 500: raise DeliveryPending()
+            return 'Telegram API\nПодключение не подтверждено. Проверьте свою сессию и доступность MCP Telegram или начните заново через /telegram.'
+        value=response.json(); command_view.set(value)
+        return value['text']
+    if re.fullmatch(r'1[A-Za-z0-9_=-]{100,4095}',prompt):
+        return 'Telegram API\nДля подключения сначала откройте /telegram. Строка сессии не отправлена ИИ.'
     if command in ('/id','/userid'): return public_reply(sender,'/id')
     if command in ('/myprofile','/setup','/skip'): return await profile_reply(settings,sender['id'],prompt)
     if command in ('/menu','/_refresh_menu','/start','/help'):
@@ -688,7 +709,7 @@ def menu_text(prompt, access):
         return {'subscription':'Подписка и подключение\nПодписка, устройства и приложения для подключения.',
                 'server':'Сервер\nСостояние, службы и диагностика.',
                 'ai':'AI-ассистент\nНапишите вопрос или прикрепите файл. Переписка с ИИ сохраняется.',
-                'admin':'Администрирование Mihomo\nВыберите подписку или создайте новую.'}.get(section,'Меню Nodera\nВыберите нужный раздел.') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
+                'admin':'Админ Mihomo\nВыберите подписку или создайте новую.'}.get(section,'Меню Nodera\nВыберите нужный раздел.') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
     if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
         return 'Подписка и подключение. Выберите нужное действие ниже.'
     if section == 'server' and access is True:
@@ -735,8 +756,9 @@ def inline_keyboard_content(answer, prompt, access, actions):
                 if row: rows.append(row)
         elif section=='admin' and sections.get('admin'): rows.append([button('Подписки','/admin list'),button('Создать','/admin create')] if 'subscriptions_create' in grants else [button('Подписки','/admin list')])
         elif not section:
-            for key,label in [('subscription','Подписка и подключение'),('ai','AI-ассистент'),('server','Сервер'),('admin','Администрирование')]:
-                if sections.get(key): rows.append([button(label,'/menu '+key)])
+            for key,label in [('subscription','Подписка Mihomo'),('ai','ИИ-ассистент'),('telegram','Telegram API'),('server','Контроль VPS'),('admin','Админ Mihomo')]:
+                if sections.get(key): rows.append([button(label,'/telegram' if key=='telegram' else '/menu '+key)])
+            if sections.get('subscription_setup'): rows.append([button('Оформить подписку Mihomo','/subscription')])
             if not any(sections.values()): rows.append([button('Мой профиль','/myprofile')] + ([button('Мой ID','/id')] if detail.get('role','guest')=='guest' else []))
         if section: rows.append([button('← Главное меню','/menu')])
         return {'inline_keyboard':rows} if rows else None
@@ -867,10 +889,16 @@ async def bot(settings):
             except Exception: logging.error('NoderaBot private command menu could not be updated')
         cached = delivery_record.get()
         cached_row = inbox.read(cached) if cached else {}
+        if (cached_row.get('telegram_input') and access_details.get() is not None and
+                'telegram_read' in access_details.get().get('permissions', [])):
+            access_details.set({**access_details.get(), 'telegram_dialog':True})
+        if (access_details.get() or {}).get('telegram_dialog') and not prompt.startswith('/') and not messages and not alert:
+            if cached: inbox.amend(cached, telegram_input=True)
         command = prompt.split()[0].split('@')[0].lower() if prompt else ''
         deterministic = cached_row.get('bot_interaction', not messages and not alert and command != '/ai' and (
             command.startswith('/') or profile_state.get() in ('name','birthdate') or
-            (access_details.get() or {}).get('admin_dialog') or not access))
+            (access_details.get() or {}).get('admin_dialog') or (access_details.get() or {}).get('telegram_dialog') or
+            re.fullmatch(r'1[A-Za-z0-9_=-]{100,4095}',prompt or '') or not access))
         # Persist routing before profile/admin state advances, including lost replies.
         if cached: inbox.amend(cached, bot_interaction=bool(deterministic))
         cleanup = list(cached_row.get('cleanup', []))
@@ -885,7 +913,7 @@ async def bot(settings):
             same_scope = cached_row.get('answer_scope',scope if access_details.get() is None else None)==scope
             answer = cached_row['answer'] if cached_row.get('answer_access') == access and same_scope else 'Доступ изменился. Откройте /menu для доступных действий.'
             command_view.set(cached_row.get('view') if same_scope else None)
-        elif not messages and not alert and not (access_details.get() or {}).get('admin_dialog') and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
+        elif not messages and not alert and not (access_details.get() or {}).get('admin_dialog') and not (access_details.get() or {}).get('telegram_dialog') and (cached_row.get('profile_dialog') or profile_state.get() is not None and (
                 profile_state.get() in ('name', 'birthdate') or prompt.split(maxsplit=1)[0].split('@')[0].lower() in ('/start', '/myprofile', '/setup', '/skip', '/skipall'))):
             # Remember routing before sending: a lost final-profile reply must
             # reconcile the same receipt even when the questionnaire is now done.
@@ -1025,7 +1053,7 @@ async def bot(settings):
                             media_groups[album_key][0].append(message)
                             inbox.amend(media_groups[album_key][1], messages=media_groups[album_key][0])
                         continue
-                    is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() not in ('/ai', '/start', '/setup', '/myprofile', '/skip', '/skipall', '/menu', '/admin')
+                    is_command = not messages and prompt.startswith('/') and prompt.split()[0].split('@')[0].lower() not in ('/ai', '/start', '/setup', '/myprofile', '/skip', '/skipall', '/menu', '/admin', '/telegram')
                     # Explicit commands remain responsive while this user's AI
                     # dialog waits; commands themselves keep their own ordering.
                     stream = (actor, 'command') if is_command else actor

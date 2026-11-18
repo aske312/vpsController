@@ -47,7 +47,7 @@ def tool_module(name):
 
 def mcp_transport_token(root, module, actor):
     return hmac.new(root.encode(), f'nodera-mcp-v1:{module}:{actor}'.encode(), hashlib.sha256).hexdigest()
-ACCOUNT_OPTIONS = ('address_as', 'bot_chat_access', 'mihomo_profile_id', 'address_gender', 'role', 'permission_overrides', 'products', 'telegram_tools', 'telegram_action_targets')
+ACCOUNT_OPTIONS = ('address_as', 'bot_chat_access', 'mihomo_profile_id', 'address_gender', 'role', 'permission_overrides', 'products', 'telegram_tools', 'telegram_action_targets', 'telegram_disabled_tools')
 BOT_UNIT = 'vps-control-nodera-bot.service'
 AGENT_UNIT = 'vps-control-ai-agent.service'
 _runtime_slots = threading.BoundedSemaphore(2)
@@ -78,10 +78,11 @@ class Account(BaseModel):
     vps_access: StrictBool = False
     excluded_dialogs: list[int] = Field(default_factory=list, max_length=100)
     telegram_tools: list[str] | None = Field(default=None, max_length=54)
+    telegram_disabled_tools: list[str] = Field(default_factory=list, max_length=54)
     telegram_action_targets: list[str] = Field(default_factory=list, max_length=100)
     session: str | None = Field(default=None, max_length=4096)
 
-    @field_validator('telegram_tools')
+    @field_validator('telegram_tools', 'telegram_disabled_tools')
     @classmethod
     def valid_telegram_tools(cls, value):
         if value is not None and (len(value) != len(set(value)) or set(value) - assistant_telegram.TOOLS.keys()):

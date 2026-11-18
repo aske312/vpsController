@@ -19,6 +19,13 @@ HAS_MCP = importlib.util.find_spec('mcp') is not None
 
 
 class VendorTests(unittest.TestCase):
+    def test_user_tool_preferences_only_remove_tools_from_admin_policy(self):
+        settings={'mcp':{'telegram-mcp':True},'accounts':[{'telegram_id':11,'telegram_access':True,'session':'fixture',
+            'effective_permissions':['telegram_read'],'telegram_tools':['tg_auth_status','tg_send_message'],
+            'telegram_disabled_tools':['tg_send_message']}]}
+        adapter=guarded.ReadAdapter(settings,'11')
+        self.assertEqual(adapter.enabled_tools,{'tg_auth_status'})
+
     def test_pinned_sources_are_complete_and_unchanged(self):
         root = guarded.verify_vendor()
         self.assertEqual(json.loads((root / 'SOURCE.json').read_text())['commit'], guarded.UPSTREAM_COMMIT)

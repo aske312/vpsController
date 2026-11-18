@@ -134,7 +134,7 @@ class ReadAdapter:
         if not re.fullmatch(r'[1-9][0-9]{0,15}', self.actor): raise PermissionError('Некорректный пользователь Telegram')
         self.excluded = set(self.profile.get('excluded_dialogs', []))
         selected = self.profile.get('telegram_tools')
-        self.enabled_tools = set(READ_TOOLS if selected is None else selected) & TOOLS.keys()
+        self.enabled_tools = (set(READ_TOOLS if selected is None else selected) & TOOLS.keys()) - set(self.profile.get('telegram_disabled_tools', []))
         self.action_targets = {str(value).strip().lstrip('@').lower() for value in self.profile.get('telegram_action_targets', [])}
         self.backend = self.manager = self.client = None
         self.last_error = None

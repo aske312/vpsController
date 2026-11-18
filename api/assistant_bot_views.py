@@ -33,7 +33,8 @@ def capabilities(api, settings, actor):
             if len(_active) >= 500: _active.pop(next(iter(_active)))
             _active[key] = (time.monotonic(), active)
     return {'role':roles.role(account), 'permissions': sorted(grants), 'products': sorted(products), 'linked_profile': linked,
-            'sections': {'subscription': active, 'ai': 'assistant' in products and 'chat' in grants,
+            'sections': {'subscription': active, 'subscription_setup': 'mihomo' in products and 'subscription_read' in grants and not linked,
+                         'telegram': 'telegram_read' in grants, 'ai': 'assistant' in products and 'chat' in grants,
                          'server': bool(grants & {'server_read','server_manage','diagnostics','logs_read','network_read','security_read'}),
                          'admin': 'subscriptions_admin' in grants}}
 
@@ -62,7 +63,8 @@ def subscription(api, settings, actor, command, args):
     identity=args[0] if args else assistant_mihomo.profile_for(settings,actor).get('mihomo_profile_id')
     link=None
     if command=='/subscription':
-        if not identity or not re.fullmatch(assistant_mihomo.ID,identity): return result('Подписка не привязана. Обратитесь к администратору.')
+        if not identity or not re.fullmatch(assistant_mihomo.ID,identity):
+            return result('Подписка Mihomo\nПодписка ещё не оформлена. Передайте ваш Telegram ID владельцу продукта, чтобы он создал и привязал подписку.\n\nВаш ID: `' + actor + '`\n\nА пока — молите Императора.')
         link=assistant_mihomo.call(api,actor,'GET','/profiles/'+identity+'/subscription',{}).get('url')
     try: item = profile_item(api, settings, actor, identity)
     except HTTPException:
@@ -279,9 +281,12 @@ def admin(api, settings, actor, args, request_id):
 def view(api, actor, prompt, request_id=None):
     parts = prompt.strip().split(); command = parts[0].split('@')[0].lower() if parts else ''; args=parts[1:]
     permissions = {'/status':'server_read','/services':'server_read','/network':'network_read','/security':'security_read','/diagnostics':'diagnostics',
-                   '/apps':'subscription_read','/subscription':'subscription_read','/profile':'subscription_read','/devices':'subscription_read','/logs':'logs_read','/logfile':'logs_read','/admin':'subscriptions_admin'}
+                   '/apps':'subscription_read','/subscription':'subscription_read','/profile':'subscription_read','/devices':'subscription_read','/logs':'logs_read','/logfile':'logs_read','/admin':'subscriptions_admin','/telegram':'telegram_read'}
     if command not in permissions: return None
     settings = control.read(api); roles.require(settings,actor,permissions[command])
+    if command=='/telegram':
+        import assistant_bot_telegram
+        return assistant_bot_telegram.view(api, actor, prompt, request_id)
     if command=='/admin': return admin(api,settings,actor,args,request_id)
     if command in ('/subscription','/profile','/devices'): return subscription(api,settings,actor,command,args)
     if command=='/apps':

@@ -171,6 +171,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const botCredentialsLocked = botLocked;
   const account = userEdit?.value;
   const accountGrants = account ? accountPermissions(draft, account) : new Set<Permission>();
+  const visibleUserSection = userSection === "telegram" && !accountGrants.has("telegram_read") ? "profile" : userSection;
 
   function openProfile(contact: BotContact) {
     const date = contact.birthdate;
@@ -510,8 +511,8 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       blocked={blocked || profileBusy || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
       submit={() => void applyUser()}>
       <div className="noderaUserSummary"><strong>{account.name || "Новый пользователь"}</strong><span>{account.telegram_id || "Telegram ID не указан"} · {roleNames[accountRole(account)]}</span></div>
-      <div className="noderaUserEditor"><nav className="noderaUserNav" aria-label="Настройки пользователя">{[{id:"profile",label:"Профиль"},{id:"access",label:"Роль и продукты"},{id:"permissions",label:"Личные права"},{id:"telegram",label:"Telegram"},{id:"info",label:"Сведения"}].map(item => <button type="button" key={item.id} aria-pressed={userSection === item.id} onClick={() => { setUserSection(item.id); setPermissionSearch(""); }}>{item.label}</button>)}</nav><div className="noderaUserContent">
-      <section className="noderaUserSection" hidden={userSection !== "profile"}>
+      <div className="noderaUserEditor"><nav className="noderaUserNav" aria-label="Настройки пользователя">{[{id:"profile",label:"Профиль"},{id:"access",label:"Роль и продукты"},{id:"permissions",label:"Личные права"},{id:"telegram",label:"Telegram API"},{id:"info",label:"Сведения"}].filter(item => item.id !== "telegram" || accountGrants.has("telegram_read")).map(item => <button type="button" key={item.id} aria-pressed={visibleUserSection === item.id} onClick={() => { setUserSection(item.id); setPermissionSearch(""); }}>{item.label}</button>)}</nav><div className="noderaUserContent">
+      <section className="noderaUserSection" hidden={visibleUserSection !== "profile"}>
       {userEdit.index < 0 && !userEdit.observed && bot?.installed && status.settings.bot_token_configured && <div className="noderaBar">
         <label>Найти в Telegram<input value={lookup} placeholder="@username" maxLength={65} onChange={event => setLookup(event.target.value)}/></label>
         <button type="button" className="ghostButton" disabled={blocked || lookingUp || !lookup.trim()} onClick={() => void findUser()}>Найти</button>
@@ -525,29 +526,29 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         <small>Год можно не указывать. Пустое поле удаляет дату из профиля Nodera.</small>
       </>}
 
-      </section><section className="noderaUserSection" hidden={userSection !== "access"}>
+      </section><section className="noderaUserSection" hidden={visibleUserSection !== "access"}>
       <h3>Роль пользователя</h3>
       <div className="noderaAccountRoles">{(Object.keys(roleNames) as Role[]).map(role => <button type="button" key={role} aria-pressed={accountRole(account) === role} disabled={blocked} onClick={() => accountRole(account) !== role && editAccount({ role, products: role === "guest" ? [] : ["owner", "administrator"].includes(role) ? ["assistant", "mihomo"] : accountProducts(account).length ? accountProducts(account) : ["assistant"], permission_overrides: {} })}><strong>{roleNames[role]}</strong></button>)}</div>
       <small>При смене роли личные исключения сбрасываются. Права роли настраиваются в разделе «Роли и права».</small>
       <fieldset className="noderaProducts"><legend>Доступ к продуктам</legend>{(Object.keys(productNames) as Product[]).map(product => <label className="noderaPermissionSwitch" key={product}><span>{productNames[product]}</span><input type="checkbox" role="switch" aria-label={productNames[product]} checked={accountProducts(account).includes(product)} disabled={blocked || ["owner", "administrator", "guest"].includes(accountRole(account))} onChange={event => { const products = new Set(accountProducts(account)); if (event.target.checked) products.add(product); else products.delete(product); editAccount({ products: [...products] }); }}/></label>)}</fieldset>
-      </section><section className="noderaUserSection" hidden={userSection !== "permissions"}>
+      </section><section className="noderaUserSection" hidden={visibleUserSection !== "permissions"}>
       <h3>Личные права · {Object.keys(account.permission_overrides ?? {}).length} исключений</h3>
         <button type="button" className="ghostButton" disabled={blocked || fixedRoles.includes(accountRole(account))} onClick={() => editAccount({ role: accountRole(account), permission_overrides: {} })}>Использовать права роли</button>
         <label>Поиск разрешения<input type="search" value={permissionSearch} onChange={event => setPermissionSearch(event.target.value)}/></label>
         <PermissionGroupNav selected={userPermissionGroup} select={setUserPermissionGroup}/>
         {permissionGroups.filter(group => permissionSearch.trim() || group.title === userPermissionGroup).map(group => <section className="noderaPermissionGroup" key={group.title}><h3>{group.title}</h3><div className="noderaPermissionGrid">{group.items.filter(id => permissionNames[id].toLocaleLowerCase().includes(permissionSearch.trim().toLocaleLowerCase())).map(id => <div className="noderaOverrideRow" key={id}><label className="noderaPermissionSwitch"><span>{permissionNames[id]}<small>{account.permission_overrides?.[id] === undefined ? "По роли" : account.permission_overrides[id] ? "Разрешено лично" : "Запрещено лично"}</small></span><input type="checkbox" role="switch" aria-label={permissionNames[id]} checked={accountGrants.has(id)} disabled={blocked || fixedRoles.includes(accountRole(account)) || id === "roles_manage" || accountRole(account) === "user" && !userPermissions.includes(id)} onChange={event => editAccount({ role: accountRole(account), permission_overrides: { ...account.permission_overrides, [id]: event.target.checked } })}/></label><button type="button" className="mcpIconButton" aria-label={`По роли: ${permissionNames[id]}`} title="Вернуть значение роли" disabled={blocked || fixedRoles.includes(accountRole(account)) || account.permission_overrides?.[id] === undefined} onClick={() => { const permissions = { ...account.permission_overrides }; delete permissions[id]; editAccount({ permission_overrides: permissions }); }}><ChatIcon name="refresh"/></button></div>)}</div></section>)}
-      </section><section className="noderaUserSection" hidden={userSection !== "profile"}>
+      </section><section className="noderaUserSection" hidden={visibleUserSection !== "profile"}>
       <label>Как Нодера обращается к пользователю<input value={account.address_as ?? ""} maxLength={80} onChange={event => editAccount({ address_as: event.target.value })}/></label>
       <label>Форма обращения<select aria-label="Форма обращения" value={account.address_gender ?? "auto"} onChange={event => editAccount({ address_gender: event.target.value as AccountDraft["address_gender"] })}>
         <option value="auto">По имени, при сомнении нейтрально</option><option value="neutral">Нейтральная</option><option value="male">Мужской род</option><option value="female">Женский род</option>
       </select></label>
-      </section><section className="noderaUserSection" hidden={userSection !== "access"}>
+      </section><section className="noderaUserSection" hidden={visibleUserSection !== "access"}>
       <label>Подписка Mihomo<select aria-label="Подписка Mihomo" value={account.mihomo_profile_id ?? ""} onChange={event => editAccount({ mihomo_profile_id: event.target.value || null })}>
         <option value="">Без привязки</option>{subscriptions.items.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
         {account.mihomo_profile_id && !subscriptions.items.some(profile => profile.id === account.mihomo_profile_id) && <option value={account.mihomo_profile_id}>{account.mihomo_profile_id} · не подтверждена</option>}
       </select></label>
       {subscriptions.error && <small role="alert">{subscriptions.error}</small>}
-      </section><section className="noderaUserSection" hidden={userSection !== "info"}>
+      </section><section className="noderaUserSection" hidden={visibleUserSection !== "info"}>
       {(() => {
         const contact = contactsById.get(account.telegram_id);
         return contact && <dl className="noderaContactFacts"><div><dt>Telegram</dt><dd>{[contact.name, contact.last_name].filter(Boolean).join(" ") || "—"}{contact.username ? ` · @${contact.username}` : ""}</dd></div>
@@ -555,9 +556,10 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
           <div><dt>Дата рождения</dt><dd>{contact.birthdate ? `${contact.birthdate.day}.${contact.birthdate.month}${contact.birthdate.year ? `.${contact.birthdate.year}` : ""}` : "Не предоставлена Telegram"}</dd></div>
           <div><dt>Последний контакт</dt><dd>{new Date(contact.seen_at * 1000).toLocaleString("ru-RU")}</dd></div>{contact.bio && <div><dt>О себе</dt><dd>{contact.bio}</dd></div>}<div><dt>Пол</dt><dd>Telegram не предоставляет</dd></div></dl>;
       })()}
-      </section><section className="noderaUserSection" hidden={userSection !== "telegram"}>
+      </section><section className="noderaUserSection" hidden={visibleUserSection !== "telegram"}>
       {!accountGrants.has("telegram_read") && <p>Чтение Telegram не разрешено. Настройте продукты и права пользователя.</p>}
       {accountGrants.has("telegram_read") && <>
+        {!!account.telegram_disabled_tools?.length && <p>Пользователь дополнительно отключил инструментов: {account.telegram_disabled_tools.length}. <button type="button" className="ghostButton" disabled={blocked} onClick={() => editAccount({ telegram_disabled_tools: [] })}>Сбросить личные ограничения</button></p>}
         <Secret label="Telegram-сессия" configured={account.session_configured} value={account.session} onChange={session => editAccount({ session })}/>
         <label>Исключённые диалоги<input value={account.excluded_dialogs_text} placeholder="ID через запятую" onChange={event => editAccount({ excluded_dialogs_text: event.target.value })}/></label>
 

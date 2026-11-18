@@ -4,7 +4,7 @@ export type AppModuleId = "nodera-bot" | "ai-agent";
 export const roleNames = { owner: "Владелец", administrator: "Администратор", moderator: "Модератор", user: "Пользователь", guest: "Гость" } as const;
 export type Role = keyof typeof roleNames;
 export const permissionNames = {
-  chat: "Общение с AI", model_select: "Выбор модели AI", web: "Поиск в интернете", memory: "Личная память", telegram_read: "Чтение своего Telegram",
+  chat: "Общение с ИИ", model_select: "Выбор модели ИИ", web: "Поиск в интернете", memory: "Личная память и персонализация", telegram_read: "Доступ к MCP Telegram",
   server_read: "Просмотр сервера и служб", server_manage: "Управление службами", diagnostics: "Диагностика приложения", logs_read: "Чтение логов", network_read: "Просмотр сети", security_read: "Просмотр безопасности", terminal_read: "Терминал: только чтение",
   subscription_read: "Получение своей подписки", subscription_manage: "Редактирование своей подписки", subscription_name: "Название своей подписки", subscription_connections: "Подключения своей подписки", subscription_devices: "Устройства своей подписки", subscription_routing: "Маршрутизация своей подписки",
   subscription_quota: "Изменение квоты трафика", subscription_speed: "Изменение скорости", subscription_expiry: "Изменение срока действия", subscriptions_admin: "Доступ ко всем подпискам", subscriptions_create: "Создание подписок", subscriptions_delete: "Удаление подписок", modules_manage: "Управление модулями Mihomo", routing_manage: "Глобальная маршрутизация Mihomo", dns_manage: "Глобальные настройки DNS", recovery: "Восстановление Mihomo", roles_manage: "Управление ролями и правами",
@@ -19,11 +19,12 @@ export const roleDefaults: Record<Role, Permission[]> = {
   moderator: [...userPermissions, "server_read"], user: userPermissions, guest: [],
 };
 export const permissionGroups: {title: string; items: Permission[]}[] = [
-  {title: "AI и общение", items: ["chat", "model_select", "web", "memory", "telegram_read"]},
-  {title: "Своя подписка", items: ["subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing"]},
-  {title: "Сервис и диагностика", items: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read", "terminal_read"]},
-  {title: "Администрирование Mihomo", items: ["subscription_quota", "subscription_speed", "subscription_expiry", "subscriptions_admin", "subscriptions_create", "subscriptions_delete", "modules_manage", "routing_manage", "dns_manage", "recovery"]},
-  {title: "Владение", items: ["roles_manage"]},
+  {title: "ИИ-ассистент", items: ["chat", "model_select", "web", "memory"]},
+  {title: "MCP Telegram", items: ["telegram_read"]},
+  {title: "Подписка Mihomo", items: ["subscription_read", "subscription_manage", "subscription_name", "subscription_connections", "subscription_devices", "subscription_routing"]},
+  {title: "Контроль VPS", items: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read", "terminal_read"]},
+  {title: "Админ Mihomo", items: ["subscription_quota", "subscription_speed", "subscription_expiry", "subscriptions_admin", "subscriptions_create", "subscriptions_delete", "modules_manage", "routing_manage", "dns_manage", "recovery"]},
+  {title: "Управление РМ", items: ["roles_manage"]},
 ];
 function isMihomo(key: Permission) { return key.startsWith("subscription") || ["modules_manage", "routing_manage", "dns_manage", "recovery"].includes(key); }
 export function accountRole(account: Account): Role { return account.role ?? (account.bot_access ? "administrator" : account.vps_access ? "moderator" : account.bot_chat_access || account.mihomo_profile_id || account.telegram_access ? "user" : "guest"); }
@@ -57,6 +58,7 @@ export function accountPermissions(settings: Pick<Settings, "role_permissions">,
   return new Set([...result].filter(key => isMihomo(key) ? products.includes("mihomo") : products.includes("assistant")));
 }
 export type Account = {
+  telegram_disabled_tools?: string[];
   telegram_tools?: string[] | null; telegram_action_targets?: string[];
   products?: Product[] | null; role?: Role | null; permission_overrides?: Partial<Record<Permission, boolean>>;
   telegram_id: number; name: string; bot_access: boolean; telegram_access: boolean; vps_access: boolean;
@@ -128,6 +130,7 @@ export function settingsPayload(draft: Draft) {
       telegram_access: accountPermissions(draft, account).has("telegram_read"), vps_access: ["server_read", "server_manage", "diagnostics", "logs_read", "network_read", "security_read"].some(key => accountPermissions(draft, account).has(key as Permission)), session: account.session,
       excluded_dialogs: account.excluded_dialogs_text.split(",").map(value => value.trim()).filter(Boolean).map(Number),
       telegram_tools: account.telegram_tools,
+      telegram_disabled_tools: account.telegram_disabled_tools,
       telegram_action_targets: account.telegram_action_targets_text === undefined ? account.telegram_action_targets ?? [] : account.telegram_action_targets_text.split(",").map(value => value.trim()).filter(Boolean),
     })),
   };

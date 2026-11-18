@@ -61,7 +61,7 @@ def mcp_transport_token(root, module, actor):
 
 def scoped_mcp_settings(settings, actor, module):
     value = {'modules': dict(settings['modules']), 'mcp': dict(settings['mcp']), 'accounts': []}
-    fields = ('telegram_id', 'telegram_access', 'session', 'excluded_dialogs', 'effective_permissions', 'telegram_tools', 'telegram_action_targets') if module == 'telegram-mcp' else (
+    fields = ('telegram_id', 'telegram_access', 'session', 'excluded_dialogs', 'effective_permissions', 'telegram_tools', 'telegram_action_targets', 'telegram_disabled_tools') if module == 'telegram-mcp' else (
         'telegram_id', 'vps_access', 'bot_access', 'mihomo_profile_id', 'effective_permissions')
     value['accounts'] = [{key: row[key] for key in fields if key in row} for row in settings['accounts'] if str(row['telegram_id']) == str(actor)]
     if module == 'telegram-mcp':
@@ -2017,6 +2017,15 @@ def error_code(exc):
 async def request_main(payload, mode):
     settings = payload['settings']
     actor = str(payload.get('actor', 'panel'))
+    if mode == '--telegram-session-check':
+        from telegram_guarded import ReadAdapter
+        if not any(str(row['telegram_id']) == actor and 'telegram_read' in row.get('effective_permissions', []) for row in settings['accounts']):
+            raise PermissionError('Нет доступа к Telegram API')
+        settings = {**settings, 'accounts': [{**row, 'session': payload['session']} if str(row['telegram_id']) == actor else row for row in settings['accounts']]}
+        adapter = ReadAdapter(settings, actor)
+        adapter.load()
+        try: return await adapter.auth_status()
+        finally: await adapter.close()
     if mode == '--telegram-action':
         from telegram_guarded import ReadAdapter
         adapter = ReadAdapter(settings, actor)

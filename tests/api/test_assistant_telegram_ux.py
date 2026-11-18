@@ -70,7 +70,7 @@ class TelegramViewsTests(unittest.TestCase):
         account.update(role='user',products=['mihomo'],mihomo_profile_id='own',permission_overrides={})
         with patch.object(mihomo,'request',side_effect=self.request):
             cap=views.capabilities(api,settings,'11')
-            self.assertEqual(cap['sections'],{'subscription':True,'ai':False,'server':False,'admin':False})
+            self.assertEqual(cap['sections'],{'subscription':True,'subscription_setup':False,'telegram':False,'ai':False,'server':False,'admin':False})
             self.item['limits_status']['state']='expired'; views._active.clear()
             self.assertFalse(views.capabilities(api,settings,'11')['sections']['subscription'])
             account['products']=['assistant']; views._active.clear()

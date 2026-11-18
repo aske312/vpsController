@@ -883,7 +883,15 @@ test('user permission switch can override and restore role inheritance while sec
   nodes(tree,n=>n.props['aria-label']==='По роли: Поиск в интернете')[0].node.props.onClick();
   tree=userTree();
   assert.equal(nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Поиск в интернете')[0].node.props.checked,true);
-  nodes(tree,n=>n.type==='button'&&n.props.children==='Telegram')[0].node.props.onClick();
+  nodes(tree,n=>typeof n.type==='function'&&n.props.selected&&n.props.select)[0].node.props.select('MCP Telegram');
+  tree=userTree();
+  nodes(tree,n=>n.props.role==='switch'&&n.props['aria-label']==='Доступ к MCP Telegram')[0].node.props.onChange({target:{checked:false}});
+  tree=userTree();
+  assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Telegram API').length,0);
+  nodes(tree,n=>n.props['aria-label']==='По роли: Доступ к MCP Telegram')[0].node.props.onClick();
+  tree=userTree();
+  assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Telegram API').length,1);
+  nodes(tree,n=>n.type==='button'&&n.props.children==='Telegram API')[0].node.props.onClick();
   tree=view.render();
   const dialog=nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь')[0].node;
   dialog.props.submit();
