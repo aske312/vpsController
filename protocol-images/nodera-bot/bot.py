@@ -22,7 +22,7 @@ import httpx
 
 if not Path(__file__).with_name('assistant_messages.py').is_file():
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'api'))
-from assistant_messages import notice, styled_message
+from assistant_messages import notice
 
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
@@ -350,7 +350,8 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
                     return job.get('error', {}).get('message') or 'Результат запроса не подтверждён. Проверьте состояние перед повтором.'
                 if job.get('state') == 'queued' and not notified and time.monotonic() - waiting_since >= 2:
                     try:
-                        await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди', QUEUE_NOTICE, '⏳')), parse_mode='HTML')
+                        sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди', QUEUE_NOTICE, '⏳')), parse_mode='HTML')
+                        if transient_sink.get(): transient_sink.get()(actor, sent)
                         notified = True
                     except Exception: pass
                 await asyncio.sleep(1)
@@ -392,6 +393,7 @@ access_details = ContextVar('nodera_access_details', default=None)
 command_view = ContextVar('nodera_command_view', default=None)
 
 QUEUE_NOTICE = 'Сообщение принято в очередь. Сначала отвечу на ваши предыдущие вопросы.'
+transient_sink = ContextVar('transient_sink', default=None)
 BUSY_NOTICE = 'Слишком много сообщений. Дождитесь ответа на предыдущий вопрос; это сообщение не принято в очередь.'
 
 
@@ -681,7 +683,12 @@ def menu_text(prompt, access):
     section = prompt.split(maxsplit=1)[1] if len(prompt.split(maxsplit=1)) > 1 else ''
     if access_details.get() is not None:
         sections=access_details.get().get('sections', {})
-        return {'subscription':'Подписка и подключение','server':'Сервер','ai':'AI-ассистент: напишите вопрос или выберите модель.','admin':'Администрирование Mihomo'}.get(section,'Меню Nodera') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
+        if prompt.split()[0] == '/start':
+            return 'Nodera\nВаш помощник в Telegram: управление подпиской и общение с ИИ при наличии доступа. Новые возможности появятся позже.\n\nОткройте нужный раздел кнопками ниже.'
+        return {'subscription':'Подписка и подключение\nПодписка, устройства и приложения для подключения.',
+                'server':'Сервер\nСостояние, службы и диагностика.',
+                'ai':'AI-ассистент\nНапишите вопрос или прикрепите файл. Переписка с ИИ сохраняется.',
+                'admin':'Администрирование Mihomo\nВыберите подписку или создайте новую.'}.get(section,'Меню Nodera\nВыберите нужный раздел.') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
     if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
         return 'Подписка и подключение. Выберите нужное действие ниже.'
     if section == 'server' and access is True:
@@ -697,7 +704,7 @@ def reply_keyboard(access):
             'input_field_placeholder': 'Напишите сообщение или откройте меню…'}
 
 
-def inline_keyboard(answer, prompt, access, actions):
+def inline_keyboard_content(answer, prompt, access, actions):
     """Opaque callbacks are scoped to one actor; long model IDs stay server-side."""
     rows = []
     def button(text, command):
@@ -776,6 +783,42 @@ def inline_keyboard(answer, prompt, access, actions):
     return {'inline_keyboard': rows} if rows else None
 
 
+def inline_keyboard(answer, prompt, access, actions):
+    markup = inline_keyboard_content(answer, prompt, access, actions)
+    detail = access_details.get()
+    command = prompt.split()[0].split('@')[0].lower()
+    if detail is None or not command.startswith('/') or command == '/ai': return markup
+    if profile_state.get() in ('new', 'name', 'birthdate') and (command_view.get() or {}).get('buttons'): return markup
+    rows = (markup or {}).get('inline_keyboard', [])
+    targets = set(actions.values())
+    section = ('subscription' if command in ('/subscription','/profile','/devices','/apps','/connect') else
+               'server' if command in ('/status','/resources','/services','/components','/network','/security','/logs','/logfile','/diagnostics') else
+               'admin' if command in ('/admin','/confirm','/cancel','/operation') else
+               'ai' if command in ('/model','/models') else None)
+    navigation = []
+    def add(label, target):
+        if target in targets: return
+        key = secrets.token_hex(8); actions[key] = target
+        navigation.append({'text':label, 'callback_data':'nd:' + key})
+    if command == '/apps' and len(prompt.split()) > 1: add('← Платформы','/apps')
+    elif command == '/logfile': add('← Журналы','/logs')
+    elif section and detail.get('sections',{}).get(section) and command != '/menu': add('← Назад','/menu ' + section)
+    if command not in ('/menu','/start','/help','/_refresh_menu'):
+        add('Главное меню','/menu')
+    if navigation: rows.append(navigation)
+    return {'inline_keyboard':rows} if rows else None
+
+
+def bot_message(text):
+    """One compact heading style for bot screens; model replies bypass this."""
+    lines = text.strip().splitlines()
+    if not lines: return text
+    heading = re.sub(r'^#{1,6}\s*', '', lines[0].strip()).replace('**','')
+    if len(heading) > 100: return text
+    body = '\n'.join(lines[1:]).strip()
+    return '**' + heading + '**' + ('\n\n' + body if body else '')
+
+
 async def bot(settings):
     if not settings['modules']['nodera-bot'] or not settings.get('bot_token'):
         raise ValueError('Нужен токен включённого NoderaBot')
@@ -801,6 +844,11 @@ async def bot(settings):
         while len(ui_messages)>1000: ui_messages.pop(next(iter(ui_messages)))
         temporary=ui_file.with_suffix('.tmp')
         temporary.write_text(json.dumps(ui_messages),encoding='utf-8'); temporary.chmod(0o600); temporary.replace(ui_file)
+    def remember_notice(actor, sent):
+        if not isinstance(sent,dict) or type(sent.get('message_id')) is not int: return
+        previous = ui_messages.get(str(actor), [])
+        identities = list(previous) if isinstance(previous,list) else [previous]
+        remember_ui(actor, identities + [sent['message_id']])
     async def deliver(sender, prompt, messages=None, alert=None, context=None):
         actor = sender['id']
         try: access = await identify(settings, sender)
@@ -819,11 +867,18 @@ async def bot(settings):
             except Exception: logging.error('NoderaBot private command menu could not be updated')
         cached = delivery_record.get()
         cached_row = inbox.read(cached) if cached else {}
-        deterministic = not messages and not alert and (prompt.startswith('/') and not prompt.startswith(('/ai','/confirm','/cancel','/operation')) or profile_state.get() in ('name','birthdate') or (access_details.get() or {}).get('admin_dialog'))
+        command = prompt.split()[0].split('@')[0].lower() if prompt else ''
+        deterministic = cached_row.get('bot_interaction', not messages and not alert and command != '/ai' and (
+            command.startswith('/') or profile_state.get() in ('name','birthdate') or
+            (access_details.get() or {}).get('admin_dialog') or not access))
+        # Persist routing before profile/admin state advances, including lost replies.
+        if cached: inbox.amend(cached, bot_interaction=bool(deterministic))
         cleanup = list(cached_row.get('cleanup', []))
-        if not cleanup and deterministic:
-            cleanup = [ui_messages.get(str(actor)), cached_row.get('replace_message_id')]
-            if profile_state.get() in ('name','birthdate') and context and context.get('chat',{}).get('id')==actor: cleanup.append(context.get('message_id'))
+        if not cleanup:
+            previous = ui_messages.get(str(actor), [])
+            cleanup = list(previous) if isinstance(previous,list) else [previous]
+            if deterministic and context and context.get('chat',{}).get('id')==actor and context.get('from',{}).get('id')==actor:
+                cleanup.append(context.get('message_id'))
             cleanup = list(dict.fromkeys(identity for identity in cleanup if type(identity) is int and identity>0))
             if cached: inbox.amend(cached, cleanup=cleanup)
         if 'answer' in cached_row:
@@ -860,10 +915,6 @@ async def bot(settings):
                 answer = 'Доступ изменился. Откройте /menu для доступных действий.'
                 command_view.set(None)
         if not answer: return
-        if (command_view.get() or {}).get('decision_complete'):
-            identity=cached_row.get('replace_message_id')
-            if type(identity) is int and identity>0 and identity not in cleanup: cleanup.append(identity)
-            if cached: inbox.amend(cached,cleanup=cleanup)
         if cached: inbox.amend(cached, answer=answer, answer_access=access, answer_scope=access_signature(access), view=command_view.get())
         if len(callbacks) >= 1000: callbacks.clear()
         actions = {}
@@ -871,29 +922,41 @@ async def bot(settings):
         if actions:
             callbacks.setdefault(actor, {}).update(actions)
             while len(callbacks[actor]) > 256: callbacks[actor].pop(next(iter(callbacks[actor])))
-        if command_view.get() is None: answer = styled_message(direct_prompt(prompt or '') or '', answer)
+        if deterministic: answer = bot_message(answer)
         document = (command_view.get() or {}).get('document')
         sent_id = cached_row.get('sent_message_id')
+        sent_ids = list(cached_row.get('sent_message_ids', [sent_id] if sent_id else []))
         for index,chunk in enumerate(telegram_chunks(answer)):
             if index < cached_row.get('sent', 0): continue
             if document and index==0:
                 sent = await bot_api(settings,'sendDocument',chat_id=actor,document=document,caption=chunk[:1000],parse_mode='HTML',reply_markup=markup or reply_keyboard(access))
             else:
                 sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=markup if index==0 and markup else reply_keyboard(access))
-            if isinstance(sent,dict) and type(sent.get('message_id')) is int: sent_id=sent['message_id']
-            if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id)
-        if deterministic and sent_id: remember_ui(actor,sent_id)
-        elif ui_messages.get(str(actor)) in cleanup: remember_ui(actor,None)
+            if isinstance(sent,dict) and type(sent.get('message_id')) is int:
+                sent_id=sent['message_id']; sent_ids.append(sent_id)
+            if cached: inbox.amend(cached, sent=index + 1, sent_message_id=sent_id, sent_message_ids=sent_ids)
+        previous = ui_messages.get(str(actor), [])
+        cleanup = list(dict.fromkeys(cleanup + (previous if isinstance(previous,list) else [previous])))
+        if cached: inbox.amend(cached,cleanup=cleanup)
+        remember_ui(actor,sent_ids if deterministic else None)
         for identity in cleanup:
-            if identity==sent_id: continue
+            if identity in sent_ids: continue
             try: await bot_api(settings,'deleteMessage',chat_id=actor,message_id=identity)
             except Exception:
+                try: await bot_api(settings,'editMessageReplyMarkup',chat_id=actor,message_id=identity,reply_markup={'inline_keyboard':[]})
+                except Exception: pass
+        if (command_view.get() or {}).get('decision_complete'):
+            identity = cached_row.get('replace_message_id')
+            # Confirmations originating in an AI answer disable its buttons,
+            # while the answer itself remains part of the conversation.
+            if type(identity) is int and identity>0 and identity not in cleanup:
                 try: await bot_api(settings,'editMessageReplyMarkup',chat_id=actor,message_id=identity,reply_markup={'inline_keyboard':[]})
                 except Exception: pass
     async def deliver_saved(row, key):
         identity = incoming_request.set(row['request_id'])
         cached = delivery_record.set(key)
         detail_token=access_details.set(None); view_token=command_view.set(None)
+        sink_token=transient_sink.set(remember_notice)
         try:
             if row.get('edited'):
                 await remember_incoming(settings, row['context']); return
@@ -905,7 +968,7 @@ async def bot(settings):
                 for message in messages: await remember_incoming(settings, message)
             await deliver(row['sender'], prompt, messages, row.get('alert'), context=row.get('context'))
         finally:
-            incoming_request.reset(identity); delivery_record.reset(cached); access_details.reset(detail_token); command_view.reset(view_token)
+            incoming_request.reset(identity); delivery_record.reset(cached); access_details.reset(detail_token); command_view.reset(view_token); transient_sink.reset(sink_token)
     async def flush_inbox():
         while True:
             try: inbox.pump(dispatcher, deliver_saved)
@@ -976,7 +1039,8 @@ async def bot(settings):
                         if len(notices) > 1000: notices = {actor: time.monotonic()}
                         try: await identify(settings, sender)
                         except ContactBlocked: continue
-                        await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
+                        sent = await bot_api(settings, 'sendMessage', chat_id=actor, text=telegram_html(notice('Сообщение в очереди' if accepted else 'Очередь заполнена', QUEUE_NOTICE if accepted else BUSY_NOTICE, '⏳')), parse_mode='HTML')
+                        remember_notice(actor,sent)
                 if updates:
                     offset = max(offset, max(update['update_id'] for update in updates) + 1)
                     temporary = state_file.with_suffix('.tmp')

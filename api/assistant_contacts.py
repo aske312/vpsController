@@ -228,7 +228,7 @@ def profile_dialog(api, settings, actor, payload):
             contact = merged_contact(known, value)
             date = contact.get('birthdate')
             date_text = f"{date['day']:02}.{date['month']:02}" + (f".{date['year']}" if date.get('year') else '') if date else 'не указана'
-            output = {'text': 'Профиль Nodera\nИмя: ' + (value.get('display_name') or contact.get('name') or 'не указано') + '\nДата рождения: ' + date_text + '\n/setup — изменить профиль.'}
+            output = {'text': 'Мой профиль\nИмя: ' + (value.get('display_name') or contact.get('name') or 'не указано') + '\nДата рождения: ' + date_text}
         elif step in ('name','birthdate') and command.startswith('/') and command not in ('/start','/setup','/skip','/skipall'):
             value['onboarding']='done'
             save_profile(api,settings,actor,value)
@@ -236,7 +236,7 @@ def profile_dialog(api, settings, actor, payload):
         elif command == '/setup' or command == '/start' and step in ('new', 'name', 'birthdate'):
             if command == '/setup' or step == 'new': step = 'name'
         elif command == '/start':
-            return {'text':'Здравствуйте! /myprofile — ваш профиль Nodera, /setup — заполнить заново, /id — ваш Telegram ID.'} if not roles.effective(settings, actor) else {'text':None}
+            return {'text':None} if roles.effective(settings, actor) else {'text':'Nodera\nВаш помощник в Telegram: управление подпиской и общение с ИИ при наличии доступа. Новые возможности появятся позже.', 'buttons':[[{'text':'Мой профиль','command':'/myprofile'},{'text':'Мой ID','command':'/id'}]]}
         elif command == '/skipall' and step in ('name', 'birthdate'):
             step = 'done'
         elif step == 'name' and (command == '/skip' or text and not command.startswith('/')):
@@ -262,6 +262,8 @@ def profile_dialog(api, settings, actor, payload):
             output = {'text': ('Профиль Nodera · знакомство\nКак к вам обращаться? Напишите имя.\n' if step == 'name' else
                               'Профиль Nodera · дата рождения\nНапишите ДД.ММ.ГГГГ или ДД.ММ без года.\n' if step == 'birthdate' else
                               'Профиль Nodera сохранён.')}
+            if command == '/start' and step == 'name':
+                output['text'] = 'Nodera\nВаш помощник в Telegram: управление подпиской и общение с ИИ при наличии доступа. Новые возможности появятся позже.\n\nКак к вам обращаться? Напишите имя или нажмите «Пропустить».'
         output['buttons'] = [[{'text':'Изменить профиль','command':'/setup'}]] if command=='/myprofile' else [[{'text':'Пропустить','command':'/skip'}]] if step in ('name','birthdate') else [[{'text':'Мой профиль','command':'/myprofile'}]]
         receipts = dict(value.get('receipts', {})); receipts[payload.request_id] = {'fingerprint':fingerprint, 'output':output}
         value['receipts'] = dict(list(receipts.items())[-32:])

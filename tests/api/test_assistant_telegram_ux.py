@@ -17,6 +17,23 @@ bot = load_module('telegram_ux_bot', 'protocol-images/nodera-bot/bot.py')
 
 
 class TelegramViewsTests(unittest.TestCase):
+    def test_screens_share_one_heading_style_without_reformatting_body(self):
+        self.assertEqual(bot.telegram_html(bot.bot_message('🔗 **Моя подписка**\nhttps://example.org/s/test')),
+                         '<b>🔗 Моя подписка</b>\n\nhttps://example.org/s/test')
+
+    def test_application_links_have_platform_navigation_and_guest_stays_scoped(self):
+        detail=bot.access_details.set({'permissions':['subscriptions_read'],'sections':{'subscription':True}})
+        view=bot.command_view.set({'buttons':[[{'text':'Nodera','url':'https://github.com/aske312/NoderaClient'}]]})
+        try:
+            actions={}; markup=bot.inline_keyboard('Windows','/apps windows','subscription',actions)
+            self.assertEqual(set(actions.values()),{'/apps','/menu'})
+            self.assertEqual(markup['inline_keyboard'][0][0]['url'],'https://github.com/aske312/NoderaClient')
+            bot.command_view.set(None)
+            bot.access_details.set({'permissions':[],'sections':{}})
+            actions={}; bot.inline_keyboard('My ID','/id',False,actions)
+            self.assertEqual(set(actions.values()),{'/menu'})
+        finally: bot.access_details.reset(detail); bot.command_view.reset(view)
+
     payload = fixtures.ServerCommandTests.payload
     save = fixtures.ServerCommandTests.save
     enabled_bot = fixtures.ServerCommandTests.enabled_bot
@@ -193,6 +210,8 @@ class TelegramViewsTests(unittest.TestCase):
                 with self.assertRaises(asyncio.CancelledError): await asyncio.wait_for(bot.bot(control.read(api)),15)
         asyncio.run(run())
         self.assertEqual(len(sent),4)
+        self.assertIn('Ваш помощник в Telegram',sent[0]['text'])
+        self.assertTrue({1,2,3,4} <= {row['message_id'] for row in deleted})
         for message in sent[:2]:
             buttons=message['reply_markup']['inline_keyboard']
             self.assertEqual([item['text'] for row in buttons for item in row],['Пропустить'])

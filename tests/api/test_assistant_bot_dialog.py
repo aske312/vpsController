@@ -12,6 +12,40 @@ bot = load_module('assistant_dialog_bot', 'protocol-images/nodera-bot/bot.py')
 
 
 class BotDialogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_commands_and_all_screen_chunks_are_removed_but_ai_conversation_stays(self):
+        sent, deleted = [], []
+        steps = ('/status', '/ai Explain', 'Another question', '/confirm abcdef12', '/menu')
+        polls = 0
+        async def transport(settings, method, **payload):
+            nonlocal polls
+            if method == 'getWebhookInfo': return {}
+            if method == 'getUpdates':
+                if polls:
+                    async with asyncio.timeout(5):
+                        while len(sent) < polls + 1: await asyncio.sleep(.01)
+                    await asyncio.sleep(.02)
+                if polls == len(steps): raise asyncio.CancelledError()
+                polls += 1
+                return [{'update_id':polls, 'message':{'message_id':polls,'from':{'id':11},
+                        'chat':{'id':11,'type':'private'},'text':steps[polls-1]}}]
+            if method == 'sendMessage':
+                sent.append(payload)
+                return {'message_id':100+len(sent)}
+            if method == 'deleteMessage': deleted.append(payload['message_id'])
+            return True
+        async def server(settings, actor, command):
+            return 'Status\n' + 'x' * 4000 if command == '/status' else 'Confirmed'
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'STATE_DIRECTORY':folder}), \
+             patch.object(bot,'bot_api',side_effect=transport), patch.object(bot,'identify',new=AsyncMock(return_value=True)), \
+             patch.object(bot,'remember_incoming',new=AsyncMock()), patch.object(bot,'command_menu',new=AsyncMock()), \
+             patch.object(bot,'server_command',side_effect=server), patch.object(bot,'agent_request',new=AsyncMock(return_value='AI answer')):
+            with self.assertRaises(asyncio.CancelledError): await asyncio.wait_for(bot.bot({'modules':{'nodera-bot':True},'bot_token':'fixture'}),15)
+        self.assertTrue({1,4,5,101,102,105}.issubset(deleted), deleted)
+        self.assertTrue({2,3,103,104}.isdisjoint(deleted), deleted)
+        self.assertEqual(sent[2]['text'],'AI answer')
+        self.assertEqual(sent[3]['text'],'AI answer')
+        self.assertTrue(sent[0]['text'].startswith('<b>Status</b>\n\n'))
+
     async def test_agent_transport_sends_alert_reference_and_reports_expired_buttons(self):
         actual_client = httpx.AsyncClient
         requests = []
