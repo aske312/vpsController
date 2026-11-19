@@ -3,7 +3,7 @@ import test, { after } from 'node:test';
 import { createTestLoader } from './vite-test-loader.mjs';
 const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
-const { historyEntries, historyErrorCount, historyMatches, historyState } = await loader.ssrLoadModule('/src/control-panel/components/operation-history-state.ts');
+const { historyEntries, historyErrorCount, historyMatches, historyPage, historyState } = await loader.ssrLoadModule('/src/control-panel/components/operation-history-state.ts');
 
 test('operation history keeps unconfirmed and failed worker results in attention', () => {
   for (const state of ['succeeded', 'finished', 'done']) {
@@ -52,4 +52,14 @@ test('error count excludes resolved, cancelled, unknown and active operations', 
   assert.equal(historyMatches(items[0], 'resolved', ''), false);
   assert.equal(historyErrorCount([{ ...resolved, resolved_at: null }]), 1);
   assert.throws(() => historyEntries({ items: [{ id: 'invalid', resolved_at: true }] }));
+});
+
+test('pages retain all records and the global error count includes older pages', () => {
+  const items = Array.from({ length: 201 }, (_, index) => ({ id: String(index), state: index === 200 ? 'failed' : 'succeeded' }));
+  assert.deepEqual([0, 1, 2].flatMap(page => historyPage(items, page).items), items);
+  assert.equal(historyPage(items, 2).items.length, 1);
+  assert.equal(historyPage(items, 10).index, 2);
+  assert.equal(historyPage([], 5).index, 0);
+  assert.equal(historyErrorCount(items), 1);
+  assert.equal(historyPage(items.filter(item => historyMatches(item, 'attention', '')), 0).items[0].id, '200');
 });

@@ -4555,14 +4555,14 @@ def application_operations(_: None = Depends(require_token)) -> dict:
         current = application_operation.read(ACTION_FILE)
         if current.get("id"):
             current = get_application_operation(current["id"], None)
-        items = [{**item, "source": "system"} for item in application_operation.history(DATA_DIR)]
+        items = [{**item, "source": "system"} for item in application_operation.history(DATA_DIR, limit=None)]
         items = [{**item, **current} if item.get("id") == current.get("id") else item for item in items]
         delegated = {(item.get("id"), item.get("action")) for item in items if item.get("id")}
         # A delegated worker shares its parent's identity. The parent owns the
         # final result, including failures after the Mihomo phase completed.
-        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo")
+        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo", limit=None)
                      if (item.get("id"), item.get("action")) not in delegated)
-        for path in sorted(cdn_operation.DIRECTORY.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:100]:
+        for path in sorted(cdn_operation.DIRECTORY.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True):
             if not re.fullmatch(r"[0-9a-f]{32}", path.stem):
                 continue
             if any(item.get("id") == path.stem for item in items):
@@ -4576,7 +4576,7 @@ def application_operations(_: None = Depends(require_token)) -> dict:
                           "state": item.get("state", "unknown"), "message": item.get("message", ""), "progress": item.get("progress"),
                           "resolved_at": item.get("resolved_at"),
                           "started_at": datetime.fromtimestamp(item["created_at"], timezone.utc).isoformat() if isinstance(item.get("created_at"), (int, float)) else None})
-        return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)[:100]}
+        return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)}
     except (OSError, ValueError):
         raise HTTPException(status_code=503, detail="История операций временно недоступна") from None
 
@@ -5260,7 +5260,7 @@ def operation_history_settings(_: None = Depends(require_token)) -> dict:
 @app.put("/api/services/operation-history")
 def update_operation_history_settings(payload: OperationHistorySettings, _: None = Depends(require_token)) -> dict:
     try:
-        operation_policy.configure(DATA_DIR, payload.model_dump(), payload.expected_revision)
+        operation_policy.configure(DATA_DIR, payload.model_dump(exclude_none=True), payload.expected_revision)
         return operation_policy.status(DATA_DIR)
     except application_operation.OperationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None

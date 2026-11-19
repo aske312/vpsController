@@ -165,6 +165,7 @@ class AutomationSchedule(BaseModel):
 
 
 class OperationHistorySettings(BaseModel):
+    max_entries: int | None = Field(default=None, ge=100, le=10000, strict=True)
     log_retention_days: int = Field(default=7, ge=1, le=730)
     log_disk_limit_mb: int = Field(default=20, ge=1, le=1024)
     retention_days: int = Field(ge=1, le=730)

@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
+import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { createApiClient } from "../../shared/lib/api-request";
 import { safeDateTime } from "../../shared/lib/control-plane-ui";
 import { notificationText } from "../../shared/notifications/operation-presentation";
 import { useNotifier } from "../../shared/notifications/notification-center";
-import { historyEntries, historyErrorCount, historyKey, historyMatches, historySource, historyState, historyTitle, type HistoryEntry, type HistoryFilter } from "./operation-history-state";
+import { historyEntries, historyErrorCount, historyKey, historyMatches, historyPage, historySource, historyState, historyTitle, type HistoryEntry, type HistoryFilter } from "./operation-history-state";
 import type { SystemAction } from "../system-operation";
 
 type Request = ReturnType<typeof createApiClient>;
+type Confirm = (options: Omit<ConfirmationRequest, "resolve">) => Promise<boolean>;
 type Journal = { events: { at: string; state: string; progress?: number; message: string; stage?: string; result?: string; error_code?: string; exit_code?: number }[]; dropped: number; available?: boolean };
 const filters: { id: HistoryFilter; label: string }[] = [{ id: "all", label: "Все" }, { id: "active", label: "В работе" }, { id: "attention", label: "Требуют внимания" }, { id: "resolved", label: "Решённые" }, { id: "completed", label: "Завершённые" }];
 
@@ -49,7 +53,7 @@ function OperationJournal({ request, entry }: { request: Request; entry: History
   </section>;
 }
 
-export function OperationHistory({ token, action }: { token: string; action?: SystemAction }) {
+export function OperationHistory({ token, action, settings, settingsRevision }: { token: string; action?: SystemAction; settings?: (confirm: Confirm) => ReactNode; settingsRevision?: string }) {
   const notify = useNotifier("operation-history", "Операции");
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -61,13 +65,17 @@ export function OperationHistory({ token, action }: { token: string; action?: Sy
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [selected, setSelected] = useState("");
   const [savingResolution, setSavingResolution] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const request = useMemo(() => createApiClient(token), [token]);
   const items = snapshot?.owner === request ? snapshot.items : null;
   const error = failure?.owner === request ? failure.message : "";
   const errorCount = items ? historyErrorCount(items) : 0;
-  const errorLabel = errorCount ? `Ошибок в последних 100 операциях: ${errorCount}${error ? "; данные устарели" : ""}` : "";
+  const errorLabel = errorCount ? `Нерешённых ошибок в истории: ${errorCount}${error ? "; данные устарели" : ""}` : "";
   const visible = items?.filter(item => historyMatches(item, filter, query)) || [];
-  const entry = visible.find(item => historyKey(item) === selected) || visible[0];
+  const pagination = historyPage(visible, page);
+  const entry = pagination.items.find(item => historyKey(item) === selected) || pagination.items[0];
   useEffect(() => { if (open) dialog.current?.showModal(); }, [open]);
   useEffect(() => {
     let cancelled = false;
@@ -86,8 +94,10 @@ export function OperationHistory({ token, action }: { token: string; action?: Sy
     void refresh();
     const timer = window.setInterval(() => void refresh(), open ? 10000 : 30000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [open, request, revision, action?.id, action?.state, action?.result]);
-  function close() { dialog.current?.close(); setOpen(false); }
+  }, [open, request, revision, action?.id, action?.state, action?.result, settingsRevision]);
+  function answerConfirmation(confirmed: boolean) { confirmation?.resolve(confirmed); setConfirmation(null); }
+  const confirmSettings: Confirm = options => new Promise(resolve => setConfirmation({ ...options, resolve }));
+  function close() { answerConfirmation(false); dialog.current?.close(); setOpen(false); }
   async function copy(entry: HistoryEntry, context = false) {
     const text = context ? `Разбери операцию ${entry.id}. Источник: ${entry.source || "system"}; действие: ${entry.action}; state=${entry.state}; result=${entry.result || "не указан"}; stage=${entry.stage || "не указан"}; error_code=${entry.error_code || "не указан"}. Начни с operation_timeline(operation_id="${entry.id}", include_journal=true). Сопоставь authoritative_result, этапы, конфликты и current_admission. Не повторяй изменяющую команду.` : entry.id || "";
     try { await navigator.clipboard.writeText(text); notify.info(context ? "Контекст для Nodera скопирован" : "ID операции скопирован"); }
@@ -107,12 +117,13 @@ export function OperationHistory({ token, action }: { token: string; action?: Sy
     <button type="button" className="ghostButton operationHistoryButton" onClick={() => setOpen(true)} title={errorLabel || undefined} aria-label={errorLabel ? `Операции. ${errorLabel}` : "Операции"}>Операции{errorCount > 0 && <span className="operationHistoryErrorCount" aria-hidden="true">{errorCount}{error ? "?" : ""}</span>}</button>
     <dialog ref={dialog} className="operationHistoryDialog" aria-labelledby="operation-history-title" onCancel={close} onClose={() => setOpen(false)}>
       <div className="operationHistoryShell">
-        <header className="operationHistoryHeader"><div><h2 id="operation-history-title">История операций</h2></div><button type="button" autoFocus onClick={close} aria-label="Закрыть историю операций">×</button></header>
+        <header className="operationHistoryHeader"><div><h2 id="operation-history-title">История операций</h2></div><div className="operationHistoryHeaderActions">{settings && <button type="button" aria-label="Настройки хранения истории" title="Настройки хранения истории" aria-expanded={settingsOpen} aria-controls="operation-history-settings" onClick={() => setSettingsOpen(value => !value)}>⚙</button>}<button type="button" autoFocus onClick={close} aria-label="Закрыть историю операций">×</button></div></header>
+        {settingsOpen ? <div id="operation-history-settings" className="operationHistorySettings">{settings?.(confirmSettings)}<button type="button" onClick={() => setSettingsOpen(false)}>Вернуться к операциям</button></div> : <>
         <div className="operationHistoryTools">
-          <label className="operationHistorySearch"><span>Найти операцию</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Название, сообщение или ID" /></label>
+          <label className="operationHistorySearch"><span>Найти операцию</span><input type="search" value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} placeholder="Название, сообщение или ID" /></label>
           <button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)}>{loading ? "Обновляем…" : "Обновить историю"}</button>
         </div>
-        <nav className="operationHistoryFilters" aria-label="Фильтр состояния операций">{filters.map(item => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}<span>{items?.filter(entry => historyMatches(entry, item.id, "")).length ?? "—"}</span></button>)}</nav>
+        <nav className="operationHistoryFilters" aria-label="Фильтр состояния операций">{filters.map(item => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => { setFilter(item.id); setPage(0); }}>{item.label}<span>{items?.filter(entry => historyMatches(entry, item.id, "")).length ?? "—"}</span></button>)}</nav>
         {error && <p className="operationHistoryNotice" role="status">{error}</p>}
         <div className="operationHistoryWorkspace">
           <section className="operationHistoryList" aria-label="Список операций" aria-busy={loading}>
@@ -120,12 +131,13 @@ export function OperationHistory({ token, action }: { token: string; action?: Sy
             {!items && !error && <p className="operationHistoryEmpty" role="status">Загрузка истории…</p>}
             {items?.length === 0 && <p className="operationHistoryEmpty">Сохранённых операций пока нет.</p>}
             {Boolean(items?.length) && visible.length === 0 && <div className="operationHistoryEmpty"><p>По вашему запросу операций нет.</p><button type="button" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}
-            {visible.map(item => <button type="button" className="operationHistoryItem" key={historyKey(item)} aria-pressed={entry && historyKey(entry) === historyKey(item)} onClick={() => setSelected(historyKey(item))}>
+            {pagination.items.map(item => <button type="button" className="operationHistoryItem" key={historyKey(item)} aria-pressed={entry && historyKey(entry) === historyKey(item)} onClick={() => setSelected(historyKey(item))}>
               <span className={`operationState ${historyState(item).tone}`}>{historyState(item).label}</span><strong>{historyTitle(item)}</strong>
               <span className="operationHistoryItemMeta"><time>{safeDateTime(item.started_at || item.updated_at)}</time><span>{historySource(item)}</span></span>
               {item.id && <code title={item.id}>{item.id.slice(0, 12)}</code>}
               {item.message && <span className="operationHistoryExcerpt">{notificationText(item.message)}</span>}
             </button>)}
+            {pagination.pages > 1 && <nav className="operationHistoryPagination" aria-label="Страницы истории"><button type="button" disabled={pagination.index === 0} onClick={() => { setPage(pagination.index - 1); setSelected(""); }}>Назад</button><span>{pagination.index + 1} / {pagination.pages}</span><button type="button" disabled={pagination.index === pagination.pages - 1} onClick={() => { setPage(pagination.index + 1); setSelected(""); }}>Далее</button></nav>}
           </section>
           <section className="operationHistoryDetail" aria-label="Выбранная операция" aria-live="polite">
             {entry && presentation ? <>
@@ -142,8 +154,10 @@ export function OperationHistory({ token, action }: { token: string; action?: Sy
             </> : <p className="operationHistoryEmpty">{items?.length ? "Выберите другой фильтр или измените запрос." : "Здесь появятся результат и этапы выбранной операции."}</p>}
           </section>
         </div>
-        <footer className="operationHistoryFooter"><span>Последние 100 записей · автообновление каждые 10 с{snapshot?.owner === request ? ` · ${snapshot.at.toLocaleTimeString("ru-RU")}` : ""}</span><span>Закрытие окна не останавливает операции.</span></footer>
+        </>}
+        <footer className="operationHistoryFooter"><span>Сохранено записей: {items?.length ?? "—"} · автообновление каждые 10 с{snapshot?.owner === request ? ` · ${snapshot.at.toLocaleTimeString("ru-RU")}` : ""}</span><span>Закрытие окна не останавливает операции.</span></footer>
       </div>
+      {confirmation && <ConfirmationDialog request={confirmation} onClose={answerConfirmation} />}
     </dialog>
   </>;
 }

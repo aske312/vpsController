@@ -42,9 +42,23 @@ function mount(request) {
     return result;
   };
 }
-const policy = (revision, days = 30) => ({ revision, retention_days: days, disk_limit_mb: 64, log_retention_days: 30, log_disk_limit_mb: 128, sources: {} });
+const policy = (revision, days = 30) => ({ revision, max_entries: 1000, retention_days: days, disk_limit_mb: 64, log_retention_days: 30, log_disk_limit_mb: 128, sources: {} });
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+
+test('reducing the operation count asks confirmation and persists the chosen limit', async () => {
+  let body, confirmations = 0;
+  const render = mount(async (_path, init) => {
+    if (init?.method) { body = JSON.parse(init.body); return { ...policy('saved'), max_entries: body.max_entries }; }
+    return policy('first');
+  });
+  render(); await flush(); let view = render();
+  view.change({ max_entries: 500 }); view = render();
+  await view.save(async () => { confirmations++; return true; });
+  assert.equal(confirmations, 1);
+  assert.equal(body.max_entries, 500);
+  assert.equal(render().draft.max_entries, 500);
+});
 
 test('refresh updates a clean history form and preserves explicit edits with their original revision', async () => {
   let next = policy('first');

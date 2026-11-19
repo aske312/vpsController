@@ -58,6 +58,29 @@ class OperationPolicyTests(unittest.TestCase):
         self.assertEqual(status["sources"]["system"]["used_bytes"], path.stat().st_size)
         self.assertFalse(status["sources"]["mihomo"]["over_limit"])
 
+    def test_count_limit_removes_oldest_terminal_records_but_keeps_protected_ones(self):
+        policy.configure(self.root, {'retention_days': 730, 'disk_limit_mb': 20, 'max_entries': 100}, policy.DEFAULTS['revision'])
+        for base, directory in ((self.root, self.root / 'operations'), (self.root, self.root / 'cdn-operations'),
+                                (self.root / 'mihomo', self.root / 'mihomo/operations')):
+            records = [self.record(directory, n, 'failed' if n % 2 else 'succeeded') for n in range(1, 108)]
+            for index, path in enumerate(records):
+                at = time.time() - 1000 + index
+                os.utime(path, (at, at))
+            protected = [self.record(directory, 200 + n, state) for n, state in enumerate(('running', 'unknown', 'queued'))]
+            operations.prune(base, records[0].stem, directory=directory)
+            self.assertTrue(records[0].exists())
+            self.assertFalse(records[1].exists())
+            self.assertTrue(all(path.exists() for path in protected))
+            self.assertEqual(len(list(directory.glob('*.json'))), 100)
+
+    def test_legacy_policy_gains_count_default_and_invalid_count_never_overwrites_it(self):
+        saved = policy.configure(self.root, {'retention_days': 90, 'disk_limit_mb': 20}, policy.DEFAULTS['revision'])
+        self.assertEqual(saved['max_entries'], 1000)
+        for value in (True, 99, 10001, None):
+            with self.assertRaises(ValueError):
+                policy.configure(self.root, {**saved, 'max_entries': value}, saved['revision'])
+            self.assertEqual(policy.read(self.root), saved)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -78,3 +78,16 @@ class OperationResolutionTests(unittest.TestCase):
         self.assertEqual(item['state'], 'failed')
         self.assertEqual(item['message'], 'Original failure')
         self.assertTrue(item['resolved_at'])
+
+    def test_history_includes_records_beyond_100_from_each_source(self):
+        for index in range(105):
+            for folder in ('operations', 'mihomo/operations', 'cdn-operations'):
+                # Separate identities prevent delegated-worker deduplication.
+                offset = {'operations': 0, 'mihomo/operations': 1000, 'cdn-operations': 2000}[folder]
+                key = f'{index + offset:032x}'
+                operations.atomic_json(self.root / folder / (key + '.json'), {'id': key, 'action': 'ui-error-test', 'state': 'failed', 'started_at': '2026-11-19T12:00:00Z'})
+        with patch.object(api, 'DATA_DIR', self.root), patch.object(api, 'ACTION_FILE', self.root / 'application-action.json'), patch.object(api.cdn_operation, 'DIRECTORY', self.root / 'cdn-operations'):
+            items = api.application_operations(None)['items']
+        self.assertEqual(len(items), 315)
+        for source in ('system', 'mihomo', 'cdn'):
+            self.assertEqual(sum(item['source'] == source for item in items), 105)

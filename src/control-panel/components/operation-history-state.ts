@@ -37,6 +37,11 @@ export function historyState(entry: HistoryEntry) {
 export function historyErrorCount(entries: HistoryEntry[]) {
   return entries.filter(entry => operationOutcome(entry) === "error" && !entry.resolved_at).length;
 }
+export function historyPage(entries: HistoryEntry[], page: number) {
+  const pages = Math.max(1, Math.ceil(entries.length / 100));
+  const index = Math.max(0, Math.min(page, pages - 1));
+  return { items: entries.slice(index * 100, (index + 1) * 100), index, pages };
+}
 function historyResultState(entry: HistoryEntry) {
   const outcome = operationOutcome(entry);
   return outcome === "active" ? entry.state! : outcome === "success" ? "succeeded" : outcome === "error" ? "failed" : outcome;

@@ -345,7 +345,7 @@ def write_status(data_dir: Path, action_file: Path, action: str, state: str, pro
         return value
 
 
-def history(data_dir: Path, limit: int = 100) -> list[dict]:
+def history(data_dir: Path, limit: int | None = 100) -> list[dict]:
     paths = sorted((path for path in (data_dir / "operations").glob("*.json") if re.fullmatch(r"[0-9a-f]{32}", path.stem)), key=lambda path: path.stat().st_mtime, reverse=True)
     items = []
     for path in paths[:limit]:
@@ -384,6 +384,7 @@ def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_bu
             continue
     paths = sorted((directory or data_dir / "operations").glob("*.json"), key=lambda path: path.stat().st_mtime)
     total = sum(path.stat().st_size for path in paths)
+    count = sum(bool(re.fullmatch(r"[0-9a-f]{32}", path.stem)) and not path.is_symlink() for path in paths)
     threshold = time.time() - retention_days * 86400
     for path in paths:
         if path.stem in protected_ids or path.is_symlink() or not re.fullmatch(r"[0-9a-f]{32}", path.stem):
@@ -393,7 +394,7 @@ def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_bu
         except OperationConflict:
             continue
         details = path.stat()
-        if value.get("state") in TERMINAL and (details.st_mtime < threshold or total > byte_budget):
+        if value.get("state") in TERMINAL and (details.st_mtime < threshold or total > byte_budget or count > policy['max_entries']):
             if directory is None:
                 payload = data_dir / "operation-inputs" / f"{path.stem}.json"
                 if payload.is_symlink():
@@ -404,6 +405,7 @@ def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_bu
                     continue
             path.unlink()
             total -= details.st_size
+            count -= 1
 
 
 def reconcile(data_dir: Path, action_file: Path, value: dict, observe) -> dict:

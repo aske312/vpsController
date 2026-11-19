@@ -87,6 +87,10 @@
   .gateOperationTrack > i { transition:none; }
 }
 .operationHistoryButton { display:inline-flex; align-items:center; gap:6px; }
+.operationHistoryHeaderActions { display:flex; gap:8px; }
+.operationHistorySettings { flex:1; min-height:0; overflow:auto; padding:0 24px 24px; }
+.operationHistorySettings .servicesHistory { margin:0 0 16px; }
+.operationHistoryPagination { display:flex; align-items:center; justify-content:space-between; position:sticky; bottom:0; padding:10px; background:#0b151e; border-top:1px solid #334653; }
 .operationResolution { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .operationResolution small { color:#9cb0bf; }
 .operationHistoryErrorCount { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border:1px solid #b45c60; border-radius:9px; background:#4a242d; color:#ffc0c4; font-size:10px; font-weight:700; font-variant-numeric:tabular-nums; }

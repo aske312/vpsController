@@ -1455,7 +1455,7 @@ export function ControlPanel() {
     viewLoading={viewLoading}
     onRefresh={() => void refreshCurrent(true, true)}
     onLogout={() => { void (async () => { if (await canLeaveSection()) { invalidateApiSession(token, false); clearSession(); } })(); }}
-    operationHistory={<OperationHistory token={token} action={application?.action} />}
+    operationHistory={<OperationHistory token={token} action={application?.action} settingsRevision={operationHistoryPolicy.saved?.revision} settings={confirm => <OperationHistorySettings policy={operationHistoryPolicy} confirm={confirm} busy={busy} />} />}
   >
       {tab !== "overview" && tab !== "network" && tab !== "nodera" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
