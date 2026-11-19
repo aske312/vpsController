@@ -7,9 +7,10 @@ import { notificationText } from "../../shared/notifications/operation-presentat
 import { useNotifier } from "../../shared/notifications/notification-center";
 import { historyEntries, historyErrorCount, historyKey, historyMatches, historyPage, historySource, historyState, historyTitle, type HistoryEntry, type HistoryFilter } from "./operation-history-state";
 import type { SystemAction } from "../system-operation";
+import { OperationSavedJournal, type SavedOperationJournal } from "./operation-saved-journal";
 
 type Request = ReturnType<typeof createApiClient>;
-type Journal = { events: { at: string; state: string; progress?: number; message: string; stage?: string; result?: string; error_code?: string; command?: string; dependency?: string; exit_code?: number; duration_ms?: number }[]; dropped: number; available?: boolean; evidence?: { captured_at: string; available: boolean; reason?: string; truncated?: boolean; unit?: string; lines: { at: string; message: string }[] } };
+type Journal = { events: { at: string; state: string; progress?: number; message: string; stage?: string; result?: string; error_code?: string; command?: string; dependency?: string; exit_code?: number; duration_ms?: number }[]; dropped: number; available?: boolean; evidence?: SavedOperationJournal };
 const filters: { id: HistoryFilter; label: string }[] = [{ id: "all", label: "Все" }, { id: "active", label: "В работе" }, { id: "attention", label: "Требуют внимания" }, { id: "resolved", label: "Решённые" }, { id: "completed", label: "Завершённые" }];
 
 function OperationJournal({ request, entry }: { request: Request; entry: HistoryEntry }) {
@@ -29,7 +30,7 @@ function OperationJournal({ request, entry }: { request: Request; entry: History
         if (!value || !Array.isArray(value.events) || value.events.some(event => !event || typeof event.at !== "string" || typeof event.state !== "string" || typeof event.message !== "string")) throw Error("Invalid journal");
         if (value.evidence && (!Array.isArray(value.evidence.lines) || typeof value.evidence.captured_at !== "string" || value.evidence.lines.some(line => !line || typeof line.at !== "string" || typeof line.message !== "string"))) throw Error("Invalid evidence snapshot");
         if (!cancelled) { setJournal(value); setError(""); }
-      } catch { if (!cancelled) setError("Не удалось обновить журнал. Показаны последние полученные этапы."); }
+      } catch { if (!cancelled) setError("Журнал не обновлён."); }
       finally { pending = false; if (!cancelled) setLoading(false); }
     }
     void load();
@@ -39,16 +40,16 @@ function OperationJournal({ request, entry }: { request: Request; entry: History
   return <section className="operationJournal" aria-label="Этапы выбранной операции">
     <div className="operationJournalHeading"><h4>Этапы выполнения</h4><button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)}>{loading ? "Загрузка…" : "Обновить этапы"}</button></div>
     {error && <p className="operationHistoryNotice" role="status">{error}</p>}
-    {!journal && !error && <p role="status">Загружаем этапы операции…</p>}
-    {journal?.available === false ? <p>Журнал ещё не создан или удалён по сроку хранения.</p> : journal?.events.length === 0 && <p>Записанных этапов пока нет.</p>}
-    {Boolean(journal?.dropped) && <p className="operationHistoryNotice">Ранние этапы сокращены по лимиту журнала.</p>}
+    {!journal && !error && <p role="status">Загрузка…</p>}
+    {journal?.available === false ? <p>Журнал недоступен.</p> : journal?.events.length === 0 && <p>Нет этапов.</p>}
+    {Boolean(journal?.dropped) && <p className="operationHistoryNotice">Пропущено этапов: {journal?.dropped}</p>}
     <ol className="operationTimeline">{journal?.events.map((event, index) => <li key={`${event.at}:${index}`}>
       <div><time>{safeDateTime(event.at)}</time><span className={`operationState ${historyState({ state: event.state }).tone}`}>{historyState({ state: event.state }).label}</span></div>
       <p>{notificationText(event.message) || "Состояние обновлено"}</p>
       <small>{event.stage && `Этап: ${event.stage}`}{event.result && ` · результат этапа: ${event.result}`}{event.error_code && ` · ${event.error_code}`}{typeof event.exit_code === "number" && ` · exit ${event.exit_code}`}</small>
       {event.command && <small><code>{event.command}{event.dependency ? ` · ${event.dependency}` : ""}</code>{typeof event.duration_ms === "number" ? ` · ${Math.round(event.duration_ms)} мс` : ""}</small>}
     </li>)}</ol>
-    {journal?.evidence && <details className="operationSavedEvidence" open><summary>Сохранённый журнал службы{journal.evidence.unit ? ` · ${journal.evidence.unit}` : ""}</summary><small>Собран {safeDateTime(journal.evidence.captured_at)}. Фрагмент ограничен временем операции и размером; поздние сообщения и утраченные записи могут отсутствовать.</small>{journal.evidence.available ? <pre>{journal.evidence.lines.map(line => `${safeDateTime(line.at)} ${line.message}`).join("\n")}</pre> : <p>Записи недоступны: служба не указана, журнал уже очищен или сбор не удался.</p>}{journal.evidence.truncated && <small>Показан ограниченный фрагмент журнала.</small>}</details>}
+    {journal?.evidence && <OperationSavedJournal evidence={journal.evidence} />}
   </section>;
 }
 
@@ -85,7 +86,7 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
         const entries = historyEntries(value);
         if (!cancelled) { setSnapshot({ owner: request, items: entries, at: new Date() }); setFailure(null); }
       } catch {
-        if (!cancelled) setFailure({ owner: request, message: "История временно недоступна. Ранее полученные записи могут быть устаревшими." });
+        if (!cancelled) setFailure({ owner: request, message: "История не обновлена." });
       } finally { pending = false; if (!cancelled) setLoading(false); }
     };
     void refresh();
@@ -96,7 +97,7 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
   async function copy(entry: HistoryEntry, context = false) {
     const text = context ? `Разбери операцию ${entry.id}. Источник: ${entry.source || "system"}; действие: ${entry.action}; state=${entry.state}; result=${entry.result || "не указан"}; stage=${entry.stage || "не указан"}; error_code=${entry.error_code || "не указан"}. Начни с operation_timeline(operation_id="${entry.id}", include_journal=true). Сопоставь authoritative_result, этапы, конфликты и current_admission. Не повторяй изменяющую команду.` : entry.id || "";
     try { await navigator.clipboard.writeText(text); notify.info(context ? "Контекст для Nodera скопирован" : "ID операции скопирован"); }
-    catch { notify.error("Не удалось скопировать. ID можно выделить в карточке операции."); }
+    catch { notify.error("Не удалось скопировать."); }
   }
   async function resolve(entry: HistoryEntry) {
     setSavingResolution(true);
@@ -104,7 +105,7 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
       const value = await request<{ resolved_at: string | null; resolution_review?: HistoryEntry["resolution_review"] }>(`/application/operations/${entry.id}/resolution?source=${entry.source || "system"}`, { method: "PUT", body: JSON.stringify({ resolved: !entry.resolved_at }) });
       setSnapshot(current => current?.owner === request ? { ...current, items: current.items.map(item => historyKey(item) === historyKey(entry) ? { ...item, resolved_at: value.resolved_at, resolution_review: value.resolution_review } : item) } : current);
       setRevision(value => value + 1);
-    } catch { notify.error("Не удалось сохранить отметку. Обновите историю и попробуйте ещё раз."); }
+    } catch { notify.error("Не удалось сохранить отметку."); }
     finally { setSavingResolution(false); }
   }
   const presentation = entry ? historyState(entry) : null;
@@ -124,7 +125,7 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
             <div className="operationHistoryListHeading"><span>{visible.length} из {items?.length ?? "—"}</span><span>Сначала новые</span></div>
             {!items && !error && <p className="operationHistoryEmpty" role="status">Загрузка истории…</p>}
             {items?.length === 0 && <p className="operationHistoryEmpty">Сохранённых операций пока нет.</p>}
-            {Boolean(items?.length) && visible.length === 0 && <div className="operationHistoryEmpty"><p>По вашему запросу операций нет.</p><button type="button" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}
+            {Boolean(items?.length) && visible.length === 0 && <div className="operationHistoryEmpty"><p>Ничего не найдено.</p><button type="button" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}
             {pagination.items.map(item => <button type="button" className="operationHistoryItem" key={historyKey(item)} aria-pressed={entry && historyKey(entry) === historyKey(item)} onClick={() => setSelected(historyKey(item))}>
               <span className={`operationState ${historyState(item).tone}`}>{historyState(item).label}</span><strong>{historyTitle(item)}</strong>
               <span className="operationHistoryItemMeta"><time>{safeDateTime(item.started_at || item.updated_at)}</time><span>{historySource(item)}</span></span>
@@ -141,15 +142,15 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
 
 
               {entry.message && <p className={`operationHistoryResult ${presentation.tone}`}>{notificationText(entry.message)}</p>}
-              {entry.resolved_at && entry.resolution_review?.by === "assistant" && <p className="operationHistoryResult">Отметка ИИ после проверки: {entry.resolution_review.note}</p>}
-              {entry.id && (presentation.tone === "error" || entry.resolved_at) && <div className="operationResolution"><label className="operationResolutionSwitch"><input type="checkbox" role="switch" aria-label="Операция решена" checked={Boolean(entry.resolved_at)} disabled={savingResolution} onChange={() => void resolve(entry)} /><span aria-hidden="true" /><strong>{savingResolution ? "Сохранение…" : entry.resolved_at ? "Решено" : "Не решено"}</strong></label><small>{entry.resolved_at ? `Отмечена решённой ${safeDateTime(entry.resolved_at)}. Результат и журнал сохранены.` : "Отметка уберёт ошибку из счётчика и сохранит её в истории."}</small></div>}
+              {entry.resolved_at && entry.resolution_review?.by === "assistant" && <p className="operationHistoryResult">Проверка ИИ: {entry.resolution_review.note}</p>}
+              {entry.id && (presentation.tone === "error" || entry.resolved_at) && <div className="operationResolution"><label className="operationResolutionSwitch"><input type="checkbox" role="switch" aria-label="Операция решена" checked={Boolean(entry.resolved_at)} disabled={savingResolution} onChange={() => void resolve(entry)} /><span aria-hidden="true" /><strong>{savingResolution ? "Сохранение…" : entry.resolved_at ? "Решено" : "Не решено"}</strong></label>{entry.resolved_at && <time dateTime={entry.resolved_at}>{safeDateTime(entry.resolved_at)}</time>}</div>}
               {presentation.tone === "active" && Number.isFinite(entry.progress) && <div className="operationHistoryProgress"><progress max={100} value={Math.max(0, Math.min(100, entry.progress!))} aria-label="Ход операции" /><span>{Math.round(Math.max(0, Math.min(100, entry.progress!)))}%</span></div>}
               {open && entry.id && <OperationJournal key={`${token}:${historyKey(entry)}`} request={request} entry={entry} />}
               <details className="operationHistoryTechnical"><summary>Технические сведения</summary><dl>{entry.id && <><dt>ID операции</dt><dd><code>{entry.id}</code></dd></>}{entry.unit && <><dt>Процесс</dt><dd><code>{entry.unit}</code></dd></>}<dt>Обновлена</dt><dd>{safeDateTime(entry.updated_at || entry.started_at)}</dd></dl></details>
-            </> : <p className="operationHistoryEmpty">{items?.length ? "Выберите другой фильтр или измените запрос." : "Здесь появятся результат и этапы выбранной операции."}</p>}
+            </> : <p className="operationHistoryEmpty">Нет операций.</p>}
           </section>
         </div>
-        <footer className="operationHistoryFooter"><span>Сохранено записей: {items?.length ?? "—"} · автообновление каждые 10 с{snapshot?.owner === request ? ` · ${snapshot.at.toLocaleTimeString("ru-RU")}` : ""}</span><span>Закрытие окна не останавливает операции.</span></footer>
+        <footer className="operationHistoryFooter"><span>Записей: {items?.length ?? "—"}</span>{snapshot?.owner === request && <time>{snapshot.at.toLocaleTimeString("ru-RU")}</time>}</footer>
       </div>
     </dialog>
   </>;
