@@ -1715,7 +1715,7 @@ export function MihomoPage({
                 <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={10} max={3600} value={Number(routingDraft.interval || 30)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
                 <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
                 <label><span>Ошибок до внеочередной проверки</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
-                <label><span>Допуск смены, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance || 50)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
+                <label><span>Допуск переключения при автовыборе, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance ?? 0)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
               </div></article>
             </div>
           </section>

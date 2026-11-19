@@ -90,11 +90,10 @@ class RuleExportTests(unittest.TestCase):
         self.assertTrue(any(rule.startswith("PROCESS-NAME") for rule in manager.profile_rules({"direct_games_enabled": True})))
 
     def test_strategy_parameters_reach_group(self):
-        for strategy in ("select", "url-test", "fallback"):
+        for strategy in ("select", "url-test", "fallback", "load-balance"):
             item = profile()
-            item["devices"][0]["routing"] = {"strategy": strategy, "interval": 77, "test_url": "http://audit.test/check", "health_timeout": 1700, "max_failed_times": 4, "tolerance": 99}
             shared = {**manager.routing_settings(), "interval": 77, "test_url": "http://audit.test/check", "health_timeout": 1700, "max_failed_times": 4, "tolerance": 99}
-            item["devices"][0]["routing"].update(interval=1, test_url="http://stale.test", tolerance=1, health_timeout=1, max_failed_times=1)
+            item["devices"][0]["routing"] = {"strategy": strategy, "interval": 1, "test_url": "http://stale.test", "tolerance": 1, "health_timeout": 1, "max_failed_times": 1}
             item["routing"] = {"interval": 2, "test_url": "http://stale-profile.test"}
             with patch.object(manager, "routing_settings", return_value=shared):
                 group = yaml.safe_load(manager.render_profile(item))["proxy-groups"][0]
@@ -102,7 +101,9 @@ class RuleExportTests(unittest.TestCase):
             if strategy != "select":
                 self.assertEqual((group["interval"], group["timeout"], group["max-failed-times"], group["url"]), (77, 1700, 4, "http://audit.test/check"))
             if strategy == "url-test":
-                self.assertEqual(group["tolerance"], 0)
+                self.assertEqual(group["tolerance"], 99)
+            else:
+                self.assertNotIn("tolerance", group)
 
 
 

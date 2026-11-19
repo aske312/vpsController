@@ -5328,7 +5328,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
             f"    max-failed-times: {int(routing.get('max_failed_times', 2))}",
         ]
         if group_type == "url-test":
-            lines.append("    tolerance: 0")
+            lines.append(f"    tolerance: {int(routing.get('tolerance', 0))}")
         if group_type == 'load-balance':
             lines.append('    strategy: ' + str(routing.get('load_balance_strategy', 'consistent-hashing')))
     for group in routing_policy.groups(routing_policy.effective(routing), rendered, routing):

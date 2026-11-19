@@ -22,6 +22,22 @@ class PolicyEditRevisionTests(unittest.TestCase):
     def rule_input(self, **changes):
         return manager.PersonalRuleInput(code="WORK", title="Work", entries=["example.com"], **changes)
 
+    def test_url_test_tolerance_defaults_to_zero_and_can_be_saved_and_reset(self):
+        current = manager.get_routing_schema()
+        self.assertEqual(current["values"]["tolerance"], 0)
+        for value in (99, 0, 1000):
+            saved = manager.patch_routing_settings(manager.ModuleSettingsPatch(
+                values={"tolerance": value}, expected_revision=current["revision"],
+            ))
+            self.assertEqual(saved["values"]["tolerance"], value)
+            self.assertEqual(manager.get_routing_schema()["values"]["tolerance"], value)
+            current = saved
+        for value in (-1, 1001):
+            with self.assertRaises(manager.HTTPException) as error:
+                manager.patch_routing_settings(manager.ModuleSettingsPatch(values={"tolerance": value}))
+            self.assertEqual(error.exception.status_code, 422)
+        self.assertEqual(manager.get_routing_schema()["revision"], current["revision"])
+
     def test_structured_policy_changes_advance_revision_and_reject_stale_full_replacements(self):
         with patch.object(manager, 'profiles', return_value=[]):
             original = manager.get_routing_schema()['revision']
