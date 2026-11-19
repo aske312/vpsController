@@ -1,13 +1,14 @@
 "use client";
 
 import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, ProfileConnection, ProfileDevice, PolicySettings, ProfilePreset, ProfileStats, RuleIconGroup, PersonalRule } from "./types";
-import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
+import { presetConnectionOptions, matchesPresetComponent, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
 import { clientUuid, deviceClientShortName, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
 import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-groups";
 import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
 import { RuleLeaveDialog } from "./rule-leave-dialog";
+import { PresetEditor, RoutingSettings } from "./routing-settings";
 import clientApps from "../../../protocol-images/mihomo/client-apps.json" with { type: "json" };
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
@@ -1225,14 +1226,14 @@ export function MihomoPage({
     finally { setBusy(""); }
   }
 
-  function openPresetSettings() {
+  function openPresetSettings(presetId?: string) {
     if (!routingReadKnown) return;
     const draft = (routingPolicy?.presets || []).map((preset) => ({ ...preset, components: preset.components.map((item) => ({ ...item })) }));
     presetSession.current += 1;
     setPresetDraft(draft);
     setPresetInitialDraft(JSON.stringify(draft));
     setPresetDraftRevision(routingPolicy?.presets_revision);
-    setPresetEditorIndex(0);
+    setPresetEditorIndex(presetId ? Math.max(0, draft.findIndex((preset) => preset.id === presetId)) : 0);
     setPresetDialog(true);
   }
 
@@ -1241,7 +1242,7 @@ export function MihomoPage({
     const session = presetSession.current;
     presetClosePending.current = true;
     try {
-      if (presetDirty && !await confirmAction({ title: "Закрыть пресеты без сохранения?", message: "Несохранённые правки будут потеряны. Уже отправленное сохранение продолжит работу.", confirmLabel: "Закрыть без сохранения" })) return;
+      if (presetDirty && !await confirmAction({ title: "Закрыть редактор шаблонов без сохранения?", message: "Несохранённые правки будут потеряны. Уже отправленное сохранение продолжит работу.", confirmLabel: "Закрыть без сохранения" })) return;
       if (presetSession.current !== session) return;
       presetSession.current += 1;
       setPresetDialog(false);
@@ -1251,8 +1252,9 @@ export function MihomoPage({
   async function reloadPresets() {
     if (!routingReadKnown || busy) return;
     const session = presetSession.current;
-    if (presetDirty && !await confirmAction({ title: "Загрузить актуальные пресеты?", message: "Несохранённые правки будут потеряны.", confirmLabel: "Загрузить" })) return;
-    if (presetSession.current === session) openPresetSettings();
+    const presetId = presetDraft[presetEditorIndex]?.id;
+    if (presetDirty && !await confirmAction({ title: "Загрузить актуальные шаблоны?", message: "Несохранённые правки будут потеряны.", confirmLabel: "Загрузить" })) return;
+    if (presetSession.current === session) openPresetSettings(presetId);
   }
 
   function addPresetDraft() {
@@ -1261,7 +1263,7 @@ export function MihomoPage({
     setPresetEditorIndex(presetDraft.length);
     setPresetDraft((current) => [...current, {
       id: `preset-${suffix}`,
-      name: `Новый пресет ${current.length + 1}`,
+      name: `Новый шаблон ${current.length + 1}`,
       description: "Пользовательская схема подключений",
       strategy: "select",
       components: [{ ...presetConnectionOptions[0] }],
@@ -1277,12 +1279,8 @@ export function MihomoPage({
   function togglePresetComponent(presetIndex: number, option: ProfilePreset["components"][number], checked: boolean) {
     setPresetDraft((current) => current.map((preset, index) => {
       if (index !== presetIndex) return preset;
-      const matches = (component: ProfilePreset["components"][number]) => component.id === option.id
-        && Boolean(component.cdn) === Boolean(option.cdn)
-        && Boolean(component.tls) === Boolean(option.tls)
-        && (component.xray_protocol || "vless") === (option.xray_protocol || "vless")
-        && String(component.transport || "") === String(option.transport || "");
-      return { ...preset, components: checked ? [...preset.components.filter((item) => !matches(item)), { ...option }] : preset.components.filter((item) => !matches(item)) };
+      const components = preset.components.filter((item) => !matchesPresetComponent(item, option));
+      return { ...preset, components: checked ? [...components, { ...option }] : components };
     }));
   }
 
@@ -1642,11 +1640,11 @@ export function MihomoPage({
 
 
       {(view === "routing" || view === "rules") && (
-        <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
+        <form className={`mihomoRoutingWorkspace${view === "routing" ? " mihomoSettingsWorkspace" : ""}`} onSubmit={saveRoutingWorkspace}>
           {routingRevisionConflict && <NotificationNotice id="mihomo:routing-conflict" title="Маршрутизация Mihomo" message="Настройки маршрутизации изменились. Ваш ввод сохранён." action={{ label: "Загрузить актуальные данные", disabled: Boolean(busy), run: () => reloadPolicy("routing") }} />}
           <header className="mihomoRoutingHeader">
-            {view === "rules" ? <div><h2>Правила</h2></div> : <div><h2>Настройки Mihomo</h2></div>}
-            <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
+            <div><h2>{view === "rules" ? "Правила" : "Настройки Mihomo"}</h2></div>
+            {view === "rules" && <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>}
           </header>
 
           {view === "rules" && <>
@@ -1696,37 +1694,16 @@ export function MihomoPage({
           {String(routingDraft.rules || "").trim() && <details className="mihomoAdvancedRules"><summary>Прежние дополнительные правила · сохранены без изменений</summary><pre className="observabilityTerminal">{String(routingDraft.rules)}</pre></details>}
           </>}
 
-          {view === "routing" && <>
-          <section className="mihomoSettingsBoard">
-            <div className="mihomoSettingsSummary">
-              <div><small>РЕЖИМ</small><b>{routingDraft.mode === "global" ? "Global" : "Rule"}</b></div>
-              <div><small>СТРАТЕГИЯ</small><b>{routingDraft.strategy === "url-test" ? "Latency" : routingDraft.strategy === "select" ? "Manual" : "Fallback"}</b></div>
-              <div><small>ПРЕСЕТЫ</small><b>{profilePresets.length}</b><span>{profilePresets.reduce((sum, item) => sum + item.components.length, 0)} каналов в шаблонах</span></div>
-              <button type="button" className="primaryButton" disabled={!routingReadKnown} onClick={openPresetSettings}>Редактировать пресеты</button>
-            </div>
-            <div className="mihomoSettingsGrid">
-              <article><header><span>01</span><div><b>Поведение трафика</b></div></header><div className="mihomoRoutingFields">
-                <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
-                <label><span>Стратегия по умолчанию</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option><option value="load-balance">Балансировка каналов</option></select></label>
-                {routingDraft.strategy === "load-balance" && <BalanceStrategy value={routingDraft.load_balance_strategy} onChange={value => updateRoutingDraft("load_balance_strategy", value)}/>}
-              </div></article>
-              <article><header><span>02</span><div><b>Проверка доступности</b></div></header><div className="mihomoRoutingFields">
-                <label className="is-wide"><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
-                <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={10} max={3600} value={Number(routingDraft.interval || 30)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
-                <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
-                <label><span>Ошибок до внеочередной проверки</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
-                <label><span>Допуск переключения при автовыборе, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance ?? 0)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
-              </div></article>
-            </div>
-          </section>
+          {view === "routing" && <RoutingSettings draft={routingDraft} presets={profilePresets}
+            disabled={!routingReadKnown} onChange={updateRoutingDraft} onEditPreset={openPresetSettings} />}
 
-          <section className="mihomoPresetCatalogSettings">
-            <header><div><h3>Шаблоны новых профилей</h3></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Управлять</button></header>
-            <div>{profilePresets.map((preset, index) => <article key={preset.id}><span>{String(index + 1).padStart(2, "0")}</span><p><b>{preset.name}</b></p><em>{preset.components.length} каналов</em><i>{preset.strategy === "url-test" ? "по задержке" : preset.strategy === "select" ? "вручную" : "резерв"}</i></article>)}</div>
-          </section>
-          </>}
-
-          <footer className="mihomoRoutingFooter"><button type="button" disabled={!routingReadKnown || !routingDirty || Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Отменить изменения</button><span>{!routingReadKnown ? "" : routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingReadKnown || !routingDirty || Boolean(busy) || routingRevisionConflict}>{busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}</button></footer>
+          <footer className="mihomoRoutingFooter">
+            <button type="button" disabled={!routingReadKnown || !routingDirty || Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Отменить изменения</button>
+            <span aria-live="polite">{!routingReadKnown ? "" : routingDirty ? "Есть несохранённые изменения" : "После сохранения обновите подписку в клиенте."}</span>
+            <button className="primaryButton" type="submit" disabled={!routingReadKnown || !routingDirty || readOnly || Boolean(busy) || routingRevisionConflict}>
+              {busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}
+            </button>
+          </footer>
         </form>
       )}
 
@@ -1944,44 +1921,28 @@ export function MihomoPage({
         </form>
       </div>}
       {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop" onClick={(event) => { if (event.target === event.currentTarget) void closePresets(); }}>
-        <form ref={presetDialogRef} role="dialog" aria-modal="true" aria-label="Пресеты Mihomo" tabIndex={-1} className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
-          {presetRevisionConflict && <NotificationNotice id="mihomo:preset-conflict" title="Пресеты Mihomo" message="Пресеты изменились. Ваш ввод сохранён." action={{ label: "Загрузить актуальные данные", disabled: Boolean(busy), run: reloadPresets }} />}
+        <form ref={presetDialogRef} role="dialog" aria-modal="true" aria-labelledby="mihomo-preset-title" tabIndex={-1} className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
+          {presetRevisionConflict && <NotificationNotice id="mihomo:preset-conflict" title="Шаблоны профилей Mihomo" message="Шаблоны изменились. Ваш ввод сохранён." action={{ label: "Загрузить актуальные данные", disabled: Boolean(busy), run: reloadPresets }} />}
           <header>
-            <div><h2>Пресеты Mihomo</h2></div>
-            <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span></div>
+            <h2 id="mihomo-preset-title">Шаблоны профилей</h2>
             <button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePresets(); }}>×</button>
           </header>
-          <div className="mihomoPresetIntro"><span>01</span></div>
-          <div className="mihomoPresetEditor">
-            <aside className="mihomoPresetRail">
-              <header><b>Пресеты</b><small>Выберите шаблон</small></header>
-              <div>{presetDraft.map((preset, index) => <button type="button" key={preset.id} className={presetEditorIndex === index ? "is-active" : ""} onClick={() => setPresetEditorIndex(index)}><span>{String(index + 1).padStart(2, "0")}</span><p><b>{preset.name}</b><small>{preset.components.length} каналов · {preset.strategy === "url-test" ? "по задержке" : preset.strategy === "select" ? "вручную" : "резерв"}</small></p><i>›</i></button>)}</div>
-              <button type="button" className="mihomoPresetRailAdd" onClick={addPresetDraft} disabled={presetDraft.length >= 12}>+ Добавить пресет</button>
-            </aside>
-            {presetDraft[presetEditorIndex] && ((preset, index) => <article key={preset.id} className="mihomoPresetCard mihomoPresetCanvas">
-              <header>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <label><small>Название пресета</small><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label>
-                <label><small>Логика переключения</small><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Резервирование по порядку</option><option value="url-test">Лучший по задержке</option><option value="select">Ручной выбор</option></select></label>
-                <em>{preset.components.length} выбрано</em>
-                <button type="button" className="mihomoPresetDelete" aria-label={`Удалить пресет ${preset.name}`} title={presetDraft.length <= 1 ? "Нужен хотя бы один пресет" : "Удалить пресет"} disabled={presetDraft.length <= 1} onClick={() => removePresetDraft(index)}>×</button>
-              </header>
-              <label className="mihomoPresetDescription"><small>Описание</small><input value={preset.description} placeholder="Когда использовать этот пресет" onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, description: event.target.value } : item))} /></label>
-              <div className="mihomoPresetGroups">
-                {presetOptionGroups.map((group) => <section key={group.id}>
-                  <header><b>{group.title}</b></header>
-                  <div>{group.options.map((option) => {
-                    const selected = preset.components.some((item) => item.id === option.id && (item.xray_protocol || "vless") === (option.xray_protocol || "vless") && Boolean(item.cdn) === Boolean(option.cdn) && Boolean(item.tls) === Boolean(option.tls) && String(item.transport || "") === String(option.transport || ""));
-                    return <label key={`${option.id}-${option.xray_protocol || "vless"}-${option.cdn ? "cdn" : option.tls ? "tls" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;
-                  })}</div>
-                </section>)}
-              </div>
-            </article>)(presetDraft[presetEditorIndex], presetEditorIndex)}
-          </div>
-          <footer><p>{presetDraft.some((item) => !item.components.length) ? "В каждом пресете нужен хотя бы один канал" : "Изменения применятся только к новым конфигурациям"}</p><button type="button" className="ghostButton" onClick={() => { void closePresets(); }}>Отмена</button><button type="submit" className="primaryButton" disabled={!routingReadKnown || Boolean(busy) || presetRevisionConflict || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer>
+          <PresetEditor presets={presetDraft} activeIndex={presetEditorIndex} onSelect={setPresetEditorIndex}
+            onAdd={addPresetDraft} onDelete={removePresetDraft}
+            onChange={(changes) => setPresetDraft((current) => current.map((preset, index) => index === presetEditorIndex ? { ...preset, ...changes } : preset))}
+            onToggleChannel={togglePresetComponent} />
+          <footer>
+            {presetDraft.some((item) => !item.components.length) && <p>В каждом шаблоне нужен хотя бы один канал</p>}
+            <div>
+              <button type="button" className="ghostButton" onClick={() => { void closePresets(); }}>Отмена</button>
+              <button type="submit" className="primaryButton" disabled={!routingReadKnown || !presetDirty || !presetDraft.length || Boolean(busy) || presetRevisionConflict || presetDraft.some((item) => !item.components.length)}>
+                {busy === "presets" ? "Сохранение…" : "Сохранить шаблоны"}
+              </button>
+            </div>
+          </footer>
         </form>
       </div>}
-      {ruleLeaveState.open && <RuleLeaveDialog state={ruleLeaveState}
+      {ruleLeaveState.open && <RuleLeaveDialog state={ruleLeaveState} section={view === "routing" ? "settings" : "rules"}
         canSave={routingReadKnown && !readOnly && !busy && !routingRevisionConflict}
         pending={pendingPolicySave?.kind === "routing"}
         onChoose={(choice) => { void routingLeaveGuard.choose(choice); }} />}

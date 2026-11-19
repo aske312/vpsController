@@ -5,6 +5,14 @@ import adServices from "../../../protocol-images/mihomo/ad-service-domains.json"
 
 export const presetConnectionOptions = connectionVariants as ProfilePreset["components"];
 
+export function matchesPresetComponent(component: ProfilePreset["components"][number], option: ProfilePreset["components"][number]) {
+  return component.id === option.id
+    && (component.xray_protocol || "vless") === (option.xray_protocol || "vless")
+    && Boolean(component.cdn) === Boolean(option.cdn)
+    && Boolean(component.tls) === Boolean(option.tls)
+    && String(component.transport || "") === String(option.transport || "");
+}
+
 export const presetOptionGroups = [
   { id: "direct", title: "VLESS REALITY", note: "Прямое подключение", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && !item.cdn && !item.tls) },
   { id: "tls", title: "Xray TLS", note: "Прямой TLS-домен", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.tls) },
