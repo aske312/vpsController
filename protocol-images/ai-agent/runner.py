@@ -1002,12 +1002,12 @@ def serve_mcp(settings, actor, module):
 
         @server.tool()
         async def diagnostic_alerts(limit: int = 30) -> dict:
-            """Прочитать активные локальные алерты, действующие условия и историю срабатывания/подтверждённого восстановления. По умолчанию две последовательные минутные проверки; неизвестное измерение не подтверждает восстановление. Показывает устаревание и потери истории. Для изменения порогов используй diagnostic_alert_rules PATCH с отдельным подтверждением пользователя."""
+            """Прочитать активные алерты сервера, приложения, компонентов и Relay, действующие условия и историю срабатывания/подтверждённого восстановления. По умолчанию две последовательные минутные проверки; неизвестное измерение не подтверждает восстановление. Показывает устаревание и потери истории. Relay API, маршруты и адреса имеют отдельные условия и не доказывают клиентскую связность. Для изменения порогов используй diagnostic_alert_rules PATCH с отдельным подтверждением пользователя."""
             return await vps_call(settings, actor, 'diagnostic_alerts', body={'limit': limit})
 
         @server.tool()
         async def diagnostic_alert_rules(method: Literal['GET', 'PATCH'] = 'GET', body: dict | None = None) -> dict:
-            """GET читает ревизию и настройки алертов. PATCH подготавливает изменение с revision: включение правил, disk_percent, http_error_percent, http_min_requests, window_minutes, trigger_samples, recovery_samples. Применение только после отдельного подтверждения человеком; модель не может подтвердить собственный запрос."""
+            """GET читает ревизию, схему и настройки алертов. PATCH с revision меняет переключатели service_error, local_health, disk_pressure, http_error_rate, cpu_pressure, memory_pressure, load_pressure, application_recovery, relay_unavailable, relay_route, relay_address, connection_errors; пороги cpu_percent, memory_percent, disk_percent, load_per_cpu (load5 на ядро), connection_error_count (ошибки свежего минутного интервала Relay), http_error_percent, http_min_requests, window_minutes, trigger_samples, recovery_samples. Relay проверяется через закреплённый Agent API; отсутствие клиентов не является ошибкой. Применение только после отдельного подтверждения человеком; модель не может подтвердить собственный запрос."""
             return await vps_call(settings, actor, 'diagnostic_alert_rules', method=method, body=body or {})
 
         @server.tool()

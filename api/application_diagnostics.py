@@ -349,7 +349,7 @@ def summary(api, query):
             result['missing_data'].append({'source': source + '_operations', 'reason': 'partial_or_unavailable_history'})
     try:
         resources = api.system_resources()
-        measured = {key: resources.get(key) for key in ('cpu_percent', 'uptime_s', 'observations')}
+        measured = {key: resources.get(key) for key in ('cpu_percent', 'cpu_count', 'load1', 'load5', 'load15', 'uptime_s', 'observations')}
         for group in ('memory', 'disk'):
             total, available = resources.get(group + '_total'), resources.get(group + '_available')
             measured[group + '_used_percent'] = round(100 * (total - available) / total, 2) if type(total) in (int, float) and total > 0 and type(available) in (int, float) and 0 <= available <= total else None

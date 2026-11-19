@@ -18,6 +18,9 @@ def label(value, fallback='Не указано'):
 
 
 def zone(component, rule=None):
+    if rule == 'cpu_pressure': return 'Система / CPU'
+    if rule == 'memory_pressure': return 'Система / RAM'
+    if rule == 'load_pressure': return 'Система / нагрузка'
     if rule == 'disk_pressure': return 'Система / диск'
     if rule == 'http_error_rate': return 'Панель / HTTP'
     if not isinstance(component, str): return 'Сервер'
@@ -40,6 +43,7 @@ def snapshot(api):
     health = list(current['local_health'].values()) if fresh and isinstance(current.get('local_health'), dict) else []
     bad = sum(row.get('state') == 'error' or row.get('state') == 'stopped' and row.get('enabled') is True for row in services.values() if isinstance(row, dict)) + health.count('critical')
     system = 'есть сбой' if bad else 'локальные службы работают' if states and all(state in GOOD for state in states) and all(state == 'healthy' for state in health) else 'состояние не подтверждено'
+    if not bad and fresh and current.get('basic_warnings', 0): system = 'есть предупреждения'
     profiles = None
     target = api.DATA_DIR / 'mihomo/profiles.json'
     try:
@@ -49,14 +53,15 @@ def snapshot(api):
                 profiles = [{'id': row.get('id'), 'name': label(row.get('name'), 'Профиль'),
                              'components': sorted({item['component'] for item in row.get('connections', []) if isinstance(item, dict) and isinstance(item.get('component'), str)}),
                              'gateway': any(isinstance(item, dict) and isinstance(item.get('settings'), dict) and item['settings'].get('route_mode') in ('cdn', 'tls', 'both') for item in row.get('connections', [])),
-                             'cdn': any(isinstance(item, dict) and isinstance(item.get('settings'), dict) and item['settings'].get('route_mode') in ('cdn', 'both') for item in row.get('connections', []))}
+                             'cdn': any(isinstance(item, dict) and isinstance(item.get('settings'), dict) and item['settings'].get('route_mode') in ('cdn', 'both') for item in row.get('connections', [])),
+                             'relays': [item['settings']['relay_host_id'] for item in row.get('connections', []) if isinstance(item, dict) and isinstance(item.get('settings'), dict) and isinstance(item['settings'].get('relay_host_id'), str)]}
                             for row in rows]
     except (OSError, ValueError, TypeError): pass
     return {'system': system, 'checked_at': at if fresh else None, 'bad_observations': bad, 'profiles': profiles,
-            'services': services, 'fresh': fresh}
+            'services': services, 'fresh': fresh, 'resources': current.get('resource_usage', {}) if fresh else {}}
 
 
-def lines(context, component, *, profile_id=None, rule=None):
+def lines(context, component, *, profile_id=None, rule=None, host_id=None):
     context = context or {}
     system = context.get('system', 'состояние не подтверждено')
     rows = context.get('profiles')
@@ -64,7 +69,7 @@ def lines(context, component, *, profile_id=None, rule=None):
         profiles = 'настройки профилей недоступны; связь с устройствами не проверена'
     else:
         affected = [row for row in rows if profile_id and row['id'] == profile_id or not profile_id and
-                    (component in row['components'] or component == 'mihomo' or rule == 'disk_pressure' or component == 'gateway' and row['gateway'] or component == 'cdn' and row.get('cdn'))]
+                    (host_id in row.get('relays', []) if host_id else component in row['components'] or component == 'mihomo' or rule in ('disk_pressure', 'cpu_pressure', 'memory_pressure', 'load_pressure') or component == 'gateway' and row['gateway'] or component == 'cdn' and row.get('cdn'))]
         profiles = f'настроено {len(rows)}'
         if affected:
             profiles += f'; возможное влияние на {len(affected)}: ' + ', '.join(row['name'] for row in affected[:3]) + ('…' if len(affected) > 3 else '')
@@ -74,4 +79,13 @@ def lines(context, component, *, profile_id=None, rule=None):
     if type(at) in (int, float):
         from datetime import datetime, timezone
         system += ' · ' + datetime.fromtimestamp(at, timezone.utc).strftime('%H:%M:%S UTC')
-    return [f'Система при проверке: {system}.', f'Профили: {profiles}.']
+    result = [f'Система при проверке: {system}.', f'Профили: {profiles}.']
+    resources = context.get('resources')
+    if isinstance(resources, dict) and resources:
+        import math
+        values = []
+        for field, name in (('cpu_percent', 'CPU'), ('memory_used_percent', 'RAM'), ('disk_used_percent', 'диск')):
+            value = resources.get(field)
+            values.append(f'{name} {value:g}%' if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 100 else name + ' —')
+        result.append('Ресурсы: ' + ' · '.join(values) + '.')
+    return result

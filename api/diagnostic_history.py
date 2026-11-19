@@ -11,18 +11,22 @@ import assistant_control as control
 import diagnostic_tools as reports
 import diagnostic_rules
 import diagnostic_configuration
+import diagnostic_builtin_alerts
 
 RULES = {'service_error': {'condition': 'systemd runtime=error or enabled service stopped', 'trigger_samples': 2, 'recovery_samples': 2},
          'local_health': {'condition': 'fresh local component health=critical', 'trigger_samples': 2, 'recovery_samples': 2},
          'disk_pressure': {'condition': 'root disk used >=95%', 'trigger_samples': 2, 'recovery_samples': 2},
          'http_error_rate': {'condition': 'HTTP errors >=10% with >=20 retained requests in 5 minutes; complete request coverage required', 'trigger_samples': 2, 'recovery_samples': 2}}
-BASELINE_POLICY = 'local_v2: all observed services running/applied/succeeded/listening/waiting; fresh installed component health healthy; complete configured HTTP window with requests and zero errors; disk<95%; no unfinished operations. Functional measurements have separate scope and configuration binding.'
+RULES.update({key: {'condition': value, 'trigger_samples': 2, 'recovery_samples': 2} for key, value in diagnostic_builtin_alerts.DEFINITIONS.items()})
+BASELINE_POLICY = 'local_v2: all observed services running/applied/succeeded/listening/waiting; fresh installed component health healthy; complete configured HTTP window with requests and zero errors; disk<95%; no unfinished operations; no observed failures in enabled resource/recovery/Relay rules. Unknown supplemental measurements do not certify resource, Relay or client health. Functional measurements have separate scope and configuration binding.'
 
 
 def rule_definitions(policy):
     definitions = {key: {**value, 'enabled': policy[key], 'trigger_samples': policy['trigger_samples'], 'recovery_samples': policy['recovery_samples']} for key, value in RULES.items()}
     definitions['disk_pressure']['condition'] = 'root disk used >= ' + str(policy['disk_percent']) + '%'
     definitions['http_error_rate']['condition'] = 'HTTP errors >= ' + str(policy['http_error_percent']) + '%; requests >= ' + str(policy['http_min_requests']) + '; window=' + str(policy['window_minutes']) + 'min; complete coverage required'
+    for key, threshold in (('cpu_pressure', 'cpu_percent'), ('memory_pressure', 'memory_percent'), ('load_pressure', 'load_per_cpu'), ('connection_errors', 'connection_error_count')):
+        definitions[key]['threshold'] = policy[threshold]
     return definitions
 
 
@@ -98,6 +102,8 @@ def sample(api):
     conditions['disk'] = {'rule': 'disk_pressure', 'component': 'system', 'failing': disk >= policy['disk_percent'] if type(disk) in (int, float) else None}
     conditions['http'] = {'rule': 'http_error_rate', 'component': 'application',
         'failing': errors / requests * 100 >= policy['http_error_percent'] if complete and requests >= policy['http_min_requests'] else None}
+    extra = diagnostic_builtin_alerts.collect(api, resources, policy)
+    conditions.update(extra)
     settings = control.read(api)
     revision = settings.get('revision')
     configuration = diagnostic_configuration.inventory(api)
@@ -113,6 +119,10 @@ def sample(api):
                                       and isinstance(item.get('name'), str) and re.fullmatch(r'[a-z0-9_-]{1,64}', item['name'])][:12] for key, value in health.items()},
         'http': {'window_minutes': policy['window_minutes'], 'requests': requests, 'errors': errors, 'error_rate': errors / requests if complete and requests else None,
                  'complete_coverage': complete, 'error_statuses': error_statuses}, 'disk_used_percent': disk}
+    snapshot['resource_usage'] = {key: resources.get(key) for key in ('cpu_percent', 'memory_used_percent', 'disk_used_percent', 'load5', 'cpu_count')}
+    for rule, field in (('cpu_pressure', 'cpu_percent'), ('memory_pressure', 'memory_used_percent')):
+        snapshot['resource_usage'][field] = extra[rule]['details']['value']
+    snapshot['basic_warnings'] = sum(value['failing'] is True for value in extra.values())
     eligible = bool(service_states and observations.get('health', {}).get('state', 'observed') == 'observed' and 'health' in observations and complete and requests and not errors
         and all(value['state'] in ('running', 'applied', 'succeeded', 'listening', 'waiting') for value in service_states.values())
         and all(conditions['health:' + key]['failing'] is False for key in health)
@@ -121,6 +131,7 @@ def sample(api):
         and all(value.get('available') and not value.get('scan_truncated') and not value.get('unreadable') for value in report['coverage']['operations']['sources'].values())
         and not report['coverage']['operations']['truncated'] and not report['coverage']['service_inventory_truncated'])
     eligible = eligible and all(not value['unavailable'] and not value['truncated'] for value in configuration.values())
+    eligible = eligible and not snapshot['basic_warnings']
     for condition in conditions.values():
         if not policy[condition['rule']]: condition['failing'] = None
     return snapshot, conditions, eligible
@@ -147,6 +158,8 @@ def alert_details(snapshot, condition, policy):
         state = snapshot.get('local_health', {}).get(component)
         if state in ('critical', 'healthy'): details['state'] = state
         details['failed_checks'] = snapshot.get('failed_health_checks', {}).get(component, [])
+    elif rule in diagnostic_builtin_alerts.DEFINITIONS:
+        details.update(condition.get('details', {}))
     return details
 
 
@@ -176,6 +189,7 @@ def observe(api):
             alert['consecutive_samples'] = alert.get('consecutive_samples', 0) + 1 if same and failing is not None else 1 if failing is not None else 0
             if not same: alert['candidate_since'] = now
             alert['enabled'] = policy[condition['rule']]
+            if 'details' in condition: alert['details'] = condition['details']
             alert['current_condition'] = rule_definitions(policy)[condition['rule']]['condition']
             if failing is True and not alert['active'] and alert['consecutive_samples'] >= policy['trigger_samples']:
                 alert.update(active=True, opened_at=now, observed_since=alert['candidate_since'], fired_rules_revision=policy['revision'], fired_condition=alert['current_condition'])
@@ -210,7 +224,7 @@ def observe(api):
 def baseline(api):
     result = reports.report('diagnostic_baseline')
     current, _, eligible = sample(api)
-    reports.observation(result, 'current', 'passive_local_snapshot', current)
+    reports.observation(result, 'current', 'local_snapshot_and_pinned_readonly_relay_status', current)
     result['coverage'] = {'policy': BASELINE_POLICY, 'current_eligible': eligible, 'causation': 'not_proven',
                           'config_scope': 'application_environment_DNS_network_security_Mihomo_relay_gateway_assistant; metadata_generation_not_semantic_change; no_values_or_secret_hashes', 'functional_health': 'separate_measurements'}
     try: stored = load(api)
@@ -253,6 +267,6 @@ def alerts(api, query):
     result['history'] = data['history'][-query.limit:]
     result['coverage'] = {'checked_at': data.get('checked_at'), 'stale': not 0 <= now - data.get('checked_at', 0) <= 180,
         'retention_days': 30, 'max_transitions': 500, 'dropped': data.get('dropped', 0), 'truncated': len(data['history']) > query.limit,
-        'rule_changes': 'diagnostic_alert_rules_PATCH_requires_human_confirmation', 'scope': 'local_rules; unknown_disabled_or_missing_measurements_never_confirm_recovery'}
+        'rule_changes': 'diagnostic_alert_rules_PATCH_requires_human_confirmation', 'scope': 'local_rules_and_pinned_relay_agent_reads; unknown_disabled_or_missing_measurements_never_confirm_recovery'}
     if result['coverage']['stale']: result['missing_data'].append({'source': 'monitor', 'reason': 'no_recent_sample; empty_active_list_does_not_prove_health'})
     return result

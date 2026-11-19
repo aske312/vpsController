@@ -18,6 +18,18 @@ class Rules(BaseModel):
     local_health: StrictBool = True
     disk_pressure: StrictBool = True
     http_error_rate: StrictBool = True
+    cpu_pressure: StrictBool = True
+    memory_pressure: StrictBool = True
+    load_pressure: StrictBool = True
+    application_recovery: StrictBool = True
+    relay_unavailable: StrictBool = True
+    relay_route: StrictBool = True
+    relay_address: StrictBool = True
+    connection_errors: StrictBool = True
+    cpu_percent: float = Field(default=90, ge=10, le=100)
+    memory_percent: float = Field(default=90, ge=10, le=100)
+    load_per_cpu: float = Field(default=1.5, ge=0.1, le=100)
+    connection_error_count: int = Field(default=10, ge=1, le=1000000)
     disk_percent: float = Field(default=95, ge=50, le=100)
     http_error_percent: float = Field(default=10, gt=0, le=100)
     http_min_requests: int = Field(default=20, ge=1, le=1000000)
@@ -36,7 +48,8 @@ def read(api):
 def save(api, payload):
     with operations.locked(api.DATA_DIR):
         if read(api)['revision'] != payload.revision: raise HTTPException(409, 'Правила изменились; прочитайте их заново')
-        value = {**payload.model_dump(), 'revision': uuid.uuid4().hex}
+        merged = {**read(api), **payload.model_dump(include=payload.model_fields_set)}
+        value = {**Rules.model_validate(merged).model_dump(), 'revision': uuid.uuid4().hex}
         operations.atomic_json(api.DATA_DIR / 'diagnostic-rules.json', value)
     return value
 
@@ -46,7 +59,8 @@ def call(api, arguments, actor):
     roles.require(settings, actor, 'diagnostics')
     roles.require(settings, actor, 'logs_read')
     method = arguments.get('method', 'GET')
-    if method == 'GET': return {'rules': read(api), 'scope': 'local_alert_policy', 'changes_require_human_confirmation': True}
+    if method == 'GET': return {'rules': read(api), 'schema': Rules.model_json_schema(),
+        'scope': 'local_alert_policy; resources_components_and_pinned_relay_agent_reads', 'changes_require_human_confirmation': True}
     if method != 'PATCH': raise HTTPException(422, 'Используйте GET или PATCH')
     roles.require(settings, actor, 'server_manage')
     submitted = arguments.get('body') or {}

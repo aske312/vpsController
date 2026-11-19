@@ -16,6 +16,7 @@ const normalizeStatus = (value: Status): Status => ({ ...value, settings: { ...a
 const deliveryNames: Record<string, string> = { sent: "Доставлено", pending: "Ожидание после ограничения Telegram", unknown: "Результат неизвестен — повтор не выполняется", failed: "Ошибка доставки", token_missing: "Нет токена бота" };
 
 export function TelegramAlerts({ request, refreshKey, blocked = false }: { request: ReturnType<typeof createApiClient>; refreshKey: number; blocked?: boolean }) {
+  const [panel, setPanel] = useState("conditions");
   const [status, setStatus] = useState<Status>();
   const [draft, setDraft] = useState<Config>();
   const [busy, setBusy] = useState(false);
@@ -87,20 +88,23 @@ export function TelegramAlerts({ request, refreshKey, blocked = false }: { reque
   const dirty = JSON.stringify(draft) !== JSON.stringify(status?.settings);
   return <div className="noderaOwnerAlerts">
 
-    {draft && status && <><label className="noderaPermissionSwitch"><input type="checkbox" role="switch" checked={draft.enabled} disabled={busy || blocked} onChange={event => edit({ ...draft, enabled: event.target.checked })}/>Включить алерты</label>
+    {draft && status && <><div className="alertOverview"><strong>Telegram: {draft.enabled ? draft.snoozed_until > now ? "пауза" : "включён" : "выключен"}</strong><span>{status.owners.find(owner => owner.telegram_id === draft.owner_id)?.name || "Получатель не выбран"}</span></div>
+      <nav className="alertNavigation" aria-label="Разделы алертов">{([['conditions', 'Основные'], ['watches', 'Свои правила'], ['delivery', 'Доставка']] as const).map(([key, title]) => <button type="button" key={key} aria-pressed={panel === key} onClick={() => setPanel(key)}>{title}</button>)}</nav>
+      <div hidden={panel !== "conditions"}><AlertDiagnosticRules request={request} blocked={busy || blocked}/></div>
+      <div hidden={panel !== "delivery"} className="alertPanel"><label className="noderaPermissionSwitch"><input type="checkbox" role="switch" checked={draft.enabled} disabled={busy || blocked} onChange={event => edit({ ...draft, enabled: event.target.checked })}/>Включить алерты</label>
       <label>Получатель<select value={draft.owner_id ?? ""} disabled={busy || blocked} onChange={event => edit({ ...draft, owner_id: event.target.value ? Number(event.target.value) : null })}><option value="">Владелец или администратор</option>{status.owners.map(owner => <option key={owner.telegram_id} value={owner.telegram_id}>{owner.name || owner.telegram_id}</option>)}</select></label>
       <p>Токен бота: {status.token_configured ? "настроен" : "не настроен"}</p>
       <div className="noderaPermissionList">{([['failures', 'Диагностические сбои'], ['recoveries', 'Восстановление диагностики'], ['boots', 'Загрузка VPS'], ['operations', 'Сбои и зависания операций']] as const).map(([key, title]) => <label className="noderaPermissionSwitch" key={key}><input type="checkbox" role="switch" checked={draft[key]} disabled={busy || blocked} onChange={event => edit({ ...draft, [key]: event.target.checked })}/>{title}</label>)}</div>
       <div className="alertFields"><label>Интервал доставки, секунд<input type="number" min={10} max={3600} value={draft.delivery_interval_seconds} disabled={busy || blocked} onChange={event => edit({ ...draft, delivery_interval_seconds: Number(event.target.value) })}/></label>
         {draft.operations && <label>Длительная операция, минут<input type="number" min={1} max={1440} value={draft.operation_timeout_seconds / 60} disabled={busy || blocked} onChange={event => edit({ ...draft, operation_timeout_seconds: Number(event.target.value) * 60 })}/></label>}</div>
       <div className="buttonRow"><button type="button" disabled={busy || blocked} onClick={() => edit({ ...draft, snoozed_until: draft.snoozed_until > now ? 0 : Math.floor(Date.now() / 1000) + 3600 })}>{draft.snoozed_until > now ? "Возобновить алерты" : "Пауза на час"}</button>{draft.snoozed_until > now && <time>До {new Date(draft.snoozed_until * 1000).toLocaleString()}</time>}</div>
-      <AlertWatches value={draft.watches} catalog={catalog} now={now} disabled={busy || blocked} status={status.watch_status} onChange={watches => edit({ ...draft, watches })}/>
+      </div><div hidden={panel !== "watches"}><AlertWatches value={draft.watches} catalog={catalog} now={now} disabled={busy || blocked} status={status.watch_status} onChange={watches => edit({ ...draft, watches })}/></div>
+      <div hidden={panel !== "delivery"}>
       <p>В очереди: {status.pending}. {status.last_delivery ? `${deliveryNames[status.last_delivery.state] ?? status.last_delivery.state} · ${new Date(status.last_delivery.at * 1000).toLocaleString()}` : "Доставок пока нет"}</p>
-      <div className="buttonRow"><button type="button" disabled={busy || blocked || !dirty} onClick={() => void act()}>Сохранить алерты</button><button type="button" disabled={busy || blocked || dirty || !status.settings.enabled} onClick={() => void act(true)}>Тест доставки</button><button type="button" disabled={busy} onClick={() => void refresh()}>{dirty ? "Отменить правки и обновить" : "Обновить статус"}</button></div>
-      <AlertDiagnosticRules request={request} blocked={busy || blocked}/>
-      <section className="alertDeliveryHistory"><h3>Доставка</h3><dl className="alertDeliveryCounters"><div><dt>В очереди</dt><dd>{status.pending}</dd></div><div><dt>Не помещено в очередь</dt><dd>{status.dropped ?? 0}</dd></div></dl>
+      </div><div hidden={panel === "conditions"} className="buttonRow"><button type="button" disabled={busy || blocked || !dirty} onClick={() => void act()}>Сохранить алерты</button><button type="button" disabled={busy || blocked || dirty || !status.settings.enabled} onClick={() => void act(true)}>Тест доставки</button><button type="button" disabled={busy} onClick={() => void refresh()}>{dirty ? "Отменить правки и обновить" : "Обновить статус"}</button></div>
+      <div hidden={panel !== "delivery"}><section className="alertDeliveryHistory"><h3>Доставка</h3><dl className="alertDeliveryCounters"><div><dt>В очереди</dt><dd>{status.pending}</dd></div><div><dt>Не помещено в очередь</dt><dd>{status.dropped ?? 0}</dd></div></dl>
         {status.deliveries?.map(row => <details key={row.id}><summary><strong>{row.zone}</strong><span>{deliveryNames[row.state] || row.state}</span><time>{new Date(row.at * 1000).toLocaleString()}</time></summary><pre>{row.text}</pre></details>)}
-      </section>
+      </section></div>
     </>}
   </div>;
 }

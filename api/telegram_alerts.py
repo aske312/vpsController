@@ -249,13 +249,22 @@ def format_alert(row, context=None):
               'disk_pressure': ('Заканчивается место на диске', 'Заполнение диска снизилось'),
               'service_error': ('Служба остановлена или завершилась с ошибкой', 'Служба снова в рабочем состоянии'),
               'local_health': ('Проверка компонента выявила проблему', 'Проверка компонента снова успешна')}
+    titles.update({'cpu_pressure': ('Высокая загрузка CPU', 'Загрузка CPU снизилась'),
+        'memory_pressure': ('Заканчивается оперативная память', 'Использование RAM снизилось'),
+        'load_pressure': ('Высокая нагрузка на ядра сервера', 'Нагрузка на ядра снизилась'),
+        'application_recovery': ('Есть незавершённое восстановление', 'Барьеры восстановления сняты'),
+        'relay_unavailable': ('Нет связи с Relay Agent', 'Связь с Relay Agent восстановлена'),
+        'relay_route': ('Неисправна пересылка Relay', 'Пересылка Relay снова соответствует настройкам'),
+        'relay_address': ('Проблема с адресами Relay', 'Адреса Relay снова подтверждены'),
+        'connection_errors': ('Ошибки обмена через Relay', 'Число ошибок обмена снизилось')})
     title = titles.get(rule, ('Обнаружена проблема', 'Условие алерта больше не выполняется'))[int(recovered)]
     urgency = 'Информационно: срочных действий по этому алерту не требуется.' if recovered else (
         'Предупреждение: проверьте ошибки; это ещё не означает недоступность VPS.' if rule == 'http_error_rate'
         else 'Высокая: проверьте сейчас, возможны перебои в работе.' if rule in titles else 'Требует проверки в панели диагностики.')
     lines = [f'{server_label()} · {"Восстановление" if recovered else "Проблема"}', title,
              f'Зона: {alert_context.zone(component, rule)} · {names.get(component, component)}',
-             *alert_context.lines(context, component, rule=rule), f'Время события: {event_time(row.get("at"))}', f'Важность: {urgency}']
+             *alert_context.lines(context, component, rule=rule, host_id=details.get('host_id')), f'Время события: {event_time(row.get("at"))}', f'Важность: {urgency}']
+    if isinstance(details.get('target'), str): lines.append('Объект: ' + alert_context.label(details['target']))
     if rule == 'http_error_rate':
         errors, requests, window, threshold = (details.get(key) for key in ('errors', 'requests', 'window_minutes', 'threshold_percent'))
         if all(number(value) for value in (errors, requests, window, threshold)) and requests > 0:
@@ -273,6 +282,23 @@ def format_alert(row, context=None):
         if number(used) and number(threshold): lines.append(f'Корневой диск занят на {used:g}%. Порог: {threshold:g}%.')
         else: lines.append('Занятое место на корневом диске ' + ('ниже настроенного порога.' if recovered else 'достигло настроенного порога.'))
         if not recovered: lines.append('Что делать: проверьте свободное место и крупные журналы/резервные копии. Освободите место, проверив назначение файлов: заполнение диска мешает записи конфигураций и работе служб.')
+    elif rule in ('cpu_pressure', 'memory_pressure', 'load_pressure'):
+        value, threshold = details.get('value'), details.get('threshold')
+        unit = ' на ядро (среднее за 5 минут)' if rule == 'load_pressure' else '%'
+        if number(value) and number(threshold): lines.append(f'Измерено: {value:g}{unit}. Порог: {threshold:g}.')
+        if not recovered: lines.append('Что делать: проверьте нагрузку процессов и свободные ресурсы сервера.')
+    elif rule == 'application_recovery':
+        if not recovered: lines.append('Проблема: сохранён барьер восстановления настроек. Проверьте незавершённую операцию и её журнал перед новыми изменениями.')
+    elif rule == 'relay_unavailable':
+        lines.append('Проверка относится к API Agent. Работоспособность пересылки и клиентской связи по этому событию не подтверждается.')
+    elif rule in ('relay_route', 'relay_address', 'connection_errors'):
+        if rule == 'relay_route':
+            lines.append(f'Маршрутов с ошибкой или расхождением: {details.get("failed_routes", "—")}.')
+            if isinstance(details.get('ports'), list): lines.append('Порты: ' + ', '.join(str(port) for port in details['ports'] if type(port) is int and 1 <= port <= 65535))
+        elif rule == 'relay_address':
+            if isinstance(details.get('addresses'), list): lines.append('Адреса: ' + ', '.join(name for name in details['addresses'] if isinstance(name, str) and re.fullmatch(r'[a-zA-Z0-9_.-]{1,253}', name)))
+        elif number(details.get('errors')): lines.append(f'Ошибок за последний интервал Agent (до 60 с): {details["errors"]:g}. Порог: {details.get("threshold", "—")}.')
+        if not recovered: lines.append('Что делать: откройте этот Relay в ресурсах сети и проверьте маршрут, адрес и диагностику обмена.')
     elif rule == 'service_error':
         state = {'error': 'ошибка выполнения', 'stopped': 'остановлена', 'running': 'работает', 'applied': 'настройки применены',
                  'succeeded': 'задача выполнена', 'listening': 'ожидает подключения', 'waiting': 'ожидает запуска'}.get(details.get('state'))

@@ -31,6 +31,21 @@ function nodes(tree, predicate) {
 const tick = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 const status = revision => ({ settings: { enabled: false, owner_id: 123, failures: true, recoveries: true, boots: true }, revision: revision.repeat(64), owners: [{ telegram_id: 123, name: "Owner" }], token_configured: true, pending: 0, last_delivery: null });
 
+test('compact alert sections retain staged delivery changes while switching panels', async () => {
+  const view = mount(); view.render(); view.calls[0].resolve(status('a')); await tick();
+  let tree = view.render();
+  assert.equal(nodes(tree, node => node.props['aria-pressed'] === true)[0].props.children, 'Основные');
+  nodes(tree, node => node.type === 'button' && node.props.children === 'Доставка')[0].props.onClick();
+  tree = view.render();
+  nodes(tree, node => node.props.role === 'switch')[0].props.onChange({ target: { checked: true } });
+  nodes(tree, node => node.type === 'button' && node.props.children === 'Основные')[0].props.onClick();
+  tree = view.render();
+  nodes(tree, node => node.type === 'button' && node.props.children === 'Доставка')[0].props.onClick();
+  tree = view.render();
+  assert.equal(nodes(tree, node => node.props.role === 'switch')[0].props.checked, true);
+  assert.equal(view.calls.length, 1);
+});
+
 test('background failures use one notification, respect dismissal and clear after recovery', async () => {
   const view = mount(); view.render(); view.calls[0].reject(new Error('Alerts unavailable')); await tick();
   let tree = view.render();

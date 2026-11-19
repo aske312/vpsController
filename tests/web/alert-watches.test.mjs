@@ -61,3 +61,24 @@ test('diagnostic thresholds save the read revision only on explicit save', async
   assert.equal(JSON.parse(calls[1].options.body).disk_percent, 90);
   assert.equal(view.store.getSnapshot()[0].state, 'success');
 });
+
+test('basic preset stages resource and relay conditions, validates thresholds and keeps revision', async () => {
+  const calls = [];
+  const request = async (path, options) => { calls.push({ path, options }); return options?.method ? JSON.parse(options.body) : { revision: 'c'.repeat(32), cpu_pressure: false, cpu_percent: 85 }; };
+  const view = mount('alert-diagnostic-rules', { request, blocked: false });
+  view.render(); await Promise.resolve();
+  let tree = view.render();
+  assert.equal(nodes(tree).filter(node => node.props.role === 'switch').length, 12);
+  nodes(tree).find(node => node.props['aria-label'] === 'Загрузка CPU: порог').props.onChange({ target: { value: '101' } });
+  nodes(view.render()).find(node => node.type === 'button' && node.props.children === 'Сохранить условия').props.onClick();
+  await Promise.resolve();
+  assert.equal(calls.length, 1);
+  nodes(view.render()).find(node => node.type === 'button' && node.props.children === 'Базовый набор').props.onClick();
+  nodes(view.render()).find(node => node.type === 'button' && node.props.children === 'Сохранить условия').props.onClick();
+  await Promise.resolve();
+  const body = JSON.parse(calls[1].options.body);
+  assert.equal(body.revision, 'c'.repeat(32));
+  assert.equal(body.cpu_percent, 90);
+  assert.equal(body.relay_address, true);
+  assert.equal(body.connection_error_count, 10);
+});

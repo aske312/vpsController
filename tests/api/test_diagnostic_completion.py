@@ -64,6 +64,19 @@ class CompletionTests(unittest.TestCase):
         with self.assertRaises(api.HTTPException):
             diagnostic_rules.call(self.env, {'method': 'PATCH', 'body': {'revision': 'f' * 32}}, 'panel')
 
+    def test_ai_manages_resource_and_relay_rules_with_human_confirmation(self):
+        catalog = diagnostic_rules.call(self.env, {}, 'panel')
+        self.assertIn('cpu_percent', catalog['schema']['properties'])
+        diagnostic_rules.call(self.env, {'method': 'PATCH', 'body': {'revision': catalog['rules']['revision'],
+            'cpu_percent': 85, 'memory_percent': 88, 'load_per_cpu': 2, 'relay_address': False,
+            'connection_error_count': 15}}, 'panel')
+        self.assertEqual(diagnostic_rules.read(self.env)['cpu_percent'], 90)
+        self.confirm()
+        changed = diagnostic_rules.read(self.env)
+        self.assertEqual(changed['cpu_percent'], 85)
+        self.assertEqual(changed['connection_error_count'], 15)
+        self.assertFalse(changed['relay_address'])
+
     def test_disabled_connector_invalidates_prepared_policy(self):
         diagnostic_rules.call(self.env, {'method': 'PATCH', 'body': {'revision': '0' * 32}}, 'panel')
         self.settings['mcp']['vps-controller-mcp'] = False

@@ -615,18 +615,18 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   </section>;
 
   const alerts = <section className="noderaSettings"><header className="noderaBlockHead"><h2>Алерты Telegram</h2><button type="button" className="ghostButton" onClick={() => setAlertsOpen(true)}>Настроить алерты</button></header>
-    {alertsOpen && <SettingsDialog title="Алерты Telegram" wide close={() => setAlertsOpen(false)}><TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/></SettingsDialog>}
+    {alertsOpen && <SettingsDialog title="Алерты Telegram" wide compact close={() => setAlertsOpen(false)}><TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/></SettingsDialog>}
   </section>;
   return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{alerts}{roleSettings}{users}</>}</div>;
 }
 
-export function SettingsDialog({ title, close, submit, blocked, children, wide = false, submitLabel = "Применить", dismissible = true }: {
-  wide?: boolean; title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode; submitLabel?: string; dismissible?: boolean;
+export function SettingsDialog({ title, close, submit, blocked, children, wide = false, compact = false, submitLabel = "Применить", dismissible = true }: {
+  wide?: boolean; compact?: boolean; title: string; close: () => void; submit?: () => void; blocked?: boolean; children: ReactNode; submitLabel?: string; dismissible?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const id = useId();
   useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className={`noderaDialog${wide ? " noderaDialogWide" : ""}`} aria-labelledby={id} onClose={close} onCancel={event => { if (!dismissible) event.preventDefault(); }}>
+  return <dialog ref={dialog} className={`noderaDialog${wide ? " noderaDialogWide" : ""}${compact ? " noderaDialogCompact" : ""}`} aria-labelledby={id} onClose={close} onCancel={event => { if (!dismissible) event.preventDefault(); }}>
     <form onSubmit={event => { event.preventDefault(); if (!blocked) submit?.(); }}>
       <header><h2 id={id}>{title}</h2><button type="button" className="mcpIconButton" aria-label="Закрыть" disabled={!dismissible} onClick={close}><ChatIcon name="close"/></button></header>
       <div className="noderaDialogFields">{children}</div>

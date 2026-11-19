@@ -28,3 +28,22 @@
 .alertDeliveryHistory summary span,.alertDeliveryHistory time,.noderaOwnerAlerts time { color:var(--muted); font-size:11px; }
 .alertDeliveryHistory pre { margin:12px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); font:12px/1.6 var(--font-sans),sans-serif; }
 @media(max-width:600px) { .alertFields { grid-template-columns:1fr; } }
+.noderaDialog.noderaDialogCompact { width:min(740px,calc(100vw - 32px)); }
+.noderaOwnerAlerts [hidden] { display:none !important; }
+.alertOverview { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; font-size:12px; }
+.alertOverview span { color:var(--muted); }
+.alertNavigation { display:flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:10px; background:var(--panel-inset); }
+.alertNavigation button { flex:1; padding:8px; border:0; border-radius:7px; color:var(--muted); background:transparent; font-size:12px; }
+.alertNavigation button[aria-pressed=true] { color:var(--text); background:var(--panel); box-shadow:0 1px 3px #0002; }
+.alertPanel { display:grid; gap:12px; }
+.alertPanel > label:not(.noderaPermissionSwitch) { display:grid; gap:6px; font-size:12px; }
+.alertBasicRules { padding-top:0; border-top:0; }
+.alertBasicRules fieldset { gap:8px; }
+.alertGroup { border:1px solid var(--line); border-radius:9px; padding:0 12px; }
+.alertGroup > summary { padding:11px 0; cursor:pointer; font-size:13px; font-weight:600; }
+.alertGroup > .alertFields { padding:4px 0 12px; }
+.alertCondition { display:flex; align-items:center; justify-content:space-between; min-height:42px; gap:12px; border-top:1px solid var(--line); }
+.alertCondition > label { display:flex; align-items:center; gap:9px; font-size:12px; }
+.alertThreshold { display:flex; align-items:center; gap:6px; width:132px; flex-shrink:0; color:var(--muted); font-size:11px; }
+.alertThreshold input { box-sizing:border-box; width:76px; padding:5px 7px; border:1px solid var(--line); border-radius:6px; background:var(--panel-inset); color:var(--text); }
+@media(max-width:440px) { .alertCondition { flex-wrap:wrap; padding:7px 0; gap:6px; } .alertThreshold { margin-left:auto; } }
