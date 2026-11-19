@@ -11,6 +11,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import traceback
 
 SQLITE_HEADER = b'SQLite format 3\0'
 EXCLUDED = {'recovery', 'tmp', 'logs', 'application-action.json'}
@@ -31,6 +32,16 @@ def snapshot_data(source: Path, destination: Path, *, database_timeout=30):
             os.chown(copied, details.st_uid, details.st_gid, follow_symlinks=False)
 
     def copy(original, copied, relative):
+        try:
+            copy_entry(original, copied, relative)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            # Keep the innermost path: directory callers must not obscure the
+            # file that failed (SQLite errors often contain no filename).
+            if not any(note.startswith('Recovery data: ') for note in getattr(error, '__notes__', ())):
+                error.add_note(f'Recovery data: source={original!s}; destination={copied!s}')
+            raise
+
+    def copy_entry(original, copied, relative):
         details = original.lstat()
         if stat.S_ISLNK(details.st_mode):
             copied.symlink_to(os.readlink(original), target_is_directory=original.is_dir())
@@ -96,4 +107,7 @@ if __name__ == '__main__':
     try:
         build_archive(args.data_dir, args.archive, args.paths)
     except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+        # stderr is retained by journald and the protected update report. Keep
+        # the cause and per-file context without printing file contents/locals.
+        traceback.print_exc()
         raise SystemExit('Recovery snapshot failed; server settings were not changed')

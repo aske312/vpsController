@@ -106,6 +106,7 @@ from schemas import (
     MetricsSettings,
     ComponentAdoption,
     OperationHistorySettings,
+    OperationResolution,
     AutomationSchedule,
     AutomationSettings,
     DnsCustomResolver,
@@ -4573,6 +4574,7 @@ def application_operations(_: None = Depends(require_token)) -> dict:
                 continue
             items.append({"id": item.get("id", path.stem), "source": "cdn", "action": "ech" if item.get("kind") == "ech" else "cdn-security",
                           "state": item.get("state", "unknown"), "message": item.get("message", ""), "progress": item.get("progress"),
+                          "resolved_at": item.get("resolved_at"),
                           "started_at": datetime.fromtimestamp(item["created_at"], timezone.utc).isoformat() if isinstance(item.get("created_at"), (int, float)) else None})
         return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)[:100]}
     except (OSError, ValueError):
@@ -4590,6 +4592,22 @@ def get_operation_log(operation_id: str, source: Literal["system", "mihomo", "cd
         return get(DATA_DIR, source, operation_id)
     except (OSError, ValueError, KeyError, TypeError):
         raise HTTPException(status_code=503, detail="Журнал операции временно недоступен") from None
+
+
+@app.put("/api/application/operations/{operation_id}/resolution")
+def resolve_operation(operation_id: str, payload: OperationResolution,
+                      source: Literal["system", "mihomo", "cdn"] = "system", _: None = Depends(require_token)) -> dict:
+    import operation_resolution
+    try:
+        return operation_resolution.set_resolved(DATA_DIR, operation_id, source, payload.resolved)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Операция не найдена") from None
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Некорректная отметка операции") from None
+    except OSError:
+        raise HTTPException(status_code=503, detail="Не удалось сохранить отметку операции") from None
 
 
 @app.get("/api/application/operations/{operation_id}")

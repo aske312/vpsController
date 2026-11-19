@@ -2,14 +2,14 @@ import { operationOutcome } from "../../shared/lib/operation-outcome.mjs";
 import { actionLabels } from "../../shared/lib/control-plane-ui";
 import type { SystemAction } from "../system-operation";
 
-export type HistoryEntry = SystemAction & { source?: string; updated_at?: string; stage?: string; stage_result?: string; error_code?: string; reason?: string; health_check?: {scope?: string; state?: string; application_function?: string} };
-export type HistoryFilter = "all" | "active" | "attention" | "completed";
+export type HistoryEntry = SystemAction & { resolved_at?: string | null; source?: string; updated_at?: string; stage?: string; stage_result?: string; error_code?: string; reason?: string; health_check?: {scope?: string; state?: string; application_function?: string} };
+export type HistoryFilter = "all" | "active" | "attention" | "completed" | "resolved";
 export function historyEntries(value: unknown): HistoryEntry[] {
   if (!value || typeof value !== "object" || !("items" in value) || !Array.isArray(value.items)) throw Error("Invalid history");
   return value.items.map((entry: unknown) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw Error("Invalid operation");
     const item = entry as Record<string, unknown>;
-    for (const key of ["id", "unit", "action", "source", "message", "state", "result", "started_at", "updated_at", "stage", "stage_result", "error_code", "reason"]) {
+    for (const key of ["id", "unit", "action", "source", "message", "state", "result", "started_at", "updated_at", "resolved_at", "stage", "stage_result", "error_code", "reason"]) {
       if (item[key] != null && typeof item[key] !== "string") throw Error("Invalid operation field");
     }
     if (!item.id && !item.unit && !item.started_at && !item.updated_at) throw Error("Missing operation identity");
@@ -31,7 +31,11 @@ export function historyTitle(entry: HistoryEntry) {
 }
 export function historyState(entry: HistoryEntry) {
   const state = historyResultState(entry);
+  if (state === "failed" && entry.resolved_at) return { label: "Ошибка · решено", tone: "neutral" };
   return { label: state === "skipped" ? "Пропущена" : states[state] || states.unknown, tone: active.has(state) ? "active" : state === "succeeded" || state === "done" ? "success" : state === "failed" ? "error" : state === "cancelled" || state === "skipped" ? "neutral" : "unknown" };
+}
+export function historyErrorCount(entries: HistoryEntry[]) {
+  return entries.filter(entry => operationOutcome(entry) === "error" && !entry.resolved_at).length;
 }
 function historyResultState(entry: HistoryEntry) {
   const outcome = operationOutcome(entry);
@@ -40,7 +44,9 @@ function historyResultState(entry: HistoryEntry) {
 
 export function historyMatches(entry: HistoryEntry, filter: HistoryFilter, query: string) {
   const state = historyResultState(entry);
-  if (filter === "active" && !active.has(state) || filter === "completed" && !completed.has(state) || filter === "attention" && (active.has(state) || completed.has(state))) return false;
+  const resolved = state === "failed" && Boolean(entry.resolved_at);
+  if (filter === "resolved" && !resolved || filter === "attention" && resolved) return false;
+  if (filter === "active" && !active.has(state) || filter === "completed" && !completed.has(state) && !resolved || filter === "attention" && (active.has(state) || completed.has(state))) return false;
   const text = [historyTitle(entry), historySource(entry), historyState(entry).label, entry.action, entry.id, entry.unit, entry.message].join(" ").toLocaleLowerCase();
   return query.trim().toLocaleLowerCase().split(/\s+/).every(word => text.includes(word));
 }

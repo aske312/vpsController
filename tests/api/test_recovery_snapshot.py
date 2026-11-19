@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from tests.api.support import load_module
 
@@ -97,6 +99,46 @@ class RecoverySnapshotTests(unittest.TestCase):
         archive.write_bytes(b'previous point')
         with self.assertRaises(FileExistsError):
             snapshot.build_archive(self.source, archive, [])
+        self.assertEqual(archive.read_bytes(), b'previous point')
+
+    def test_copy_failure_identifies_innermost_file_and_preserves_exception(self):
+        source = self.source / 'metrics' / 'settings.json'
+        source.write_text('private fixture contents')
+        with patch.object(snapshot.shutil, 'copyfile', side_effect=PermissionError('copy denied')):
+            with self.assertRaises(PermissionError) as raised:
+                snapshot.snapshot_data(self.source, self.root / 'snapshot')
+        notes = raised.exception.__notes__
+        self.assertEqual(len(notes), 1)
+        self.assertIn(str(source), notes[0])
+        self.assertNotIn('private fixture contents', notes[0])
+
+    def test_cli_reports_sqlite_cause_and_path_without_retaining_partial_backup(self):
+        self.database.write_bytes(b'private invalid database fixture')
+        archive = self.root / 'recovery.tar.gz'
+        result = subprocess.run(
+            [sys.executable, str(Path(snapshot.__file__)), '--data-dir', str(self.source),
+             '--archive', str(archive), str(self.source)],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('sqlite3.DatabaseError: file is not a database', result.stderr)
+        self.assertIn(str(self.database), result.stderr)
+        self.assertIn('Recovery snapshot failed; server settings were not changed', result.stderr)
+        self.assertNotIn('private invalid database fixture', result.stderr)
+        self.assertFalse(archive.exists())
+        self.assertEqual(list(self.root.glob('.data-snapshot-*')), [])
+
+    def test_cli_reports_archive_collision_without_overwriting_recovery_point(self):
+        archive = self.root / 'recovery.tar.gz'
+        archive.write_bytes(b'previous point')
+        result = subprocess.run(
+            [sys.executable, str(Path(snapshot.__file__)), '--data-dir', str(self.source),
+             '--archive', str(archive), str(self.source)],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('FileExistsError', result.stderr)
+        self.assertIn(repr(str(archive)), result.stderr)
         self.assertEqual(archive.read_bytes(), b'previous point')
 
     @unittest.skipIf(os.name == 'nt', 'GNU tar integration runs on Linux')

@@ -5,11 +5,12 @@ import { createApiClient } from "../../shared/lib/api-request";
 import { safeDateTime } from "../../shared/lib/control-plane-ui";
 import { notificationText } from "../../shared/notifications/operation-presentation";
 import { useNotifier } from "../../shared/notifications/notification-center";
-import { historyEntries, historyKey, historyMatches, historySource, historyState, historyTitle, type HistoryEntry, type HistoryFilter } from "./operation-history-state";
+import { historyEntries, historyErrorCount, historyKey, historyMatches, historySource, historyState, historyTitle, type HistoryEntry, type HistoryFilter } from "./operation-history-state";
+import type { SystemAction } from "../system-operation";
 
 type Request = ReturnType<typeof createApiClient>;
 type Journal = { events: { at: string; state: string; progress?: number; message: string; stage?: string; result?: string; error_code?: string; exit_code?: number }[]; dropped: number; available?: boolean };
-const filters: { id: HistoryFilter; label: string }[] = [{ id: "all", label: "Все" }, { id: "active", label: "В работе" }, { id: "attention", label: "Требуют внимания" }, { id: "completed", label: "Завершённые" }];
+const filters: { id: HistoryFilter; label: string }[] = [{ id: "all", label: "Все" }, { id: "active", label: "В работе" }, { id: "attention", label: "Требуют внимания" }, { id: "resolved", label: "Решённые" }, { id: "completed", label: "Завершённые" }];
 
 function OperationJournal({ request, entry }: { request: Request; entry: HistoryEntry }) {
   const [journal, setJournal] = useState<Journal | null>(null);
@@ -48,7 +49,7 @@ function OperationJournal({ request, entry }: { request: Request; entry: History
   </section>;
 }
 
-export function OperationHistory({ token }: { token: string }) {
+export function OperationHistory({ token, action }: { token: string; action?: SystemAction }) {
   const notify = useNotifier("operation-history", "Операции");
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -59,14 +60,16 @@ export function OperationHistory({ token }: { token: string }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [selected, setSelected] = useState("");
+  const [savingResolution, setSavingResolution] = useState(false);
   const request = useMemo(() => createApiClient(token), [token]);
   const items = snapshot?.owner === request ? snapshot.items : null;
   const error = failure?.owner === request ? failure.message : "";
+  const errorCount = items ? historyErrorCount(items) : 0;
+  const errorLabel = errorCount ? `Ошибок в последних 100 операциях: ${errorCount}${error ? "; данные устарели" : ""}` : "";
   const visible = items?.filter(item => historyMatches(item, filter, query)) || [];
   const entry = visible.find(item => historyKey(item) === selected) || visible[0];
   useEffect(() => { if (open) dialog.current?.showModal(); }, [open]);
   useEffect(() => {
-    if (!open) return;
     let cancelled = false;
     let pending = false;
     const refresh = async () => {
@@ -81,18 +84,27 @@ export function OperationHistory({ token }: { token: string }) {
       } finally { pending = false; if (!cancelled) setLoading(false); }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 10000);
+    const timer = window.setInterval(() => void refresh(), open ? 10000 : 30000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [open, request, revision]);
+  }, [open, request, revision, action?.id, action?.state, action?.result]);
   function close() { dialog.current?.close(); setOpen(false); }
   async function copy(entry: HistoryEntry, context = false) {
     const text = context ? `Разбери операцию ${entry.id}. Источник: ${entry.source || "system"}; действие: ${entry.action}; state=${entry.state}; result=${entry.result || "не указан"}; stage=${entry.stage || "не указан"}; error_code=${entry.error_code || "не указан"}. Начни с operation_timeline(operation_id="${entry.id}", include_journal=true). Сопоставь authoritative_result, этапы, конфликты и current_admission. Не повторяй изменяющую команду.` : entry.id || "";
     try { await navigator.clipboard.writeText(text); notify.info(context ? "Контекст для Nodera скопирован" : "ID операции скопирован"); }
     catch { notify.error("Не удалось скопировать. ID можно выделить в карточке операции."); }
   }
+  async function resolve(entry: HistoryEntry) {
+    setSavingResolution(true);
+    try {
+      const value = await request<{ resolved_at: string | null }>(`/application/operations/${entry.id}/resolution?source=${entry.source || "system"}`, { method: "PUT", body: JSON.stringify({ resolved: !entry.resolved_at }) });
+      setSnapshot(current => current?.owner === request ? { ...current, items: current.items.map(item => historyKey(item) === historyKey(entry) ? { ...item, resolved_at: value.resolved_at } : item) } : current);
+      setRevision(value => value + 1);
+    } catch { notify.error("Не удалось сохранить отметку. Обновите историю и попробуйте ещё раз."); }
+    finally { setSavingResolution(false); }
+  }
   const presentation = entry ? historyState(entry) : null;
   return <>
-    <button type="button" className="ghostButton" onClick={() => setOpen(true)}>Операции</button>
+    <button type="button" className="ghostButton operationHistoryButton" onClick={() => setOpen(true)} title={errorLabel || undefined} aria-label={errorLabel ? `Операции. ${errorLabel}` : "Операции"}>Операции{errorCount > 0 && <span className="operationHistoryErrorCount" aria-hidden="true">{errorCount}{error ? "?" : ""}</span>}</button>
     <dialog ref={dialog} className="operationHistoryDialog" aria-labelledby="operation-history-title" onCancel={close} onClose={() => setOpen(false)}>
       <div className="operationHistoryShell">
         <header className="operationHistoryHeader"><div><h2 id="operation-history-title">История операций</h2></div><button type="button" autoFocus onClick={close} aria-label="Закрыть историю операций">×</button></header>
@@ -123,6 +135,7 @@ export function OperationHistory({ token }: { token: string }) {
 
 
               {entry.message && <p className={`operationHistoryResult ${presentation.tone}`}>{notificationText(entry.message)}</p>}
+              {entry.id && (presentation.tone === "error" || entry.resolved_at) && <div className="operationResolution"><button type="button" disabled={savingResolution} onClick={() => void resolve(entry)}>{savingResolution ? "Сохранение…" : entry.resolved_at ? "Снять отметку «Решено»" : "Отметить как решённую"}</button><small>{entry.resolved_at ? `Отмечена решённой ${safeDateTime(entry.resolved_at)}. Результат и журнал сохранены.` : "Отметка уберёт ошибку из счётчика и сохранит её в истории."}</small></div>}
               {presentation.tone === "active" && Number.isFinite(entry.progress) && <div className="operationHistoryProgress"><progress max={100} value={Math.max(0, Math.min(100, entry.progress!))} aria-label="Ход операции" /><span>{Math.round(Math.max(0, Math.min(100, entry.progress!)))}%</span></div>}
               {open && entry.id && <OperationJournal key={`${token}:${historyKey(entry)}`} request={request} entry={entry} />}
               <details className="operationHistoryTechnical"><summary>Технические сведения</summary><dl>{entry.id && <><dt>ID операции</dt><dd><code>{entry.id}</code></dd></>}{entry.unit && <><dt>Процесс</dt><dd><code>{entry.unit}</code></dd></>}<dt>Обновлена</dt><dd>{safeDateTime(entry.updated_at || entry.started_at)}</dd></dl></details>

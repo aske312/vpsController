@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, StrictInt, IPvAnyAddress, field_validator
 from resource_country import country_override
 
 
+class OperationResolution(BaseModel):
+    model_config = {"extra": "forbid"}
+    resolved: bool = Field(strict=True)
+
+
 class BootstrapRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 

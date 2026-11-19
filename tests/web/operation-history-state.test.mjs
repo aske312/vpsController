@@ -3,7 +3,7 @@ import test, { after } from 'node:test';
 import { createTestLoader } from './vite-test-loader.mjs';
 const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
-const { historyEntries, historyMatches, historyState } = await loader.ssrLoadModule('/src/control-panel/components/operation-history-state.ts');
+const { historyEntries, historyErrorCount, historyMatches, historyState } = await loader.ssrLoadModule('/src/control-panel/components/operation-history-state.ts');
 
 test('operation history keeps unconfirmed and failed worker results in attention', () => {
   for (const state of ['succeeded', 'finished', 'done']) {
@@ -30,4 +30,26 @@ test('operation history keeps unconfirmed and failed worker results in attention
 
 test('invalid result payload cannot be rendered as successful history', () => {
   for (const result of [{}, [], 1, true]) assert.throws(() => historyEntries({ items: [{ id: 'operation', state: 'succeeded', result }] }));
+});
+
+test('error count excludes resolved, cancelled, unknown and active operations', () => {
+  const items = historyEntries({ items: [
+    { id: 'failed', state: 'failed' },
+    { id: 'exit-code', state: 'finished', result: 'exit-code' },
+    { id: 'resolved', state: 'failed', resolved_at: '2026-11-19T10:00:00Z' },
+    { id: 'active', state: 'running', result: 'failed' },
+    { id: 'unknown', state: 'unknown', result: 'timeout' },
+    { id: 'cancelled', state: 'cancelled', result: 'signal' },
+    { id: 'success', state: 'succeeded' },
+  ] });
+  assert.equal(historyErrorCount(items), 2);
+  const resolved = items[2];
+  assert.equal(historyState(resolved).label, 'Ошибка · решено');
+  assert.equal(resolved.state, 'failed');
+  assert.equal(historyMatches(resolved, 'attention', ''), false);
+  assert.equal(historyMatches(resolved, 'resolved', ''), true);
+  assert.equal(historyMatches(resolved, 'completed', ''), true);
+  assert.equal(historyMatches(items[0], 'resolved', ''), false);
+  assert.equal(historyErrorCount([{ ...resolved, resolved_at: null }]), 1);
+  assert.throws(() => historyEntries({ items: [{ id: 'invalid', resolved_at: true }] }));
 });

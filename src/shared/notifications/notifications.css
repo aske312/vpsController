@@ -86,6 +86,10 @@
   .gateOperationTrack.indeterminate > i { animation:none; }
   .gateOperationTrack > i { transition:none; }
 }
+.operationHistoryButton { display:inline-flex; align-items:center; gap:6px; }
+.operationResolution { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.operationResolution small { color:#9cb0bf; }
+.operationHistoryErrorCount { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border:1px solid #b45c60; border-radius:9px; background:#4a242d; color:#ffc0c4; font-size:10px; font-weight:700; font-variant-numeric:tabular-nums; }
 .operationHistoryDialog { width:min(1160px, calc(100vw - 32px)); height:min(88dvh,860px); max-width:none; max-height:94dvh; margin:auto; padding:0; overflow:hidden; border:1px solid #334653; border-radius:16px; background:#0b151e; color:#e0ebef; box-shadow:0 30px 100px #0008; }
 .operationHistoryDialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(4px); }
 .operationHistoryShell { display:flex; flex-direction:column; height:100%; min-height:0; }

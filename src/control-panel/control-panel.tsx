@@ -1,6 +1,6 @@
 "use client";
 
-import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
+import { useNotifications, useNotifier } from "../shared/notifications/notification-center";
 import { createApiClient, invalidateApiReads, invalidateApiSession, onApiSessionExpired } from "../shared/lib/api-request";
 import { refreshResource } from "../shared/lib/refresh-resource";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
@@ -16,6 +16,7 @@ import type { SectionLeaveGuard } from "../features/mihomo/rule-leave-guard";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { OperationHistory } from "./components/operation-history";
+import { observedNodeState } from "./node-state";
 import { OperationHistorySettings, useOperationHistorySettings } from "../features/services/operation-history-settings";
 import { ServicesDashboard } from "../features/services/services-view";
 import { ObservabilityPanel } from "../features/services/observability-panel";
@@ -100,7 +101,6 @@ export function ControlPanel() {
   const [metricsSettings, setMetricsSettings] = useState<MetricsSettings | null>(null);
   const [metricsDraft, setMetricsDraft] = useState<MetricsSettings | null>(null);
   const notifications = useNotifications();
-  const notificationItems = useNotificationList();
   const { error: notifyError, success: notifySuccess } = useNotifier("panel", "Панель");
   const [applicationLogs, setApplicationLogs] = useState<string[]>([]);
   const [securityLogsOpen, setSecurityLogsOpen] = useState(false);
@@ -1400,10 +1400,8 @@ export function ControlPanel() {
   const operationName = application?.action?.action || "";
   const operationTarget = protocolImages.find(image => image.id === operationName.split(":")[1])?.name;
   const operationLabel = [actionLabels[operationName.split(":")[0]] || operationName, operationTarget].filter(Boolean).join(" · ");
-  const nodeHasError = notificationItems.some((item) => item.state === "error") || application?.api.active === false || application?.action?.state === "failed" || application?.action?.result === "failed";
-  const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
-  const nodeState = !application ? "gray" : nodeHasError ? "red" : serviceModeActive ? "blue" : operationActive || nodeDegraded ? "yellow" : "green";
+  const nodeState = observedNodeState(application, services, operationActive);
   const nodeStateLabel = nodeState === "gray" ? "ПРОВЕРКА УЗЛА"
     : nodeState === "red" ? "УЗЕЛ С ОШИБКОЙ"
     : nodeState === "blue" ? "СЕРВИСНЫЙ РЕЖИМ"
@@ -1457,7 +1455,7 @@ export function ControlPanel() {
     viewLoading={viewLoading}
     onRefresh={() => void refreshCurrent(true, true)}
     onLogout={() => { void (async () => { if (await canLeaveSection()) { invalidateApiSession(token, false); clearSession(); } })(); }}
-    operationHistory={<OperationHistory token={token} />}
+    operationHistory={<OperationHistory token={token} action={application?.action} />}
   >
       {tab !== "overview" && tab !== "network" && tab !== "nodera" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
