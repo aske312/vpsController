@@ -32,7 +32,7 @@ import { ConnectionOrderNav } from "./connection-order-nav";
 import { connectionAppearance } from "./connection-status";
 import { ProfileConnectionCard } from "./profile-connection-card";
 
-import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
+import { NotificationNotice, useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
 import { createApiClient } from "../../shared/lib/api-request";
 import { submitSystemOperation, systemActionSnapshot, systemActionNeedsPolling, systemOperationId, systemOperationNotification, type SystemAction } from "../../control-panel/system-operation";
@@ -1457,8 +1457,8 @@ export function MihomoPage({
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
-      {readOnly && <p role="status">Только просмотр и диагностика. Для изменения Mihomo примите его под управление в разделе «Обзор».</p>}
-      {status?.recovery_required && <p role="alert">Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы. <button type="button" disabled={Boolean(busy) || readOnly} onClick={() => void recoverProfiles()}>Восстановить Mihomo</button></p>}
+      {readOnly && <NotificationNotice id="mihomo:read-only" title="Mihomo · только просмотр" state="info" message="Для изменения Mihomo примите его под управление в разделе «Обзор»." />}
+      {status?.recovery_required && <NotificationNotice id="mihomo:recovery" title="Восстановление Mihomo" state="unknown" message="Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы." action={{ label: "Восстановить Mihomo", disabled: Boolean(busy) || readOnly, run: recoverProfiles }} />}
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
@@ -1610,7 +1610,7 @@ export function MihomoPage({
 
       {view === "dns" && (
         <form className="mihomoDnsWorkspace mihomoDnsV2" onSubmit={saveDnsWorkspace}>
-          {dnsRevisionConflict && <p className="mihomoHint" role="alert">DNS-настройки изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Загрузить актуальные данные</button></p>}
+          {dnsRevisionConflict && <NotificationNotice id="mihomo:dns-conflict" title="Настройки DNS" message="DNS-настройки изменились. Ваш ввод сохранён." action={{ label: "Загрузить актуальные данные", disabled: Boolean(busy), run: () => reloadPolicy("dns") }} />}
           <header className="mihomoDnsHeader"><div><h2>Разрешение доменов</h2></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
           <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b></div></section>
 
@@ -1627,7 +1627,7 @@ export function MihomoPage({
             {dnsByRoute && key !== "direct_nameserver" && !String(dnsDraft[key] || "").startsWith("https://") && <option value={String(dnsDraft[key] || "")} disabled>Выберите DoH-резолвер</option>}
             {dnsOptions.filter((option) => !dnsByRoute || key === "direct_nameserver" || option.value.startsWith("https://")).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select></label>)}</div>
-          {dnsSaveError && <p className="mihomoHint" role="alert">{dnsSaveError}</p>}
+          {dnsReadKnown && dnsSaveError && <NotificationNotice id="mihomo:dns-validation" title="Настройки DNS" message={dnsSaveError} />}
           <details className="mihomoDnsRouteDetails"><summary>Дополнительные резолверы</summary><div>
             <label><span><b>DNS адреса VPN-сервера</b></span><select value={String(dnsDraft.proxy_nameserver || "")} onChange={(event) => updateDnsDraft("proxy_nameserver", event.target.value)}>{dnsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             <label><span><b>Начальный DNS</b></span><input value={String(dnsDraft.bootstrap_nameserver || "")} placeholder="1.1.1.1" onChange={(event) => updateDnsDraft("bootstrap_nameserver", event.target.value)} /></label>
@@ -1637,14 +1637,14 @@ export function MihomoPage({
           {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Дополнительный резолвер для проверки ответов.']] as const).map(([key, title]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
           </>}
           <aside className="mihomoDnsNote"><b>Применение настроек</b><span>{dnsByRoute ? "При недоступности VPN туннельный DNS не переключается на прямой. Для правил по IP и приложениям DNS может понадобиться до выбора маршрута. " : "Основной и резервный DNS должны отличаться. "}После сохранения обновите подписку в клиенте.</span></aside>
-          <footer className="mihomoDnsFooter"><button type="button" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Отменить изменения</button><span>{!dnsReadKnown ? "Не удалось прочитать настройки DNS. Обновите данные; ваш ввод сохранён." : dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy) || dnsRevisionConflict || Boolean(dnsSaveError)}>{busy === "settings:dns-private" ? "Сохранение…" : dnsSaveError ? "Проверьте DNS" : "Сохранить DNS"}</button></footer>
+          <footer className="mihomoDnsFooter"><button type="button" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Отменить изменения</button><span>{!dnsReadKnown ? "" : dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy) || dnsRevisionConflict || Boolean(dnsSaveError)}>{busy === "settings:dns-private" ? "Сохранение…" : dnsSaveError ? "Проверьте DNS" : "Сохранить DNS"}</button></footer>
         </form>
       )}
 
 
       {(view === "routing" || view === "rules") && (
         <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
-          {routingRevisionConflict && <p className="mihomoHint" role="alert">Настройки маршрутизации изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Загрузить актуальные данные</button></p>}
+          {routingRevisionConflict && <NotificationNotice id="mihomo:routing-conflict" title="Маршрутизация Mihomo" message="Настройки маршрутизации изменились. Ваш ввод сохранён." action={{ label: "Загрузить актуальные данные", disabled: Boolean(busy), run: () => reloadPolicy("routing") }} />}
           <header className="mihomoRoutingHeader">
             {view === "rules" ? <div><h2>Правила</h2></div> : <div><h2>Настройки Mihomo</h2></div>}
             <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
@@ -1667,7 +1667,7 @@ export function MihomoPage({
                 <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
               </> : activeRuleList === "direct_p2p_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><h3>P2P и торренты напрямую</h3></div><span>{selectedP2pClients.size} напрямую</span></header>
-                <div className="mihomoMessage is-error">Прямой маршрут раскрывает ваш публичный IP участникам раздачи и не обходит ограничения провайдера.</div>
+                <NotificationNotice id="mihomo:direct-route" title="Прямой маршрут" state="info" message="Прямой маршрут раскрывает ваш публичный IP участникам раздачи и не обходит ограничения провайдера." />
                 <div className="mihomoGameCatalog">
                   {p2pClientCatalog.map((client) => { const selected = selectedP2pClients.has(client.id); return <button type="button" key={client.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleP2pClient(client.id)}><span>{client.code}</span><b>{client.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>
@@ -1690,7 +1690,7 @@ export function MihomoPage({
             </article>
           </section>
 
-          {!routingPolicy?.routing_library_supported && <p className="mihomoHint">Для назначения маршрутов наборам обновите компонент Mihomo.</p>}
+          {routingReadKnown && !routingPolicy?.routing_library_supported && <NotificationNotice id="mihomo:routing-library" title="Наборы маршрутизации" state="info" message="Для назначения маршрутов наборам обновите компонент Mihomo." />}
           <AdvancedRouting value={routingDraft.structured_policy} defaults={routingDraft} library={routingPolicy?.routing_library_supported ? routingLibrary : []}
             onEditSource={id => { setActiveRuleList(id.startsWith("preset:") ? id.slice(7) : id); ruleStudio.current?.scrollIntoView({ block: "start" }); }}
             onChange={value => updateRoutingDraft("structured_policy", value)}/>
@@ -1727,7 +1727,7 @@ export function MihomoPage({
           </section>
           </>}
 
-          <footer className="mihomoRoutingFooter"><button type="button" disabled={!routingReadKnown || !routingDirty || Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Отменить изменения</button><span>{!routingReadKnown ? "Не удалось прочитать настройки маршрутизации. Обновите данные; ваш ввод сохранён." : routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingReadKnown || !routingDirty || Boolean(busy) || routingRevisionConflict}>{busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}</button></footer>
+          <footer className="mihomoRoutingFooter"><button type="button" disabled={!routingReadKnown || !routingDirty || Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Отменить изменения</button><span>{!routingReadKnown ? "" : routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingReadKnown || !routingDirty || Boolean(busy) || routingRevisionConflict}>{busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}</button></footer>
         </form>
       )}
 
@@ -1742,7 +1742,7 @@ export function MihomoPage({
             </header>
 
             {editing.id === "transport-hysteria2" && <p className="mihomoHint">Обфускация: {settingsDraft.obfs ? "Salamander включён" : "выключена"}. Клиенты должны обновить подписку после изменения. Сохранение использует штатную операцию изменения серверного канала с проверкой и откатом.</p>}
-            {settingsRevisionConflict && <p role="alert">{latestSettingsModule ? "Настройки компонента изменились. Ваш ввод сохранён; загрузите актуальные данные перед новой записью." : "Компонент больше не доступен. Ваш ввод сохранён."} <button type="button" disabled={!latestSettingsModule || Boolean(busy)} onClick={() => void reloadSettings()}>Загрузить актуальные настройки</button></p>}
+            {settingsRevisionConflict && <NotificationNotice id="mihomo:component-conflict" title="Настройки компонента" message={latestSettingsModule ? "Настройки компонента изменились. Ваш ввод сохранён; загрузите актуальные данные перед новой записью." : "Компонент больше не доступен. Ваш ввод сохранён."} action={{ label: "Загрузить актуальные настройки", disabled: !latestSettingsModule || Boolean(busy), run: reloadSettings }} />}
             <div className="mihomoFields">
               {(editing.settings || []).filter((field) => editing.id !== "transport-reality" || String(settingsDraft.transport || "xhttp") === "xhttp" || !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)).map((field) => (
                 <label key={field.key}>
@@ -1782,7 +1782,7 @@ export function MihomoPage({
               <div className="mihomoProfileHeading"><div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div></div>
               <button type="button" className="iconButton" aria-label="Закрыть профиль" onClick={() => void closeProfile()}>x</button>
             </header>
-            {profileRevisionConflict && <p className="mihomoMessage is-error" role="alert">{latestEditProfile ? "Профиль изменился на сервере. Ваши правки сохранены в форме, сохранение заблокировано до загрузки актуальных данных." : "Профиль удалён на сервере. Ваши правки остались в форме."} {latestEditProfile && <button type="button" disabled={Boolean(busy)} onClick={() => void reloadEditProfile()}>Загрузить актуальные данные</button>}</p>}
+            {profileRevisionConflict && <NotificationNotice id="mihomo:profile-conflict" title="Настройки профиля" message={latestEditProfile ? "Профиль изменился на сервере. Ваши правки сохранены в форме, сохранение заблокировано до загрузки актуальных данных." : "Профиль удалён на сервере. Ваши правки остались в форме."} action={latestEditProfile ? { label: "Загрузить актуальные данные", disabled: Boolean(busy), run: reloadEditProfile } : undefined} />}
             <div className="mihomoProfileWorkspace">
               <aside className="mihomoProfileRail">
                 <header><small>КОНФИГУРАЦИЯ</small><b>Параметры профиля</b></header>
@@ -1808,8 +1808,8 @@ export function MihomoPage({
             {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
             {profileStep === 3 && <ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue}/>}
             {activeProfileRouting.strategy === "load-balance" && <BalanceStrategy value={effectiveProfileRouting.load_balance_strategy} onChange={value => setProfileRoutingValue("load_balance_strategy", value)}/>}
-            {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
-            {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
+            {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <NotificationNotice id={`mihomo:encryption:${liveDialogProfile.id}:${activeDeviceId}`} title="Шифрование профиля" message="Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте." />}
+            {transitionMessage && <NotificationNotice id={`mihomo:transition:${liveDialogProfile?.id}:${activeDeviceId}`} title="Обновление профиля" state="info" message={`${transitionMessage}${activeDeviceId === liveDialogProfile?.common_device_id ? " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула." : ""}`} />}
             <section className="mihomoProfileRules"><header><div><b>Правила маршрутизации</b></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); const route = libraryRoute(effectiveProfileRouting.structured_policy, effectiveProfileRouting[policySelectionKey], `preset:${rule.key}`); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b>{route && <small className="mihomoProfileRuleRoute">{route}</small>}{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); const route = libraryRoute(effectiveProfileRouting.structured_policy, effectiveProfileRouting[policySelectionKey], `personal:${rule.id}`); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b>{route && <small className="mihomoProfileRuleRoute">{route}</small>}{"entries" in rule && Array.isArray(rule.entries) && <small>{rule.entries.length}</small>}</span></button>; })}</div>}</section>
             {profileStep === 3 && <>
               <ProfilePolicyGroups value={effectiveProfileRouting.structured_policy} selection={effectiveProfileRouting[policySelectionKey]} ownSelection={activeProfileDevice?.routing?.[policySelectionKey]}
@@ -1838,7 +1838,7 @@ export function MihomoPage({
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">
-              {!networkStatus && <p className="mihomoHint" role="status">Состояние маршрутов сети неизвестно. Обновите данные перед добавлением TLS/CDN-подключения. Ваш ввод сохранён.</p>}
+              {!networkStatus && <NotificationNotice id="mihomo:profile-network" title="Маршруты профиля" message="Состояние маршрутов сети неизвестно. Обновите данные перед добавлением TLS/CDN-подключения. Ваш ввод сохранён." action={{ label: "Обновить данные", disabled: Boolean(busy), run: refresh }} />}
               <header><div><b>Подключения устройства</b></div></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).map((module) => (
@@ -1901,7 +1901,7 @@ export function MihomoPage({
             </div>
             <footer>
               <button type="button" className="ghostButton" onClick={() => void closeProfile()}>Отмена</button>
-              <span>{pendingProfileSave ? "Результат сохранения пока неизвестен. Проверьте прежнюю операцию перед новой записью." : profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span>
+              {!pendingProfileSave && <span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span>}
               {pendingProfileSave
                 ? <button type="button" className="primaryButton" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button>
                 : <button type="submit" className="primaryButton" disabled={Boolean(busy) || profileRevisionConflict || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button>}
@@ -1932,7 +1932,7 @@ export function MihomoPage({
       </div></div>}
       {personalRuleDialog && <div className="mihomoDialogBackdrop mihomoPersonalRuleBackdrop" onClick={(event) => { if (event.target === event.currentTarget) void closePersonalRule(); }}>
         <form ref={personalRuleDialogRef} role="dialog" aria-modal="true" aria-label="Персональное правило" tabIndex={-1} className="mihomoDialog mihomoPersonalRuleDialog" onSubmit={savePersonalRule}>
-          {personalRuleRevisionConflict && <p role="alert">{latestPersonalRule ? "Правило изменилось. Ваш ввод сохранён." : "Правило удалено. Ваш ввод сохранён."} <button type="button" disabled={!latestPersonalRule || Boolean(busy)} onClick={() => void reloadPersonalRule()}>Загрузить актуальные данные</button></p>}
+          {personalRuleRevisionConflict && <NotificationNotice id="mihomo:rule-conflict" title="Персональное правило" message={latestPersonalRule ? "Правило изменилось. Ваш ввод сохранён." : "Правило удалено. Ваш ввод сохранён."} action={{ label: "Загрузить актуальные данные", disabled: !latestPersonalRule || Boolean(busy), run: reloadPersonalRule }} />}
           <header><div><h2>{personalRuleDialog === "new" ? "Новое персональное правило" : "Изменить персональное правило"}</h2></div><button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePersonalRule(); }}>×</button></header>
           <div className="mihomoPersonalRuleForm">
             <label><span>Код и название</span><div className="mihomoPersonalRuleFormRow"><input value={personalRuleDraft.code} maxLength={8} placeholder="GAME" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, code: event.target.value }))} required /><input value={personalRuleDraft.title} maxLength={80} placeholder="Например, Игровой трафик" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, title: event.target.value }))} required /></div></label>
@@ -1946,7 +1946,7 @@ export function MihomoPage({
       </div>}
       {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop" onClick={(event) => { if (event.target === event.currentTarget) void closePresets(); }}>
         <form ref={presetDialogRef} role="dialog" aria-modal="true" aria-label="Пресеты Mihomo" tabIndex={-1} className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
-          {presetRevisionConflict && <p role="alert">Пресеты изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPresets()}>Загрузить актуальные данные</button></p>}
+          {presetRevisionConflict && <NotificationNotice id="mihomo:preset-conflict" title="Пресеты Mihomo" message="Пресеты изменились. Ваш ввод сохранён." action={{ label: "Загрузить актуальные данные", disabled: Boolean(busy), run: reloadPresets }} />}
           <header>
             <div><h2>Пресеты Mihomo</h2></div>
             <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span></div>

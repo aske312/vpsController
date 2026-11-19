@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { RouteTypeIcon } from "./route-type-icon";
 import { useCdnSecurity } from "../application/use-cdn-security";
 import { OperationNotifications } from "../../control-panel/components/operation-notifications";
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { NotificationNotice, useNotifier } from "../../shared/notifications/notification-center";
 import type { CdnOperation, CdnSecurityStatus, EchRecord } from "../../shared/lib/cdn-security-operation";
 import type { NetworkRequest } from "./network-api";
 
@@ -49,7 +49,7 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
         {!throughCdn && <button type="button" className="routeActionPrimary" disabled={loading || command.pending || route === "unresolved" || !capability?.supported} onClick={() => void command.prepareEch(domain)}>{command.pending ? "Подготовка ECH…" : record ? "Проверить ECH" : "Подготовить ECH"}</button>}
         <button type="button" disabled={loading || command.pending} onClick={() => void load()}>Обновить</button>
       </div>
-      {!throughCdn && capability?.message && <p className="routeCdnHint" role="status">{capability.message}</p>}
+      {!throughCdn && capability?.message && <NotificationNotice id={`network:ech:${domain}`} title={`ECH · ${domain}`} state="info" message={capability.message} />}
       {loading && <p role="status">Загрузка…</p>}
       {record && <>
         <div className="routeEchRecord"><div className="routeEchRecordTitle"><strong>{route === "proxy_or_cdn" ? "HTTPS-запись VPS" : "HTTPS-запись для DNS"}</strong><span>{record.type}</span></div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useId, useState } from "react";
 import { relayAddresses, type RelayStatus } from "../network/relay-state";
 import { connectionAddressModes, isRelayOriginTls, relayOriginTlsSettings, xrayProtocolSettings } from "./connection-address";
@@ -97,8 +98,8 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
     </>}</>}
     {mode === "tls" && relay && <><label><span>TLS-сервис VPS</span><select aria-label="TLS-сервис основного VPS" value={tlsDomain} disabled={locked} onChange={event => change({ tls_domain: event.target.value })}>{tlsServices.map(item => <option key={item} value={item}>{item}</option>)}</select></label></>}
     {originTls && <><label><span>TLS-имя сервиса VPS</span><select aria-label="TLS-имя сервиса VPS через Relay" value={String(settings.cdn_domain || "")} disabled={locked} onChange={event => change({ cdn_domain: event.target.value })}>{domains.map(item => <option key={item} value={item}>{item}</option>)}</select></label></>}
-    {savedOnly && <small>Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес.</small>}
+    {savedOnly && <NotificationNotice id={`mihomo:saved-route:${connection.id}`} title="Адрес подключения" state="info" message="Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес." />}
     {modes.tls && webTransports.length > 0 && !tlsServices.length && !originTls && <small>Для отдельного TLS-сервиса сначала добавьте TLS-домен основного VPS в Сеть → ROUTES.</small>}
-    {canRelay && (inventory.failed || !inventory.status) && <small>{inventory.failed ? "Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." : "Обновляем адреса подключённых Relay…"}</small>}
+    {canRelay && inventory.failed && <NotificationNotice id="relay:inventory" title="Адреса Relay" message="Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." />}
   </div>;
 }

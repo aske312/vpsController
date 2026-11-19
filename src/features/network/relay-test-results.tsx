@@ -1,4 +1,5 @@
 import type { RelayDeviceTest, RelayMeasurement } from "./relay-state";
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 
 const reasons: Record<string, string> = {
   udp_verified: "Все UDP-пакеты вернулись", packet_loss: "Часть UDP-пакетов потеряна",
@@ -35,7 +36,7 @@ export function RelayDeviceResult({ test, disabled, onDownload, onUpload, onCanc
   const failures: Record<string, string> = { export_unavailable: "Подключение не соответствует выбранному порту Relay или его экспорт недоступен.", temporary_peer_unavailable: "Не удалось безопасно подготовить временный WG/AWG peer. Рабочий peer не используется.", measurement_unavailable: "Не удалось подготовить UDP-тест. Проверьте Agent 1.3 и возможность открыть временный UDP-порт на VPS.", kit_unavailable: "Не удалось подготовить комплект с адресом Relay без раскрытия origin VPS.", report_invalid: "Отчёт или наблюдения сторон не прошли проверку.", configuration_changed: "Настройки изменились во время теста.", configuration_changed_or_stale: "Настройки изменились, данные Relay недоступны или результат старше часа." };
   return <section className="routeDetailsCheck" aria-label="Тест с устройства">
     <strong>Тест с устройства · {labels[test.state]}</strong>
-    {test.state === "unknown" && <p>{failures[test.reason] || "Не удалось подтвердить результат теста."}</p>}
+    {test.state === "unknown" && <NotificationNotice id={`relay:device-test:${test.id}`} title="Тест с устройства" message={failures[test.reason] || "Не удалось подтвердить результат теста."} />}
     <p>Создан: {new Date(test.created_at * 1000).toLocaleString("ru-RU")}. Срок запуска: до {new Date(test.expires_at * 1000).toLocaleTimeString("ru-RU")}.</p>
     {test.state === "awaiting_client" && <>
       <p>Скачайте и распакуйте комплект. Запустите <code>python runner.py --core ПУТЬ_К_ЯДРУ</code>, затем загрузите <code>result.json</code>. Нужны Python, curl и ядро указанного в README формата. Системные VPN и маршруты тест не переключает.</p>
@@ -45,6 +46,6 @@ export function RelayDeviceResult({ test, disabled, onDownload, onUpload, onCanc
     {active && <button type="button" disabled={disabled || !onCancel} onClick={onCancel}>Отменить тест</button>}
     {test.media && <p>Видео: {test.media.state === "ready" ? "получено и проверено" : test.media.state === "failed" ? "не прошло проверку" : "результат не подтверждён"}{test.media.verified_bytes ? ` · ${test.media.verified_bytes} байт` : ""}. Медиарезультат сообщён клиентской утилитой; UDP-путь сопоставлен с наблюдениями Relay и VPS.</p>}
     <RelayLossResult result={test.measurement} source="устройство" stale={test.state === "unknown"} />
-    {test.cleanup_state && <p role={test.cleanup_state === "failed" ? "alert" : undefined}>{test.cleanup_state === "cleaned" ? "Временные ресурсы теста удалены." : test.cleanup_state === "pending" ? "Удаление диагностического порта Relay ещё не подтверждено; Agent закроет его по сроку." : "Не удалось подтвердить полную очистку временных ресурсов; требуется проверка на сервере."}</p>}
+    {test.cleanup_state && test.cleanup_state !== "cleaned" && <NotificationNotice id={`relay:device-cleanup:${test.id}`} title="Очистка теста Relay" state={test.cleanup_state === "pending" ? "unknown" : "error"} message={test.cleanup_state === "pending" ? "Удаление диагностического порта Relay ещё не подтверждено; Agent закроет его по сроку." : "Не удалось подтвердить полную очистку временных ресурсов; требуется проверка на сервере."} />}
   </section>;
 }

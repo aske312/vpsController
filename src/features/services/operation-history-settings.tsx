@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePageError } from "../../shared/notifications/notification-center";
+import { NotificationNotice, usePageError } from "../../shared/notifications/notification-center";
 import { createApiClient } from "../../shared/lib/api-request";
 import { refreshedHistoryDraft, type HistoryPolicy as Policy } from "./history-settings-state";
 
@@ -82,7 +82,7 @@ export function OperationHistorySettings({ policy, confirm, busy }: {
   return <section className="servicesLog servicesHistory" aria-label="Хранение истории операций">
     <div className="operationsTitle"><p className="eyebrow">OPERATION HISTORY</p><h3>История операций</h3></div>
     <div className="operationsBody">
-    {conflict && <p role="status">Настройки на сервере изменились. Ваш ввод сохранён; отмените правки, чтобы принять актуальные значения.</p>}
+    {conflict && <NotificationNotice id="history-settings:conflict" title="Хранение истории операций" message="Настройки на сервере изменились. Ваш ввод сохранён; отмените правки, чтобы принять актуальные значения." action={{ label: "Сбросить правки", disabled: saving, run: policy.reset }} />}
     <div className="servicesHistoryFields">
       <label className="opsField"><span>На каждый архив, операций</span><input type="number" min={100} max={10000} step={100} value={draft?.max_entries ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ max_entries: Number(event.target.value) })} /></label>
       <label className="opsField"><span>Хранить, дней</span><input type="number" min={1} max={730} value={draft?.retention_days ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ retention_days: Number(event.target.value) })} /></label>

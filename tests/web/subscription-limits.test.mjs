@@ -22,7 +22,8 @@ test('general settings isolate subscription editing from device identity and pre
       onProfileNameChange: value => changed.push(['subscription', value]), onDeviceNameChange: value => changed.push(['device', value]), onLimitsChange() {}, onOpenSubscription() {},
     };
     const html = renderToStaticMarkup(createElement(ProfileGeneral, props));
-    assert.match(html, /Объём трафика исчерпан/);
+    assert.match(html, /data-state="exhausted"/);
+    assert.doesNotMatch(html, /Объём трафика исчерпан/, 'the warning is published in notifications');
     assert.doesNotMatch(html, /private-hwid-hash|private-user-agent/);
     if (scope === 'common') {
       assert.equal((html.match(/type="number"/g) || []).length, 3);
@@ -156,8 +157,10 @@ test('traffic history snapshots reject malformed counters and reversed or missin
 
 test('exhaustion and unknown enforcement are visible instead of appearing active', () => {
   const status = { state: 'exhausted', enforced: true, used_bytes: 1000000000, started_at: null, expires_at: null, checked_at: 1000 };
-  assert.match(render({ status }), /Объём трафика исчерпан/);
-  assert.match(render({ status: { ...status, state: 'unknown', enforced: false } }), /не подтверждена/);
+  assert.match(render({ status }), /data-state="exhausted"/);
+  assert.doesNotMatch(render({ status }), /Объём трафика исчерпан/);
+  assert.match(render({ status: { ...status, state: 'unknown', enforced: false } }), /data-state="unknown"/);
+  assert.doesNotMatch(render({ status: { ...status, state: 'unknown', enforced: false } }), /не подтверждена/);
   assert.match(render({ status: { ...status, used_bytes: 0, state: 'active', enforced: false } }), />—</);
 });
 

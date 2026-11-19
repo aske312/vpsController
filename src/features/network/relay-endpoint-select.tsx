@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useEffect, useState } from "react";
 import type { NetworkRequest } from "./network-api";
 import { relaySnapshot, relayAddresses, type RelayStatus } from "./relay-state";
@@ -90,6 +91,9 @@ export function RelayEndpointSelect({ request, inventory, value, address = "", o
       {relaySupported && !unavailable && (!modeControls || mode === "relay") && relays.length > 0 && <optgroup label="Relay">{relays.filter(choice => choice.value === selected || matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.value} value={choice.value}>{choice.address} · {choice.host.name}</option>)}</optgroup>}
     </select>
     </>}
-    <small>{unavailable || (mode === "tls" ? "Прямой TLS-вход через выбранный домен. Сертификат будет настроен при сохранении профиля." : mode === "udp" ? "Прямой UDP-адрес. Порт, SNI и настройки сертификата протокола сохраняются." : failed ? "Не удалось получить список Relay. Сохранённый выбор не изменён; повторим загрузку автоматически." : !status ? "Получаем список Relay…" : value && !known ? "Узел удалён. Настройки сохранены; выберите Relay для восстановления подключения." : value ? `${transport ? transport+" · " : ""}Пересылка и внешний порт будут настроены автоматически при сохранении.` : cdn?.value ? "VLESS через выбранный CDN-домен." : "Подключённые в Сеть → ROUTES узлы доступны здесь по IP/домену.")}</small>
+    {failed && <NotificationNotice id="relay:inventory" title="Адреса Relay" message="Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." />}
+    {unavailable && <NotificationNotice id={`relay:endpoint-unavailable:${value}`} title="Адрес подключения" state="info" message={unavailable} />}
+    {!failed && status && value && !known && <NotificationNotice id={`relay:endpoint-missing:${value}`} title="Адрес подключения" message="Узел удалён. Настройки сохранены; выберите Relay для восстановления подключения." />}
+    <small>{mode === "tls" ? "Прямой TLS-вход через выбранный домен. Сертификат будет настроен при сохранении профиля." : mode === "udp" ? "Прямой UDP-адрес. Порт, SNI и настройки сертификата протокола сохраняются." : !status ? "Получаем список Relay…" : value ? `${transport ? transport+" · " : ""}Пересылка и внешний порт будут настроены автоматически при сохранении.` : cdn?.value ? "VLESS через выбранный CDN-домен." : "Подключённые в Сеть → ROUTES узлы доступны здесь по IP/домену."}</small>
   </div>;
 }

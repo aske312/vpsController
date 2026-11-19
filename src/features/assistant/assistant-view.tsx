@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
-import { useNotifier, useNotifications, usePageError } from "../../shared/notifications/notification-center";
+import { NotificationNotice, useNotifier, useNotifications, usePageError } from "../../shared/notifications/notification-center";
 import { mutationFailureState } from "../../shared/lib/api-request";
 import { observeChatJob, rememberChat, forgetChat, savedChat, savedChats, chatStage, ChatJobError, type ChatJob } from "./chat-jobs";
 import { ConfirmationCards, confirmationGroups, useAssistantConfirmations, type PendingAction } from "./confirmation-queue";
@@ -598,8 +598,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     ...(confirmations.context || []).filter(item => item.actor === (actor || "panel") && !(confirmations.activities || []).some(activity => activity.snapshot.id === item.operation_id)).map(item => commandOwnerFor(item.operation_id ? [item.operation_id] : [])),
   ]);
   return <div hidden={!active} className={`mcpWorkspace noderaWorkspace ${active && isChat ? "isChat" : ""}`}>
-    {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
-    {needsUpdate && <div className="mcpRuntimeUpdate" role="status"><span>{status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"}</span><button type="button" className="ghostButton" disabled={blocked || dirty || !canUpdate} onClick={() => void updateAgent()}>Обновить Nodera</button></div>}
+    {active && readOnly && <NotificationNotice id="nodera:read-only" title="Nodera · только просмотр" state="info" message="Для изменения настроек примите компонент под управление в «Обзоре»." />}
+    {active && needsUpdate && <NotificationNotice id="nodera:update" title="Обновление Nodera" state="info" message={status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"} action={{ label: "Обновить Nodera", disabled: blocked || dirty || !canUpdate, run: updateAgent }} />}
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!composerBlocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
       <div className="mcpChatHead">
         <span className={`mcpConnectionDot ${chatConnection === "failed" || apiConnection.state === "error" ? "failed" : apiConnection.state === "available" ? "available" : "unknown"}`} role="img" aria-label={connectionLabel} title={apiConnection.error || connectionLabel}/>
@@ -612,7 +612,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           {isChat && sectionPicker}
         </div>
       </div>
-      {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
+      {active && dirty && <NotificationNotice id="nodera:unsaved" title="Настройки Nodera" state="info" message="Перед запросом сохраните настройки." />}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite" onScroll={event => {
         const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
       }}>
@@ -696,7 +696,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           </div>}
         </div>
       </section>
-      {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
+      {active && conflict && <NotificationNotice id="nodera:conflict" title="Настройки Nodera" message="Настройки изменились на сервере. Отмените правки и повторите." action={{ label: "Отменить правки", disabled: settingsBlocked, run: discardSettings }} />}
       <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
         blocked={editingBlocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
         working={working}/>

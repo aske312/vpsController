@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useState } from "react";
 import type { useNetworkAddresses } from "./network-addresses";
 import { addressRoleLabels, type ServerAddress, type ServerAddressRole } from "./server-address-state";
@@ -22,7 +23,6 @@ export function ServerAddressPanel({ row, control }: { row: ServerAddress; contr
       </label>)}</fieldset>
       <div className="routeRoleApply"><small>Существующие подключения сохранят свои адреса.</small><button type="button" className="routeActionPrimary" disabled={locked || chosen === row.role} onClick={() => void control.setRole(row.address, chosen)}>Применить роль</button></div>
     </section>
-    {control.pending ? <div className="routeLibraryCallout" role="status"><p>Проверяем результат назначения. Команда повторно не отправляется.</p><button type="button" disabled={control.reading} onClick={() => void control.load()}>Проверить состояние</button></div>
-      : locked && <p className="routeLibraryCallout" role="status">{row.presence === "missing" ? "Адрес больше не обнаружен на сервере. Назначение недоступно." : row.presence === "unknown" ? "Наличие адреса на сервере не подтверждено." : "Изменение временно недоступно. Дождитесь актуальных данных сервера."}</p>}
+    {!control.pending && locked && <NotificationNotice id={`network:ip:${row.address}`} title={row.address} state="info" message={row.presence === "missing" ? "Адрес больше не обнаружен на сервере. Назначение недоступно." : row.presence === "unknown" ? "Наличие адреса на сервере не подтверждено." : "Изменение временно недоступно. Дождитесь актуальных данных сервера."} action={{ label: "Проверить состояние", disabled: control.reading, run: () => control.load() }} />}
   </>;
 }

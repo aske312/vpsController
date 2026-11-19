@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
@@ -273,7 +274,7 @@ export function NetworkEndpoints({
                 );
               })}
             </div>
-            {pendingAddress && <p className="networkRouteDraftHint" role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
+            {pendingAddress && <NotificationNotice id="network:pending-address" title="Адреса сети" state="info" message="Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением." />}
             <div className="networkEndpointFooter">
               <p>
                 Существующие подключения не изменятся.

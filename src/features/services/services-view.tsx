@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { usePageError } from "../../shared/notifications/notification-center";
+import { NotificationNotice, usePageError } from "../../shared/notifications/notification-center";
 
 import type { AutomationSchedule, LoggingSettings, MetricsSettings, ServiceItem, ServiceTimer, ServicesStatus } from "../../shared/types/control-plane";
 import { runtimeState, servicesSummary } from "./service-state";
@@ -204,7 +204,7 @@ export function ServicesDashboard({
           </div>
           <div className="operationsBody">
           {metricsSettings?.trimmed_at && <p>Часть старых измерений удалена по дисковому лимиту.</p>}
-          {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <p role="status">Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения.</p>}
+          {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <NotificationNotice id="metrics:conflict" title="Хранение метрик" message="Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения." action={{ label: "Сбросить правки", disabled: busy, run: onResetMetrics }} />}
           <div className="servicesLogControls">
             <label className="opsField toggle"><span>Запись</span><span className="serviceToggle compact"><input type="checkbox" aria-label="Сохранять историю метрик" checked={metricsDraft?.enabled ?? false} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ enabled: event.target.checked })} /><span /><em>{metricsDraft?.enabled ? "ON" : "OFF"}</em></span></label>
             {([
@@ -229,7 +229,7 @@ export function ServicesDashboard({
             </div>
           </header>
           <div className="operationsBody">
-          {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
+          {services?.automation_recovery_required && <NotificationNotice id="automation:recovery" title="Восстановление расписаний" state="unknown" message="Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб." action={{ label: "Восстановить расписания", disabled: serviceBusy, run: onRecoverAutomation }} />}
 
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createNotificationStore, isPending, type Notification, type NotificationAction, type NotificationFailure, type NotificationState, type NotificationStore } from "./store";
 import { notificationDuration, notificationPresentation, orderedNotifications } from "./operation-presentation";
@@ -59,6 +59,24 @@ export function usePageError(source: string, title: string, message: string | un
   useEffect(() => () => store.resolve(id), [store, id]);
 }
 
+/** Declarative screen/dialog feedback always renders in the shared notification dock. */
+export function NotificationNotice({ id, title, message, state = "error", action, secondaryAction, details }: {
+  id: string; title: string; message: string; state?: NotificationState;
+  action?: NotificationAction; secondaryAction?: NotificationAction; details?: string;
+}) {
+  const store = useContext(Context);
+  const owner = useRef(Symbol("notice"));
+  useEffect(() => {
+    if (!store) throw new Error("NotificationProvider is required");
+    store.setNotice(owner.current, { id: `notice:${id}`, source: id, title, message, state, kind: "message", action, secondaryAction, details });
+  }, [store, id, title, message, state, action, secondaryAction, details]);
+  useEffect(() => {
+    const identity = owner.current;
+    return () => store?.setNotice(identity, null);
+  }, [store]);
+  return null;
+}
+
 function NotificationCenter() {
   const items = useNotificationList();
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
@@ -101,7 +119,7 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
   const presentation = notificationPresentation(item);
   const { progress } = presentation;
   async function runAction(action = item.action) {
-    if (checking || !action) return;
+    if (checking || !action || action.disabled) return;
     setChecking(true);
     try { await action.run(); }
     catch (cause) {
@@ -127,16 +145,19 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
       <span className="gateOperationIcon" title={presentation.label} aria-hidden="true">{item.state === "running" ? <i className="gateOperationSpinner" /> : item.state === "unknown" ? "?" : item.state === "error" ? "!" : item.state === "success" ? "✓" : item.state === "cancelled" ? "−" : "i"}</span>
       <div className="gateOperationText"><strong>{item.title}{item.count > 1 ? ` ×${item.count}` : ""}</strong><small title={presentation.summary}>{presentation.summary}</small></div>
       {item.kind === "operation" && item.state === "running" && <b className="gateOperationPercent" title={progress === undefined ? "Сервер не передал процент" : "Прогресс выполнения"}>{progress === undefined ? "—" : `${progress}%`}</b>}
-      {item.state === "unknown" && item.action && <button type="button" className="gateNotificationMore" disabled={checking} aria-label={item.action.label} title={item.action.label} onClick={() => void runAction()}>↻</button>}
-      {item.kind === "message" && item.action && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction()}>{item.action.label}</button>}
+      {item.state === "unknown" && item.kind !== "message" && item.action && <button type="button" className="gateNotificationMore" disabled={checking || item.action.disabled} aria-label={item.action.label} title={item.action.label} onClick={() => void runAction()}>↻</button>}
       <button type="button" className="gateNotificationMore" aria-expanded={detailsOpen} aria-label={`Подробности: ${item.title}`} title="Подробности и действия" onClick={() => setDetailsOpen(value => !value)}>···</button>
       {item.kind === "confirmation" && <button type="button" className="gateNotificationMore" aria-label={`Свернуть запрос: ${item.title}`} title="Свернуть запрос" onClick={() => setHidden(true)}>−</button>}
       {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
     </div>
     {item.kind === "confirmation" && item.confirmationItems && <ol className="gateConfirmationItems">{item.confirmationItems.map((text, index) => <li key={index}>{text}</li>)}</ol>}
     {item.kind === "confirmation" && <div className="gateOperationActions">
-      {item.action && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction()}>{item.action.label}</button>}
-      {item.secondaryAction && <button type="button" className="gateOperationButton" disabled={checking} onClick={() => void runAction(item.secondaryAction)}>{item.secondaryAction.label}</button>}
+      {item.action && <button type="button" className="gateOperationButton" disabled={checking || item.action.disabled} onClick={() => void runAction()}>{item.action.label}</button>}
+      {item.secondaryAction && <button type="button" className="gateOperationButton" disabled={checking || item.secondaryAction.disabled} onClick={() => void runAction(item.secondaryAction)}>{item.secondaryAction.label}</button>}
+    </div>}
+    {item.kind === "message" && (item.action || item.secondaryAction) && <div className="gateOperationActions">
+      {item.action && <button type="button" className="gateOperationButton" disabled={checking || item.action.disabled} onClick={() => void runAction()}>{item.action.label}</button>}
+      {item.secondaryAction && <button type="button" className="gateOperationButton" disabled={checking || item.secondaryAction.disabled} onClick={() => void runAction(item.secondaryAction)}>{item.secondaryAction.label}</button>}
     </div>}
     {detailsOpen && <div className="gateOperationBody">
       <p className="gateOperationStage">{presentation.details || presentation.summary}</p>{item.details && <pre className="gateConfirmationDetails">{item.details}</pre>}
@@ -144,8 +165,9 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
       {item.state === "unknown" && item.kind === "operation" && <small className="gateOperationUnknown">Проверяем прежнюю команду без повторного запуска.</small>}
     </div>}
     {item.kind === "operation" && item.state === "running" && <div className={`gateOperationTrack${progress === undefined ? " indeterminate" : ""}`} role="progressbar" aria-label={`Прогресс: ${item.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={presentation.summary}><i style={{ width: `${progress ?? 34}%` }} /></div>}
-    {detailsOpen && item.kind !== "confirmation" && (pending || item.action) && <div className="gateOperationActions">
-      {item.action && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking || item.state === "running"} onClick={() => void runAction()}>{checking ? "Проверяем…" : item.action.label}</button>}
+    {detailsOpen && item.kind !== "confirmation" && (pending || item.action || item.secondaryAction) && <div className="gateOperationActions">
+      {item.action && item.kind !== "message" && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking || item.state === "running" || item.action.disabled} onClick={() => void runAction()}>{checking ? "Проверяем…" : item.action.label}</button>}
+      {item.kind !== "message" && item.secondaryAction && <button type="button" className="gateOperationButton" disabled={checking || item.secondaryAction.disabled} onClick={() => void runAction(item.secondaryAction)}>{item.secondaryAction.label}</button>}
       {item.state === "running" && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "Останавливаем…" : "Остановить / откатить"}</button>}
       {pending && <button type="button" className="gateOperationButton" onClick={() => setHidden(true)} aria-label={`Скрыть карточку без остановки: ${item.title}`}>Скрыть</button>}
     </div>}

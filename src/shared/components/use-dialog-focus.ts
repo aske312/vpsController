@@ -15,24 +15,32 @@ export function useDialogFocus<T extends HTMLElement = HTMLElement>(open: boolea
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const entry = { element: dialog, previous };
     dialogs.push(entry);
-    const elements = () => [...dialog.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], [tabindex]')]
+    const selector = 'button, input, select, textarea, a[href], [tabindex]';
+    const dock = () => document.querySelector<HTMLElement>(".gateNotificationDock");
+    const contains = (target: Node | null) => Boolean(target && (dialog.contains(target) || dock()?.contains(target)));
+    const ownsFocus = () => {
+      const native = document.querySelector("dialog:modal");
+      return dialogs.at(-1) === entry && (!native || native.contains(dialog));
+    };
+    const elements = () => [...new Set([...dialog.querySelectorAll<HTMLElement>(selector), ...dock()?.querySelectorAll<HTMLElement>(selector) ?? []])]
       .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled, [hidden]') && element.getClientRects().length > 0);
     (dialog.querySelector<HTMLElement>('[data-dialog-initial]') ?? elements()[0] ?? dialog).focus();
     const keydown = (event: KeyboardEvent) => {
-      if (dialogs.at(-1) !== entry) return;
+      if (!ownsFocus()) return;
       if (event.key === "Escape") {
+        if (dock()?.contains(event.target as Node)) return;
         event.preventDefault(); event.stopImmediatePropagation(); close.current();
       } else if (event.key === "Tab") {
         const items = elements();
         const first = items[0] ?? dialog;
         const last = items.at(-1) ?? dialog;
-        if (!dialog.contains(document.activeElement) || event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last || !items.length) {
+        if (!contains(document.activeElement) || event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last || !items.length) {
           event.preventDefault(); (event.shiftKey ? last : first).focus();
         }
       }
     };
     const focusin = (event: FocusEvent) => {
-      if (dialogs.at(-1) === entry && !dialog.contains(event.target as Node)) (elements()[0] ?? dialog).focus();
+      if (ownsFocus() && !contains(event.target as Node)) (elements()[0] ?? dialog).focus();
     };
     document.addEventListener("keydown", keydown, true);
     document.addEventListener("focusin", focusin);

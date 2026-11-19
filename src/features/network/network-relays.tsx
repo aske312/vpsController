@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
-import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
+import { NotificationNotice, useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
@@ -163,12 +163,12 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
   const recovery = relay.status?.recovery;
   const host = relay.status?.hosts.find(item => item.id === recovery?.host_id);
   return <>
-    {relay.status?.pending && <div className="networkNotice" role="status"><strong>Результат изменения Relay не подтверждён{host ? ` · ${host.name} (${host.client_address || new URL(host.agent_url).hostname})` : ""}.</strong>
-      {recovery && <p>{recovery.action === "put" ? "Создание" : "Удаление"} {recovery.transport.toUpperCase()} {recovery.listen_port} → {recovery.target_ip}:{recovery.target_port}. {recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}</p>}
-
-      <button disabled={relay.locked} onClick={() => void relay.submit("/network/relays/reconcile", { method: "POST" })}>Проверить результат операции</button>
-      {recovery && <button disabled={relay.locked} onClick={() => relay.setRecoveryConfirmation(true)}>Восстановить пересылку</button>}
-    </div>}
+    {relay.status?.pending && <NotificationNotice id="relay:recovery" title="Изменение Relay" state="unknown"
+      message={`Результат изменения Relay не подтверждён${host ? ` · ${host.name} (${host.client_address || new URL(host.agent_url).hostname})` : ""}.`}
+      details={recovery ? `${recovery.action === "put" ? "Создание" : "Удаление"} ${recovery.transport.toUpperCase()} ${recovery.listen_port} → ${recovery.target_ip}:${recovery.target_port}. ${recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}` : undefined}
+      action={{ label: "Проверить результат операции", disabled: relay.locked, run: async () => { await relay.submit("/network/relays/reconcile", { method: "POST" }); } }}
+      secondaryAction={recovery ? { label: "Восстановить пересылку", disabled: relay.locked, run: () => relay.setRecoveryConfirmation(true) } : undefined}
+    />}
   </>;
 }
 
@@ -220,7 +220,7 @@ export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
         <details className="relayCredentialEditor" open={!relay.edit || undefined}><summary>{relay.edit ? relay.connection ? "Новые данные подключения введены" : "Заменить данные подключения" : "JSON подключения"}<span aria-hidden="true">+</span></summary><div>
           <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} aria-invalid={invalid || undefined} placeholder="Вставьте JSON из раздела Agent" /></label>
           {relay.edit && <small>Пустое поле сохранит текущий ключ.</small>}
-          {invalid && <p role="status" className="relayFormValidation">JSON не распознан. Вставьте полные данные подключения Agent.</p>}
+          {invalid && <NotificationNotice id="relay:connection-validation" title="Подключение Agent" message="JSON не распознан. Вставьте полные данные подключения Agent." />}
           {preview && <p className="relayConnectionPreview">Agent: <code>{preview.agent_url}</code></p>}
           {relay.connection && <button type="button" disabled={relay.locked} onClick={() => relay.changeConnection("")}>Убрать новые данные</button>}
         </div></details>

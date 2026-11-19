@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useId, useState } from "react";
 import { bytes } from "../../shared/lib/control-plane-ui";
 import type { ProfileStats, SubscriptionLimits, SubscriptionLimitsStatus, TrafficAmount, TrafficPeriod, TrafficUsage } from "./types";
@@ -70,6 +71,7 @@ export function SubscriptionLimitsFields({ value, status, traffic, disabled, onC
 }
 
 export function SubscriptionUsage({ status, traffic, label = "Использовано" }: { status?: SubscriptionLimitsStatus; traffic?: SubscriptionTraffic; label?: string }) {
+  const noticeId = useId();
   const [period, setPeriod] = useState<TrafficPeriod>("all");
   const selected = periodTraffic(traffic, period);
   const window = period !== "all" ? traffic?.periods?.[period] : undefined;
@@ -86,8 +88,8 @@ export function SubscriptionUsage({ status, traffic, label = "Использов
       История собирается с {utcDate(traffic.history_started_at, true)} UTC. {window && traffic.history_started_at > window.started_at ? "Период учтён частично. Ранние данные доступны в итоге за всё время." : "Учтённый объём отмечен знаком ≥."}
     </small>}
     {status?.expires_at != null && <span>Подписка до {new Date(status.expires_at * 1000).toLocaleDateString("ru-RU")}</span>}
-    {status?.state === "expired" && <strong>Срок подписки истёк. Доступ остановлен.</strong>}
-    {status?.state === "exhausted" && <strong>Объём трафика исчерпан. Доступ остановлен.</strong>}
-    {status?.state === "unknown" && <strong>Актуальность серверного контроля не подтверждена.</strong>}
+    {status?.state === "expired" && <NotificationNotice id={`mihomo:limits:${noticeId}`} title={label} message="Срок подписки истёк. Доступ остановлен." />}
+    {status?.state === "exhausted" && <NotificationNotice id={`mihomo:limits:${noticeId}`} title={label} message="Объём трафика исчерпан. Доступ остановлен." />}
+    {status?.state === "unknown" && <NotificationNotice id={`mihomo:limits:${noticeId}`} title={label} message="Актуальность серверного контроля не подтверждена." />}
   </div>;
 }

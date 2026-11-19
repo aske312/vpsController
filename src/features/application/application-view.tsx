@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import type { ApplicationAction, ApplicationDependency, ApplicationStatus, ServicesStatus } from "../../shared/types/control-plane";
 import { applicationRuntime } from "./runtime-state";
 import { applicationVersionState } from "./version-state";
@@ -43,9 +44,9 @@ export function ApplicationView({ application, services, applicationVersion, app
           </div>
         </article>
 
-        {recoveryRequired && <div className="applicationRecoveryState" role="alert">
-          <span><strong>Восстановление приложения не завершено</strong><small>Новые изменения заблокированы. Подключитесь по SSH и запустите сохранённую команду восстановления:</small><code>sudo python3 /var/lib/vps-control/recovery/application-update/recover.py {application?.recovery?.application_command || "rollback"}</code><small>{application?.recovery?.application_command === "commit" ? "Команда проверит уже принятую версию и завершит сохранение результата." : "Команда продолжит откат прежней операции."} Диагностика и журналы доступны.</small></span>
-        </div>}
+        {recoveryRequired && <NotificationNotice id="application:recovery" title="Восстановление приложения не завершено" state="unknown"
+          message="Новые изменения заблокированы. Подключитесь по SSH и запустите сохранённую команду восстановления. Диагностика и журналы доступны."
+          details={`sudo python3 /var/lib/vps-control/recovery/application-update/recover.py ${application?.recovery?.application_command || "rollback"}\n${application?.recovery?.application_command === "commit" ? "Команда проверит уже принятую версию и завершит сохранение результата." : "Команда продолжит откат прежней операции."}`} /> }
 
         <article className="applicationControlPlane">
           <div className="applicationControlShade" />

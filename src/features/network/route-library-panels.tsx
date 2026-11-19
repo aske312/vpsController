@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { NetworkEndpointCheck } from "../../shared/types/control-plane";
@@ -40,9 +41,9 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
   const submit = (path: string) => void relay.submit(path, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } });
   return <>
     <section className="routeAgentCard"><div><h3>Agent {host.version || "· версия неизвестна"}</h3><p>Автообновление {host.updates ? host.updates.enabled ? "раз в сутки" : "выключено" : "· нет данных"}</p></div><button type="button" onClick={() => { close(); relay.openHost(host); }} disabled={relay.locked}>Настроить Relay</button></section>
-    {version?.state === "outdated" && <div className="routeLibraryCallout"><p>Доступно обновление Agent {version.version}</p>{host.capabilities?.includes("manual-update-v1") ? <><button type="button" disabled={locked || Boolean(updating) || active} onClick={() => void relay.submit(`/network/relays/${host.id}/update`, { method: "POST", body: JSON.stringify({ version: version.version, digest: version.digest, expected_revision: relay.status?.revision }) })}>Обновить Agent</button><small>Agent перезапустится. Ключи и настройки сохранятся.</small></> : <small>Для команды из PRO сначала обновите Agent до 1.4 штатным установщиком или суточным updater.</small>}</div>}
-    {host.agent_update && <p role="status">Обновление Agent: {({ sending: "команда отправляется", queued: "в очереди", running: "выполняется", updated: "завершено", failed: "не удалось выполнить", unknown: "результат не подтверждён, команда не повторяется" })[host.agent_update.state]}.</p>}
-    {host.updates?.state === "failed" && <p className="routeLibraryCallout" role="alert">Последняя попытка автообновления не удалась.</p>}
+    {version?.state === "outdated" && <NotificationNotice id={`relay:update-available:${host.id}`} title={`Agent · ${host.name}`} state="info" message={`Доступно обновление Agent ${version.version}`} details={host.capabilities?.includes("manual-update-v1") ? "Agent перезапустится. Ключи и настройки сохранятся." : "Для команды из PRO сначала обновите Agent до 1.4 штатным установщиком или суточным updater."} action={host.capabilities?.includes("manual-update-v1") ? { label: "Обновить Agent", disabled: locked || Boolean(updating) || active, run: async () => { await relay.submit(`/network/relays/${host.id}/update`, { method: "POST", body: JSON.stringify({ version: version.version, digest: version.digest, expected_revision: relay.status?.revision }) }); } } : undefined} />}
+    {host.agent_update && <NotificationNotice id={`relay:update:${host.id}`} title={`Обновление Agent · ${host.name}`} state={host.agent_update.state === "failed" ? "error" : host.agent_update.state === "unknown" ? "unknown" : host.agent_update.state === "updated" ? "success" : "running"} message={({ sending: "Команда отправляется", queued: "В очереди", running: "Выполняется", updated: "Обновление завершено", failed: "Не удалось выполнить обновление", unknown: "Результат не подтверждён, команда не повторяется" })[host.agent_update.state]} />}
+    {host.updates?.state === "failed" && <NotificationNotice id={`relay:auto-update:${host.id}`} title={`Автообновление Agent · ${host.name}`} message="Последняя попытка автообновления не удалась." />}
     {host.capabilities?.includes("private-transport-v1") && <section className="routeTaskCard">
       <h3>Защищённый транспорт</h3>
 
@@ -53,11 +54,10 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
     <section className="routeTaskCard routeRelayTests" aria-label="Проверка маршрута Relay">
       {profiles.length > 0 && <RelayProfilePicker host={host} profiles={profiles} selected={profile?.id || ""} onChange={id => { setProfile(id); setSelected(""); setConsumer(""); }} />}
       {profiles.length > 0 && <button type="button" className="relayAllConnections" aria-pressed={selectedProfile === "__all__"} onClick={() => { setProfile("__all__"); setSelected(""); setConsumer(""); }}>Все порты и отдельные подключения</button>}
-      {profiles.filter(item => item.relay_failures?.some(error => error.host_id === host.id)).map(item => <div key={item.id} className="routeLibraryCallout" role="alert">
-        <p>{item.name}: не удалось настроить пересылку через {host.name}. Профиль сохранён.</p>
-        {item.relay_failures?.some(error => error.host_id === host.id && error.reason === "recovery_required") && <p>Сначала проверьте результат прерванной операции Relay.</p>}
-        <button type="button" disabled={locked || active} onClick={() => submit(`/mihomo/profiles/${encodeURIComponent(item.id)}/relays`)}>Повторить настройку пересылки</button>
-      </div>)}
+      {profiles.filter(item => item.relay_failures?.some(error => error.host_id === host.id)).map(item => <NotificationNotice key={item.id} id={`relay:profile:${host.id}:${item.id}`} title={item.name}
+        message={`Не удалось настроить пересылку через ${host.name}. Профиль сохранён.`}
+        details={item.relay_failures?.some(error => error.host_id === host.id && error.reason === "recovery_required") ? "Сначала проверьте результат прерванной операции Relay." : undefined}
+        action={{ label: "Повторить настройку пересылки", disabled: locked || active, run: () => submit(`/mihomo/profiles/${encodeURIComponent(item.id)}/relays`) }} />)}
       {profiles.length === 0 && <p>Профили через этот Relay пока не настроены.</p>}
       {route && <RelayLiveDiagnostics route={route} stale={relay.failed || host.state !== "connected" || route.state !== "listening"} />}
       <details className="relayProfileDiagnostics" open={active || undefined}><summary>Диагностика{profile ? ` · ${profile.name}` : " и отдельные подключения"}</summary>
@@ -68,7 +68,7 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
         </div>
         <div className="routeRelayPath"><code>{route.transport.toUpperCase()} :{route.listen_port}</code><span aria-hidden="true">→</span><code>VPS :{route.target_port}</code><span className="routeRelayPathState" data-state={route.state}>{({ listening: "Порт слушает", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" })[route.state]}</span></div>
         <div className="routeTestOptions"><div><h4>Видео с VPS</h4><button type="button" className="routeActionPrimary" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/check?mode=media&consumer_id=${encodeURIComponent(consumer)}`)}>Проверить с VPS</button><div className="routeTestResults" aria-label="Результат с VPS"><RelayCheckResult route={route} stale={host.state !== "connected"} /></div></div>{host.capabilities?.includes("udp-measurement-v1") && <div><h4>Из вашей сети</h4><button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/device-tests?consumer_id=${encodeURIComponent(consumer)}`)}>Тест с устройства</button></div>}</div>
-        {active && <p role="status">Тест с устройства уже запущен. Завершите или отмените его перед новой проверкой.</p>}
+
         {route.device_test && <div className="routeTestResults" aria-label="Тест с устройства">
         <RelayDeviceResult test={route.device_test} disabled={locked} onDownload={() => void relay.downloadTest(host.id, route.id, route.device_test!.id)} onUpload={file => void relay.uploadTest(host.id, route.id, route.device_test!.id, file)} onCancel={() => void relay.submit(`/network/relays/${host.id}/routes/${route.id}/device-tests/${route.device_test!.id}`, { method: "DELETE", headers: { "If-Match": relay.status?.revision || "" } })} />
         </div>}
@@ -85,8 +85,8 @@ function RelayCheckResult({ route, stale }: { route: RelayRoute; stale: boolean 
   return <>
     <p className="routeLibraryResult">{stale || !check || check.state === "unknown" ? "Результат с VPS не подтверждён." : check.state === "ready" ? check.mode === "media" ? "Передача видео проверена с VPS." : "Тестовый обмен с VPS подтверждён." : "Проверка с VPS не пройдена."}</p>
     {check?.checked_at && <small>{new Date(check.checked_at).toLocaleString("ru-RU")}</small>}
-    {[route.check?.cleanup_state, route.device_test?.cleanup_state].includes("failed") && <p role="alert">Не удалось подтвердить очистку теста. Проверьте ресурсы на сервере.</p>}
-    {[route.check?.cleanup_state, route.device_test?.cleanup_state].includes("pending") && <p role="status">Ожидается подтверждение закрытия диагностического порта Relay.</p>}
+    {route.check?.cleanup_state === "failed" && <NotificationNotice id={`relay:cleanup:${route.id}`} title="Очистка теста Relay" message="Не удалось подтвердить очистку теста. Проверьте ресурсы на сервере." />}
+    {route.check?.cleanup_state === "pending" && <NotificationNotice id={`relay:cleanup:${route.id}`} title="Очистка теста Relay" state="unknown" message="Ожидается подтверждение закрытия диагностического порта Relay." />}
     {check?.measurement && <RouteDisclosure title="Результат измерения UDP"><RelayLossResult result={check.measurement} source="VPS" stale={stale || check.state === "unknown"} /></RouteDisclosure>}
   </>;
 }
@@ -108,11 +108,11 @@ export function DomainEntryPanel({ entry, request, disabled, onRemove, onChecked
       <div className="routeDnsOverview"><span>{udpIp ? "IP" : "DNS"}</span><div><strong>{entry.summary.connection}</strong><div className="routeDnsChips">{entry.domain.resolved.map(address => <code key={address}>{address}</code>)}</div></div></div>
       {kind && <>
         <div className="routeLibraryQuickActions"><button type="button" className="routeActionPrimary" disabled={disabled || checking || entry.domain.status === "stale"} onClick={() => void sweep.run(kind, entry.address)}>{checking ? "Проверяем компоненты…" : kind === "tls_relay" ? "Проверить TLS" : kind === "udp_relay" ? "Проверить UDP" : "Проверить адрес"}</button>{checking && <button type="button" onClick={sweep.stop}>Остановить после текущего теста</button>}</div>
-        <div className="routeTestResults" role="status"><p>{disabled ? "Сохранённые сведения; актуальность не подтверждена." : check?.message || "Проверка ещё не выполнена."}</p>{check?.checked_at && <small>{new Date(check.checked_at).toLocaleString("ru-RU")}</small>}</div>
+        {check?.checked_at && <small>{new Date(check.checked_at).toLocaleString("ru-RU")}</small>}
         {hasSweep && <div className="routeComponentResults">{(["mihomo"] as const).map(owner => {
           const rows = sweep.rows.filter(row => row.owner === owner);
           return rows.length > 0 && <section key={owner}><h4>{"Mihomo"}<span>{rows.filter(row => row.state === "ready").length} / {rows.length}</span></h4>{rows.map(row => <details key={row.id} data-state={disabled ? "unknown" : row.state}><summary><span><strong>{row.label}</strong>{row.consumer_label && <small>{row.consumer_label}</small>}</span><span>{disabled ? "Сохранено" : ({ pending: "В очереди", running: "Проверяем…", ready: "Обмен подтверждён", failed: "Ошибка", unavailable: "Не проверено", unknown: "Нет результата" })[row.state]}</span></summary><p>{disabled ? "Актуальность результата не подтверждена." : row.message || "Ожидаем запуск проверки"}</p></details>)}</section>;
-        })}{!sweep.rows.length && !checking && <p>{sweep.failure || "Установленные транспортные компоненты не найдены."}</p>}</div>}
+        })}{!sweep.rows.length && !checking && !sweep.failure && <p>Установленные транспортные компоненты не найдены.</p>}</div>}
       </>}
     </section>
     {!!entry.domain.stale_usages?.length && <p>Адрес сохранён в подключениях: {entry.domain.stale_usages.join(", ")}.</p>}

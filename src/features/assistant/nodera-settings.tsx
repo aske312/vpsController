@@ -1,4 +1,4 @@
-import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
+import { NotificationNotice, useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
@@ -373,7 +373,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </div>
       <div className="noderaBar">
         {botUsername && tokenPresent ? <strong>@{botUsername}</strong> : draft.bot_token === null && draft.bot_token_configured && <span>Токен сохранён</span>}
-        {status.legacy_bot.active && <p className="mcpNotice">Для запуска остановите прежнего Telegram-бота.</p>}
+        {panel === "users" && status.legacy_bot.active && <NotificationNotice id="nodera:legacy-bot" title="Telegram-бот" state="info" message="Для запуска остановите прежнего Telegram-бота." />}
       </div>
 
     </fieldset>
@@ -495,8 +495,8 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         </tr>)}
       </tbody>
     </table></div>
-    {subscriptions.error && <small role="status">{subscriptions.error}</small>}
-    {contacts?.revision === revision && contacts.error && <small role="status">{contacts.error}</small>}
+    {subscriptions.error && <NotificationNotice id="nodera:subscriptions" title="Подписки пользователей" message={subscriptions.error} />}
+    {contacts?.revision === revision && contacts.error && <NotificationNotice id="nodera:contacts" title="Пользователи Nodera" message={contacts.error} />}
     {guests.length > contactsLimit && <button type="button" className="ghostButton noderaMoreContacts" onClick={() => setContactsLimit(value => value + 20)}>Ещё пользователи</button>}
     {userEdit && account && <SettingsDialog title={userEdit.index < 0 && !userEdit.observed ? "Добавить пользователя" : "Пользователь"} wide close={closeUser} dismissible={!profileBusy}
       blocked={blocked || profileBusy || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
@@ -507,7 +507,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       {userEdit.index < 0 && !userEdit.observed && bot?.installed && status.settings.bot_token_configured && <div className="noderaBar">
         <label>Найти в Telegram<input value={lookup} placeholder="@username" maxLength={65} onChange={event => setLookup(event.target.value)}/></label>
         <button type="button" className="ghostButton" disabled={blocked || lookingUp || !lookup.trim()} onClick={() => void findUser()}>Найти</button>
-        {lookupError && <small role="alert">{lookupError}</small>}
+        {lookupError && <NotificationNotice id="nodera:user-lookup" title="Поиск пользователя" message={lookupError} />}
       </div>}
       <label>Telegram ID<input type="number" min={1} max={2 ** 52} required readOnly={userEdit.index >= 0 || userEdit.observed} value={account.telegram_id || ""} onChange={event => editAccount({ telegram_id: Number(event.target.value) })}/></label>
       <label>Имя в таблице<input value={account.name} maxLength={80} onChange={event => editAccount({ name: event.target.value })}/></label>
@@ -538,7 +538,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
         <option value="">Без привязки</option>{subscriptions.items.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
         {account.mihomo_profile_id && !subscriptions.items.some(profile => profile.id === account.mihomo_profile_id) && <option value={account.mihomo_profile_id}>{account.mihomo_profile_id} · не подтверждена</option>}
       </select></label>
-      {subscriptions.error && <small role="alert">{subscriptions.error}</small>}
+      {subscriptions.error && <NotificationNotice id="nodera:subscriptions" title="Подписки пользователей" message={subscriptions.error} />}
       </section><section className="noderaUserSection" hidden={visibleUserSection !== "info"}>
       {(() => {
         const contact = contactsById.get(account.telegram_id);
@@ -568,13 +568,13 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </>}
       </section>
       </div></div>
-      {profileError && <p role="alert">{profileError}</p>}
+      {profileError && <NotificationNotice id="nodera:profile-validation" title="Профиль пользователя" message={profileError} />}
       {profileEdit && <>
         <div className="noderaUserActions">
           <button type="button" className="ghostButton" disabled={blocked || profileBusy || dirty} onClick={() => void changeProfile("block")}>{profileEdit.contact.blocked ? "Разблокировать" : "Заблокировать"}</button>
           <button type="button" className="dangerButton" disabled={blocked || profileBusy || dirty} onClick={() => setDeleteProfile(true)}>Удалить пользователя</button>
         </div>
-        {deleteProfile && <div role="alert"><p>Удалить профиль? Для запрета обращений используйте блокировку.</p><button type="button" className="dangerButton" disabled={blocked || profileBusy} onClick={() => void changeProfile("delete")}>Подтвердить удаление</button></div>}
+        {deleteProfile && <div role="group" aria-label="Подтверждение удаления"><p>Удалить профиль? Для запрета обращений используйте блокировку.</p><button type="button" className="dangerButton" disabled={blocked || profileBusy} onClick={() => void changeProfile("delete")}>Подтвердить удаление</button></div>}
         {dirty && <small>Сначала сохраните изменения прав доступа.</small>}
       </>}
     </SettingsDialog>}

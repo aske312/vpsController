@@ -1,5 +1,5 @@
 export type NotificationState = "running" | "unknown" | "success" | "error" | "info" | "cancelled";
-export type NotificationAction = { label: string; run: () => void | Promise<void> };
+export type NotificationAction = { label: string; run: () => void | Promise<void>; disabled?: boolean };
 export type NotificationInput = {
   id: string;
   source: string;
@@ -38,6 +38,7 @@ export function createNotificationStore(now = Date.now) {
   const dismissed = new Map<string, string>();
   const finishedOperations = new Set<string>();
   const failures = new Map<string, { title: string; values: Record<string, NotificationFailure>; reconnecting: boolean; action?: NotificationAction }>();
+  const notices = new Map<symbol, NotificationInput>();
   const emit = () => {
     const hidden = new Set([...inline.values()].flatMap(ids => [...ids]));
     const next = items.filter(item => !hidden.has(item.id));
@@ -63,7 +64,7 @@ export function createNotificationStore(now = Date.now) {
     input = { ...input, startedAt: Number.isFinite(input.startedAt) ? input.startedAt : previous?.startedAt };
     const signature = fingerprint(input);
     if (dismissed.get(input.id) === signature) return input.id;
-    if (previous && fingerprint(previous) === signature) {
+    if (previous && fingerprint(previous) === signature && Boolean(previous.action?.disabled) === Boolean(input.action?.disabled) && Boolean(previous.secondaryAction?.disabled) === Boolean(input.secondaryAction?.disabled)) {
       // Callbacks may change while the visible message remains the same.
       previous.action = input.action;
       previous.secondaryAction = input.secondaryAction;
@@ -146,6 +147,15 @@ export function createNotificationStore(now = Date.now) {
     },
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     upsert, notify, resolve, dismiss,
+    setNotice: (owner: symbol, input: NotificationInput | null) => {
+      const previous = notices.get(owner);
+      if (input) { notices.delete(owner); notices.set(owner, input); } else notices.delete(owner);
+      for (const id of new Set([previous?.id, input?.id])) {
+        if (!id) continue;
+        const current = [...notices.values()].reverse().find(value => value.id === id);
+        if (current) upsert(current); else resolve(id);
+      }
+    },
     finishOperation: (input: NotificationInput) => {
       upsert(input);
       // A confirmed result must not be replaced by a late progress poll,
@@ -154,7 +164,7 @@ export function createNotificationStore(now = Date.now) {
       if (finishedOperations.size > 200) finishedOperations.delete(finishedOperations.values().next().value!);
     },
     clearCompleted: () => [...items].filter((item) => !isPending(item)).forEach((item) => dismiss(item.id)),
-    reset: () => { items = []; failures.clear(); dismissed.clear(); finishedOperations.clear(); networkSince = undefined; pausedAt = undefined; emit(); },
+    reset: () => { items = []; failures.clear(); notices.clear(); dismissed.clear(); finishedOperations.clear(); networkSince = undefined; pausedAt = undefined; emit(); },
     setFailures: (source: string, title: string, values: Record<string, NotificationFailure>, reconnecting = false, action?: NotificationAction) => {
       failures.set(source, { title, values, reconnecting, action });
       syncFailures();

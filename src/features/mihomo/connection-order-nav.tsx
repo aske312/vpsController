@@ -1,3 +1,4 @@
+import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useEffect, useRef, useState } from "react";
 import type { Module, ProfileConnection } from "./types";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
@@ -127,7 +128,7 @@ export function ConnectionOrderNav({ connections, modules, selectedId, disabled,
     <button type="button" className="mihomoConnectionArrow" aria-label="Следующее подключение" disabled={disabled || selectedIndex >= connections.length - 1} onClick={() => select(selectedIndex + 1)}><span aria-hidden="true">›</span></button>
     </div>
     <div className="mihomoConnectionPosition" aria-live="polite">{connections.length ? selectedIndex + 1 : 0} / {connections.length}</div>
-    {selectedStatus && ["warning", "error"].includes(selectedStatus.state) && <p className="mihomoConnectionStatusNote" data-connection-status={selectedStatus.state} role="status"><b>{selectedStatus.label}</b><span>{selectedStatus.reason}</span></p>}
+    {selectedStatus && ["warning", "error"].includes(selectedStatus.state) && <NotificationNotice id={`mihomo:connection:${selectedId}`} title={selectedStatus.label} message={selectedStatus.reason} state={selectedStatus.state === "error" ? "error" : "info"} />}
     <span className="mihomoConnectionOrderStatus" role="status">{announcement}</span>
   </div>;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
-import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
+import { NotificationNotice, useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import type { NetworkStatus, NetworkEndpointCheck } from "../../shared/types/control-plane";
 import type { NetworkRequest } from "./network-api";
 import type { NetworkListState } from "./network-view";
@@ -83,7 +83,7 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
       <RoutePagination {...ipPagination} label="Адреса этого сервера" onChange={setIpPage} />
     </section>}
     {selected && <RouteControlDialog title={selected.title} address={selected.address} subtitle={selected.kind === "relay" ? "Relay Agent" : selected.subtitle} type={selected.kind} icon={entryIcon(selected)} country={entryCountry(selected, locations)} cdn={selected.kind === "domain" && domainRouteKinds(selected).includes("cdn")} badge={<NetworkRouteSummaryBadge summary={selected.summary} />} close={close}>
-      {needsAttention(selected.summary) && <p className="routeLibraryCallout" role="status">{selected.summary.detail}</p>}
+      {needsAttention(selected.summary) && <NotificationNotice id={`network:resource:${selected.id}`} title={selected.address} state="info" message={selected.summary.detail} />}
       <ResourceDetails entry={selected} consumers={consumersFor(selected)} />
       {selected.kind === "relay" ? <RelayEntryPanel key={selected.id} host={selected.host} relay={relay} close={close} /> : <DomainEntryPanel key={selected.id} entry={selected} request={request} disabled={busy || failed || endpointDirty} onChecked={onRefresh} onRemove={(kind, address) => setDeletion({ kind, address })}>
         <NetworkCdnSettings domain={selected.address} route={selected.domain.route} detected={selected.domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={cloudflare && { ...cloudflare, blocked: cloudflare.blocked || busy || failed }} refreshKey={refreshKey} />

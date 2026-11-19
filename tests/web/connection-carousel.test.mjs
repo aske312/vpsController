@@ -94,7 +94,7 @@ test('carousel and profile cards expose readable status labels without changing 
   const states = Object.fromEntries(items.map((item, index) => [item.id, { state: ['unchecked', 'verified', 'warning', 'error'][index], label: ['Не проверено', 'Проверено', 'Требует внимания', 'Ошибка'][index], reason: 'Полная причина состояния подключения' }]));
   const html = renderToStaticMarkup(createElement(ConnectionOrderNav, { connections: items, modules: [], states, selectedId: items[2].id, disabled: false, onSelect() {}, onReorder() {} }));
   for (const state of ['unchecked', 'verified', 'warning', 'error']) assert.ok(html.includes(`data-connection-status="${state}"`));
-  assert.match(html, /mihomoConnectionStatusNote/);
+  assert.doesNotMatch(html, /mihomoConnectionStatusNote/, 'the detailed warning belongs in notifications');
   assert.match(html, /Полная причина состояния подключения/);
   const card = renderToStaticMarkup(createElement(ProfileConnectionCard, { connection: items[2], status: states[items[2].id] }));
   assert.match(card, /data-connection-status="warning"/);
