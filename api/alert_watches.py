@@ -103,14 +103,20 @@ def evaluate(value, rows, context, now):
         if not rule['enabled'] or rule['snoozed_until'] > now or config['snoozed_until'] > now:
             record['paused'] = True
             continue
-        if record.pop('paused', False): record.update(since=now, items={})
+        if record.pop('paused', False):
+            record.update(since=now, items={})
+            record.pop('unknown_since', None)
+        record['checked_at'] = now
         observations = []
         observed_times = []
         if rule['source'] == 'service':
             observed = context.get('services', {}).get(rule['target'], {})
-            if not observed and now - record['since'] < rule['after_seconds']: continue
             service_state = observed.get('state')
             status = 'failed' if service_state in ('error', 'stopped') else 'recovered' if service_state in alert_context.GOOD else 'unknown'
+            if status == 'unknown':
+                since = record.setdefault('unknown_since', now)
+                if now - since < rule['after_seconds']: continue
+            else: record.pop('unknown_since', None)
             observations.append((rule['target'], status, {'component': rule['target'], 'service_state': service_state}))
         else:
             for source, row in rows:
@@ -140,7 +146,6 @@ def evaluate(value, rows, context, now):
         record['items'] = dict(list(record['items'].items())[-2000:])
         if rule['source'] == 'operation':
             record['cursor'] = max([record.get('cursor', record['since']), *observed_times])
-        record['checked_at'] = now
     return result
 
 

@@ -118,6 +118,7 @@ class AlertWatchesTests(unittest.TestCase):
         self.context['services']['api']['state'] = 'error'
         alerts.sample(self.env)
         self.context['services'] = {}
+        alerts.sample(self.env)
         self.now += 61
         alerts.sample(self.env)
         texts = [row['text'] for row in alerts.load(self.env)['queue']]
@@ -125,6 +126,20 @@ class AlertWatchesTests(unittest.TestCase):
         self.assertFalse(any('Состояние подтверждено' in text for text in texts))
         self.configure(watches=[{**rule, 'enabled': False}])
         self.assertEqual(alerts.load(self.env)['queue'], [])
+
+    def test_service_unknown_delay_starts_when_data_disappears_not_when_rule_was_created(self):
+        self.configure(watches=[self.rule(source='service', target='api', after_seconds=60)])
+        alerts.sample(self.env)
+        self.now += 86400
+        self.context['services'] = {}
+        alerts.sample(self.env)
+        self.assertEqual(alerts.load(self.env)['queue'], [])
+        self.now += 59
+        alerts.sample(self.env)
+        self.assertEqual(alerts.load(self.env)['queue'], [])
+        self.now += 1
+        alerts.sample(self.env)
+        self.assertEqual(len(alerts.load(self.env)['queue']), 1)
 
     def test_pause_discards_backlog_and_resumes_current_service_observation(self):
         rule = self.rule(source='service', target='api', events=['failed', 'recovered'])
