@@ -20,6 +20,10 @@ class ApplicationOperationTests(unittest.TestCase):
         self.current = self.root / "application-action.json"
         self.command = ["vps-control", "protocol-install", "wg"]
         self.launch = Mock(return_value=SimpleNamespace(returncode=0))
+        # These tests count mutation launches; journal collection is covered
+        # separately and must not share the process-launch mock.
+        self.enterContext(patch('operation_evidence.capture', return_value={
+            'available': False, 'lines': [], 'reason': 'isolated_admission_test'}))
 
     def start(self, identity="1" * 32, command=None, launch=None):
         return operations.start(self.root, self.current, "protocol-install:wg", command or self.command,

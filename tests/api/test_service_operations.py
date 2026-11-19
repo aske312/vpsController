@@ -20,6 +20,9 @@ class ServiceOperationTests(unittest.TestCase):
         self.enterContext(patch.object(api, "INSTALL_DIR", self.root / "app"))
         self.enterContext(patch.object(api, "observe_service", return_value={"unit_present": None}))
         self.launch = self.enterContext(patch.object(api.subprocess, "run", return_value=SimpleNamespace(returncode=0)))
+        # Keep the mutation assertion strict while isolating passive evidence.
+        self.enterContext(patch('operation_evidence.capture', return_value={
+            'available': False, 'lines': [], 'reason': 'isolated_service_test'}))
 
     def test_network_payload_is_private_and_replay_does_not_repeat_mutation(self):
         identity = "c" * 32
