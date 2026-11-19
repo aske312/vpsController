@@ -1459,7 +1459,6 @@ export function MihomoPage({
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
       {readOnly && <p role="status">Только просмотр и диагностика. Для изменения Mihomo примите его под управление в разделе «Обзор».</p>}
       {status?.recovery_required && <p role="alert">Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы. <button type="button" disabled={Boolean(busy) || readOnly} onClick={() => void recoverProfiles()}>Восстановить Mihomo</button></p>}
-      {pendingProfileSave && !profileDialog && <p role="status">Результат сохранения профиля пока неизвестен. Перед следующей записью проверьте прежнюю операцию. <button type="button" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button></p>}
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">

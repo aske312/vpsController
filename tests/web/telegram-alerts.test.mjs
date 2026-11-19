@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import ts from "typescript";
+import { notificationFixture } from './notification-fixture.mjs';
 
 function mount() {
   const slots = [], effects = [], calls = [];
@@ -15,11 +16,12 @@ function mount() {
     useEffect(fn, deps) { const index = cursor++; if (!same(slots[index]?.deps, deps)) { slots[index]?.cleanup?.(); slots[index] = { deps }; effects.push(() => { slots[index].cleanup = fn(); }); } },
   };
   const actual = createRequire(import.meta.url), exported = {};
+  const { api, store } = notificationFixture(hooks);
   const source = readFileSync(new URL("../../src/features/assistant/telegram-alerts.tsx", import.meta.url), "utf8");
   const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  new Function("require", "exports", output)(name => name === "react" ? hooks : actual(name), exported);
-  const request = (path, options) => new Promise(resolve => calls.push({ path, options, resolve }));
-  return { calls, refresh() { refreshKey++; }, render() { cursor = 0; const tree = exported.TelegramAlerts({ request, refreshKey }); for (const effect of effects.splice(0)) effect(); return tree; } };
+  new Function("require", "exports", output)(name => name === "react" ? hooks : name.endsWith('/notification-center') ? api : actual(name), exported);
+  const request = (path, options) => new Promise((resolve, reject) => calls.push({ path, options, resolve, reject }));
+  return { calls, store, refresh() { refreshKey++; }, render() { cursor = 0; const tree = exported.TelegramAlerts({ request, refreshKey }); for (const effect of effects.splice(0)) effect(); return tree; } };
 }
 function nodes(tree, predicate) {
   if (Array.isArray(tree)) return tree.flatMap(node => nodes(node, predicate));
@@ -28,6 +30,32 @@ function nodes(tree, predicate) {
 }
 const tick = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 const status = revision => ({ settings: { enabled: false, owner_id: 123, failures: true, recoveries: true, boots: true }, revision: revision.repeat(64), owners: [{ telegram_id: 123, name: "Owner" }], token_configured: true, pending: 0, last_delivery: null });
+
+test('background failures use one notification, respect dismissal and clear after recovery', async () => {
+  const view = mount(); view.render(); view.calls[0].reject(new Error('Alerts unavailable')); await tick();
+  let tree = view.render();
+  assert.equal(nodes(tree, node => ['alert', 'status'].includes(node.props.role)).length, 0);
+  assert.equal(view.store.getSnapshot().length, 1);
+  view.refresh(); view.render(); view.calls[1].reject(new Error('Alerts unavailable')); await tick(); view.render();
+  assert.equal(view.store.getSnapshot()[0].count, 1);
+  view.store.dismiss(view.store.getSnapshot()[0].id);
+  view.refresh(); view.render(); view.calls[2].reject(new Error('Alerts unavailable')); await tick(); view.render();
+  assert.equal(view.store.getSnapshot().length, 0);
+  view.refresh(); view.render(); view.calls[3].resolve(status('a')); await tick(); view.render();
+  view.refresh(); view.render(); view.calls[4].reject(new Error('Alerts unavailable')); await tick(); view.render();
+  assert.equal(view.store.getSnapshot().length, 1);
+});
+
+test('saving alerts publishes its result in notifications, not the page', async () => {
+  const view = mount(); view.render(); view.calls[0].resolve(status('a')); await tick();
+  let tree = view.render();
+  nodes(tree, node => node.props.role === 'switch')[0].props.onChange({ target: { checked: true } });
+  tree = view.render();
+  nodes(tree, node => node.type === 'button' && node.props.children === 'Сохранить алерты')[0].props.onClick();
+  view.calls[1].resolve(status('b')); await tick(); tree = view.render();
+  assert.equal(view.store.getSnapshot()[0].state, 'success');
+  assert.equal(nodes(tree, node => ['alert', 'status'].includes(node.props.role)).length, 0);
+});
 test("background refresh preserves an alert draft and its original optimistic revision", async () => {
   const view = mount(); view.render(); view.calls[0].resolve(status("a")); await tick();
   let tree = view.render();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
+import { usePageError } from "../../shared/notifications/notification-center";
 
 import type { AutomationSchedule, LoggingSettings, MetricsSettings, ServiceItem, ServiceTimer, ServicesStatus } from "../../shared/types/control-plane";
 import { runtimeState, servicesSummary } from "./service-state";
@@ -94,6 +95,7 @@ export function ServicesDashboard({
   onSaveAutomation,
   onRecoverAutomation,
 }: Props) {
+  usePageError("metrics-settings", "Хранение метрик", metricsSettings?.error);
   const items = useMemo(() => services?.items || [], [services?.items]);
   const summary = servicesSummary(services);
   const serviceBusy = busy || !services || services.observation_failed === true;
@@ -201,7 +203,6 @@ export function ServicesDashboard({
             <p className="eyebrow">METRICS HISTORY</p><h3>История метрик VPS</h3>
           </div>
           <div className="operationsBody">
-          {metricsSettings?.error && <p role="status">{metricsSettings.error}</p>}
           {metricsSettings?.trimmed_at && <p>Часть старых измерений удалена по дисковому лимиту.</p>}
           {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <p role="status">Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения.</p>}
           <div className="servicesLogControls">

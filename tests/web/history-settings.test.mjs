@@ -33,7 +33,7 @@ function mount(request) {
   const source = readFileSync(new URL('../../src/features/services/operation-history-settings.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const exported = {}, actualRequire = createRequire(import.meta.url);
-  const require = name => name === 'react' ? hooks : name === './history-settings-state' ? stateHelpers : actualRequire(name);
+  const require = name => name === 'react' ? hooks : name.endsWith('/notification-center') ? {} : name === './history-settings-state' ? stateHelpers : actualRequire(name);
   new Function('require', 'exports', outputText)(require, exported);
   return () => {
     cursor = 0;

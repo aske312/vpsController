@@ -1,4 +1,4 @@
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
@@ -69,6 +69,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const [contextText, setContextText] = useState("");
   const [contextBusy, setContextBusy] = useState(false);
   const [contextError, setContextError] = useState("");
+  usePageError("nodera-context", "Контекст Nodera", contextOpen ? contextError : "");
   const contextGeneration = useRef(0);
   useEffect(() => {
     if (!contextOpen) return;
@@ -218,7 +219,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       } else if (action === "block") setProfileEdit(current => current && { ...current, contact: result });
       notify.success(action === "delete" ? "Профиль пользователя удалён" : action === "block" ? result.blocked ? "Пользователь заблокирован" : "Пользователь разблокирован" : "Профиль сохранён");
       return true;
-    } catch (cause) { setProfileError(cause instanceof Error ? cause.message : "Профиль не изменён"); return false; }
+    } catch (cause) { notify.error(cause instanceof Error ? cause.message : "Профиль не изменён"); return false; }
     finally { profileWriting.current = false; setProfileBusy(false); }
   }
 
@@ -277,12 +278,6 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       setLookingUp(false);
     }
   }
-
-  const checkResult = (id: ModuleId) => {
-    const result = checks[id];
-    return result?.revision === status.settings.revision && result.actor === actor &&
-      <p className={result.ok ? "mcpCheck" : "mcpCheck error"} role="status">{result.text}</p>;
-  };
 
   const connections = <section className="noderaSettings" aria-label="Подключения">
     <header className="noderaBlockHead"><h2>Подключения</h2>
@@ -378,7 +373,6 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       </div>
       <div className="noderaBar">
         {botUsername && tokenPresent ? <strong>@{botUsername}</strong> : draft.bot_token === null && draft.bot_token_configured && <span>Токен сохранён</span>}
-        {botCheck && !botCheck.ok && <p className="mcpCheck error" role="status">{botCheck.text}</p>}
         {status.legacy_bot.active && <p className="mcpNotice">Для запуска остановите прежнего Telegram-бота.</p>}
       </div>
 
@@ -408,7 +402,6 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
             {item.id === "telegram-mcp" && <button type="button" className="mcpIconButton" aria-label="Настроить Telegram MCP" title="Настроить" onClick={() => setTelegramMcpOpen(true)}><ChatIcon name="gear"/></button>}
             {item.id !== "telegram-mcp" && <button type="button" className="ghostButton" disabled={blocked || dirty || !item.enabled || !item.configured} onClick={() => void check(item.id)}>Проверить подключение</button>}
           </footer>
-          {checkResult(item.id)}
         </article>;
       })}</div>
     </fieldset>
@@ -419,7 +412,6 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       {actorSelect}
       <button type="button" className="ghostButton" disabled={blocked || dirty || !actor || !status.mcp_modules.some(item => item.id === "telegram-mcp" && item.enabled && item.configured)}
         onClick={() => void check("telegram-mcp")}>Проверить модуль</button>
-      {checkResult("telegram-mcp")}
     </SettingsDialog>}
   </section>;
 
@@ -467,7 +459,6 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
       {personalTab === "memory" && <section className="noderaPersonalSection"><h3>Личная память собеседника</h3>
       {contextData?.cache && <p className="mcpFieldHint">Кеш персонализации: {(contextData.cache.used_bytes / 1024 / 1024).toFixed(1)} МБ / 5 ГБ. Временный контекст — {draft.memory_days ?? 30} дней; важные сведения хранятся до удаления.</p>}
       <label>Собеседник<select value={contextActor} disabled={contextBusy} onChange={event => setContextActor(event.target.value)}><option value="">Администратор панели</option>{draft.accounts.map(account => <option key={account.telegram_id} value={String(account.telegram_id)}>{account.name || account.telegram_id}</option>)}</select></label>
-      {contextError && <p role="alert">{contextError}</p>}
       {!contextData && !contextError && <p role="status">Загрузка контекста…</p>}
       {contextData && <><h3>Сохранённые предпочтения</h3>{contextData.facts.length ? contextData.facts.slice(0, factLimit).map(fact => <div className="noderaContextFact" key={fact.id}><span>{fact.text}<small>{fact.permanent ? "Долгосрочно" : `${draft.memory_days ?? 30} дней`}</small></span><button type="button" className="ghostButton" disabled={contextBusy} onClick={() => void changeContext("forget", fact.id)}>Удалить</button></div>) : <p>Нет сохранённых предпочтений.</p>}
         {contextData.facts.length > factLimit && <button type="button" className="ghostButton" onClick={() => setFactLimit(value => value + 8)}>Ещё факты</button>}

@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, useSyncExterna
 import { createPortal } from "react-dom";
 import { createNotificationStore, isPending, type Notification, type NotificationAction, type NotificationFailure, type NotificationState, type NotificationStore } from "./store";
 import { notificationDuration, notificationPresentation, orderedNotifications } from "./operation-presentation";
+import { notificationTarget, subscribeNotificationTarget } from "./notification-target";
 
 const Context = createContext<NotificationStore | null>(null);
 const EMPTY: Notification[] = [];
@@ -47,6 +48,17 @@ export function useFailureNotifications(source: string, title: string, failures:
   useEffect(() => () => store.clearFailures(source), [store, source]);
 }
 
+/** A recoverable read error has one identity, regardless of background refreshes. */
+export function usePageError(source: string, title: string, message: string | undefined, action?: NotificationAction) {
+  const store = useNotifications();
+  const id = `page-error:${source}`;
+  useEffect(() => {
+    if (message) store.upsert({ id, source, title, message, state: "error", kind: "message", action });
+    else store.resolve(id);
+  }, [store, id, source, title, message, action]);
+  useEffect(() => () => store.resolve(id), [store, id]);
+}
+
 function NotificationCenter() {
   const items = useNotificationList();
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
@@ -56,6 +68,7 @@ function NotificationCenter() {
 
 function NotificationViewport({ items }: { items: Notification[] }) {
   const store = useNotifications();
+  const target = useSyncExternalStore(subscribeNotificationTarget, notificationTarget, () => null);
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -74,7 +87,7 @@ function NotificationViewport({ items }: { items: Notification[] }) {
       <div id="gate-notification-list" className="gateNotificationList" tabIndex={0} aria-label="Список уведомлений">
         {orderedNotifications(items).map((item) => <NotificationCard key={item.id} item={item} now={now} />)}
       </div>
-    </aside>, document.body,
+    </aside>, target ?? document.body,
   );
 }
 

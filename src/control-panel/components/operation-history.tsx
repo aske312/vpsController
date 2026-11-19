@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
 import { safeDateTime } from "../../shared/lib/control-plane-ui";
 import { notificationText } from "../../shared/notifications/operation-presentation";
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import { historyEntries, historyErrorCount, historyKey, historyMatches, historyPage, historySource, historyState, historyTitle, type HistoryEntry, type HistoryFilter } from "./operation-history-state";
 import type { SystemAction } from "../system-operation";
 import { OperationSavedJournal, type SavedOperationJournal } from "./operation-saved-journal";
@@ -18,6 +18,7 @@ function OperationJournal({ request, entry }: { request: Request; entry: History
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  usePageError("operation-journal", "Этапы операции", error, { label: "Обновить этапы", run: () => setRevision(value => value + 1) });
   const active = historyState(entry).tone === "active" || historyState(entry).tone === "unknown";
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +40,6 @@ function OperationJournal({ request, entry }: { request: Request; entry: History
   }, [request, entry.id, entry.source, active, revision]);
   return <section className="operationJournal" aria-label="Этапы выбранной операции">
     <div className="operationJournalHeading"><h4>Этапы выполнения</h4><button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)}>{loading ? "Загрузка…" : "Обновить этапы"}</button></div>
-    {error && <p className="operationHistoryNotice" role="status">{error}</p>}
     {!journal && !error && <p role="status">Загрузка…</p>}
     {journal?.available === false ? <p>Журнал недоступен.</p> : journal?.events.length === 0 && <p>Нет этапов.</p>}
     {Boolean(journal?.dropped) && <p className="operationHistoryNotice">Пропущено этапов: {journal?.dropped}</p>}
@@ -69,6 +69,7 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
   const request = useMemo(() => createApiClient(token), [token]);
   const items = snapshot?.owner === request ? snapshot.items : null;
   const error = failure?.owner === request ? failure.message : "";
+  usePageError("operation-history", "История операций", open ? error : "", { label: "Обновить историю", run: () => setRevision(value => value + 1) });
   const errorCount = items ? historyErrorCount(items) : 0;
   const errorLabel = errorCount ? `Нерешённых ошибок в истории: ${errorCount}${error ? "; данные устарели" : ""}` : "";
   const visible = items?.filter(item => historyMatches(item, filter, query)) || [];
@@ -119,7 +120,6 @@ export function OperationHistory({ token, action, settingsRevision }: { token: s
           <button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)}>{loading ? "Обновляем…" : "Обновить историю"}</button>
         </div>
         <nav className="operationHistoryFilters" aria-label="Фильтр состояния операций">{filters.map(item => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => { setFilter(item.id); setPage(0); }}>{item.label}<span>{items?.filter(entry => historyMatches(entry, item.id, "")).length ?? "—"}</span></button>)}</nav>
-        {error && <p className="operationHistoryNotice" role="status">{error}</p>}
         <div className="operationHistoryWorkspace">
           <section className="operationHistoryList" aria-label="Список операций" aria-busy={loading}>
             <div className="operationHistoryListHeading"><span>{visible.length} из {items?.length ?? "—"}</span><span>Сначала новые</span></div>

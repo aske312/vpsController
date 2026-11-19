@@ -133,9 +133,9 @@
 .operationHistoryDialog { width:min(1160px, calc(100vw - 32px)); height:min(88dvh,860px); max-width:none; max-height:94dvh; margin:auto; padding:0; overflow:hidden; border:1px solid #334653; border-radius:16px; background:#0b151e; color:#e0ebef; box-shadow:0 30px 100px #0008; }
 .operationHistoryDialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(4px); }
 .operationHistoryShell { display:flex; flex-direction:column; height:100%; min-height:0; }
-.operationHistoryDialog button { min-height:32px; padding:6px 10px; border:1px solid #344955; border-radius:7px; background:#14242f; color:#d9e7ef; font:inherit; font-size:11px; cursor:pointer; }
-.operationHistoryDialog button:disabled { cursor:default; opacity:.5; }
-.operationHistoryDialog :is(button,input,summary):focus-visible { outline:2px solid #62c8ff; outline-offset:2px; }
+.operationHistoryShell button { min-height:32px; padding:6px 10px; border:1px solid #344955; border-radius:7px; background:#14242f; color:#d9e7ef; font:inherit; font-size:11px; cursor:pointer; }
+.operationHistoryShell button:disabled { cursor:default; opacity:.5; }
+.operationHistoryShell :is(button,input,summary):focus-visible { outline:2px solid #62c8ff; outline-offset:2px; }
 .operationHistoryHeader { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; padding:20px 24px 14px; }
 .operationHistoryHeader .eyebrow { margin:0 0 6px; color:#6fa8c4; font-size:9px; letter-spacing:.14em; }
 .operationHistoryHeader h2 { margin:0; font-size:23px; }

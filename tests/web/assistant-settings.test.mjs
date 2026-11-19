@@ -51,7 +51,11 @@ function mount(status, catalog = [], overrides = {}) {
   const sessionHelpers = { ...chatSession, createChatSessionWriter(...args) { const writer = chatSession.createChatSessionWriter(...args); persistence.push(writer); return writer; } };
   const confirmations = { actions: [], working: [], results: {}, errors: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
   const require = name => name.endsWith('/command-message-state') ? commandMessages : name === 'react' ? hooks : name.endsWith('/use-dialog-focus') ? {useDialogFocus:()=>({current:null})} : name === './chat-session' ? sessionHelpers : name === './chat-turn' ? turnModule : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
-    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
+    : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { usePageError: (source, title, message, action) => {
+      const id = `page-error:${source}`, index = notifications.findIndex(item => item.id === id);
+      if (index >= 0) notifications.splice(index, 1);
+      if (message) notifications.push({ id, title, message, action, state: 'error' });
+    }, useNotifications: () => ({ getSnapshot: () => notifications.filter(item => item.id), resolve: id => { const index = notifications.findIndex(item => item.id === id); if (index >= 0) notifications.splice(index, 1); }, upsert: value => notifications.push(value) }), useNotifier: () => ({ error: message => notifications.push({state:'error',message}), success: message => notifications.push({state:'success',message}), info: message => notifications.push({state:'info',message}) }) } : name.endsWith('/system-operation') ? { systemActionSnapshot: value => value } : name.endsWith('/api-request') ? { mutationFailureState: () => 'error' } : name.endsWith('/protocol-icon') ? { ProtocolIcon() {} } : requireActual(name);
   const alertsSource = readFileSync(new URL('../../src/features/assistant/telegram-alerts.tsx', import.meta.url), 'utf8');
   const compiledAlerts = ts.transpileModule(alertsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   new Function('require', 'exports', compiledAlerts.outputText)(require, alerts);
@@ -192,7 +196,8 @@ test('one user dialog applies profile and access edits together and keeps them o
       assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь').length,1);
       assert.equal(nodes(tree,n=>n.props['aria-label']==='Дата рождения')[0].node.props.value,'29.02');
       assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children?.props?.children==='Пользователь')[0].node.props['aria-pressed'],true);
-      assert.equal(nodes(tree,n=>n.props.role==='alert'&&n.props.children==='profile unavailable').length,1);
+      assert.equal(nodes(tree,n=>n.props.role==='alert'&&n.props.children==='profile unavailable').length,0);
+      assert.equal(view.notifications.filter(n=>n.state==='error'&&n.message==='profile unavailable').length,1);
     } else {
       assert.equal(nodes(tree,n=>typeof n.type==='function'&&n.props.title==='Пользователь').length,0);
       nodes(tree,n=>n.type==='button'&&n.props.children==='Сохранить')[0].node.props.onClick();
@@ -263,7 +268,8 @@ test('a failed guest mutation preserves the profile and reports the error',async
   nodes(view.render(),n=>n.props['aria-label']==='Настроить пользователя Visitor')[0].node.props.onClick();
   nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать')[0].node.props.onClick();
   await new Promise(setImmediate);
-  assert.equal(nodes(view.render(),n=>n.props.role==='alert'&&n.props.children==='temporary failure').length,1);
+  assert.equal(nodes(view.render(),n=>n.props.role==='alert'&&n.props.children==='temporary failure').length,0);
+  assert.equal(view.notifications.filter(n=>n.state==='error'&&n.message==='temporary failure').length,1);
   assert.equal(nodes(view.render(),n=>n.type==='button'&&n.props.children==='Заблокировать').length,1);
 });
 
@@ -610,14 +616,15 @@ test('catalog failure is visible and keeps chat available with the saved model; 
   }});
   view.render(); await Promise.resolve(); view.render(); await new Promise(setImmediate);
   let tree = view.render();
-  assert.equal(nodes(tree, n => n.props.role === 'alert' && n.props.children === 'temporary outage').length, 1);
+  assert.equal(nodes(tree, n => n.props.role === 'alert' && n.props.children === 'temporary outage').length, 0);
+  assert.equal(view.notifications.filter(n => n.message === 'temporary outage').length, 1);
   nodes(tree, n => n.type === 'textarea')[0].node.props.onChange({target:{value:'hello', style:{}, scrollHeight:48}});
   tree = view.render();
   assert.equal(nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].disabled, false);
-  nodes(tree, n => n.type === 'button' && n.props.children === 'Проверить API сейчас')[0].node.props.onClick();
+  view.notifications.find(n => n.message === 'temporary outage').action.run();
   await new Promise(setImmediate); tree = view.render();
   assert.equal(nodes(tree, n => n.props.role === 'img' && n.props['aria-label'] === 'Каталог API доступен').length, 1);
-  assert.equal(nodes(tree, n => n.props.role === 'alert' && n.props.children === 'temporary outage').length, 0);
+  assert.equal(view.notifications.filter(n => n.message === 'temporary outage').length, 0);
 });
 
 test('Telegram exposes all 54 switches per user and saves individual tools with allowed targets', async () => {

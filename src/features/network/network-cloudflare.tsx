@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { cdnSecuritySnapshot, type CdnSecurityStatus } from "../../shared/lib/cdn-security-operation";
 import type { NetworkRequest } from "./network-api";
+import { usePageError } from "../../shared/notifications/notification-center";
 
 export type NetworkCloudflareControl = {
   change: (enabled: boolean) => Promise<void> | void;
@@ -18,6 +19,7 @@ export function NetworkCloudflare({ domain, detected, request, control, refreshK
   const [reading, setReading] = useState(true);
   const [revision, setRevision] = useState(0);
   const [sending, setSending] = useState(false);
+  usePageError("cloudflare", "Защита Cloudflare", error, { label: "Обновить", run: () => setRevision(value => value + 1) });
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
@@ -47,6 +49,5 @@ export function NetworkCloudflare({ domain, detected, request, control, refreshK
       <label className="networkCloudflareToggle"><input type="checkbox" aria-label={`Проверять сертификат Cloudflare для ${domain}`} checked={status?.authenticated_origin_pulls ?? false} disabled={blocked} onChange={event => void change(event.target.checked)} /><span>{pending || sending ? "Проверяем операцию…" : reading ? "Проверяем…" : status?.authenticated_origin_pulls ? "Включено" : "Выключено"}</span></label>
     </div>
     <small>Для всех Cloudflare-маршрутов. {status?.authenticated_origin_pulls ? "Доступ только с сертификатом Cloudflare." : "Перед включением настройте Full (strict) и Origin Pulls; возможен краткий разрыв."}</small>
-    {error && <p role="status">{error} <button type="button" disabled={reading} onClick={() => setRevision(value => value + 1)}>Обновить</button></p>}
   </section>;
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 
 type Config = { enabled: boolean; owner_id: number | null; failures: boolean; recoveries: boolean; boots: boolean };
 type Status = { settings: Config; revision: string; owners: { telegram_id: number; name: string }[]; token_configured: boolean; pending: number; last_delivery: { state: string; at: number } | null };
@@ -10,7 +11,8 @@ export function TelegramAlerts({ request, refreshKey, blocked = false }: { reque
   const [draft, setDraft] = useState<Config>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const notify = useNotifier("telegram-alerts", "Telegram · оповещения");
+  usePageError("telegram-alerts", "Telegram · оповещения", error);
   const editing = useRef(false);
   const generation = useRef(0);
   const edit = (next: Config) => {
@@ -27,27 +29,29 @@ export function TelegramAlerts({ request, refreshKey, blocked = false }: { reque
     const controller = new AbortController();
     const current = ++generation.current;
     void request<Status>("/assistant/alerts", { signal: controller.signal }).then(value => {
-      if (!controller.signal.aborted && current === generation.current && !editing.current) { setStatus(value); setDraft(value.settings); }
-    }).catch(cause => { if (!controller.signal.aborted) setError(String(cause)); });
+      if (!controller.signal.aborted && current === generation.current) {
+        setError("");
+        if (!editing.current) { setStatus(value); setDraft(value.settings); }
+      }
+    }).catch(cause => { if (!controller.signal.aborted && current === generation.current) setError(String(cause)); });
     return () => controller.abort();
   }, [request, refreshKey]);
   const act = async (test = false) => {
     if (!draft || !status || blocked) return;
     generation.current++;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true);
     try {
-      if (test) { await request("/assistant/alerts/test", { method: "POST" }); setNotice("Тест добавлен в очередь."); }
-      else { const value = await request<Status>("/assistant/alerts", { method: "PUT", body: JSON.stringify({ ...draft, expected_revision: status.revision }) }); editing.current = false; setStatus(value); setDraft(value.settings); setNotice("Настройки алертов сохранены."); }
-    } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
+      if (test) { await request("/assistant/alerts/test", { method: "POST" }); notify.success("Тест добавлен в очередь."); }
+      else { const value = await request<Status>("/assistant/alerts", { method: "PUT", body: JSON.stringify({ ...draft, expected_revision: status.revision }) }); editing.current = false; setStatus(value); setDraft(value.settings); setError(""); notify.success("Настройки алертов сохранены."); }
+    } catch (cause) { notify.error(String(cause)); } finally { setBusy(false); }
   };
   const refresh = async () => {
     setBusy(true); setError("");
-    try { await load(); } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
+    try { await load(); setError(""); } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(status?.settings);
   return <div className="noderaOwnerAlerts">
 
-    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {draft && status && <><label className="noderaPermissionSwitch"><input type="checkbox" role="switch" checked={draft.enabled} disabled={busy || blocked} onChange={event => edit({ ...draft, enabled: event.target.checked })}/>Включить алерты</label>
       <label>Получатель<select value={draft.owner_id ?? ""} disabled={busy || blocked} onChange={event => edit({ ...draft, owner_id: event.target.value ? Number(event.target.value) : null })}><option value="">Владелец или администратор</option>{status.owners.map(owner => <option key={owner.telegram_id} value={owner.telegram_id}>{owner.name || owner.telegram_id}</option>)}</select></label>
       <p>Токен бота: {status.token_configured ? "настроен" : "не настроен"}</p>

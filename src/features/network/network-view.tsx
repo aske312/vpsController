@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import type { NetworkCapabilityCheck, NetworkEndpointCheck, NetworkEndpointSettings, NetworkStatus, SystemAction } from "../../shared/types/control-plane";
 import { appendNetworkEndpoints } from "./endpoint-additions";
 import { useNetworkAddresses } from "./network-addresses";
@@ -55,6 +55,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   const addresses = useNetworkAddresses({ request, busy: operationBusy, refreshKey });
   const busy = operationBusy || Boolean(addresses.pending);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [relayDirty, setRelayDirty] = useState(false);
   const [routeDirty, setRouteDirty] = useState(false);
   const relay = useNetworkRelays({ request, admit: admitOperation, operation, onOperation, busy: busy || loading || !status || loadFailed, onDirtyChange: setRelayDirty, refreshKey });
@@ -92,10 +93,11 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       );
       savedEndpointRef.current = next.network.transport_endpoints;
       setLoadFailed(false);
+      setLoadError("");
     } catch (cause) {
       if (run !== loadingRun.current) return;
       setLoadFailed(true);
-      notifyError(
+      setLoadError(
         cause instanceof Error
           ? cause.message
           : "Не удалось загрузить состояние сети",
@@ -104,7 +106,8 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       loadingRef.current = false;
       if (showLoading) { setLoading(false); onLoadingChange?.(false, run); }
     }
-  }, [notifyError, onLoadingChange, request]);
+  }, [onLoadingChange, request]);
+  usePageError("network-read", "Обновление сети", loadFailed ? loadError : "", { label: "Обновить", run: () => load(true) });
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -226,11 +229,6 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
           </section>
         ) : null}
           <>
-            {status && loadFailed && (
-              <p className="networkNotice" role="status">
-                Обновление не удалось. Показаны последние полученные данные.
-              </p>
-            )}
             <div>
               <DiagnosticsV2
                 cloudflare={cloudflare}

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import ts from 'typescript';
+import { notificationFixture } from './notification-fixture.mjs';
 
 function mount() {
   const slots = [], effects = [], calls = [];
@@ -19,7 +20,8 @@ function mount() {
   const source=readFileSync(new URL('../../src/features/services/observability-panel.tsx',import.meta.url),'utf8');
   const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
   const live = {};
-  const require = name=>name==='react'?hooks:name==='./live-observation'?live:name.endsWith('/api-request')?{}:actual(name);
+  const { api } = notificationFixture(hooks);
+  const require = name=>name==='react'?hooks:name.endsWith('/notification-center')?api:name==='./live-observation'?live:name.endsWith('/api-request')?{}:actual(name);
   const liveSource=readFileSync(new URL('../../src/features/services/live-observation.tsx',import.meta.url),'utf8');
   const liveOutput=ts.transpileModule(liveSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
   new Function('require','exports',liveOutput)(require,live);

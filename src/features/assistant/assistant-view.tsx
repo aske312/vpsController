@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { createApiClient } from "../../shared/lib/api-request";
-import { useNotifier, useNotifications } from "../../shared/notifications/notification-center";
+import { useNotifier, useNotifications, usePageError } from "../../shared/notifications/notification-center";
 import { mutationFailureState } from "../../shared/lib/api-request";
 import { observeChatJob, rememberChat, forgetChat, savedChat, savedChats, chatStage, ChatJobError, type ChatJob } from "./chat-jobs";
 import { ConfirmationCards, confirmationGroups, useAssistantConfirmations, type PendingAction } from "./confirmation-queue";
@@ -523,7 +523,10 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     }
   }
 
-  if (!status || !draft) return <section hidden={!active} className="mcpWorkspace"><p role="status">{loadError || "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
+  usePageError("nodera-load", "Обновление Nodera", active ? loadError : "", { label: "Повторить", run: () => load() });
+  usePageError("nodera-memory", "Диалоги Nodera", active ? memoryError : "");
+  usePageError("nodera-catalog", "API Nodera", active ? catalogError : "", { label: "Проверить API", run: () => loadModels() });
+  if (!status || !draft) return <section hidden={!active} className="mcpWorkspace"><p role="status">{loadError ? "Компонент недоступен" : "Загрузка компонента…"}</p><button type="button" className="ghostButton" onClick={() => void load()}>Повторить</button></section>;
   const selectedComponent = status.modules.find(item => item.id === "ai-agent");
   const botComponent = status.modules.find(item => item.id === "nodera-bot");
   const selectedModel = status.settings.model_mode === "catalog" ? (availableModels.includes(model) ? model : availableModels.includes(status.settings.model) ? status.settings.model : "") : status.settings.model;
@@ -595,7 +598,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     ...(confirmations.context || []).filter(item => item.actor === (actor || "panel") && !(confirmations.activities || []).some(activity => activity.snapshot.id === item.operation_id)).map(item => commandOwnerFor(item.operation_id ? [item.operation_id] : [])),
   ]);
   return <div hidden={!active} className={`mcpWorkspace noderaWorkspace ${active && isChat ? "isChat" : ""}`}>
-    {loadError && <p className="mcpNotice error" role="alert">{loadError}</p>}
     {readOnly && <p className="mcpNotice">Для изменения настроек примите компонент под управление в «Обзоре».</p>}
     {needsUpdate && <div className="mcpRuntimeUpdate" role="status"><span>{status.nodera_version ? "Доступно обновление Nodera" : "Доступен переход на единый компонент"}</span><button type="button" className="ghostButton" disabled={blocked || dirty || !canUpdate} onClick={() => void updateAgent()}>Обновить Nodera</button></div>}
     <section aria-label="Чат Nodera" hidden={panel !== "chat"} className={`mcpChat ${dragging ? "isDragging" : ""}`} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!composerBlocked) void attachFiles(Array.from(event.dataTransfer.files)); }}>
@@ -610,9 +612,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
           {isChat && sectionPicker}
         </div>
       </div>
-      {memoryError && <p className="mcpNotice error" role="alert">{memoryError}</p>}
-      {catalogError && <p className="mcpNotice error" role="alert">{catalogError}</p>}
-      {apiConnection.state === "error" && <p className="mcpNotice" role="status">Проверка повторяется автоматически. Сохранённая модель и последний каталог доступны. <button type="button" className="ghostButton" onClick={() => void loadModels()}>Проверить API сейчас</button></p>}
       {dirty && <p className="mcpNotice">Перед запросом сохраните настройки.</p>}
       <div ref={transcript} className="mcpTranscript" role="log" aria-label="Диалог с AI-агентом" aria-live="polite" onScroll={event => {
         const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
@@ -698,7 +697,6 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         </div>
       </section>
       {conflict && <p className="mcpNotice error">Настройки изменились на сервере. Отмените правки и повторите.</p>}
-      {dirty && settingsBlocked && !editingBlocked && <p className="mcpNotice" role="status">Настройки можно редактировать. Сохранение станет доступно после завершения текущей операции или восстановления связи.</p>}
       <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
         blocked={editingBlocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
         working={working}/>

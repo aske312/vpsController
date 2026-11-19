@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../../shared/lib/api-request";
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import type { NetworkRequest } from "./network-api";
 import { confirmsAddressChange, serverAddressesSnapshot, type AddressChange, type ServerAddressInventory, type ServerAddressRole } from "./server-address-state";
 
@@ -54,6 +54,7 @@ export function useNetworkAddresses({ request, busy, refreshKey }: { request: Ne
     } catch { if (active.current && run === generation.current) setFailed(true); }
     finally { readingNow.current = false; if (active.current) setReading(false); }
   }, [accept, request]);
+  usePageError("server-addresses-read", "IP сервера", failed || status?.discovery.state === "error" ? "Актуальность адресов не подтверждена." : "", { label: "Проверить состояние", run: () => load() });
   useEffect(() => {
     active.current = true;
     remember(readPending());

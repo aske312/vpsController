@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import type { NetworkStatus, NetworkEndpointCheck } from "../../shared/types/control-plane";
 import type { NetworkRequest } from "./network-api";
 import type { NetworkListState } from "./network-view";
@@ -38,6 +38,7 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
   const [deletion, setDeletion] = useState<{ kind: NetworkEndpointCheck["kind"]; address: string } | null>(null);
   const entries = routeEntries(status, relay.status?.hosts || [], failed, relay.failed, Boolean(relay.status?.pending), relay.reading);
   const usage = useResourceUsage(request, refreshKey, status?.detected_at, busy);
+  usePageError("route-usage", "Подключения сети", usage.failed ? "Связанные подключения не удалось загрузить. Состояние адресов показано отдельно." : "");
   const consumersFor = (entry: RouteEntry) => resourceConsumers(entry, failed ? null : usage.bindings, relay.failed || relay.status?.pending ? null : relay.status);
   const searchable = entries.map(entry => ({ ...entry, search: `${entry.search} ${resourceProvider(entry)} ${entry.kind === "domain" ? entry.domain.dns?.provider || "" : ""} ${(consumersFor(entry) || []).map(item => item.label).join(" ")}`.toLowerCase() }));
   const filtered = filter === "server" ? [] : filterEntries(searchable, listState.query, filter);
@@ -71,9 +72,7 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
     ]} />)}</div>
     <RoutePagination {...entryPagination} label="Точки входа" onChange={setEntryPage} />
     {!filtered.length && !visibleServer.length && <div className="routeLibraryEmpty"><strong>{entries.length || serverItems.length ? "Ресурсы не найдены" : relay.reading && !relay.status ? "Загружаем адреса…" : "Добавьте первую точку входа"}</strong><p>{entries.length || serverItems.length ? "Измените запрос или выбранный фильтр." : "Подключите Relay или добавьте домен."}</p></div>}
-    {usage.failed && <p className="routeUsageNotice" role="status">Связанные подключения не удалось загрузить. Состояние адресов показано отдельно.</p>}
     {(visibleServer.length > 0 || !addresses.status && (filter === "all" || filter === "server")) && <section className="routeLibraryServer" aria-label="Адреса этого сервера"><header><h3>Адреса этого сервера <small>{visibleServer.length}</small></h3></header>
-      {serverProblem && <div className="routeLibraryCallout" role="status"><p>{addresses.pending ? "Проверяем результат назначения IP. Команда не повторяется." : "Актуальность адресов не подтверждена."}</p><button type="button" disabled={addresses.reading} onClick={() => void addresses.load()}>Проверить состояние</button></div>}
       {!addresses.status && <p>Определяем адреса…</p>}
       <div className="routeServerGrid">{ipPagination.items.map(row => <RouteStatusCard key={row.address} title={row.address} types={[row.family === "ipv4" ? "IPv4" : "IPv6", addressRoleLabels[row.role]]} icon="ip" summary={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending))} onOpen={() => open(`SERVER-${row.address}`)} details={[
         { label: "Провайдер IP", value: ipProvider(serverIpInfo(row.address)) || "Не определён" },

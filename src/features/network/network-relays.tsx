@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
-import { useNotifier } from "../../shared/notifications/notification-center";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
@@ -65,6 +65,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
       if (inFlight.current === job) inFlight.current = null;
     }
   }, [request]);
+  usePageError("relay-read", "Обновление Relay", failed ? "Не удалось прочитать состояние Relay. Действия заблокированы до успешного чтения." : "", { label: "Повторить чтение Relay", run: () => load(true) });
   useEffect(() => {
     hasSnapshot.current = false;
     return cancelLoad;
@@ -162,7 +163,6 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
   const recovery = relay.status?.recovery;
   const host = relay.status?.hosts.find(item => item.id === recovery?.host_id);
   return <>
-    {relay.failed && <p role="status" className="networkNotice">Relay UNKNOWN — обновление не удалось. Действия заблокированы до успешного чтения. <button disabled={relay.reading} onClick={() => void relay.load()}>Повторить чтение Relay</button></p>}
     {relay.status?.pending && <div className="networkNotice" role="status"><strong>Результат изменения Relay не подтверждён{host ? ` · ${host.name} (${host.client_address || new URL(host.agent_url).hostname})` : ""}.</strong>
       {recovery && <p>{recovery.action === "put" ? "Создание" : "Удаление"} {recovery.transport.toUpperCase()} {recovery.listen_port} → {recovery.target_ip}:{recovery.target_port}. {recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}</p>}
 

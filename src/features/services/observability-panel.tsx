@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
 import { LiveObservation } from "./live-observation";
+import { useNotifier, usePageError } from "../../shared/notifications/notification-center";
 
 type Policy = { enabled: boolean; errors_only: boolean; retention_days: number; max_events: number; revision: number };
 type Evidence = {
@@ -26,7 +27,9 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
   const [data, setData] = useState<Evidence>();
   const [draft, setDraft] = useState<Policy>();
   const [connections, setConnections] = useState<Connections>();
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const notify = useNotifier("observability", "Диагностика служб");
+  usePageError("observability-settings", "Настройки диагностики", loadError);
   const [working, setWorking] = useState(false);
   const [minutes, setMinutes] = useState(60);
   const [service, setService] = useState("");
@@ -42,7 +45,6 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
   const load = useCallback(async () => {
     const current = ++generation.current;
     setWorking(true);
-    setError("");
     try {
       const query = new URLSearchParams({ minutes: String(minutes), errors: String(errors), limit: String(limit) });
       if (service) query.set("service", service);
@@ -54,52 +56,50 @@ export function ObservabilityPanel({ request, busy, services = [] }: { request: 
       if (eventConsole.current) eventConsole.current.open = true;
       setDraft(previous => previous ?? result.settings);
     } catch (cause) {
-      if (current === generation.current) setError(cause instanceof Error ? cause.message : "Журнал недоступен");
+      if (current === generation.current) notify.error(cause instanceof Error ? cause.message : "Журнал недоступен");
     } finally { if (current === generation.current) setWorking(false); }
-  }, [request, minutes, service, identity, errors, limit]);
+  }, [request, minutes, service, identity, errors, limit, notify]);
   // Apply filters explicitly, so typing an ID does not send partial searches.
   useEffect(() => {
     let current = true;
-    void request<Policy>("/observability/settings").then(value => { if (current) setDraft(previous => previous ?? value); })
-      .catch(cause => { if (current) setError(cause instanceof Error ? cause.message : "Настройки недоступны"); });
+    void request<Policy>("/observability/settings").then(value => { if (current) { setDraft(previous => previous ?? value); setLoadError(""); } })
+      .catch(cause => { if (current) setLoadError(cause instanceof Error ? cause.message : "Настройки недоступны"); });
     const counter = generation;
     return () => { current = false; counter.current++; };
   }, [request]);
   const save = async () => {
     if (!draft) return;
     setWorking(true);
-    setError("");
     try {
       const policy = await request<Policy>("/observability/settings", { method: "PUT", body: JSON.stringify(draft) });
       setDraft(policy);
+      setLoadError("");
+      notify.success("Настройки диагностики сохранены.");
       setData(previous => previous ? { ...previous, settings: policy } : previous);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить настройки"); }
+    } catch (cause) { notify.error(cause instanceof Error ? cause.message : "Не удалось сохранить настройки"); }
     finally { setWorking(false); }
   };
   const observeConnections = async () => {
     setWorking(true);
-    setError("");
     try { setConnections(await request<Connections>("/observability/connections")); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Соединения недоступны"); }
+    catch (cause) { notify.error(cause instanceof Error ? cause.message : "Соединения недоступны"); }
     finally { setWorking(false); }
   };
   const blocked = busy || working;
   const readJournal = async () => {
     setWorking(true);
-    setError("");
     setJournal(undefined);
     try {
       const query = new URLSearchParams({ service: journalService, priority, minutes: String(minutes), limit: "120" });
       const result = await request<{ lines: string[] }>(`/observability/journal?${query}`);
       setJournal(result.lines);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Системный журнал недоступен"); }
+    } catch (cause) { notify.error(cause instanceof Error ? cause.message : "Системный журнал недоступен"); }
     finally { setWorking(false); }
   };
   const eventLines = data?.events.map(event => `${at(event.at)}  ${event.service}  ${event.method} ${event.route}  ${event.status}  ${event.duration_ms}ms  ${event.reason || "—"}  request=${event.request_id || "—"}  profile=${event.profile_id || "—"}`) ?? [];
   return <section className="servicesLog servicesObservability">
     <div className="operationsTitle"><p className="eyebrow">OBSERVABILITY</p><h3>Запросы и ошибки</h3></div>
     <div className="operationsBody">
-      {error && <p role="alert">{error}</p>}
       <div className="servicesLogControls">
         <label className="opsField">Период<select value={minutes} disabled={blocked} onChange={event => { setMinutes(Number(event.target.value)); setJournal(undefined); }}><option value={60}>Час</option><option value={1440}>Сутки</option><option value={10080}>Неделя</option></select></label>
         <label className="opsField">Слой<select value={service} disabled={blocked} onChange={event => setService(event.target.value)}><option value="">Все</option><option value="panel">Панель</option><option value="mihomo">Mihomo</option></select></label>

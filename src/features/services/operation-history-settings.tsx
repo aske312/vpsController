@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePageError } from "../../shared/notifications/notification-center";
 import { createApiClient } from "../../shared/lib/api-request";
 import { refreshedHistoryDraft, type HistoryPolicy as Policy } from "./history-settings-state";
 
@@ -75,12 +76,12 @@ export function OperationHistorySettings({ policy, confirm, busy }: {
   policy: ReturnType<typeof useOperationHistorySettings>; confirm: Confirmation; busy: boolean;
 }) {
   const { saved, draft, error, saving } = policy;
+  usePageError("history-settings", "Хранение истории операций", error, { label: "Обновить", run: policy.load });
   const conflict = Boolean(saved && draft && saved.revision !== draft.revision);
   const valid = draft && Number.isInteger(draft.max_entries) && draft.max_entries >= 100 && draft.max_entries <= 10000 && [draft.retention_days, draft.log_retention_days].every((value) => Number.isInteger(value) && value >= 1 && value <= 730) && [draft.disk_limit_mb, draft.log_disk_limit_mb].every((value) => Number.isInteger(value) && value >= 1 && value <= 1024);
   return <section className="servicesLog servicesHistory" aria-label="Хранение истории операций">
     <div className="operationsTitle"><p className="eyebrow">OPERATION HISTORY</p><h3>История операций</h3></div>
     <div className="operationsBody">
-    {error && <p role="alert">{error}</p>}
     {conflict && <p role="status">Настройки на сервере изменились. Ваш ввод сохранён; отмените правки, чтобы принять актуальные значения.</p>}
     <div className="servicesHistoryFields">
       <label className="opsField"><span>На каждый архив, операций</span><input type="number" min={100} max={10000} step={100} value={draft?.max_entries ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ max_entries: Number(event.target.value) })} /></label>
