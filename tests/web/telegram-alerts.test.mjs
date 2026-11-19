@@ -19,8 +19,8 @@ function mount() {
   const { api, store } = notificationFixture(hooks);
   const source = readFileSync(new URL("../../src/features/assistant/telegram-alerts.tsx", import.meta.url), "utf8");
   const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  new Function("require", "exports", output)(name => name === "react" ? hooks : name.endsWith('/notification-center') ? api : actual(name), exported);
-  const request = (path, options) => new Promise((resolve, reject) => calls.push({ path, options, resolve, reject }));
+  new Function("require", "exports", output)(name => name === "react" ? hooks : name === "./alert-watches" ? { AlertWatches() {} } : name === "./alert-diagnostic-rules" ? { AlertDiagnosticRules() {} } : name.endsWith('/notification-center') ? api : actual(name), exported);
+  const request = (path, options) => path === "/assistant/alerts/catalog" ? Promise.resolve({ services: [], operation_actions: [] }) : new Promise((resolve, reject) => calls.push({ path, options, resolve, reject }));
   return { calls, store, refresh() { refreshKey++; }, render() { cursor = 0; const tree = exported.TelegramAlerts({ request, refreshKey }); for (const effect of effects.splice(0)) effect(); return tree; } };
 }
 function nodes(tree, predicate) {
@@ -77,4 +77,21 @@ test("a read started before a save cannot replace the successfully saved alert s
   view.calls[2].resolve({ ...status("b"), settings: { ...status("b").settings, enabled: true } }); await tick();
   view.calls[1].resolve(status("a")); await tick();
   assert.equal(nodes(view.render(), node => node.props.role === "switch")[0].props.checked, true);
+});
+
+test('watch changes and delivery pause are staged and sent together with the current revision', async () => {
+  const view = mount(); view.render(); view.calls[0].resolve(status('a')); await tick();
+  let tree = view.render();
+  const rule = { id: 'b'.repeat(32), name: 'API', enabled: true, source: 'service', target: 'api', operation_id: null, events: ['failed', 'recovered'], after_seconds: 600, snoozed_until: 0 };
+  nodes(tree, node => typeof node.type === 'function' && node.type.name === 'AlertWatches')[0].props.onChange([rule]);
+  tree = view.render();
+  nodes(tree, node => node.type === 'button' && node.props.children === 'Пауза на час')[0].props.onClick();
+  assert.equal(view.calls.length, 1);
+  tree = view.render();
+  nodes(tree, node => node.type === 'button' && node.props.children === 'Сохранить алерты')[0].props.onClick();
+  const body = JSON.parse(view.calls[1].options.body);
+  assert.deepEqual(body.watches, [rule]);
+  assert.equal(body.expected_revision, 'a'.repeat(64));
+  assert.ok(body.snoozed_until > Date.now() / 1000);
+  view.calls[1].resolve(status('b')); await tick();
 });

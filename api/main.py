@@ -5207,6 +5207,27 @@ def owner_alert_test(_: None = Depends(require_token)) -> dict:
     return telegram_alerts.test(sys.modules[__name__])
 
 
+@app.get('/api/assistant/alerts/catalog')
+def owner_alert_catalog(_: None = Depends(require_token)) -> dict:
+    import alert_watches
+    return alert_watches.catalog(sys.modules[__name__])
+
+
+@app.get('/api/assistant/alerts/rules')
+def owner_alert_rules(_: None = Depends(require_token)) -> dict:
+    import diagnostic_rules
+    return diagnostic_rules.read(sys.modules[__name__])
+
+
+@app.put('/api/assistant/alerts/rules')
+def owner_alert_rules_config(payload: dict, _: None = Depends(require_token)) -> dict:
+    import diagnostic_rules
+    from pydantic import ValidationError
+    try: parsed = diagnostic_rules.Rules.model_validate(payload)
+    except ValidationError: raise HTTPException(422, 'Некорректные правила диагностических алертов') from None
+    return diagnostic_rules.save(sys.modules[__name__], parsed)
+
+
 @app.put('/api/observability/settings')
 def update_observability_settings(payload: observability.Settings, _: None = Depends(require_token)) -> dict:
     import observability_control

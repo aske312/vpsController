@@ -1587,7 +1587,6 @@ export function MihomoPage({
           </div>
           <section className="mihomoClientGuide">
             <header><h3>Настройка и подключение</h3></header>
-            <p>Для Windows 10/11 x64 рекомендуем наш клиент <a href="https://github.com/aske312/NoderaClient" target="_blank" rel="noreferrer">Nodera</a>: установите приложение, нажмите «+» и вставьте ссылку подписки.</p>
             <ol><li><b>1</b><span>Нажмите «Скопировать подписку» у нужного профиля.</span></li><li><b>2</b><span>В клиенте добавьте удалённый профиль по URL.</span></li><li><b>3</b><span>После изменений обновите профиль в клиенте.</span></li></ol>
             <details className="mihomoClientAppsDetails"><summary>Приложения для подключения</summary><div className="mihomoClientApps">
               {clientApps.map(app => <a key={app.id} href={app.url} target="_blank" rel="noreferrer"><small>{app.label}</small><strong>{app.name}</strong><span>{app.note}</span></a>)}

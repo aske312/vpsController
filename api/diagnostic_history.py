@@ -84,7 +84,7 @@ def sample(api):
     for key, value in service_items.items():
         state = (value.get('execution') or {}).get('state') or value.get('runtime', {}).get('state', 'unknown')
         execution = value.get('execution') or {}
-        service_states[key] = {'state': state, 'service_type': value.get('service_type'),
+        service_states[key] = {'state': state, 'enabled': value.get('enabled'), 'service_type': value.get('service_type'),
             'last_started_at': execution.get('last_started_at'), 'last_finished_at': execution.get('last_finished_at'),
             'last_success_at': execution.get('last_success_at'), 'last_error': execution.get('last_error')}
         conditions['service:' + key] = {'rule': 'service_error', 'component': key,
@@ -109,6 +109,8 @@ def sample(api):
         'configuration_coverage': configuration,
         'functional_checks': observations.get('functional_checks', {}).get('data') or [],
         'local_health': {key: value.get('status') for key, value in health.items()},
+        'failed_health_checks': {key: [item['name'] for item in value.get('checks', []) if isinstance(item, dict) and item.get('ok') is False
+                                      and isinstance(item.get('name'), str) and re.fullmatch(r'[a-z0-9_-]{1,64}', item['name'])][:12] for key, value in health.items()},
         'http': {'window_minutes': policy['window_minutes'], 'requests': requests, 'errors': errors, 'error_rate': errors / requests if complete and requests else None,
                  'complete_coverage': complete, 'error_statuses': error_statuses}, 'disk_used_percent': disk}
     eligible = bool(service_states and observations.get('health', {}).get('state', 'observed') == 'observed' and 'health' in observations and complete and requests and not errors
@@ -138,9 +140,13 @@ def alert_details(snapshot, condition, policy):
         state = snapshot.get('services', {}).get(component, {}).get('state')
         if state in ('error', 'stopped', 'running', 'applied', 'succeeded', 'listening', 'waiting'):
             details['state'] = state
+        reason = snapshot.get('services', {}).get(component, {}).get('last_error')
+        if reason in ('exit-code', 'signal', 'timeout', 'watchdog', 'oom-kill', 'resources', 'start-limit-hit', 'dependency', 'protocol'):
+            details['reason'] = reason
     elif rule == 'local_health':
         state = snapshot.get('local_health', {}).get(component)
         if state in ('critical', 'healthy'): details['state'] = state
+        details['failed_checks'] = snapshot.get('failed_health_checks', {}).get(component, [])
     return details
 
 

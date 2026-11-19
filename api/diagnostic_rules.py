@@ -33,6 +33,14 @@ def read(api):
     return Rules.model_validate({key: value for key, value in stored.items() if key != 'applied_operation_id'} if stored else {'revision': '0' * 32}).model_dump()
 
 
+def save(api, payload):
+    with operations.locked(api.DATA_DIR):
+        if read(api)['revision'] != payload.revision: raise HTTPException(409, 'Правила изменились; прочитайте их заново')
+        value = {**payload.model_dump(), 'revision': uuid.uuid4().hex}
+        operations.atomic_json(api.DATA_DIR / 'diagnostic-rules.json', value)
+    return value
+
+
 def call(api, arguments, actor):
     settings = control.read(api)
     roles.require(settings, actor, 'diagnostics')

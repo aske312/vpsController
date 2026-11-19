@@ -615,7 +615,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   </section>;
 
   const alerts = <section className="noderaSettings"><header className="noderaBlockHead"><h2>Алерты Telegram</h2><button type="button" className="ghostButton" onClick={() => setAlertsOpen(true)}>Настроить алерты</button></header>
-    {alertsOpen && <SettingsDialog title="Алерты Telegram" close={() => setAlertsOpen(false)}><TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/></SettingsDialog>}
+    {alertsOpen && <SettingsDialog title="Алерты Telegram" wide close={() => setAlertsOpen(false)}><TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/></SettingsDialog>}
   </section>;
   return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{alerts}{roleSettings}{users}</>}</div>;
 }

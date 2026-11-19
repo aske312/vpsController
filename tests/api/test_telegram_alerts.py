@@ -139,7 +139,7 @@ class OwnerAlertsTests(unittest.TestCase):
             'transition': 'firing', 'details': {'state': 'secret', 'requests': float('inf')}})
         self.assertNotIn('secret', text)
         self.assertNotIn('TOKEN', text)
-        self.assertIn('Где: Сервер', text)
+        self.assertIn('Зона: Сервер', text)
         self.assertEqual(alerts.event_time(float('inf')), 'время не сохранено')
         self.assertEqual(alerts.event_time(10**30), 'время не сохранено')
 

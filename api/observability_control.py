@@ -96,11 +96,14 @@ def call(api, arguments, actor):
     if method == 'POST' and path == '/operation-resolution':
         import operation_resolution
         return operation_resolution.assistant_resolve(api, actor, body)
-    if path == '/owner-alerts':
+    if path == '/owner-alerts' or path.startswith('/owner-alerts/') and path != '/owner-alerts/test':
         roles.require(settings, actor, 'roles_manage')
         import telegram_alerts
-        if method == 'GET' and not body: return telegram_alerts.status(api)
-        raise HTTPException(422, 'Алерты: GET /owner-alerts, POST /owner-alerts/test без произвольного текста')
+        if method == 'GET' and path == '/owner-alerts' and not body: return telegram_alerts.status(api)
+        if method == 'GET' and path == '/owner-alerts/catalog' and not body:
+            import alert_watches
+            return alert_watches.catalog(api)
+        return telegram_alerts.prepare(api, settings, actor, method, path, body)
     if method == 'POST' and path == '/owner-alerts/test':
         roles.require(settings, actor, 'roles_manage')
         if body: raise HTTPException(422, 'Тест не принимает получателя или текст')
@@ -154,11 +157,15 @@ def confirm(api, actor, record):
     roles.require(settings, actor, 'server_manage')
     if settings['revision'] != record['revision']:
         raise HTTPException(409, 'Права изменились; подготовьте подтверждение заново')
-    if record.get('action') == 'owner-alert-test':
+    if record.get('action') in ('owner-alert-test', 'owner-alert-settings'):
         roles.require(settings, actor, 'roles_manage')
         import telegram_alerts
-        telegram_alerts.test(api)
-        text = 'Тест уведомлений добавлен в очередь владельца.'
+        if record['action'] == 'owner-alert-settings':
+            telegram_alerts.configure(api, telegram_alerts.Settings.model_validate(record['body']), operation_id=record['operation_id'])
+            text = 'Настройки и правила Telegram-алертов сохранены.'
+        else:
+            telegram_alerts.test(api)
+            text = 'Тест уведомлений добавлен в очередь владельца.'
     else:
         configure(api, observability.Settings.model_validate(record['body']))
         text = 'Настройки наблюдаемости сохранены.'
@@ -169,7 +176,7 @@ def confirm(api, actor, record):
             current['completed_text'] = text
             control.operations.atomic_json(path, current)
             control.operations.atomic_json(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'), {
-                'id': record['operation_id'], 'action': 'logging-config', 'state': 'succeeded', 'result': 'success',
+                'id': record['operation_id'], 'action': 'owner-alert-settings' if record.get('action') == 'owner-alert-settings' else 'logging-config', 'state': 'succeeded', 'result': 'success',
                 'message': text, 'started_at': control.operations.timestamp(), 'updated_at': control.operations.timestamp()})
     return text
 

@@ -100,7 +100,5 @@ async def monitor(api):
         try:
             import diagnostic_history
             await asyncio.to_thread(diagnostic_history.observe, api)
-            import telegram_alerts
-            await asyncio.to_thread(telegram_alerts.sample, api)
         except Exception: api.logger.warning('Diagnostic baseline/alert sample unavailable')
         await asyncio.sleep(60)
