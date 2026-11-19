@@ -1,4 +1,4 @@
-"""Bounded, private stage journals. Never ingest command output or environment."""
+"""Bounded private stages and redacted failure evidence; never store raw argv."""
 from __future__ import annotations
 
 import fcntl
@@ -74,8 +74,12 @@ def append(data_dir: Path, value: dict, source: str | None = None):
             document["events"].append(event)
             document["state"] = value.get("state", "unknown")
             document["updated_at"] = event["at"]
+            if value.get('state') == 'failed' and 'evidence' not in document:
+                from operation_evidence import capture
+                archive = {'system': root / 'operations', 'mihomo': root / 'mihomo/operations', 'cdn': root / 'cdn-operations'}[source]
+                document['evidence'] = capture(root, {**read(archive / (value['id'] + '.json')), **value})
             import json
-            while len(document["events"]) > MAX_EVENTS or len(json.dumps(document, ensure_ascii=False).encode()) > MAX_BYTES:
+            while document['events'] and (len(document["events"]) > MAX_EVENTS or len(json.dumps(document, ensure_ascii=False).encode()) > MAX_BYTES):
                 document["events"].pop(0)
                 document["dropped"] += 1
             atomic_json(path, document)
@@ -128,6 +132,16 @@ def get(root, source, identity):
     with locked(root):
         _prune(root)
         document = read(path)
+        if document and (document.get('id') != identity or document.get('source') != source or not isinstance(document.get('events'), list) or type(document.get('dropped')) is not int):
+            raise ValueError('Invalid stage journal')
+        archive = {'system': root / 'operations', 'mihomo': root / 'mihomo/operations', 'cdn': root / 'cdn-operations'}[source]
+        record = read(archive / (identity + '.json'))
+        from operation_evidence import capture, needs_capture
+        if record.get('state') == 'failed' and needs_capture(document.get('evidence')):
+            document = document or {'id': identity, 'source': source, 'events': [], 'dropped': 0, 'state': 'failed'}
+            document['evidence'] = capture(root, record)
+            from application_operation import atomic_json
+            atomic_json(path, document)
         if not document:
             return {"id": identity, "source": source, "events": [], "available": False, "dropped": 0}
         if document.get("id") != identity or document.get("source") != source or not isinstance(document.get("events"), list) or type(document.get("dropped")) is not int:
@@ -145,7 +159,7 @@ def get(root, source, identity):
                 if type(event.get(key)) in (int, float): events[-1][key] = event[key]
             if isinstance(event.get('dependency'), str) and re.fullmatch(r'[a-zA-Z0-9@_.-]{1,160}', event['dependency']): events[-1]['dependency'] = event['dependency']
             if isinstance(event.get('health_check'), dict): events[-1]['health_check'] = safe_health(event['health_check'])
-        return {"id": identity, "source": source, "events": events, "available": True, "dropped": document["dropped"]}
+        return {"id": identity, "source": source, "events": events, "available": True, "dropped": document["dropped"], 'evidence': document.get('evidence')}
 
 
 def safe_health(value):

@@ -129,7 +129,8 @@ def safe_record(value, source, api=None):
             'systemd_invocation_id': value.get('systemd_invocation_id') if isinstance(value.get('systemd_invocation_id'), str) and re.fullmatch(r'[0-9a-f]{32}', value['systemd_invocation_id']) else None,
             'integration_id': value.get('integration_id') if isinstance(value.get('integration_id'), str) and re.fullmatch(r'ai:[0-9a-f]{32}', value['integration_id']) else None,
             **{key: operation_log.public_text(value.get(key)) if isinstance(value.get(key), str) else '' for key in
-               ('action', 'state', 'result', 'stage', 'stage_result', 'error_code', 'message', 'unit', 'reason', 'started_at', 'updated_at', 'finished_at')},
+               ('action', 'state', 'result', 'stage', 'stage_result', 'error_code', 'message', 'unit', 'reason', 'started_at', 'updated_at', 'finished_at', 'resolved_at')},
+            'resolution_review': value.get('resolution_review'),
             'health_check': operation_log.safe_health(value['health_check']) if isinstance(value.get('health_check'), dict) else None,
             'changed_components': component_list('changed_components'),
             'runtime_changed_components': component_list('runtime_changed_components'),
@@ -166,8 +167,11 @@ def timeline(api, query):
             journal_path = operation_log.location(api.DATA_DIR, source, query.operation_id)
             if journal_path.is_symlink() or journal_path.exists() and journal_path.stat().st_size > operation_log.MAX_BYTES:
                 raise ValueError('unsafe journal')
+            operation_log.get(api.DATA_DIR, source, query.operation_id)
             journal = operations.read(journal_path)
             if journal:
+                if isinstance(journal.get('evidence'), dict):
+                    reports.observation(result, 'saved_journal:' + source, 'retained_operation_evidence', journal['evidence'])
                 if journal.get('id') != query.operation_id or journal.get('source') != source: raise ValueError('identity mismatch')
                 dropped = journal.get('dropped')
                 result['coverage'][source] = {'dropped': dropped, 'journal_available': True, 'schema_version': journal.get('schema_version', 1)}
@@ -545,4 +549,8 @@ def call(api, name, arguments, actor):
         except (OSError, ValueError, sqlite3.Error): value['recording'] = {'stored': False, 'reason': 'probe_storage_unavailable'}
         return value
     if name == 'operation_inventory': return operation_inventory(api, query)
-    return summary(api, query) if name == 'application_diagnostics' else timeline(api, query)
+    if name == 'application_diagnostics': return summary(api, query)
+    report = timeline(api, query)
+    import operation_resolution
+    report['resolution_review'] = operation_resolution.review_offer(api, actor, report)
+    return report

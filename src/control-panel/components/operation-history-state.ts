@@ -2,7 +2,7 @@ import { operationOutcome } from "../../shared/lib/operation-outcome.mjs";
 import { actionLabels } from "../../shared/lib/control-plane-ui";
 import type { SystemAction } from "../system-operation";
 
-export type HistoryEntry = SystemAction & { resolved_at?: string | null; source?: string; updated_at?: string; stage?: string; stage_result?: string; error_code?: string; reason?: string; health_check?: {scope?: string; state?: string; application_function?: string} };
+export type HistoryEntry = SystemAction & { resolved_at?: string | null; resolution_review?: { by: string; note: string }; source?: string; updated_at?: string; stage?: string; stage_result?: string; error_code?: string; reason?: string; health_check?: {scope?: string; state?: string; application_function?: string} };
 export type HistoryFilter = "all" | "active" | "attention" | "completed" | "resolved";
 export function historyEntries(value: unknown): HistoryEntry[] {
   if (!value || typeof value !== "object" || !("items" in value) || !Array.isArray(value.items)) throw Error("Invalid history");
@@ -14,6 +14,7 @@ export function historyEntries(value: unknown): HistoryEntry[] {
     }
     if (!item.id && !item.unit && !item.started_at && !item.updated_at) throw Error("Missing operation identity");
     if (item.progress != null && (typeof item.progress !== "number" || !Number.isFinite(item.progress))) throw Error("Invalid progress");
+    if (item.resolution_review != null && (typeof item.resolution_review !== "object" || !("by" in item.resolution_review) || !("note" in item.resolution_review) || typeof item.resolution_review.by !== "string" || typeof item.resolution_review.note !== "string")) throw Error("Invalid resolution review");
     return { ...item, started_at: item.started_at || undefined, updated_at: item.updated_at || undefined } as HistoryEntry;
   });
 }

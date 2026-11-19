@@ -4575,6 +4575,7 @@ def application_operations(_: None = Depends(require_token)) -> dict:
             items.append({"id": item.get("id", path.stem), "source": "cdn", "action": "ech" if item.get("kind") == "ech" else "cdn-security",
                           "state": item.get("state", "unknown"), "message": item.get("message", ""), "progress": item.get("progress"),
                           "resolved_at": item.get("resolved_at"),
+                          "resolution_review": item.get("resolution_review"),
                           "started_at": datetime.fromtimestamp(item["created_at"], timezone.utc).isoformat() if isinstance(item.get("created_at"), (int, float)) else None})
         return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)}
     except (OSError, ValueError):

@@ -87,12 +87,20 @@
   .gateOperationTrack > i { transition:none; }
 }
 .operationHistoryButton { display:inline-flex; align-items:center; gap:6px; }
-.operationHistoryHeaderActions { display:flex; gap:8px; }
-.operationHistorySettings { flex:1; min-height:0; overflow:auto; padding:0 24px 24px; }
-.operationHistorySettings .servicesHistory { margin:0 0 16px; }
 .operationHistoryPagination { display:flex; align-items:center; justify-content:space-between; position:sticky; bottom:0; padding:10px; background:#0b151e; border-top:1px solid #334653; }
 .operationResolution { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .operationResolution small { color:#9cb0bf; }
+.operationResolutionSwitch { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+.operationResolutionSwitch input { position:absolute; opacity:0; width:1px; height:1px; }
+.operationResolutionSwitch > span { width:34px; height:20px; padding:2px; border:1px solid #52616c; border-radius:12px; background:#28343e; box-sizing:border-box; }
+.operationResolutionSwitch > span::after { content:""; display:block; width:14px; height:14px; border-radius:50%; background:#c5ced5; transition:transform .15s; }
+.operationResolutionSwitch input:checked + span { background:#146b59; border-color:#459b83; }
+.operationResolutionSwitch input:checked + span::after { transform:translateX(14px); background:#d9fff0; }
+.operationResolutionSwitch input:focus-visible + span { outline:2px solid var(--cyan); outline-offset:3px; }
+.operationResolutionSwitch:has(input:disabled) { opacity:.6; cursor:wait; }
+.operationResolutionSwitch strong { font-size:12px; }
+.operationSavedEvidence { margin:14px 0; padding:12px; border:1px solid var(--line); border-radius:8px; }
+.operationSavedEvidence pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; font-size:11px; }
 .operationHistoryErrorCount { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border:1px solid #b45c60; border-radius:9px; background:#4a242d; color:#ffc0c4; font-size:10px; font-weight:700; font-variant-numeric:tabular-nums; }
 .operationHistoryDialog { width:min(1160px, calc(100vw - 32px)); height:min(88dvh,860px); max-width:none; max-height:94dvh; margin:auto; padding:0; overflow:hidden; border:1px solid #334653; border-radius:16px; background:#0b151e; color:#e0ebef; box-shadow:0 30px 100px #0008; }
 .operationHistoryDialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(4px); }

@@ -93,6 +93,9 @@ def call(api, arguments, actor):
     method = arguments.get('method', 'GET')
     path = arguments.get('path') or '/events'
     body = arguments.get('body') or {}
+    if method == 'POST' and path == '/operation-resolution':
+        import operation_resolution
+        return operation_resolution.assistant_resolve(api, actor, body)
     if path == '/owner-alerts':
         roles.require(settings, actor, 'roles_manage')
         import telegram_alerts
