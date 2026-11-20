@@ -1168,7 +1168,8 @@ def _runtime_request(api, mode, body):
         import assistant_trace
         try: runtime_version = (runtime_directory(component) / 'version').read_text().strip()
         except OSError: runtime_version = ''
-        assistant_trace.record({'stage': 'runtime_started', 'model_id': value.get('model'), 'runtime_version': runtime_version})
+        assistant_trace.record({'stage': 'runtime_started', 'model_id': value.get('model'),
+                                'provider_id': active_provider(value), 'runtime_version': runtime_version})
     try:
         with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               text=True, env=env, start_new_session=os.name == 'posix') as process:

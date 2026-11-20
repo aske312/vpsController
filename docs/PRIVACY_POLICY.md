@@ -1,6 +1,6 @@
 # Уведомление о приватности 312node.net / Privacy Notice
 
-Редакция / Effective date: 02.08.2026
+Редакция / Effective date: 20.11.2026
 
 312node.net — свободное self-hosted программное обеспечение под лицензией MIT. Проект не предоставляет централизованный облачный сервис и не требует указания имени, адреса или иных юридических реквизитов автора в экземпляре приложения.
 
@@ -19,6 +19,8 @@
 - состояние служб, метрики, сетевые сведения и журналы безопасности;
 - имена профилей и клиентов, адреса, публичные ключи, endpoints, handshake и статистику трафика;
 - команды, результаты диагностики и настройки автоматизации.
+
+Статистика AI локально связывает идентификатор пользователя с количеством запросов, моделями, результатами и сообщённым провайдером расходом токенов. Счётчики хранятся до 90 дней отдельно от истории диалогов, без текстов сообщений и ключей API.
 
 Эти данные хранятся на VPS и в браузере администратора. Учётные данные панели сохраняются в `sessionStorage` вкладки. Закрытые ключи и пароли не следует публиковать или передавать в открытых обращениях.
 
@@ -53,6 +55,8 @@ Depending on configuration, the application may locally process:
 - service state, metrics, network information and security logs;
 - profile and client names, addresses, public keys, endpoints, handshakes and traffic statistics;
 - commands, diagnostic results and automation settings.
+
+Local AI usage statistics associate a user identifier with request counts, models, outcomes and provider-reported token consumption. Counters are retained for up to 90 days separately from conversation history, without message text or API keys.
 
 This data remains on the VPS and in the administrator’s browser. Panel credentials are stored in the tab’s `sessionStorage`. Private keys and passwords should never be included in public requests.
 

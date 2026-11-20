@@ -1945,6 +1945,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                     ('. Проверьте поля: ' + ', '.join(problem['fields']) if problem['fields'] else '') + '. Исправьте причину перед новой попыткой.') if problem else 'Исчерпан лимит шагов. Сузьте задачу до одного действия или уточните недостающие данные.'
         messages.append({'role': 'system', 'content': 'Вызовы инструментов завершены, дополнительные действия запрещены. Дай краткий итог пользователю: что удалось проверить, какая ошибка помешала, какие поля нужно исправить и следующий шаг. Отдели факты от предположений. Не заявляй о сохранении, выполнении или подготовке изменений без квитанции подтверждения. Не выводи секреты. Изменяющие запросы не повторяй.'})
         diagnostic('summary_start')
+        measured = {}
         try:
             review = await model_request(settings, messages, [], completion_limit=2400)
             answer = review.get('content')
@@ -1959,7 +1960,9 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         answer = grounded_answer(answer, successful, prepared_operation,
             bool(prepared_ids <= executed_ids if prepared_ids else executed_ids or mutation_names and mutation_names <= immediate_successes), failures,
             operation_scope=evidence_required or bool(mutation_names))
-        diagnostic('summary_result', status='incomplete', answer_chars=len(answer))
+        diagnostic('summary_result', status='incomplete', answer_chars=len(answer),
+                   prompt_tokens=measured.get('prompt_tokens') if isinstance(measured, dict) else None,
+                   completion_tokens=measured.get('completion_tokens') if isinstance(measured, dict) else None)
         result = {'answer': heading + '\n\n' + answer[:18000], 'tools_used': used, 'status': 'partial' if prepared_operation else 'incomplete', 'diagnostics': failures[-16:], 'prepared_operation_ids': sorted(prepared_ids)}
         if complete_usage: result['usage'] = usage
         return result

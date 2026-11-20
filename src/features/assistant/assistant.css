@@ -46,6 +46,10 @@
 .mcpActivityLabel { min-width:0; animation:mcpActivityReveal .25s ease-out; }
 .mcpActivityClock { margin-left:auto; padding-left:8px; flex-shrink:0; font-size:11px; font-variant-numeric:tabular-nums; opacity:.7; }
 .mcpResponseTime { margin-right:auto; color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; opacity:.7; }
+.noderaUsage { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
+.noderaUsage > summary { cursor:pointer; color:var(--text); font-size:13px; font-weight:600; }
+.noderaUsageBody { display:grid; gap:10px; padding-top:12px; }
+.noderaUsage td small { display:block; color:var(--muted); font-size:10px; margin-top:3px; }
 @keyframes mcpActivityWave { 0%,100% { transform:scaleY(.6); opacity:.35; } 50% { transform:scaleY(2.2); opacity:1; } }
 @keyframes mcpActivityReveal { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 @media(prefers-reduced-motion:reduce) { .mcpActivitySignal i,.mcpActivityLabel { animation:none; } }

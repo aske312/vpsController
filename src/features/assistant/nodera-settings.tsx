@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { createApiClient } from "../../shared/lib/api-request";
 import { ChatIcon } from "./chat-icon";
 import { TelegramAlerts } from "./telegram-alerts";
+import { AIUsage } from "./ai-usage";
 import { enabledTelegramTools } from "./assistant-state";
 import { type ProviderConnection } from "./provider-connection";
 import { dollars, latestObservation, quotaFacts, quotaText, queueProviderCatalog, type ProviderObservation, type ProviderCatalog } from "./provider-details";
@@ -498,6 +499,7 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     {subscriptions.error && <NotificationNotice id="nodera:subscriptions" title="Подписки пользователей" message={subscriptions.error} />}
     {contacts?.revision === revision && contacts.error && <NotificationNotice id="nodera:contacts" title="Пользователи Nodera" message={contacts.error} />}
     {guests.length > contactsLimit && <button type="button" className="ghostButton noderaMoreContacts" onClick={() => setContactsLimit(value => value + 20)}>Ещё пользователи</button>}
+    <AIUsage request={request} names={Object.fromEntries([...guests.map(item => [String(item.telegram_id), item.profile_name || item.name]), ...draft.accounts.map(item => [String(item.telegram_id), item.name || contactsById.get(item.telegram_id)?.name || String(item.telegram_id)])])}/>
     {userEdit && account && <SettingsDialog title={userEdit.index < 0 && !userEdit.observed ? "Добавить пользователя" : "Пользователь"} wide close={closeUser} dismissible={!profileBusy}
       blocked={blocked || profileBusy || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
       submit={() => void applyUser()}>

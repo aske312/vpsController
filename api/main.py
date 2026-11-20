@@ -728,6 +728,12 @@ def nodera_bot_users(_: None = Depends(require_token)) -> dict:
     return {'items': assistant_contacts.list_recent(sys.modules[__name__])}
 
 
+@app.get('/api/assistant/usage')
+def nodera_usage(days: int = Query(default=30, ge=1, le=90), _: None = Depends(require_token)) -> dict:
+    import assistant_usage
+    return assistant_usage.report(sys.modules[__name__], days)
+
+
 @app.patch('/api/assistant/bot-users/{identity}')
 def nodera_user_edit(identity: int, payload: assistant_contacts.ProfileEdit, _: None = Depends(require_token)) -> dict:
     return assistant_contacts.edit_profile(sys.modules[__name__], identity, payload)

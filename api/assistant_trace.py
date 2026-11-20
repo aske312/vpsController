@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import threading
 import time
 
@@ -14,6 +15,16 @@ current = ContextVar('assistant_trace', default=None)
 RETENTION = 7 * 86400
 MAX_FILES = 256
 MAX_BYTES = 256 * 1024
+
+
+def store_usage(context):
+    try:
+        import assistant_usage
+        assistant_usage.store_events(context['api'], context['meta'], context['events'])
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        pass  # Accounting cannot discard a dialogue result.
+
+
 STAGES = {'request_started', 'request_finished', 'runtime_started', 'model_start', 'model_result', 'model_error', 'provider_transport', 'provider_error', 'provider_retry', 'tool_start', 'tool_result', 'repeat_blocked', 'summary_start', 'summary_result', 'budget_exhausted', 'trace_truncated'}
 FIELDS = {'name', 'view', 'method', 'path', 'body', 'values', 'expected_revision', 'operation_id', 'profile_id', 'device_id', 'routing', 'structured_policy', 'structured_policy_selection', 'groups', 'rules', 'members', 'kind', 'value', 'target', 'connections', 'devices', 'settings', 'limits', 'section', 'module_id', 'group_id', 'service', 'action', 'selection', 'telegram_id', 'query', 'url', 'timeout', 'interval', 'strategy', 'max_failed_times', 'tolerance', 'request_id', 'operation_ids'}
 
@@ -30,7 +41,7 @@ def safe_event(value):
     if isinstance(value.get('runtime_version'), str) and re.fullmatch(r'[0-9]{1,3}(?:\.[0-9]{1,3}){2}', value['runtime_version']): result['runtime_version'] = value['runtime_version']
     for key in ('tool', 'error_code', 'status'):
         if isinstance(value.get(key), str) and re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_]{0,79}', value[key]): result[key] = value[key]
-    for key in ('request_id', 'operation_id', 'conversation_id'):
+    for key in ('request_id', 'operation_id', 'conversation_id', 'provider_id'):
         if isinstance(value.get(key), str) and re.fullmatch(r'[a-f0-9]{32}', value[key]): result[key] = value[key]
     if isinstance(value.get('operation_ids'), list): result['operation_ids'] = [identity for identity in value['operation_ids'][:32] if isinstance(identity, str) and re.fullmatch(r'[a-f0-9]{32}', identity)]
     for key in ('round', 'duration_ms', 'http_status', 'tool_count', 'answer_chars', 'argument_chars', 'prompt_chars', 'history_turns', 'attachments', 'prompt_tokens', 'completion_tokens'):
@@ -72,6 +83,12 @@ def record(value):
     trace = current.get()
     event = safe_event(value)
     if not trace or not event: return
+    # Accounting checkpoints continue even after the diagnostic file reaches
+    # its size limit or is removed by diagnostic retention.
+    with trace['lock']:
+        trace['events'].append(dict(event))
+        if event['stage'] in ('model_start', 'model_result', 'summary_start', 'summary_result', 'provider_retry', 'request_finished'):
+            store_usage(trace)
     try:
         with trace['lock']:
             file = trace['file']
@@ -93,20 +110,33 @@ def record(value):
 def capture(api, identity, actor, channel):
     if not isinstance(identity, str) or not re.fullmatch(r'[a-f0-9]{32}', identity): raise ValueError('Invalid AI trace identity')
     folder = directory(api)
+    file = folder / (identity + '.jsonl')
+    context = {'api': api, 'file': file, 'start': time.monotonic(), 'lock': threading.Lock(),
+               'meta': {'request_id': identity, 'actor': str(actor), 'channel': channel, 'created_at': time.time()}, 'events': []}
     try:
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for index, (file, modified) in enumerate(recent_files(folder)):
-            if index >= MAX_FILES - 1 or modified < time.time() - RETENTION: file.unlink(missing_ok=True)
-        file = folder / (identity + '.jsonl')
+        for index, (old_file, modified) in enumerate(recent_files(folder)):
+            if index >= MAX_FILES - 1 or modified < time.time() - RETENTION: old_file.unlink(missing_ok=True)
         if not file.exists():
             with os.fdopen(os.open(file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w', encoding='utf-8') as stream:
-                stream.write(json.dumps({'request_id': identity, 'actor': actor, 'channel': channel, 'created_at': time.time()}) + '\n')
-        context = {'file': file, 'start': time.monotonic(), 'lock': threading.Lock()}
-    except OSError:
-        context = None
+                stream.write(json.dumps(context['meta']) + '\n')
+        else:
+            with file.open(encoding='utf-8') as stream: lines = stream.read(MAX_BYTES + 4096).splitlines()
+            previous = json.loads(lines[0])
+            if str(previous.get('actor')) == str(actor) and previous.get('channel') == channel:
+                context['meta'] = previous
+                for line in lines[1:]:
+                    try:
+                        event = json.loads(line)
+                        if isinstance(event, dict): context['events'].append(event)
+                    except ValueError: break
+    except (OSError, ValueError, IndexError, AttributeError):
+        pass
     token = current.set(context)
     try: yield
-    finally: current.reset(token)
+    finally:
+        current.reset(token)
+        store_usage(context)
 
 
 def read(api, identity, actor='panel'):
