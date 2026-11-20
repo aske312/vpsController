@@ -1,10 +1,16 @@
 """Mihomo YAML capabilities shared with the profile editor."""
 import json
+import re
 from pathlib import Path
 
 CAPABILITIES = json.loads(Path(__file__).with_name("client-capabilities.json").read_text(encoding="utf-8"))
 FEATURES = {key for caps in CAPABILITIES.values() for key in caps["features"]}
 RULES = set(CAPABILITIES["mihomo"]["rules"])
+
+
+def snell_v6_supported(core_version):
+    version = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)(?:[+.-][0-9A-Za-z.-]+)?', core_version or '')
+    return version is not None and tuple(map(int, version.groups())) >= (1, 19, 34)
 
 
 def device_capabilities(os=None):

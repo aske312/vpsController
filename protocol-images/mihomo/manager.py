@@ -42,7 +42,7 @@ from client_labels import connection_label
 from profile_modes import connection_mode, service_ids, service_rules
 from client_subscription import CLIENT_HINTS, import_page
 import client_compatibility
-from client_capabilities import FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
+from client_capabilities import FEATURES, RULES, compatible_routing, connection_supported, device_capabilities, snell_v6_supported
 from dns_routing import mihomo_route_dns, validate_route_dns
 from routing_presets import AD_RULES, QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
 import routing_policy
@@ -5455,10 +5455,17 @@ def require_yaml_export(requested_format: str | None = None, metadata: dict[str,
                                  "Экспорт sing-box/Xray JSON и URI-подписок удалён. Используйте клиент с поддержкой Mihomo/Clash YAML и добавьте общую ссылку профиля заново.")
 
 
-def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None, *, selected_channels=True) -> tuple[str, str]:
+def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None, *, selected_channels=True, core_version=None) -> tuple[str, str]:
     require_yaml_export(requested_format)
     profile = normalize_profile(item)
     profile["connections"] = subscription_limits.client_connections(profile, effective_client_connections(profile.get("connections", [])))
+    if core_version is None:
+        core_version = next((device.get('core_version', '') for device in profile['devices'] if device['id'] == device_id), '')
+    if not snell_v6_supported(core_version):
+        selected_connections = [entry for entry in profile['connections'] if entry.get('device_id') == device_id]
+        profile['connections'] = [entry for entry in profile['connections'] if entry.get('device_id') != device_id or entry['component'] != 'transport-snell']
+        if selected_connections and not any(entry.get('device_id') == device_id for entry in profile['connections']):
+            raise HTTPException(409, 'Для Snell v6 обновите Mihomo до 1.19.34 или новее либо добавьте совместимый канал')
     record = application_operation.read(client_channels.path(DATA_ROOT, str(profile['id']), device_id)) if selected_channels else {}
     selected = client_channels.active(record)
     if selected_channels and not selected:
@@ -5830,7 +5837,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                 raise HTTPException(404, "Subscription not found")
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request), read_only=allow_changes is False)
     try:
-        config, extension = render_client_profile(selected_profile, selected_device)
+        config, extension = render_client_profile(selected_profile, selected_device, core_version=metadata.get('core_version', ''))
     except Exception:
         request.state.evidence_reason = 'subscription_render_failed'
         raise
@@ -5883,10 +5890,8 @@ def client_route_definitions(profile, device_id, core_version=None):
     for component in sorted(TRANSPORTS):
         if not module_is_installed(component) or not module_is_ready(component):
             continue
-        if component == 'transport-snell':
-            version = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', core_version or '')
-            if version is None or tuple(map(int, version.groups())) < (1, 19, 34):
-                continue
+        if component == 'transport-snell' and not snell_v6_supported(core_version):
+            continue
         variants = [{}]
         if component == 'transport-reality':
             variants = [{'route_mode': 'direct', 'transport': transport} for transport in ('xhttp', 'raw', 'grpc')]
@@ -5935,7 +5940,7 @@ def provision_client_routes(profile, device_id, core_version=None):
     if not definitions:
         return profile
     import yaml
-    old_base, _ = render_client_profile(profile, device_id, selected_channels=False)
+    old_base, _ = render_client_profile(profile, device_id, selected_channels=False, core_version=core_version)
     old_digest = client_channels.digest(yaml.safe_load(old_base))
     updated = deepcopy(record)
     target = client_channels.path(DATA_ROOT, profile['id'], device_id)
@@ -5945,7 +5950,7 @@ def provision_client_routes(profile, device_id, core_version=None):
             profile['connections'].extend(provisioned)
             # Preserve an accepted selection when merely extending its catalog.
             # Existing names and credentials stay unchanged as candidates append.
-            base, _ = render_client_profile(profile, device_id, selected_channels=False)
+            base, _ = render_client_profile(profile, device_id, selected_channels=False, core_version=core_version)
             for selection in (updated, updated.get('previous') or {}):
                 if selection.get('source_digest') == old_digest:
                     selection['source_digest'] = client_channels.digest(yaml.safe_load(base))
@@ -6045,8 +6050,9 @@ def select_client_channels(token: str, request: Request, payload: ChannelSelecti
     try:
         with profile_mutation_lock:
             profile, device_id = registered_command_device(token, request)
-            profile = provision_client_routes(profile, device_id, subscription_device_metadata(request).get('core_version'))
-            config, _ = render_client_profile(profile, device_id, selected_channels=False)
+            core_version = subscription_device_metadata(request).get('core_version', '')
+            profile = provision_client_routes(profile, device_id, core_version)
+            config, _ = render_client_profile(profile, device_id, selected_channels=False, core_version=core_version)
     except (ValueError, OSError, RuntimeError, HTTPException):
         raise HTTPException(409, "Не удалось подготовить каналы. Проверьте настройки профиля и Relay") from None
     finally:
@@ -6086,9 +6092,9 @@ class ChannelDecision(BaseModel):
     model_config = {'extra': 'forbid'}
 
 
-def channel_command_response(record, base, profile, device_id):
+def channel_command_response(record, base, profile, device_id, core_version):
     result = client_channels.response(record, base)
-    result['config'], _ = render_client_profile(profile, device_id)
+    result['config'], _ = render_client_profile(profile, device_id, core_version=core_version)
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
@@ -6100,7 +6106,8 @@ def prepare_client_channels(token: str, request: Request, payload: ChannelPrepar
         raise HTTPException(409, 'Изменения подписки временно недоступны')
     with profile_mutation_lock:
         profile, device_id = registered_command_device(token, request)
-        base, _ = render_client_profile(profile, device_id, selected_channels=False)
+        core_version = subscription_device_metadata(request).get('core_version', '')
+        base, _ = render_client_profile(profile, device_id, selected_channels=False, core_version=core_version)
         import yaml
         config = yaml.safe_load(base)
         try:
@@ -6112,7 +6119,7 @@ def prepare_client_channels(token: str, request: Request, payload: ChannelPrepar
                                              config, profile_revision(profile))
         except (ValueError, OSError):
             raise HTTPException(409, 'Профиль изменился или отчёт проверки не соответствует каналам устройства') from None
-        return channel_command_response(record, base, profile, device_id)
+        return channel_command_response(record, base, profile, device_id, core_version)
 
 
 @app.get('/s/{token}/commands/select-channels/{identity}')
@@ -6125,8 +6132,9 @@ def client_channels_status(token: str, request: Request, identity: str | None = 
         record = application_operation.read(client_channels.path(DATA_ROOT, profile['id'], device_id))
         if not record.get('id') or identity is not None and record.get('id') != identity:
             raise HTTPException(404, 'Подготовленный профиль не найден')
-        base, _ = render_client_profile(profile, device_id, selected_channels=False)
-        return channel_command_response(record, base, profile, device_id)
+        core_version = subscription_device_metadata(request).get('core_version', '')
+        base, _ = render_client_profile(profile, device_id, selected_channels=False, core_version=core_version)
+        return channel_command_response(record, base, profile, device_id, core_version)
 
 
 @app.post('/s/{token}/commands/select-channels/{identity}/decision')
@@ -6137,14 +6145,15 @@ def decide_client_channels(token: str, identity: str, request: Request, payload:
         raise HTTPException(409, 'Изменения подписки временно недоступны')
     with profile_mutation_lock:
         profile, device_id = registered_command_device(token, request)
-        base, _ = render_client_profile(profile, device_id, selected_channels=False)
+        core_version = subscription_device_metadata(request).get('core_version', '')
+        base, _ = render_client_profile(profile, device_id, selected_channels=False, core_version=core_version)
         import yaml
         try:
             record = client_channels.decision(DATA_ROOT, profile['id'], device_id, identity,
                                               payload.action, yaml.safe_load(base))
         except (ValueError, OSError):
             raise HTTPException(409, 'Не удалось изменить подготовленный профиль. Проверьте его состояние') from None
-        return channel_command_response(record, base, profile, device_id)
+        return channel_command_response(record, base, profile, device_id, core_version)
 
 
 def execute_module_operation(action: str, module_id: str, identity: str, unit: str) -> bool:

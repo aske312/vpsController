@@ -12,6 +12,37 @@ from tests.api.support import manager, ROOT, managed_mihomo_fixture
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_subscription_omits_existing_snell_for_old_or_unknown_core(self):
+        import yaml
+        self.store[0]['devices'][0]['core_version'] = '1.19.34'
+        self.store[0]['connections'].append({
+            'id': 'common-snell', 'device_id': 'common', 'component': 'transport-snell', 'settings': {},
+            'credential': {'instance_id': 'profile-common', 'port': 33000,
+                           'password': 'test-key-for-snell-v6', 'mode': 'default'},
+        })
+        before = deepcopy(self.store)
+        for version, supported in (('', False), ('1.19.33', False), ('1.19.34', True), ('v1.19.34+custom', True)):
+            with self.subTest(version=version):
+                headers = [(b'x-core-version', version.encode())] if version else []
+                response = self.fetch('Nodera/0.0.11 (Windows; Mihomo)', hwid=None, extra_headers=headers)
+                proxies = yaml.safe_load(response.body)['proxies']
+                self.assertEqual(any(node['type'] == 'snell' for node in proxies), supported)
+                self.assertTrue(any(node['type'] == 'ss' for node in proxies))
+        self.assertEqual({row['id']: row['credential'] for row in self.store[0]['connections']},
+                         {row['id']: row['credential'] for row in before[0]['connections']})
+
+    def test_snell_only_subscription_returns_upgrade_requirement_for_old_core(self):
+        self.store[0]['connections'] = [{
+            'id': 'common-snell', 'device_id': 'common', 'component': 'transport-snell', 'settings': {},
+            'credential': {'instance_id': 'profile-common', 'port': 33000,
+                           'password': 'test-key-for-snell-v6', 'mode': 'default'},
+        }]
+        with self.assertRaises(manager.HTTPException) as rejected:
+            self.fetch('Nodera/0.0.11 (Windows; Mihomo)', hwid=None,
+                       extra_headers=[(b'x-core-version', b'1.19.33')])
+        self.assertEqual(rejected.exception.status_code, 409)
+        self.assertIn('1.19.34', rejected.exception.detail)
+
     def test_reissued_url_delivers_yaml_to_the_same_hwid_without_reprovisioning(self):
         self.fetch('ClashMeta/1.0')
         device_id = self.store[0]['devices'][1]['id']
