@@ -36,39 +36,58 @@ export function RoutingSettings({ draft, presets, disabled, onChange, onEditPres
   onEditPreset: (id?: string) => void;
 }) {
   const strategy = String(draft.strategy || "fallback");
-  const tolerance = <RoutingNumberField label={strategy === "url-test" ? "Допуск переключения, мс" : "Допуск автовыбора, мс"}
-    value={String(draft.tolerance ?? 0)} min={0} max={1000} onChange={(value) => onChange("tolerance", value)} />;
   return <div className="mihomoSettingsLayout">
-    <fieldset className="mihomoSettingsRouting" disabled={disabled} aria-label="Общие настройки маршрутизации">
-      <div className="mihomoSettingsMode">
-        <label className="mihomoSettingsField">Режим трафика
-          <select value={String(draft.mode || "rule")} onChange={(event) => onChange("mode", event.target.value)}>
-            <option value="rule">По правилам</option>
-            <option value="global">Весь трафик через VPN</option>
-          </select>
-        </label>
-      </div>
-      <fieldset className="mihomoSettingsStrategy">
-        <legend>Стратегия по умолчанию</legend>
-        <p>Используется, когда профиль или устройство наследует общие настройки.</p>
-        <div>
+    <div className="mihomoSettingsPanels">
+      <section className="mihomoSettingsPanel" aria-labelledby="mihomo-settings-strategy">
+        <header>
+          <h3 id="mihomo-settings-strategy">Стратегия</h3>
+          <p>По умолчанию для профилей и устройств с общими настройками.</p>
+        </header>
+        <fieldset disabled={disabled} aria-label="Стратегия по умолчанию" className="mihomoSettingsStrategy">
           {strategies.map(({ value, title }) => <label key={value}>
             <input type="radio" name="mihomo-routing-strategy" value={value} checked={strategy === value}
               aria-label={title} aria-describedby={`mihomo-strategy-${value}`} onChange={() => onChange("strategy", value)} />
             <span><b>{title}</b><small id={`mihomo-strategy-${value}`}>{strategyDescriptions[value]}</small></span>
           </label>)}
-        </div>
-      </fieldset>
-      {strategy === "url-test" && <div className="mihomoSettingsStrategyOptions">
-        {tolerance}
-        <p>Пока разница в задержке укладывается в допуск, Mihomo сохраняет текущий доступный канал.</p>
-      </div>}
-      {strategy === "load-balance" && <div className="mihomoSettingsStrategyOptions">
-        <BalanceStrategy value={draft.load_balance_strategy} onChange={(value) => onChange("load_balance_strategy", value)} />
-      </div>}
-      <details className="mihomoSettingsHealth" onInvalidCapture={(event) => { event.currentTarget.open = true; }}>
-        <summary>Проверка доступности <small>Общие параметры для автоматических стратегий</small></summary>
-        <div className="mihomoSettingsHealthFields">
+        </fieldset>
+        <fieldset disabled={disabled} aria-label="Параметры стратегии" className="mihomoSettingsStrategyOptions">
+          <label className="mihomoSettingsField">Режим трафика
+            <select value={String(draft.mode || "rule")} onChange={(event) => onChange("mode", event.target.value)}>
+              <option value="rule">По правилам</option>
+              <option value="global">Весь трафик через VPN</option>
+            </select>
+          </label>
+          <RoutingNumberField label="Допуск автовыбора, мс" value={String(draft.tolerance ?? 0)} min={0} max={1000}
+            onChange={(value) => onChange("tolerance", value)} />
+          {strategy === "load-balance" && <div className="mihomoSettingsBalance">
+            <BalanceStrategy value={draft.load_balance_strategy} onChange={(value) => onChange("load_balance_strategy", value)} />
+          </div>}
+        </fieldset>
+        <p>Если разница в задержке в пределах допуска, автовыбор оставляет текущий доступный канал.</p>
+      </section>
+
+      <section className="mihomoSettingsPanel mihomoSettingsPresets" aria-labelledby="mihomo-settings-presets">
+        <header>
+          <h3 id="mihomo-settings-presets">Шаблоны</h3>
+          <p>Каналы и стратегия для новых профилей.</p>
+        </header>
+        {presets.length > 0 && <ul>
+          {presets.map((preset) => <li key={preset.id}>
+            <button type="button" disabled={disabled} onClick={() => onEditPreset(preset.id)}>
+              <span><b>{preset.name}</b><small>{presetStrategies.find(({ value }) => value === preset.strategy)?.title} · Каналов: {preset.components.length}</small></span>
+              <span aria-hidden="true">›</span>
+            </button>
+          </li>)}
+        </ul>}
+        <button type="button" className="ghostButton" disabled={disabled} onClick={() => onEditPreset()}>Редактировать шаблоны</button>
+      </section>
+
+      <section className="mihomoSettingsPanel mihomoSettingsHealth" aria-labelledby="mihomo-settings-health">
+        <header>
+          <h3 id="mihomo-settings-health">Проверка доступности</h3>
+          <p>Общие параметры проверки каналов.</p>
+        </header>
+        <fieldset disabled={disabled} aria-label="Параметры проверки" className="mihomoSettingsHealthFields">
           <label className="mihomoSettingsField mihomoSettingsHealthUrl">Адрес проверки
             <input value={String(draft.test_url ?? "")} onChange={(event) => onChange("test_url", event.target.value)} />
           </label>
@@ -76,28 +95,12 @@ export function RoutingSettings({ draft, presets, disabled, onChange, onEditPres
             onChange={(value) => onChange("interval", value)} />
           <RoutingNumberField label="Таймаут, мс" value={String(draft.health_timeout ?? 3000)} min={1000} max={10000}
             onChange={(value) => onChange("health_timeout", value)} />
-          <RoutingNumberField label="Ошибок до перепроверки" value={String(draft.max_failed_times ?? 2)} min={1} max={10}
+          <RoutingNumberField label="Порог ошибок" value={String(draft.max_failed_times ?? 2)} min={1} max={10}
             onChange={(value) => onChange("max_failed_times", value)} />
-          {strategy !== "url-test" && tolerance}
-        </div>
-      </details>
-    </fieldset>
-
-    <section className="mihomoSettingsPresets">
-      <header>
-        <h3>Шаблоны профилей</h3>
-        <p>Задают каналы и стратегию при создании профиля.</p>
-      </header>
-      {presets.length > 0 && <ul>
-        {presets.map((preset) => <li key={preset.id}>
-          <button type="button" disabled={disabled} onClick={() => onEditPreset(preset.id)}>
-            <span><b>{preset.name}</b><small>{presetStrategies.find(({ value }) => value === preset.strategy)?.title} · Каналов: {preset.components.length}</small></span>
-            <span aria-hidden="true">›</span>
-          </button>
-        </li>)}
-      </ul>}
-      <button type="button" className="ghostButton" disabled={disabled} onClick={() => onEditPreset()}>Редактировать шаблоны</button>
-    </section>
+        </fieldset>
+        <p>При достижении порога ошибок запускается внеочередная проверка.</p>
+      </section>
+    </div>
   </div>;
 }
 
