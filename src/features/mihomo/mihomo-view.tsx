@@ -9,6 +9,7 @@ import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-gr
 import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
 import { RuleLeaveDialog } from "./rule-leave-dialog";
 import { PresetEditor, RoutingSettings } from "./routing-settings";
+import { changedRoutingDraftKeys, rebaseRoutingDraft, type RoutingDraft } from "./routing-draft";
 import clientApps from "../../../protocol-images/mihomo/client-apps.json" with { type: "json" };
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
@@ -129,7 +130,7 @@ export function MihomoPage({
     (list) => [list.id, partitionRuleGroups(list, ruleIconGroups[list.id] || [])],
   )), [routingPolicy]);
   const [routingReadKnown, setRoutingReadKnown] = useState(false);
-  const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
+  const [routingDraft, setRoutingDraft] = useState<RoutingDraft>({});
   const [routingDirty, setRoutingDirty] = useState(false);
   const [routingDraftRevision, setRoutingDraftRevision] = useState<string | undefined>();
   const routingSaving = useRef(false);
@@ -140,7 +141,20 @@ export function MihomoPage({
   const [gameFilter, setGameFilter] = useState<"all" | "direct" | "vpn" | "restricted">("all");
   const routingDirtyRef = useRef(false);
   const ruleStudio = useRef<HTMLElement>(null);
-  const routingDraftRef = useRef<Record<string, string | number | boolean>>({});
+  const routingDraftRef = useRef<RoutingDraft>({});
+  const routingBaseline = useRef<RoutingDraft>({});
+  const applyRoutingDraft = useCallback((draft: RoutingDraft) => {
+    const dirty = changedRoutingDraftKeys(routingBaseline.current, draft).length > 0;
+    routingDraftRef.current = draft;
+    routingDirtyRef.current = dirty;
+    setRoutingDraft(draft);
+    setRoutingDirty(dirty);
+  }, []);
+  const resetRoutingDraft = useCallback((policy: PolicySettings, draft = policy.values) => {
+    routingBaseline.current = policy.values;
+    setRoutingDraftRevision(policy.revision);
+    applyRoutingDraft(draft);
+  }, [applyRoutingDraft]);
   const [requestBusy, setBusy] = useState("");
   const [pendingPolicySave, setPendingPolicySave] = useState<PolicySave | null>(null);
   const [pendingProfileSave, setPendingProfileSave] = useState<{ mutation: ProfileMutation; session: number; draft: string } | null>(null);
@@ -325,11 +339,7 @@ export function MihomoPage({
             value = policySnapshot(value, "routing");
             setRoutingReadKnown(true);
             setRoutingPolicy(value as PolicySettings);
-            if (!routingDirtyRef.current) {
-              setRoutingDraftRevision((value as PolicySettings).revision);
-              routingDraftRef.current = { ...(value as PolicySettings).values };
-              setRoutingDraft(routingDraftRef.current);
-            }
+            if (!routingDirtyRef.current && pendingPolicySaveRef.current?.kind !== "routing") resetRoutingDraft(value as PolicySettings);
           } },
         });
         const statsEntries = await Promise.all((profileItems || []).map(async (profile) => {
@@ -349,7 +359,7 @@ export function MihomoPage({
     });
     refreshInFlight.current = job;
     return job;
-  }, [onLoadingChange, request, setProfilesPage]);
+  }, [onLoadingChange, request, resetRoutingDraft, setProfilesPage]);
 
   const reportPolicySave = useCallback((save: PolicySave, state: "running" | "unknown" | "success" | "error", message: string, onRecheck?: () => void) => {
     if (save.kind === "operation") {
@@ -499,11 +509,7 @@ export function MihomoPage({
       dnsDirtyRef.current = false;
       setDnsDirty(false);
     } else {
-      routingDraftRef.current = { ...policy.values };
-      setRoutingDraft(routingDraftRef.current);
-      setRoutingDraftRevision(policy.revision);
-      routingDirtyRef.current = false;
-      setRoutingDirty(false);
+      resetRoutingDraft(policy);
     }
   }
 
@@ -578,11 +584,8 @@ export function MihomoPage({
   }
 
   function updateRoutingDraft(key: string, value: string | number | boolean) {
-    const next = { ...routingDraftRef.current, [key]: value };
-    routingDraftRef.current = next;
-    setRoutingDraft(next);
-    routingDirtyRef.current = true;
-    setRoutingDirty(true);
+    applyRoutingDraft({ ...routingDraftRef.current, [key]: value });
+    if (!routingDirtyRef.current && routingPolicy && pendingPolicySaveRef.current?.kind !== "routing") resetRoutingDraft(routingPolicy);
   }
 
   function ruleGroupLines(ruleList: NonNullable<PolicySettings["rule_lists"]>[number], group: RuleIconGroup) {
@@ -691,19 +694,15 @@ export function MihomoPage({
 
   async function saveRoutingWorkspace(event?: FormEvent): Promise<boolean> {
     event?.preventDefault();
-    if (!routingReadKnown || readOnly || busy || routingSaving.current || routingRevisionConflict) return false;
+    if (!routingReadKnown || !routingDirtyRef.current || readOnly || busy || routingSaving.current || routingRevisionConflict) return false;
     routingSaving.current = true;
     setBusy("settings:routing-policy");
 
     try {
       const submitted = routingDraftRef.current;
       await savePolicy<PolicySettings>("routing", "/mihomo/routing/settings", { values: submitted, expected_revision: routingDraftRevision }, (result) => {
-        setRoutingDraftRevision(result.revision);
         setRoutingPolicy((current) => ({ ...current, ...result }));
-        if (routingDraftRef.current === submitted) {
-          routingDirtyRef.current = false;
-          setRoutingDirty(false);
-        }
+        resetRoutingDraft(result, rebaseRoutingDraft(result.values, submitted, routingDraftRef.current));
       });
       return !routingDirtyRef.current && !pendingPolicySaveRef.current;
     } catch {
@@ -720,12 +719,7 @@ export function MihomoPage({
       canSave: () => routingReadKnown && !readOnly && !busy && !routingRevisionConflict && !routingSaving.current,
       save: () => saveRoutingWorkspace(),
       discard: () => {
-        if (!routingPolicy) return;
-        routingDraftRef.current = { ...routingPolicy.values };
-        setRoutingDraft(routingDraftRef.current);
-        setRoutingDraftRevision(routingPolicy.revision);
-        routingDirtyRef.current = false;
-        setRoutingDirty(false);
+        if (routingPolicy) resetRoutingDraft(routingPolicy);
       },
     };
   });

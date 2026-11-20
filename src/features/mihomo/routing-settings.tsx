@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { BalanceStrategy } from "./advanced-routing";
 import { matchesPresetComponent, presetOptionGroups, profileStrategies } from "./catalog";
+import { routingControlDefaults as defaults, type RoutingDraft } from "./routing-draft";
 import type { ProfilePreset } from "./types";
 
-type RoutingValues = Record<string, string | number | boolean>;
 type UpdateRouting = (key: string, value: string | number | boolean) => void;
 
 const strategies = profileStrategies.filter(({ value }) => value);
@@ -29,13 +29,13 @@ function RoutingNumberField({ label, value, min, max, onChange }: {
 }
 
 export function RoutingSettings({ draft, presets, disabled, onChange, onEditPreset }: {
-  draft: RoutingValues;
+  draft: RoutingDraft;
   presets: ProfilePreset[];
   disabled: boolean;
   onChange: UpdateRouting;
   onEditPreset: (id?: string) => void;
 }) {
-  const strategy = String(draft.strategy || "fallback");
+  const strategy = String(draft.strategy || defaults.strategy);
   return <div className="mihomoSettingsLayout">
     <div className="mihomoSettingsPanels">
       <section className="mihomoSettingsPanel" aria-labelledby="mihomo-settings-strategy">
@@ -52,15 +52,15 @@ export function RoutingSettings({ draft, presets, disabled, onChange, onEditPres
         </fieldset>
         <fieldset disabled={disabled} aria-label="Параметры стратегии" className="mihomoSettingsStrategyOptions">
           <label className="mihomoSettingsField">Режим трафика
-            <select value={String(draft.mode || "rule")} onChange={(event) => onChange("mode", event.target.value)}>
+            <select value={String(draft.mode || defaults.mode)} onChange={(event) => onChange("mode", event.target.value)}>
               <option value="rule">По правилам</option>
               <option value="global">Весь трафик через VPN</option>
             </select>
           </label>
-          <RoutingNumberField label="Допуск автовыбора, мс" value={String(draft.tolerance ?? 0)} min={0} max={1000}
+          <RoutingNumberField label="Допуск автовыбора, мс" value={String(draft.tolerance ?? defaults.tolerance)} min={0} max={1000}
             onChange={(value) => onChange("tolerance", value)} />
           {strategy === "load-balance" && <div className="mihomoSettingsBalance">
-            <BalanceStrategy value={draft.load_balance_strategy} onChange={(value) => onChange("load_balance_strategy", value)} />
+            <BalanceStrategy value={draft.load_balance_strategy ?? defaults.load_balance_strategy} onChange={(value) => onChange("load_balance_strategy", value)} />
           </div>}
         </fieldset>
         <p>Если разница в задержке в пределах допуска, автовыбор оставляет текущий доступный канал.</p>
@@ -89,13 +89,13 @@ export function RoutingSettings({ draft, presets, disabled, onChange, onEditPres
         </header>
         <fieldset disabled={disabled} aria-label="Параметры проверки" className="mihomoSettingsHealthFields">
           <label className="mihomoSettingsField mihomoSettingsHealthUrl">Адрес проверки
-            <input value={String(draft.test_url ?? "")} onChange={(event) => onChange("test_url", event.target.value)} />
+            <input value={String(draft.test_url ?? defaults.test_url)} onChange={(event) => onChange("test_url", event.target.value)} />
           </label>
-          <RoutingNumberField label="Интервал, сек." value={String(draft.interval ?? 30)} min={10} max={3600}
+          <RoutingNumberField label="Интервал, сек." value={String(draft.interval ?? defaults.interval)} min={10} max={3600}
             onChange={(value) => onChange("interval", value)} />
-          <RoutingNumberField label="Таймаут, мс" value={String(draft.health_timeout ?? 3000)} min={1000} max={10000}
+          <RoutingNumberField label="Таймаут, мс" value={String(draft.health_timeout ?? defaults.health_timeout)} min={1000} max={10000}
             onChange={(value) => onChange("health_timeout", value)} />
-          <RoutingNumberField label="Порог ошибок" value={String(draft.max_failed_times ?? 2)} min={1} max={10}
+          <RoutingNumberField label="Порог ошибок" value={String(draft.max_failed_times ?? defaults.max_failed_times)} min={1} max={10}
             onChange={(value) => onChange("max_failed_times", value)} />
         </fieldset>
         <p>При достижении порога ошибок запускается внеочередная проверка.</p>
