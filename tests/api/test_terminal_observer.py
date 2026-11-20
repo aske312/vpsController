@@ -49,11 +49,12 @@ class TerminalTests(unittest.TestCase):
         self.assertNotIn('terminal_read', roles.DEFAULTS['moderator'])
 
     def test_explicit_read_only_role_can_use_terminal_without_management_rights(self):
-        self.settings['role_permissions'] = {'moderator': ['server_read', 'terminal_read']}
+        self.settings['accounts'][0]['role'] = 'administrator'
+        self.settings['role_permissions'] = {'administrator': ['server_read', 'terminal_read']}
         result = terminal.call(self.env, {}, '11')
         self.assertIn('sockets', result['commands'])
         self.assertFalse(roles.allows(self.settings, '11', 'server_manage'))
-        self.settings['role_permissions']['moderator'] = ['terminal_read']
+        self.settings['role_permissions']['administrator'] = ['terminal_read']
         with self.assertRaises(api.HTTPException): terminal.call(self.env, {}, '11')
 
     def test_shell_injection_unknown_arguments_and_secret_paths_are_rejected_before_spawn(self):
