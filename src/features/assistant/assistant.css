@@ -46,10 +46,22 @@
 .mcpActivityLabel { min-width:0; animation:mcpActivityReveal .25s ease-out; }
 .mcpActivityClock { margin-left:auto; padding-left:8px; flex-shrink:0; font-size:11px; font-variant-numeric:tabular-nums; opacity:.7; }
 .mcpResponseTime { margin-right:auto; color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; opacity:.7; }
-.noderaUsage { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
-.noderaUsage > summary { cursor:pointer; color:var(--text); font-size:13px; font-weight:600; }
-.noderaUsageBody { display:grid; gap:10px; padding-top:12px; }
-.noderaUsage td small { display:block; color:var(--muted); font-size:10px; margin-top:3px; }
+.noderaUsage { min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:rgba(10,23,32,.88); }
+.noderaUsage > summary { cursor:pointer; color:var(--text); font-size:12px; font-weight:600; }
+.noderaUsage > summary > span { margin-left:5px; color:var(--muted); font-size:11px; font-weight:400; }
+.noderaUsageBody { display:grid; gap:6px; padding-top:8px; }
+.noderaUsageToolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.noderaUsageToolbar label { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--muted); }
+.mcpWorkspace .noderaUsageToolbar select { width:auto; min-width:0; min-height:26px; padding:3px 6px; }
+.noderaUsage .noderaAccessTable :is(th,td) { padding:4px 6px; vertical-align:top; line-height:1.35; }
+.noderaUsage .noderaAccessTable th:first-child { width:28%; }
+.noderaUsage .noderaAccessTable td:last-child { width:auto; text-align:left; }
+.noderaUsage .noderaAccessTable small { display:block; color:var(--muted); font-size:10px; margin-top:1px; }
+.noderaUsage .noderaAccessTable .noderaUsageIncomplete { color:var(--amber); }
+.noderaUsageIssues { display:flex; flex-wrap:wrap; gap:0 6px; }
+.noderaUsageNotes { color:var(--muted); font-size:10px; }
+.noderaUsageNotes > summary { cursor:pointer; }
+.noderaUsageNotes p { margin:5px 0 0; }
 @keyframes mcpActivityWave { 0%,100% { transform:scaleY(.6); opacity:.35; } 50% { transform:scaleY(2.2); opacity:1; } }
 @keyframes mcpActivityReveal { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 @media(prefers-reduced-motion:reduce) { .mcpActivitySignal i,.mcpActivityLabel { animation:none; } }

@@ -499,7 +499,6 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
     {subscriptions.error && <NotificationNotice id="nodera:subscriptions" title="Подписки пользователей" message={subscriptions.error} />}
     {contacts?.revision === revision && contacts.error && <NotificationNotice id="nodera:contacts" title="Пользователи Nodera" message={contacts.error} />}
     {guests.length > contactsLimit && <button type="button" className="ghostButton noderaMoreContacts" onClick={() => setContactsLimit(value => value + 20)}>Ещё пользователи</button>}
-    <AIUsage request={request} names={Object.fromEntries([...guests.map(item => [String(item.telegram_id), item.profile_name || item.name]), ...draft.accounts.map(item => [String(item.telegram_id), item.name || contactsById.get(item.telegram_id)?.name || String(item.telegram_id)])])}/>
     {userEdit && account && <SettingsDialog title={userEdit.index < 0 && !userEdit.observed ? "Добавить пользователя" : "Пользователь"} wide close={closeUser} dismissible={!profileBusy}
       blocked={blocked || profileBusy || !account.telegram_id || draft.accounts.some((item, index) => item.telegram_id === account.telegram_id && index !== userEdit.index)}
       submit={() => void applyUser()}>
@@ -619,7 +618,8 @@ export function NoderaSettings({ apiConnection, panel, request, status, draft, p
   const alerts = <section className="noderaSettings"><header className="noderaBlockHead"><h2>Алерты Telegram</h2><button type="button" className="ghostButton" onClick={() => setAlertsOpen(true)}>Настроить алерты</button></header>
     {alertsOpen && <SettingsDialog title="Алерты Telegram" wide compact close={() => setAlertsOpen(false)}><TelegramAlerts request={request} refreshKey={refreshKey} blocked={blocked}/></SettingsDialog>}
   </section>;
-  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{tools}{modules}</> : <>{telegram}{alerts}{roleSettings}{users}</>}</div>;
+  const usage = <AIUsage request={request} names={Object.fromEntries([...guests.map(item => [String(item.telegram_id), item.profile_name || item.name]), ...draft.accounts.map(item => [String(item.telegram_id), item.name || contactsById.get(item.telegram_id)?.name || String(item.telegram_id)])])}/>;
+  return <div className="noderaBlocks">{panel === "settings" ? <>{connections}{usage}{tools}{modules}</> : <>{telegram}{alerts}{roleSettings}{users}</>}</div>;
 }
 
 export function SettingsDialog({ title, close, submit, blocked, children, wide = false, compact = false, submitLabel = "Применить", dismissible = true }: {
