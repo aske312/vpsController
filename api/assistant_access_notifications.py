@@ -101,6 +101,9 @@ def message(before, after, *, blocked=False):
     lines = ['Ваши права в Nodera изменены.']
     if blocked:
         lines += ['', 'Доступ к боту заблокирован администратором. Команды пока недоступны.']
+    elif after['role'] == 'guest':
+        lines += ['', 'Чтобы получить доступ, передайте свой Telegram ID владельцу.',
+                  '', '/myprofile — ваш профиль; /id — ваш Telegram ID.']
     else:
         labels = [PERMISSION_NAMES[key] for key in roles.PERMISSIONS if key in new
                   and not (key == 'subscription_manage' and new.intersection(roles.OWN_EDIT))]
@@ -109,8 +112,7 @@ def message(before, after, *, blocked=False):
             tools = [assistant_telegram.TOOLS[name]['title'] for name in after['telegram_tools'] if name in assistant_telegram.TOOLS]
             labels = [label for label in labels if label != PERMISSION_NAMES['telegram_read']]
             if tools: labels.append('В подключённом Telegram: ' + '; '.join(tools))
-        lines += ['', 'Теперь вам доступно:', *['• ' + label for label in labels],
-                  '', '/myprofile — ваш профиль; /id — ваш Telegram ID.']
+        if labels: lines += ['', 'Теперь вам доступно:', *['• ' + label for label in labels]]
     text = '\n'.join(lines)
     return text if len(text) <= 4000 else text[:3998] + '…'
 
