@@ -202,7 +202,7 @@ def groups(raw, rendered, routing):
     policy = parse(raw)
     if not policy.groups: return []
     available = {str(connection['id']): [name for name in (direct, cdn, tls) if name] for connection, direct, cdn, tls in rendered if connection.get('id')}
-    all_names = [name for _, direct, cdn, tls in rendered for name in (direct, cdn, tls) if name]
+    all_names = [name for _, direct, cdn, tls in rendered for name in (direct, cdn, tls) if name and not name.startswith('__312_transport_')]
     result = []
     for group in policy.groups:
         members = []

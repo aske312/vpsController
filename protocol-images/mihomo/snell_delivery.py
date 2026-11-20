@@ -1,4 +1,5 @@
 """Snell delivery through an existing, device-local Xray TLS/CDN connection."""
+import hashlib
 import yaml
 
 
@@ -32,6 +33,23 @@ def remap(connections, identities):
             if carrier not in identities:
                 raise ValueError('Внешний канал Snell отсутствует в шаблоне устройства')
             settings['carrier_connection_id'] = identities[carrier]
+
+
+def transport_names(rendered):
+    carriers = {item.get('settings', {}).get('carrier_connection_id') for item, *_ in rendered} - {None, ''}
+    if not carriers:
+        return rendered
+    validate([item for item, *_ in rendered])
+    existing = {name for _, *names in rendered for name in names if name}
+    result = []
+    for item, direct, cdn, tls in rendered:
+        if item['id'] in carriers:
+            alias = '__312_transport_snell_' + hashlib.sha256(item['id'].encode()).hexdigest()[:24]
+            if alias in existing:
+                raise ValueError('Имя внешнего транспортного канала занято')
+            direct, cdn, tls = (alias if name else None for name in (direct, cdn, tls))
+        result.append((item, direct, cdn, tls))
+    return result
 
 
 def apply(text, rendered):

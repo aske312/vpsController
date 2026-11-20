@@ -1,5 +1,6 @@
 from copy import deepcopy
 from types import SimpleNamespace
+import json
 import unittest
 from unittest.mock import Mock, patch
 
@@ -10,6 +11,18 @@ import snell_delivery
 
 
 class SnellDeliveryTests(unittest.TestCase):
+    def test_carrier_has_a_stable_transport_name_and_is_absent_from_wildcard_selection(self):
+        import routing_policy
+        rows = self.connections()
+        rendered = [(rows[0], 'Snell', None, None), (rows[1], None, 'User CDN label', None)]
+        renamed = snell_delivery.transport_names(rendered)
+        alias = renamed[1][2]
+        self.assertTrue(alias.startswith('__312_transport_snell_'))
+        reordered = snell_delivery.transport_names([(rows[1], None, 'Renamed CDN label', None), rendered[0]])
+        self.assertEqual(reordered[0][2], alias)
+        groups = routing_policy.groups(json.dumps({'groups': [{'name': 'Automatic', 'members': ['*']}], 'rules': []}), renamed, {})
+        self.assertEqual(groups[0]['proxies'], ['Snell'])
+
     def connections(self):
         return [
             {'id': 'snell', 'component': 'transport-snell', 'device_id': 'phone',

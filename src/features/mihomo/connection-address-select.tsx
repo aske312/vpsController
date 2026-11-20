@@ -114,5 +114,6 @@ export function MihomoConnectionAddress({ connection, connections = [], inventor
     {modes.tls && webTransports.length > 0 && !tlsServices.length && !originTls && <small>Для отдельного TLS-сервиса сначала добавьте TLS-домен основного VPS в Сеть → ROUTES.</small>}
     {canRelay && inventory.failed && <NotificationNotice id="relay:inventory" title="Адреса Relay" message="Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." />}
     {snell && <small>Snell v6 передаёт TCP и UDP внутри TCP. Для Relay нужен TCP-маршрут. Обычный HTTP-CDN напрямую не поддерживается: добавьте Xray TLS/CDN-подключение этого устройства и выберите его в «Доставка Snell». Требуется Mihomo 1.19.34 или новее.</small>}
+    {connections.some(item => item.settings.carrier_connection_id === connection.id) && <small>Это внешний канал доставки Snell. Он исключён из общего автовыбора, чтобы соединение проходило через Snell.</small>}
   </div>;
 }

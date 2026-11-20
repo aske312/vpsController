@@ -5223,6 +5223,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
             direct_name, cdn_name, tls_name = None, None, connection_label(connection, index + 1, "tls")
         rendered.append((connection, direct_name, cdn_name, tls_name))
+    import snell_delivery
+    try:
+        rendered = snell_delivery.transport_names(rendered)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    carrier_ids = {connection.get('settings', {}).get('carrier_connection_id') for connection, *_ in rendered} - {None, ''}
     routing = routing_policy.merge_routing(routing_settings(), profile_routing)
     routing["_device_os"] = next((device.get("os") for device in normalized.get("devices", []) if device["id"] == selected_device), None)
     routing["_personal_rule_lines"] = personal_rule_lines_for_device(normalized, selected_device, routing)
@@ -5346,7 +5352,9 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         f"    type: {group_type}",
         "    proxies:",
     ]
-    for _, name, cdn_name, tls_name in rendered:
+    for connection, name, cdn_name, tls_name in rendered:
+        if connection['id'] in carrier_ids:
+            continue
         if name:
             lines.append(f"      - {q(name)}")
         if cdn_name:
@@ -5391,7 +5399,6 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     for rule in rules:
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")
     text = "\n".join(lines) + "\n"
-    import snell_delivery
     try:
         text = snell_delivery.apply(text, rendered)
     except ValueError as exc:

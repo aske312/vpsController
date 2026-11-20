@@ -30,13 +30,19 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.snell_chain()
         before = deepcopy(self.store)
         text, _ = manager.render_client_profile(self.store[0], 'common', core_version='1.19.34')
-        nodes = yaml.safe_load(text)['proxies']
+        config = yaml.safe_load(text)
+        nodes = config['proxies']
         snell = next(row for row in nodes if row['type'] == 'snell')
         outer = next(row for row in nodes if row['name'] == snell['dialer-proxy'])
         self.assertEqual((snell['server'], snell['port'], snell['psk']),
                          ('192.0.2.1', 33000, 'native-snell-test-password'))
         self.assertEqual((outer['type'], outer['server'], outer['tls'], outer['network']),
                          ('vless', 'cdn.example', True, 'ws'))
+        self.assertTrue(outer['name'].startswith('__312_transport_snell_'))
+        members = config['proxy-groups'][0]['proxies']
+        self.assertIn(snell['name'], members)
+        self.assertNotIn(outer['name'], members)
+        self.assertIn(outer['name'], {row['name'] for row in config['proxies']})
         self.assertEqual(self.store, before)
 
     def test_new_hwid_clones_snell_dependency_with_device_local_ids(self):
