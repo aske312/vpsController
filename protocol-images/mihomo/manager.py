@@ -5353,7 +5353,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
         "    proxies:",
     ]
     for connection, name, cdn_name, tls_name in rendered:
-        if connection['id'] in carrier_ids:
+        if connection.get('id') in carrier_ids:
             continue
         if name:
             lines.append(f"      - {q(name)}")
@@ -5704,7 +5704,8 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
         if str(connection.get("device_id", template_id)) != template_id:
             continue
         identity = f"hwid-{hwid_hash[:10]}-{uuid.uuid4().hex[:8]}"
-        identities[connection['id']] = identity
+        if connection.get('id'):
+            identities[connection['id']] = identity
         definitions.append({
             "id": identity,
             "component": connection["component"], "name": connection.get("name", ""),

@@ -65,6 +65,17 @@ class SnellDeliveryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             snell_delivery.apply(yaml.safe_dump(config), rendered[:1])
 
+    def test_transport_naming_preserves_legacy_connections_without_an_id(self):
+        rows = self.connections()
+        legacy = {'component': 'transport-shadowsocks', 'device_id': 'phone', 'settings': {}}
+        rendered = [(legacy, 'Legacy SS', None, None), (rows[0], 'Snell', None, None),
+                    (rows[1], None, 'CDN', None)]
+        named = snell_delivery.transport_names(rendered)
+        config = {'proxies': [{'name': name, 'type': 'ss'} for _, direct, cdn, tls in named
+                              for name in (direct, cdn, tls) if name]}
+        output = yaml.safe_load(snell_delivery.apply(yaml.safe_dump(config), named))
+        self.assertEqual(output['proxies'][0], {'name': 'Legacy SS', 'type': 'ss'})
+
     def test_profile_admission_rejects_dangling_carrier_before_any_provisioning(self):
         rows = self.connections()[:1]
         values = [manager.ProfileConnectionInput(**{**row, 'name': row['id']}) for row in rows]

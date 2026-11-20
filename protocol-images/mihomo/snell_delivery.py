@@ -4,7 +4,7 @@ import yaml
 
 
 def validate(connections):
-    by_id = {item['id']: item for item in connections}
+    by_id = {item['id']: item for item in connections if item.get('id')}
     for item in connections:
         settings = item.get('settings', {})
         carrier_id = settings.get('carrier_connection_id', '')
@@ -43,7 +43,7 @@ def transport_names(rendered):
     existing = {name for _, *names in rendered for name in names if name}
     result = []
     for item, direct, cdn, tls in rendered:
-        if item['id'] in carriers:
+        if item.get('id') in carriers:
             alias = '__312_transport_snell_' + hashlib.sha256(item['id'].encode()).hexdigest()[:24]
             if alias in existing:
                 raise ValueError('Имя внешнего транспортного канала занято')
@@ -56,7 +56,7 @@ def apply(text, rendered):
     if not any(item.get('settings', {}).get('carrier_connection_id') for item, *_ in rendered):
         return text
     validate([item for item, *_ in rendered])
-    names = {item['id']: (direct, cdn, tls) for item, direct, cdn, tls in rendered}
+    names = {item['id']: (direct, cdn, tls) for item, direct, cdn, tls in rendered if item.get('id')}
     config = yaml.safe_load(text)
     nodes = {node['name']: node for node in config['proxies']}
     for item, direct, _, _ in rendered:
