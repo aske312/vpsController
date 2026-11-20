@@ -41,6 +41,8 @@ def connection_supported(connection, direct_settings=None):
         return True
     credential = connection.get("credential", {})
     settings = connection.get("settings", {})
+    protocol = settings.get("xray_protocol") or credential.get("xray_protocol") or "vless"
+    transports = caps.get("protocol_transports", {}).get(protocol, caps["transports"])
     mode = settings.get("route_mode") or credential.get("route_mode") or "both"
     variants = ["tls"] if mode == "tls" else ["cdn"] if mode == "cdn" else ["direct", "cdn"] if mode == "both" and (settings.get("cdn_enabled") or credential.get("cdn_enabled")) else ["direct"]
     for variant in variants:
@@ -51,6 +53,12 @@ def connection_supported(connection, direct_settings=None):
             kind = kind or "xhttp"
         else:
             kind = settings.get(f"{variant}_transport") or credential.get(f"{variant}_transport") or ("websocket" if variant == "cdn" else "xhttp")
-        if kind not in caps["transports"]:
+        if kind not in transports:
             return False
     return True
+
+
+def compatible_connections(connections, direct_settings=None):
+    unsupported = {row.get('id') for row in connections if not connection_supported(row, direct_settings)}
+    return [row for row in connections if row.get('id') not in unsupported
+            and row.get('settings', {}).get('carrier_connection_id') not in unsupported]

@@ -34,3 +34,13 @@ test('Xray protocol selection retains transport options and uses compatible mode
     assert.equal(restored.target, settings.target);
   }
 });
+
+test('changing VLESS XHTTP to VMess or Trojan selects a working transport', () => {
+  const settings = {route_mode:'tls', tls_transport:'xhttp', cdn_transport:'xhttp'};
+  for (const protocol of ['vmess', 'trojan']) {
+    const selected = xrayProtocolSettings(settings, protocol, ['tls.example'], []);
+    assert.equal(selected.tls_transport, 'websocket');
+    assert.equal(selected.cdn_transport, 'websocket');
+    assert.equal(settings.tls_transport, 'xhttp');
+  }
+});

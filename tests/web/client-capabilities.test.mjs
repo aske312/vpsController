@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "../../src/features/mihomo/client-capabilities.ts";
+import { clientCapabilities, compatibleClientRouting, clientConnectionSupported, clientTransports } from "../../src/features/mihomo/client-capabilities.ts";
 
 test("legacy format choices use YAML capabilities and discard retired switches", () => {
   assert.equal(clientCapabilities().label, "Mihomo YAML");
@@ -24,4 +24,16 @@ test("desktop process presets are absent on mobile and remain available on deskt
   assert.equal(clientCapabilities("windows").rules.includes("direct_games_enabled"), true);
   assert.equal(clientCapabilities().rules.includes("direct_games_enabled"), true);
   assert.equal(clientCapabilities("ios").rules.includes("direct_games_udp_enabled"), true);
+});
+
+test("XHTTP is available only for VLESS in Mihomo profiles", () => {
+  for (const protocol of ["vless", "vmess", "trojan"]) {
+    assert.equal(clientTransports(protocol).includes("xhttp"), protocol === "vless");
+    for (const mode of ["tls", "cdn"]) {
+      for (const transport of ["xhttp", "grpc", "websocket", "httpupgrade"]) {
+        const settings = { xray_protocol: protocol, route_mode: mode, [`${mode}_transport`]: transport };
+        assert.equal(clientConnectionSupported({ component: "transport-reality", settings }), protocol === "vless" || transport !== "xhttp");
+      }
+    }
+  }
 });

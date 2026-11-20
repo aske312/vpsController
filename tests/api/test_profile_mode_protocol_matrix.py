@@ -61,7 +61,7 @@ class ProfileModeProtocolMatrixTests(unittest.TestCase):
         item = connection_fixture()
         original = deepcopy(item)
         baseline = yaml.safe_load(manager.render_profile(item))['proxies']
-        self.assertEqual(len(baseline), 33)
+        self.assertEqual(len(baseline), 29)
         self.assertEqual({row['type'] for row in baseline}, {'vless', 'vmess', 'trojan', 'ss', 'wireguard', 'hysteria2', 'tuic'})
         for capture, scope, route_dns, strategy in product(('tun', 'proxy'), ('all', 'selected'),
                                                           (False, True), ('', 'select', 'fallback', 'url-test')):
@@ -96,6 +96,42 @@ class ProfileModeProtocolMatrixTests(unittest.TestCase):
             with self.subTest(type=node['type'], network=node.get('network')):
                 identity_key = 'sni' if node['type'] == 'trojan' else 'servername'
                 self.assertEqual(node[identity_key], 'example.com')
+
+    def test_unsupported_xhttp_is_rejected_before_provisioning_and_not_exported(self):
+        self.enterContext(patch.object(manager, 'module_is_ready', return_value=True))
+        for protocol, route in product(('vless', 'vmess', 'trojan'), ('tls', 'cdn')):
+            settings = {'xray_protocol': protocol, 'route_mode': route,
+                        route + '_domain': 'example.com', route + '_transport': 'xhttp'}
+            with self.subTest(protocol=protocol, route=route):
+                if protocol == 'vless':
+                    manager.validate_connection('transport-reality', settings, allow_unverified_network_route=True)
+                else:
+                    with self.assertRaises(manager.HTTPException) as raised:
+                        manager.validate_connection('transport-reality', settings, allow_unverified_network_route=True)
+                    self.assertEqual(raised.exception.status_code, 422)
+        source = connection_fixture()
+        original = deepcopy(source)
+        config = yaml.safe_load(manager.render_profile(source))
+        self.assertTrue(any(node['type'] == 'vless' and node.get('network') == 'xhttp' for node in config['proxies']))
+        self.assertFalse(any(node['type'] in {'vmess', 'trojan'} and node.get('network') == 'xhttp' for node in config['proxies']))
+        self.assertEqual(source, original)
+
+    def test_legacy_profile_with_only_unsupported_nodes_revokes_previous_nodes(self):
+        source = connection_fixture()
+        source['connections'] = [row for row in source['connections'] if row['id'].startswith(('vmess-', 'trojan-')) and row['id'].endswith('-xhttp')]
+        config = yaml.safe_load(manager.render_profile(source))
+        self.assertEqual(config['proxies'], [])
+        self.assertEqual(config['rules'], ['MATCH,REJECT'])
+
+    def test_snell_with_an_unsupported_carrier_cannot_break_other_routes(self):
+        source = connection_fixture()
+        source['connections'].append({'id': 'snell', 'device_id': 'common', 'component': 'transport-snell',
+                                      'settings': {'carrier_connection_id': 'vmess-cdn-xhttp'}, 'credential': {}})
+        original = deepcopy(source)
+        config = yaml.safe_load(manager.render_profile(source))
+        self.assertEqual(len(config['proxies']), 29)
+        self.assertFalse(any(node['type'] == 'snell' for node in config['proxies']))
+        self.assertEqual(source, original)
 
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires real Mihomo')
     def test_real_core_accepts_every_mode_with_all_connection_types(self):

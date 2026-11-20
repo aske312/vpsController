@@ -48,7 +48,8 @@ class ConnectionSettingsTests(unittest.TestCase):
         for protocol in ("vless", "vmess", "trojan"):
             for mode in ("tls", "cdn"):
                 transports = {row["transport"] for row in matrix if row.get("xray_protocol") == protocol and row.get(mode)}
-                self.assertEqual(transports, {"xhttp", "websocket", "httpupgrade", "grpc"})
+                expected = {"websocket", "httpupgrade", "grpc"} | ({"xhttp"} if protocol == "vless" else set())
+                self.assertEqual(transports, expected)
         self.assertEqual({row["id"] for row in matrix if row["id"] != "transport-reality"},
                          {"transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic", "transport-snell"})
         invalid = {"id": "bad", "name": "Invalid", "components": [{"id": "transport-reality", "xray_protocol": "vmess"}]}

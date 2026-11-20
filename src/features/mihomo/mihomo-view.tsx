@@ -4,7 +4,7 @@ import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, Profil
 import { presetConnectionOptions, matchesPresetComponent, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
 import { clientUuid, deviceClientShortName, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
-import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
+import { clientCapabilities, compatibleClientRouting, clientConnectionSupported, clientTransports } from "./client-capabilities";
 import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-groups";
 import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
 import { RuleLeaveDialog } from "./rule-leave-dialog";
@@ -1824,11 +1824,12 @@ export function MihomoPage({
                 {(selectedConnection ? [selectedConnection] : []).map((connection) => {
                   const connectionIndex = deviceConnections.findIndex(item => item.id === connection.id);
                   const protocolModule = modules.find((item) => item.id === connection.component);
-                  const supported = commonDevice || clientConnectionSupported(connection);
+                  const supported = clientConnectionSupported(connection);
                   const schema = commonDevice || activeCapabilities.components.includes(connection.component) ? protocolModule?.connection_settings || [] : [];
                   const xrayName = ({vless:"VLESS",vmess:"VMess",trojan:"Trojan"} as Record<string, string>)[String(connection.settings.xray_protocol || "vless")] || "Xray";
                   const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";
-                  const webTransports = ["xhttp", "websocket", "httpupgrade", "grpc"].filter(transport => commonDevice || activeCapabilities.transports.includes(transport));
+                  const transports = clientTransports(String(connection.settings.xray_protocol || "vless"));
+                  const webTransports = ["xhttp", "websocket", "httpupgrade", "grpc"].filter(transport => transports.includes(transport));
                   const fields = schema.filter((field) => {
                         if (connection.component === "transport-hysteria2" && ["up_mbps", "down_mbps"].includes(field.key)) return false;
                         if (field.formats && !field.formats.includes("mihomo")) return false;
@@ -1843,7 +1844,7 @@ export function MihomoPage({
                         if (field.key === "transport_path") return connection.settings.transport !== "raw";
                         if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";
                         return true;
-                      }).map(field => ({ ...field, options: field.options?.filter(option => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)) }));
+                      }).map(field => ({ ...field, options: field.options?.filter(option => !["transport", "cdn_transport", "tls_transport"].includes(field.key) || transports.includes(typeof option === "string" ? option : option.value)) }));
                   return <div key={connection.id} className="mihomoConnectionDetailLayout">
                     <div className="mihomoConnectionSettingsPane"><ConnectionEditor connection={connection}
                     title={vlessRoute === "cdn" ? `${xrayName} CDN` : vlessRoute === "tls" ? `${xrayName} TLS` : vlessRoute === "direct" ? `${xrayName} REALITY` : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}

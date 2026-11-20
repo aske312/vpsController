@@ -20,7 +20,8 @@ test('Snell offers TCP Relay and only device-local Xray TLS/CDN carriers', () =>
   assert.deepEqual(connectionAddressModes('transport-snell'), {tls:false,cdn:false,udp:false,relay:true});
   const foreign = {...carrier, id:'foreign',device_id:'laptop'};
   const direct = {...carrier,id:'direct',settings:{route_mode:'direct'}};
-  assert.deepEqual(snellCarriers(snell,[carrier,foreign,direct,snell]),[carrier]);
+  const incompatible = {...carrier,id:'bad',settings:{route_mode:'cdn',xray_protocol:'vmess',cdn_transport:'xhttp'}};
+  assert.deepEqual(snellCarriers(snell,[carrier,foreign,direct,incompatible,snell]),[carrier]);
   const html=renderToStaticMarkup(createElement(MihomoConnectionAddress, { connection:snell, connections:[carrier,foreign],
     inventory,tlsDomains:[],udpDomains:[],cdnDomains:[],webTransports:[],supported:true,disabled:false,onChange(){} }));
   assert.match(html,/value="carrier"/);

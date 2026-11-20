@@ -42,7 +42,7 @@ from client_labels import connection_label
 from profile_modes import connection_mode, service_ids, service_rules
 from client_subscription import CLIENT_HINTS, import_page
 import client_compatibility
-from client_capabilities import FEATURES, RULES, compatible_routing, connection_supported, device_capabilities, snell_v6_supported
+from client_capabilities import FEATURES, RULES, compatible_routing, compatible_connections, connection_supported, device_capabilities, snell_v6_supported
 from dns_routing import mihomo_route_dns, validate_route_dns
 from routing_presets import AD_RULES, QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
 import routing_policy
@@ -3351,6 +3351,8 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
     if tls_enabled and not allow_unverified_network_route and not mihomo_route_endpoint_selectable("tls", tls_domain):
         raise HTTPException(status_code=409, detail="Добавьте TLS-адрес в активные маршруты раздела «Сеть»")
     result.update({"route_mode": route_mode, "port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "tls_enabled": tls_enabled, "tls_domain": tls_domain, "tls_transport": tls_transport, "tls_xhttp_mode": tls_xhttp_mode, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
+    if not connection_supported({"component": component, "settings": result}):
+        raise HTTPException(422, f"Mihomo не поддерживает выбранный транспорт для {kind.upper()}. Для XHTTP используйте VLESS")
     return result
 
 
@@ -5188,6 +5190,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     configured_connections = bool(connections)
+    connections = compatible_connections(connections, reality_connection_settings)
     connections = with_relay_labels(connections) if resolve_relays else connections
     redirect = relay_client_lines if resolve_relays else lambda connection, lines: lines
     if not connections and not configured_connections:
@@ -5700,7 +5703,7 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
     device_id = f"hwid-{identity_hash[:16]}"
     definitions = []
     identities = {}
-    for connection in normalized["connections"]:
+    for connection in compatible_connections(normalized["connections"], reality_connection_settings):
         if str(connection.get("device_id", template_id)) != template_id:
             continue
         identity = f"hwid-{hwid_hash[:10]}-{uuid.uuid4().hex[:8]}"

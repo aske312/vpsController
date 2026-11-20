@@ -37,7 +37,7 @@ export function MihomoConnectionAddress({ connection, connections = [], inventor
   const selected = relay && !cdnRelay ? JSON.stringify(["relay", relay, relayAddress]) : domain ? JSON.stringify(["direct", domain]) : "";
   const canRelay = modes.relay && (originTls || mode !== "cdn" && mode !== "both");
   const savedOnly = Boolean(relay && !cdnRelay && (!canRelay || !choices.some(choice => choice.key === selected)));
-  const locked = disabled || !supported;
+  const locked = disabled || !supported && !modes.tls;
   const snell = connection.component === "transport-snell";
   const carrierId = snell ? String(settings.carrier_connection_id || "") : "";
   const carriers = snellCarriers(connection, connections);

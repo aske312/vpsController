@@ -24,5 +24,9 @@ export function clientConnectionSupported(connection: Pick<ProfileConnection, "c
   const settings = connection.settings;
   const mode = String(settings.route_mode || (settings.cdn_enabled ? "both" : "direct"));
   const variants = mode === "both" ? ["direct", "cdn"] : [mode];
-  return variants.every((variant) => caps.transports.includes(String(variant === "direct" ? settings.transport || "xhttp" : settings[`${variant}_transport`] || (variant === "cdn" ? "websocket" : "xhttp"))));
+  return variants.every((variant) => clientTransports(String(settings.xray_protocol || "vless")).includes(String(variant === "direct" ? settings.transport || "xhttp" : settings[`${variant}_transport`] || (variant === "cdn" ? "websocket" : "xhttp"))));
+}
+
+export function clientTransports(protocol: string): string[] {
+  return (catalog.mihomo.protocol_transports as Record<string, string[]>)[protocol] || catalog.mihomo.transports;
 }

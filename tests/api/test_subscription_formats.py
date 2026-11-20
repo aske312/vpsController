@@ -57,6 +57,18 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertNotEqual(outer['id'], 'common-carrier')
         self.assertEqual([row for row in profile['connections'] if row['device_id'] == 'common'], before)
 
+    def test_new_hwid_skips_legacy_unsupported_transport_and_its_snell_dependency(self):
+        self.snell_chain()
+        carrier = next(row for row in self.store[0]['connections'] if row['id'] == 'common-carrier')
+        carrier['settings'].update(xray_protocol='vmess', cdn_transport='xhttp')
+        carrier['credential'].update(xray_protocol='vmess', cdn_transport='xhttp')
+        before = deepcopy(self.store[0]['connections'])
+        profile, device_id = manager.subscription_device(self.store[0], 'new-hwid', 'test-token',
+                                                        {'os': 'windows', 'import_client': 'nodera'})
+        own = [row for row in profile['connections'] if row['device_id'] == device_id]
+        self.assertEqual([row['component'] for row in own], ['transport-shadowsocks'])
+        self.assertEqual([row for row in profile['connections'] if row['device_id'] == 'common'], before)
+
     def test_subscription_omits_existing_snell_for_old_or_unknown_core(self):
         import yaml
         self.store[0]['devices'][0]['core_version'] = '1.19.34'

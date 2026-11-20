@@ -43,7 +43,7 @@ class XrayComponentTests(unittest.TestCase):
     def test_protocols_and_transports_provision_render_yaml_and_remove_without_touching_neighbors(self):
         for kind in ('vless', 'vmess', 'trojan'):
             for route in ('tls', 'cdn'):
-                for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
+                for transport in (('websocket', 'xhttp', 'grpc', 'httpupgrade') if kind == 'vless' else ('websocket', 'grpc', 'httpupgrade')):
                     with self.subTest(protocol=kind, route=route, transport=transport):
                         connection = self.create(kind, transport, route)
                         credential = connection['credential']
@@ -68,6 +68,17 @@ class XrayComponentTests(unittest.TestCase):
         for kind in ('vmess', 'trojan', 'unknown'):
             with self.subTest(kind=kind), self.assertRaises(manager.HTTPException):
                 manager.validate_connection('transport-reality', {'xray_protocol':kind, 'route_mode':'direct'})
+
+    def test_xhttp_for_vmess_and_trojan_is_rejected_without_server_mutations(self):
+        before = self.config.read_bytes()
+        for kind in ('vmess', 'trojan'):
+            for route in ('tls', 'cdn'):
+                with self.subTest(protocol=kind, route=route), self.assertRaises(manager.HTTPException) as raised:
+                    self.create(kind, 'xhttp', route)
+                self.assertEqual(raised.exception.status_code, 422)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.apply.assert_not_called()
+        self.assertFalse(list((self.root/'routes').glob('*.json')))
 
     def test_each_protocol_has_its_own_probe_identity_and_never_borrows_a_neighbor(self):
         for kind in ('vless', 'vmess', 'trojan'):
@@ -103,12 +114,12 @@ class XrayComponentTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), original)
         self.assertFalse(list((self.root/'routes').glob('*.json')))
 
-    def test_real_xray_and_mihomo_parsers_accept_all_protocol_transport_pairs(self):
+    def test_real_xray_and_mihomo_parsers_accept_supported_protocol_transport_pairs(self):
         binary = os.getenv('PRIVACY_XRAY_BIN')
         mihomo = os.getenv('PRIVACY_MIHOMO_BIN')
         if not binary or not mihomo: self.skipTest('Set Xray and Mihomo binaries')
         for kind in ('vless', 'vmess', 'trojan'):
-            for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
+            for transport in (('websocket', 'xhttp', 'grpc', 'httpupgrade') if kind == 'vless' else ('websocket', 'grpc', 'httpupgrade')):
                 with self.subTest(protocol=kind, transport=transport):
                     connection = self.create(kind, transport)
                     checked = subprocess.run([binary,'run','-test','-config',str(self.config)],capture_output=True,text=True,timeout=15)

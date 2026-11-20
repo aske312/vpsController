@@ -49,13 +49,6 @@
     "id": "transport-reality",
     "xray_protocol": "vmess",
     "tls": true,
-    "transport": "xhttp",
-    "label": "VMess TLS · XHTTP"
-  },
-  {
-    "id": "transport-reality",
-    "xray_protocol": "vmess",
-    "tls": true,
     "transport": "websocket",
     "label": "VMess TLS · WS"
   },
@@ -72,13 +65,6 @@
     "tls": true,
     "transport": "grpc",
     "label": "VMess TLS · gRPC"
-  },
-  {
-    "id": "transport-reality",
-    "xray_protocol": "trojan",
-    "tls": true,
-    "transport": "xhttp",
-    "label": "Trojan TLS · XHTTP"
   },
   {
     "id": "transport-reality",
@@ -133,13 +119,6 @@
     "id": "transport-reality",
     "xray_protocol": "vmess",
     "cdn": true,
-    "transport": "xhttp",
-    "label": "VMess CDN · XHTTP"
-  },
-  {
-    "id": "transport-reality",
-    "xray_protocol": "vmess",
-    "cdn": true,
     "transport": "websocket",
     "label": "VMess CDN · WS"
   },
@@ -156,13 +135,6 @@
     "cdn": true,
     "transport": "grpc",
     "label": "VMess CDN · gRPC"
-  },
-  {
-    "id": "transport-reality",
-    "xray_protocol": "trojan",
-    "cdn": true,
-    "transport": "xhttp",
-    "label": "Trojan CDN · XHTTP"
   },
   {
     "id": "transport-reality",
