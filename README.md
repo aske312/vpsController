@@ -1,131 +1,75 @@
-# 312node.net VPS Controller
+# vpsController
 
-312node.net — инструменты управления Linux VPS. Общий установщик предлагает **Light**, **PRO** и автономный **Agent** для добавления VPS в изолированную сеть.
+[Русский](#ru) · [English](#en)
 
-## Требования
+## RU
 
-- **Debian 13 (trixie) — основная и рекомендуемая система**;
-- Debian 13 или Ubuntu Server 22.04/24.04 для Light;
-- Debian 12/13 или Ubuntu Server 22.04/24.04/26.04 для PRO;
-- архитектура `amd64` или `arm64`;
-- для панели — от 1 ГБ оперативной памяти и 5 ГБ свободного места;
-- systemd и права `root`;
-- доступ к GitHub и системным репозиториям.
+Установщик панели управления Linux VPS: **Light**, **PRO** или автономный **Relay Agent**.
 
-## Установка
+### Требования и установка
 
-### Подготовка Debian 13
+Debian 13 рекомендуется. Light: Debian 13 / Ubuntu 22.04/24.04;
+PRO: Debian 12/13 / Ubuntu 22.04/24.04/26.04. Нужны `amd64`/`arm64`, systemd,
+root и доступ к GitHub/репозиториям. Для панели — от 1 ГБ RAM и 5 ГБ диска.
 
-Подключитесь к VPS под `root`. Если вошли обычным пользователем, перейдите в
-root-сессию через `su -` (нужен пароль root) либо `sudo -i`, если sudo уже настроен.
-На минимальной Debian `sudo` может отсутствовать; команды ниже выполняются
-**в root-сессии**, без префикса sudo.
-
-Установите средства загрузки и доверенные сертификаты до скачивания установщика:
+Выполняйте в root-сессии; на минимальной Debian `sudo` может отсутствовать:
 
 ```bash
-apt-get update
-apt-get install -y ca-certificates curl
-```
-
-Если `apt-get update` завершается с ошибкой, сначала исправьте доступ к
-репозиториям/DNS. Не отключайте проверку HTTPS-сертификатов. Python, Node.js и
-остальные зависимости выбранного варианта установщик подготавливает сам;
-устанавливать Python-пакеты глобально через pip не требуется.
-
-### Выбор приложения
-
-Скачайте установщик. Только после успешной загрузки выполните команду нужной редакции:
-
-```bash
+apt-get update && apt-get install -y ca-certificates curl
 curl -fL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o /root/vps-control-install.sh
-```
-
-Light:
-
-```bash
 bash /root/vps-control-install.sh --edition light
 ```
 
-PRO:
+Выберите одну редакцию: `light`, `pro` или `agent`. Без `--edition` появится меню.
+Установщик покажет адрес панели и данные входа либо параметры Agent.
+Для домена заранее настройте DNS на VPS и откройте TCP 80/443.
 
-```bash
-bash /root/vps-control-install.sh --edition pro
-```
-
-Автономный Agent:
-
-```bash
-bash /root/vps-control-install.sh --edition agent
-```
-
-Параметр `--edition` выбирает вариант установки:
-
-| Значение | Что устанавливается | Источник |
-| --- | --- | --- |
-| `light` | Панель Light с независимыми модулями протоколов | Ветка `light` |
-| `pro` | Панель PRO с расширенным управлением | Ветка `pro` |
-| `agent` | Автономный Relay Agent без основной панели | Ветка `agent` |
-
-Выполните только одну из этих команд, соответствующую назначению VPS.
-После установки панели консоль покажет её адрес и данные для входа;
-после установки Agent — параметры подключения узла.
-
-Без `--edition` установщик предложит выбрать вариант в терминале:
-
-```bash
-bash /root/vps-control-install.sh
-```
-
-Для HTTPS по домену заранее направьте его A/AAAA-записи на доступные адреса VPS
-и разрешите входящие TCP 80/443 в firewall провайдера. Параметры панели и
-доступность конкретного протокола зависят от редакции, ОС и запущенного ядра.
-Для AmneziaWG могут понадобиться headers именно запущенного ядра. Если после
-обновления ядра требуется перезагрузка, выполните её в согласованное окно,
-затем повторите установку модуля из панели.
-
-Справка Debian: [учётные записи и sudo](https://www.debian.org/releases/trixie/amd64/ch06s03.en.html#di-user-setup),
-[пакет ca-certificates](https://packages.debian.org/trixie/ca-certificates).
-
-## Устройство репозитория
-
-Ветка `installer` содержит общий установщик и список вариантов установки.
-Код каждого варианта и его проверки находятся в соответствующей ветке;
-тестов и CI в `installer` нет. Agent развивается отдельно и не публикуется
-в GitHub Releases или prereleases.
-
-## Основные команды панели
-
-Выполняются в root-сессии на VPS с установленной Light или PRO; к автономному
-Agent команда `vps-control` не относится.
-
-Состояние панели и повторный вывод данных входа:
+### Управление панелью
 
 ```bash
 vps-control status
 vps-control credentials
-```
-
-Данные входа содержат секреты: не публикуйте их в отчётах или переписке.
-
-Назначить домен панели Light:
-
-```bash
 vps-control domain panel.example.com
-```
-
-Повторно определить адрес и расположение сервера:
-
-```bash
 vps-control identity
-```
-
-Установить актуальную стабильную версию приложения:
-
-```bash
 vps-control update
 ```
 
-## Лицензия
+Данные входа содержат секреты. Команды панели не относятся к автономному Agent.
 
-Проект распространяется по лицензии [MIT](LICENSE).
+[Light](https://github.com/aske312/vpsController/tree/light) · [PRO](https://github.com/aske312/vpsController/tree/pro) · [Agent](https://github.com/aske312/vpsController/tree/agent) · [MIT](LICENSE)
+
+## EN
+
+Installer for a Linux VPS control panel: **Light**, **PRO**, or a standalone **Relay Agent**.
+
+### Requirements and installation
+
+Debian 13 is recommended. Light: Debian 13 / Ubuntu 22.04/24.04;
+PRO: Debian 12/13 / Ubuntu 22.04/24.04/26.04. Requires `amd64`/`arm64`, systemd,
+root, and access to GitHub/package repositories. The panel needs at least 1 GB RAM and 5 GB disk space.
+
+Run in a root session; minimal Debian installations may not include `sudo`:
+
+```bash
+apt-get update && apt-get install -y ca-certificates curl
+curl -fL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o /root/vps-control-install.sh
+bash /root/vps-control-install.sh --edition light
+```
+
+Choose one edition: `light`, `pro`, or `agent`. Omit `--edition` for an interactive menu.
+The installer displays the panel address and credentials, or Agent connection details.
+For a domain, point DNS to the VPS and open TCP ports 80/443 beforehand.
+
+### Panel management
+
+```bash
+vps-control status
+vps-control credentials
+vps-control domain panel.example.com
+vps-control identity
+vps-control update
+```
+
+Credentials contain secrets. Panel commands do not apply to the standalone Agent.
+
+[Light](https://github.com/aske312/vpsController/tree/light) · [PRO](https://github.com/aske312/vpsController/tree/pro) · [Agent](https://github.com/aske312/vpsController/tree/agent) · [MIT](LICENSE)
