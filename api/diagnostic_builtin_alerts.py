@@ -49,11 +49,38 @@ def resources_conditions(resources, policy, now):
     return result
 
 
+def recovery_owner_active(api, marker):
+    """A snapshot is expected only while its own worker is observably alive."""
+    try:
+        if marker.is_symlink() or marker.stat().st_size > 32 * 1024 * 1024: return None
+        identity = operations.read(marker).get('operation_id')
+        if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity): return False
+        uncertain = False
+        for root in (api.DATA_DIR, api.DATA_DIR / 'mihomo'):
+            row = operations.read(root / 'operations' / (identity + '.json'))
+            if row.get('id') != identity or row.get('state') not in ('queued', 'running', 'unknown'): continue
+            if row.get('boot_id') and operations.boot_id() and row['boot_id'] != operations.boot_id(): continue
+            observed = operations.worker_observation(row, api.observe_service)
+            if observed.get('active') is True: return True
+            if observed.get('unit_present') is not False and observed.get('state') not in ('inactive', 'failed'): uncertain = True
+        return None if uncertain else False
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def recovery_condition(api):
     markers = ('recovery/application-update', 'mihomo/profile-recovery/manifest.json',
                'automation-recovery.json', 'dns-recovery.json', 'recovery/security-recovery.txt', 'relay/pending.json')
     try:
         pending = [name for name in markers if (api.DATA_DIR / name).exists() or (api.DATA_DIR / name).is_symlink()]
+        profile_marker = 'mihomo/profile-recovery/manifest.json'
+        if profile_marker in pending:
+            owned = recovery_owner_active(api, api.DATA_DIR / profile_marker)
+            if owned is False:
+                return {'rule': 'application_recovery', 'component': 'application', 'failing': True, 'details': {'pending_recoveries': len(pending)}}
+            if owned is not False and len(pending) == 1:
+                return {'rule': 'application_recovery', 'component': 'application', 'failing': None, 'details': {}}
+            if owned is True: pending.remove(profile_marker)
         target = api.DATA_DIR / 'application-action.json'
         if pending and (target.is_symlink() or target.exists() and target.stat().st_size > 128 * 1024): raise ValueError('Invalid operation state')
         current = operations.read(target) if pending else {}

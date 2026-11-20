@@ -18,6 +18,53 @@ class OperationLogTests(unittest.TestCase):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.identity = "a" * 32
 
+    def test_checks_have_a_separate_archive_and_legacy_IDs_keep_history_and_resolution(self):
+        import application_diagnostics as diagnostics
+        import operation_resolution as resolution
+        operation = journal.DiagnosticOperation(self.root, 'ai-catalog', 'ai-agent')
+        operation.stage('complete', 'passed')
+        self.assertFalse((self.root / 'operations' / (operation.identity + '.json')).exists())
+        self.assertTrue((self.root / 'diagnostic-checks' / (operation.identity + '.json')).exists())
+        legacy = {'id': self.identity, 'action': 'runtime-check', 'state': 'failed',
+                  'result': 'failed', 'started_at': operations.timestamp()}
+        file = self.root / 'operations' / (self.identity + '.json')
+        operations.atomic_json(file, legacy)
+        before = file.stat().st_mtime_ns
+        actual = {**legacy, 'id': 'b' * 32, 'action': 'update'}
+        operations.atomic_json(self.root / 'operations' / ('b' * 32 + '.json'), actual)
+        journal.migrate_checks(self.root)
+        journal.migrate_checks(self.root)
+        moved = operations.record_path(self.root, self.identity)
+        self.assertEqual(operations.read(moved), legacy)
+        self.assertEqual(moved.stat().st_mtime_ns, before)
+        self.assertFalse(file.exists())
+        resolution.set_resolved(self.root, self.identity, 'system', True)
+        with patch.object(api, 'DATA_DIR', self.root), patch.object(api, 'ACTION_FILE', self.root / 'application-action.json'), patch.object(api.cdn_operation, 'DIRECTORY', self.root / 'cdn-operations'):
+            default = api.application_operations(None)
+            checked = api.application_operations(None, kind='checks')
+            self.assertEqual(api.get_application_operation(self.identity, None)['state'], 'failed')
+        self.assertEqual([row['id'] for row in default['items']], ['b' * 32])
+        self.assertEqual(default['counts'], {'operations': 1, 'checks': 2, 'errors': 1})
+        self.assertEqual({row['id'] for row in checked['items']}, {self.identity, operation.identity})
+        env = type('API', (), {'DATA_DIR': self.root, 'observe_service': lambda *args: {'unit_present': False}})()
+        with patch('assistant_control.read', return_value={'accounts': [], 'providers': []}):
+            timeline = diagnostics.timeline(env, diagnostics.TimelineQuery(operation_id=operation.identity))
+        self.assertEqual(timeline['authoritative_result']['context']['kind'], 'check')
+        self.assertEqual(timeline['authoritative_result']['context']['outcome'], 'success')
+
+    def test_check_retention_never_prunes_a_real_operation(self):
+        actual = self.root / 'operations' / (self.identity + '.json')
+        operations.atomic_json(actual, {'id': self.identity, 'state': 'failed', 'action': 'update'})
+        for index in range(101):
+            identity = f'{index:032x}'
+            operations.atomic_json(self.root / 'diagnostic-checks' / (identity + '.json'),
+                                   {'id': identity, 'state': 'succeeded', 'kind': 'check'})
+        with patch.object(policy, 'read', return_value={**policy.DEFAULTS, 'max_entries': 100}):
+            check = journal.DiagnosticOperation(self.root, 'ai-catalog', 'ai-agent')
+            check.stage('complete', 'passed')
+        self.assertTrue(actual.exists())
+        self.assertLessEqual(len(list((self.root / 'diagnostic-checks').glob('*.json'))), 100)
+
     def test_public_stages_are_deduplicated_bounded_and_secret_free(self):
         value = {"id": self.identity, "state": "running", "progress": 10,
                  "message": "password=secret https://user:password@example.test/token Bearer abc", "environment": {"SECRET": "never-copy"}}

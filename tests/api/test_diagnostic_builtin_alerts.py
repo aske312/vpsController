@@ -79,6 +79,21 @@ class BuiltinAlertTests(unittest.TestCase):
         target.rmdir()
         self.assertFalse(builtin.recovery_condition(self.env)['failing'])
 
+    def test_profile_snapshot_is_owned_by_its_worker_not_an_unrelated_running_operation(self):
+        identity = 'd' * 32
+        operations.atomic_json(self.root / 'mihomo/profile-recovery/manifest.json', {'operation_id': identity})
+        operations.atomic_json(self.root / 'operations' / (identity + '.json'),
+                               {'id': identity, 'state': 'running', 'unit': 'profile-worker.service'})
+        operations.atomic_json(self.root / 'application-action.json', {'id': 'e'*32, 'state': 'running'})
+        self.env.observe_service = lambda unit: {'unit_present': True, 'active': True, 'state': 'active'}
+        self.assertIsNone(builtin.recovery_condition(self.env)['failing'])
+        self.env.observe_service = lambda unit: {'unit_present': False, 'active': False, 'state': 'inactive'}
+        self.assertTrue(builtin.recovery_condition(self.env)['failing'])
+        operations.atomic_json(self.root / 'mihomo/operations' / (identity + '.json'),
+                               {'id': identity, 'state': 'running', 'unit': 'delegated-worker.service'})
+        self.env.observe_service = lambda unit: {'unit_present': True, 'active': True, 'state': 'active'} if unit == 'delegated-worker.service' else {'unit_present': False, 'active': False, 'state': 'inactive'}
+        self.assertIsNone(builtin.recovery_condition(self.env)['failing'])
+
     def test_disabled_network_rules_do_not_call_relay(self):
         self.env.relay_control = lambda: self.fail('disabled rules must not perform network reads')
         policy = {**self.policy, **{key: False for key in ('relay_unavailable', 'relay_route', 'relay_address', 'connection_errors', 'cpu_pressure')}}

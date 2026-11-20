@@ -99,8 +99,41 @@ class AlertWatchesTests(unittest.TestCase):
         self.now += 1
         self.rows[-1][1].update(state='succeeded', result='success', updated_at=self.now)
         alerts.sample(self.env)
-        self.assertEqual(len(alerts.load(self.env)['queue']), 3)
+        self.assertEqual(len(alerts.load(self.env)['queue']), 2)
         self.assertIn('Состояние подтверждено', alerts.load(self.env)['queue'][-1]['text'])
+
+    def test_general_operation_alerts_ignore_checks_and_warnings_but_keep_real_failures(self):
+        self.configure(operations=True)
+        self.now += 1
+        self.rows = [('system', {'id': 'a'*32, 'action': 'ai-catalog', 'state': 'failed', 'updated_at': self.now}),
+                     ('system', {'id': 'b'*32, 'action': 'update', 'state': 'succeeded', 'result': 'warning', 'updated_at': self.now}),
+                     ('system', {'id': 'c'*32, 'action': 'update', 'state': 'failed', 'updated_at': self.now})]
+        alerts.sample(self.env)
+        queue = alerts.load(self.env)['queue']
+        self.assertEqual(len(queue), 1)
+        self.assertIn('c'*32, queue[0]['text'])
+        self.assertNotIn('a'*32, queue[0]['text'])
+
+    def test_unknown_operation_needs_a_persistent_observation_and_only_alerts_once(self):
+        self.configure(watches=[self.rule(target='update', after_seconds=60, events=['unknown'])])
+        self.now += 1
+        self.rows = [('system', {'id': 'd'*32, 'action': 'update', 'state': 'unknown', 'updated_at': self.now})]
+        alerts.sample(self.env)
+        self.assertEqual(alerts.load(self.env)['queue'], [])
+        self.now += 59
+        alerts.sample(self.env)
+        self.assertEqual(alerts.load(self.env)['queue'], [])
+        self.now += 1
+        alerts.sample(self.env); alerts.sample(self.env)
+        self.assertEqual(len(alerts.load(self.env)['queue']), 1)
+
+    def test_service_warning_never_becomes_a_failure_or_an_unknown_alert(self):
+        self.configure(watches=[self.rule(source='service', target='api', after_seconds=60)])
+        self.context['services']['api']['state'] = 'warning'
+        alerts.sample(self.env)
+        self.now += 120
+        alerts.sample(self.env)
+        self.assertEqual(alerts.load(self.env)['queue'], [])
 
     def test_specific_running_operation_alerts_on_timeout_and_acknowledgement_is_not_recovery(self):
         identity = 'd' * 32

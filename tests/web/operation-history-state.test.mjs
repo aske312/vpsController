@@ -3,7 +3,28 @@ import test, { after } from 'node:test';
 import { createTestLoader } from './vite-test-loader.mjs';
 const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
-const { historyEntries, historyErrorCount, historyMatches, historyPage, historyState } = await loader.ssrLoadModule('/src/control-panel/components/operation-history-state.ts');
+const { historyDuration, historyEntries, historyErrorCount, historyMatches, historyPage, historyState } = await loader.ssrLoadModule('/src/control-panel/components/operation-history-state.ts');
+
+test('completed warnings stay separate from failures and unconfirmed results', () => {
+  for (const result of ['warn','warning','warnings','passed_with_warnings']) {
+    const entry={state:'succeeded',result};
+    assert.equal(historyState(entry).tone,'warning');
+    assert.equal(historyState(entry).label,'Предупреждение');
+    assert.equal(historyErrorCount([entry]),0);
+    assert(historyMatches(entry,'warnings',''));
+    assert(historyMatches(entry,'completed',''));
+    assert.equal(historyMatches(entry,'attention',''),false);
+  }
+  assert.equal(historyState({state:'failed',result:'warning'}).tone,'error');
+  assert.equal(historyState({state:'running',result:'warning'}).tone,'active');
+});
+
+test('history duration uses recorded completion instead of acknowledgement or current time', () => {
+  const entry={started_at:'2026-11-20T10:00:00Z',finished_at:'2026-11-20T10:01:04Z',updated_at:'2026-11-20T12:00:00Z'};
+  assert.equal(historyDuration(entry),'1 мин 4 с');
+  assert.equal(historyDuration({...entry,finished_at:undefined}),'');
+  assert.equal(historyDuration({...entry,finished_at:'invalid'}),'');
+});
 
 test('operation history keeps unconfirmed and failed worker results in attention', () => {
   for (const state of ['succeeded', 'finished', 'done']) {

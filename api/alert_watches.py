@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, StrictBool, model_validator
 
 import alert_context
-from operation_outcome import outcome
+from operation_outcome import outcome, is_check
 
 
 EVENTS = ('failed', 'unknown', 'stalled', 'succeeded', 'cancelled', 'recovered')
@@ -112,7 +112,7 @@ def evaluate(value, rows, context, now):
         if rule['source'] == 'service':
             observed = context.get('services', {}).get(rule['target'], {})
             service_state = observed.get('state')
-            status = 'failed' if service_state in ('error', 'stopped') else 'recovered' if service_state in alert_context.GOOD else 'unknown'
+            status = 'failed' if service_state in ('error', 'stopped') else 'recovered' if service_state in alert_context.GOOD else 'warning' if service_state in ('warning', 'warn', 'possible_issues', 'degraded') else 'unknown'
             if status == 'unknown':
                 since = record.setdefault('unknown_since', now)
                 if now - since < rule['after_seconds']: continue
@@ -120,6 +120,7 @@ def evaluate(value, rows, context, now):
             observations.append((rule['target'], status, {'component': rule['target'], 'service_state': service_state}))
         else:
             for source, row in rows:
+                if is_check(row) and not rule['target'] and not rule['operation_id']: continue
                 if rule['target'] and row.get('action') != rule['target'] or rule['operation_id'] and row.get('id') != rule['operation_id']: continue
                 at = epoch(row.get('updated_at') or row.get('finished_at') or row.get('started_at'))
                 if at is not None and at > now + 60: at = None
@@ -130,13 +131,20 @@ def evaluate(value, rows, context, now):
                 if status == 'active': status = 'stalled' if started is not None and now - started >= rule['after_seconds'] else 'running'
                 if row.get('resolved_at') and status == 'failed': status = 'acknowledged'
                 identity = source + ':' + row['id']
-                # Explicit IDs can watch their current outcome; broad rules never replay old terminal history.
+                pending_unknown = record.setdefault('operation_unknown_since', {})
                 cutoff = max(record.get('cursor', record['since']), record['since'])
-                if not rule['operation_id'] and identity not in record['items'] and status in ('failed', 'unknown', 'succeeded', 'cancelled', 'acknowledged') and (at is None or at <= cutoff): continue
+                if not rule['operation_id'] and identity not in record['items'] and identity not in pending_unknown and status in ('failed', 'unknown', 'succeeded', 'cancelled', 'acknowledged') and (at is None or at <= cutoff): continue
+                if status == 'unknown':
+                    since = pending_unknown.setdefault(identity, now)
+                    if now - since < rule['after_seconds']: continue
+                else: pending_unknown.pop(identity, None)
+                # Explicit IDs can watch their current outcome; broad rules never replay old terminal history.
                 observations.append((identity, status, {'component': operation_component(row, source),
                     'operation_id': row['id'], 'action': row.get('action'), 'profile_id': row.get('profile_id'), 'stage': row.get('stage'), 'error_code': row.get('error_code')}))
         for identity, status, details in observations:
             previous = record['items'].get(identity)
+            if rule['source'] == 'service' and status == 'warning' and previous in ('failed', 'unknown'):
+                continue  # A warning neither opens an incident nor proves its recovery.
             if previous == status: continue
             record['items'][identity] = status
             event = 'recovered' if status in ('recovered', 'succeeded') and previous in ('failed', 'unknown', 'stalled') and 'recovered' in rule['events'] else status
@@ -144,6 +152,8 @@ def evaluate(value, rows, context, now):
             if event not in rule['events']: continue
             result.append({'watch_id': rule['id'], 'watch_name': rule['name'], 'event': event, 'at': now, **details})
         record['items'] = dict(list(record['items'].items())[-2000:])
+        if 'operation_unknown_since' in record:
+            record['operation_unknown_since'] = dict(list(record['operation_unknown_since'].items())[-2000:])
         if rule['source'] == 'operation':
             record['cursor'] = max([record.get('cursor', record['since']), *observed_times])
     return result

@@ -345,12 +345,22 @@ def write_status(data_dir: Path, action_file: Path, action: str, state: str, pro
         return value
 
 
-def history(data_dir: Path, limit: int | None = 100) -> list[dict]:
-    paths = sorted((path for path in (data_dir / "operations").glob("*.json") if re.fullmatch(r"[0-9a-f]{32}", path.stem)), key=lambda path: path.stat().st_mtime, reverse=True)
+def record_path(data_dir: Path, identity: str) -> Path:
+    file = data_dir / 'operations' / (operation_id(identity) + '.json')
+    check = data_dir / 'diagnostic-checks' / file.name
+    return check if not file.exists() and not file.is_symlink() and check.exists() and not check.is_symlink() else file
+
+
+def history(data_dir: Path, limit: int | None = 100, *, directory: Path | None = None) -> list[dict]:
+    paths = sorted((path for path in (directory or data_dir / "operations").glob("*.json") if re.fullmatch(r"[0-9a-f]{32}", path.stem)), key=lambda path: path.stat().st_mtime, reverse=True)
     items = []
     for path in paths[:limit]:
         try:
-            items.append(read(path))
+            value = read(path)
+            if value:
+                items.append(value)
+            elif path.exists():
+                items.append({"id": path.stem, "state": "unknown", "message": "Запись операции недоступна"})
         except OperationConflict:
             items.append({"id": path.stem, "state": "unknown", "message": "Запись операции недоступна"})
     return items

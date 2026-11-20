@@ -79,7 +79,7 @@ export async function checkProfileMutation(request: Request, mutation: ProfileMu
           options = { ...options, systemOperationUnit: operation.unit };
           options.onOperation?.(operation);
           if (["error", "cancelled"].includes(operationOutcome(operation))) throw new ProfileMutationFailed(operation.message || "Изменение профиля не завершено успешно");
-          if (operationOutcome(operation) !== "success") {
+          if (!["success", "warning"].includes(operationOutcome(operation))) {
             await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs ?? 1500));
             continue;
           }

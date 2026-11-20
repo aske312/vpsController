@@ -44,7 +44,7 @@ class OperationsQuery(BaseModel):
     model_config = {'extra': 'forbid'}
     action: str | None = Field(default=None, max_length=100, pattern='^[a-zA-Z0-9_:-]+$')
     source: Literal['system', 'mihomo', 'cdn'] | None = None
-    outcome: Literal['active', 'success', 'error', 'unknown', 'cancelled', 'skipped'] | None = None
+    outcome: Literal['active', 'success', 'warning', 'error', 'unknown', 'cancelled', 'skipped'] | None = None
     minutes: int = Field(default=1440, strict=True, ge=1, le=129600)
     include_checks: bool = False
     offset: int = Field(default=0, strict=True, ge=0, le=6000)
@@ -90,27 +90,28 @@ def records(api, scan_limit=200):
     rows, coverage = [], {}
     budget = MAX_OPERATION_SCAN_BYTES
     roots = [('system', api.DATA_DIR / 'operations'), ('mihomo', api.DATA_DIR / 'mihomo/operations'),
-             ('cdn', api.DATA_DIR / 'cdn-operations')]
-    for source, root in roots:
+             ('cdn', api.DATA_DIR / 'cdn-operations'), ('checks', api.DATA_DIR / 'diagnostic-checks')]
+    for category, root in roots:
+        source = 'system' if category == 'checks' else category
         try: paths = sorted(root.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
-            coverage[source] = {'available': False}
+            coverage[category] = {'available': False}
             continue
-        coverage[source] = {'available': True, 'scan_truncated': len(paths) > scan_limit, 'unreadable': 0}
+        coverage[category] = {'available': True, 'scan_truncated': len(paths) > scan_limit, 'unreadable': 0}
         for path in paths[:scan_limit]:
             if not tracing.valid(path.stem): continue
             try:
                 size = path.stat().st_size
                 if path.is_symlink() or size > 128 * 1024: raise ValueError('unsafe record')
                 if size > budget:
-                    coverage[source].update(scan_truncated=True, byte_limit_reached=True)
+                    coverage[category].update(scan_truncated=True, byte_limit_reached=True)
                     break
                 budget -= size
                 value = operations.read(path)
                 if value.get('id') != path.stem: raise ValueError('identity mismatch')
                 rows.append((source, operations.diagnostic_state(value)))
             except (OSError, ValueError, RecursionError):
-                coverage[source]['unreadable'] += 1
+                coverage[category]['unreadable'] += 1
                 rows.append((source, {'id': path.stem, 'state': 'unknown'}))
     return rows, coverage
 
@@ -153,7 +154,7 @@ def timeline(api, query):
     parent_unavailable = False
     for source, directory in [('system', api.DATA_DIR / 'operations'), ('mihomo', api.DATA_DIR / 'mihomo/operations'),
                               ('cdn', api.DATA_DIR / 'cdn-operations')]:
-        path = directory / (query.operation_id + '.json')
+        path = operations.record_path(api.DATA_DIR, query.operation_id) if source == 'system' else directory / (query.operation_id + '.json')
         try:
             if path.is_symlink(): raise ValueError('unsafe record')
             record = operations.read(path)
@@ -271,7 +272,7 @@ def operation_inventory(api, query):
         if not tracing.valid(identity) or identity in seen: continue
         seen.add(identity)
         action = value.get('action') if isinstance(value.get('action'), str) else ''
-        if not query.include_checks and not query.action and action in operation_outcome.CHECKS: continue
+        if not query.include_checks and not query.action and operation_outcome.is_check(value): continue
         if query.action and query.action not in str(action): continue
         at = reports.epoch(value.get('started_at') or value.get('updated_at'))
         if at is not None and at < time.time() - query.minutes * 60: continue

@@ -4565,12 +4565,15 @@ def start_application_operation(action: str, command: list[str], *, operation_id
 
 
 @app.get("/api/application/operations")
-def application_operations(_: None = Depends(require_token)) -> dict:
+def application_operations(_: None = Depends(require_token), kind: Literal['operations', 'checks', 'all'] = 'operations') -> dict:
     try:
         current = application_operation.read(ACTION_FILE)
         if current.get("id"):
             current = get_application_operation(current["id"], None)
         items = [{**item, "source": "system"} for item in application_operation.history(DATA_DIR, limit=None)]
+        check_files = [file for file in (DATA_DIR / 'diagnostic-checks').glob('*.json') if re.fullmatch(r'[a-f0-9]{32}', file.stem)]
+        if kind != 'operations':
+            items.extend({**item, "source": "system"} for item in application_operation.history(DATA_DIR, limit=None, directory=DATA_DIR / 'diagnostic-checks'))
         items = [{**item, **current} if item.get("id") == current.get("id") else item for item in items]
         delegated = {(item.get("id"), item.get("action")) for item in items if item.get("id")}
         # A delegated worker shares its parent's identity. The parent owns the
@@ -4592,7 +4595,13 @@ def application_operations(_: None = Depends(require_token)) -> dict:
                           "resolved_at": item.get("resolved_at"),
                           "resolution_review": item.get("resolution_review"),
                           "started_at": datetime.fromtimestamp(item["created_at"], timezone.utc).isoformat() if isinstance(item.get("created_at"), (int, float)) else None})
-        return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)}
+        from operation_outcome import is_check, outcome
+        checks = [item for item in items if is_check(item)]
+        operations = [item for item in items if not is_check(item)]
+        selected = checks if kind == 'checks' else items if kind == 'all' else operations
+        return {"items": sorted(selected, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True),
+                "counts": {"operations": len(operations), "checks": len(checks) + (len(check_files) if kind == 'operations' else 0),
+                           "errors": sum(outcome(item) == 'error' and not item.get('resolved_at') for item in operations)}}
     except (OSError, ValueError):
         raise HTTPException(status_code=503, detail="История операций временно недоступна") from None
 
@@ -4631,7 +4640,7 @@ def get_application_operation(operation_id: str, _: None = Depends(require_token
     try:
         identity = application_operation.operation_id(operation_id)
         with application_operation.locked(DATA_DIR):
-            value = application_operation.read(DATA_DIR / "operations" / f"{identity}.json")
+            value = application_operation.read(application_operation.record_path(DATA_DIR, identity))
             current = application_operation.read(ACTION_FILE)
             if current.get("id") == identity:
                 value = application_operation.reconcile(DATA_DIR, ACTION_FILE, value, observe_service)

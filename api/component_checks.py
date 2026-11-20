@@ -34,9 +34,10 @@ def inspect(api, identity, image, *, read_only=False):
     checks = []
     def check(name, ok, reason):
         level = 'process' if name.endswith('service') or name == 'service' else 'local_api' if name == 'manager_api' else 'configuration' if 'configuration' in name else 'local_runtime'
-        checks.append({'name': name, 'ok': ok, 'state': 'passed' if ok else 'failed', 'level': level, 'reason': reason})
+        checks.append({'name': name, 'ok': ok, 'state': 'unknown' if ok is None else 'passed' if ok else 'failed', 'level': level, 'reason': reason})
     observed = api.observe_service(image['service'])
-    check('service', observed.get('runtime', {}).get('state') == 'running', observed.get('runtime', {}).get('reason', 'Нет наблюдения службы'))
+    runtime = observed.get('runtime', {}).get('state')
+    check('service', True if runtime == 'running' else False if runtime in ('error', 'stopped') else None, observed.get('runtime', {}).get('reason', 'Нет наблюдения службы'))
     if identity == 'nodera':
         settings = control.read(api)
         for component in control.MODULES:
@@ -70,12 +71,20 @@ def inspect(api, identity, image, *, read_only=False):
         version = api.mihomo_core_installed_version()
         check('core', bool(version), 'Версия установленного бинарника Mihomo определена')
         check('version_consistency', bool(version) and status.get('core_version') == version, 'Версия менеджера совпадает с установленным ядром')
-        check('profiles', not status.get('recovery_required', False), 'Нет незавершённого восстановления профилей')
-    failed = [item for item in checks if not item['ok']]
-    return {'status': 'critical' if failed else 'healthy', 'checked_at': operations.timestamp(), 'checks': checks,
+        if status.get('recovery_required'):
+            from diagnostic_builtin_alerts import recovery_owner_active
+            owned = recovery_owner_active(api, api.DATA_DIR / 'mihomo/profile-recovery/manifest.json')
+            check('profiles', False if owned is False else None,
+                  'Прервано изменение профилей; требуется восстановление' if owned is False else
+                  'Выполняется изменение профилей; снимок отката используется рабочим процессом' if owned else 'Состояние рабочего процесса изменения профилей не подтверждено')
+        else:
+            check('profiles', True, 'Нет незавершённого восстановления профилей')
+    failed = [item for item in checks if item['ok'] is False]
+    uncertain = [item for item in checks if item['ok'] is None]
+    return {'status': 'critical' if failed else 'warning' if uncertain else 'healthy', 'checked_at': operations.timestamp(), 'checks': checks,
             'coverage': {'scope': 'local_checks_only', 'dependency': 'not_checked', 'functional_operation': 'not_checked',
                          'settings_mode': 'no_configuration_changes', 'cache_maintenance': 'personalization_pruning_may_run'},
-            'reason': '; '.join(item['reason'] for item in failed) if failed else 'Локальные проверки пройдены; проверка из сети пользователя выполняется отдельно'}
+            'reason': '; '.join(item['reason'] for item in failed or uncertain) if failed or uncertain else 'Локальные проверки пройдены; проверка из сети пользователя выполняется отдельно'}
 
 
 def refresh(api):
@@ -94,6 +103,9 @@ def refresh(api):
 
 
 async def monitor(api):
+    from operation_log import migrate_checks
+    try: await asyncio.to_thread(migrate_checks, api.DATA_DIR)
+    except Exception: api.logger.warning('Legacy diagnostic check migration unavailable')
     while True:
         try: await asyncio.to_thread(refresh, api)
         except Exception: api.logger.warning('Automatic component health refresh unavailable')

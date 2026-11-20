@@ -22,7 +22,7 @@ def set_resolved(data_dir, identity, source, resolved, *, review=None, expected_
         raise ValueError('Invalid resolution')
     root = data_dir / 'mihomo' if source == 'mihomo' else data_dir
     with operations.locked(root):
-        path = directories[source] / (identity + '.json')
+        path = record_path(data_dir, identity, source)
         value = operations.read(path)
         if not value:
             raise LookupError('Operation not found')
@@ -58,6 +58,7 @@ def fingerprint(value):
 
 
 def record_path(root, identity, source):
+    if source == 'system': return operations.record_path(root, identity)
     directories = {'system': 'operations', 'mihomo': 'mihomo/operations', 'cdn': 'cdn-operations'}
     return root / directories[source] / (operations.operation_id(identity) + '.json')
 

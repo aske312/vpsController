@@ -43,7 +43,7 @@ def snapshot(api):
     health = list(current['local_health'].values()) if fresh and isinstance(current.get('local_health'), dict) else []
     bad = sum(row.get('state') == 'error' or row.get('state') == 'stopped' and row.get('enabled') is True for row in services.values() if isinstance(row, dict)) + health.count('critical')
     system = 'есть сбой' if bad else 'локальные службы работают' if states and all(state in GOOD for state in states) and all(state == 'healthy' for state in health) else 'состояние не подтверждено'
-    if not bad and fresh and current.get('basic_warnings', 0): system = 'есть предупреждения'
+    if not bad and fresh and (current.get('basic_warnings', 0) or 'warning' in health): system = 'есть предупреждения'
     profiles = None
     target = api.DATA_DIR / 'mihomo/profiles.json'
     try:

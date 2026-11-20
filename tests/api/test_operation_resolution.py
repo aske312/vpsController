@@ -90,7 +90,7 @@ class OperationResolutionTests(unittest.TestCase):
                 # Separate identities prevent delegated-worker deduplication.
                 offset = {'operations': 0, 'mihomo/operations': 1000, 'cdn-operations': 2000}[folder]
                 key = f'{index + offset:032x}'
-                operations.atomic_json(self.root / folder / (key + '.json'), {'id': key, 'action': 'ui-error-test', 'state': 'failed', 'started_at': '2026-11-19T12:00:00Z'})
+                operations.atomic_json(self.root / folder / (key + '.json'), {'id': key, 'action': 'fixture-update', 'state': 'failed', 'started_at': '2026-11-19T12:00:00Z'})
         with patch.object(api, 'DATA_DIR', self.root), patch.object(api, 'ACTION_FILE', self.root / 'application-action.json'), patch.object(api.cdn_operation, 'DIRECTORY', self.root / 'cdn-operations'):
             items = api.application_operations(None)['items']
         self.assertEqual(len(items), 315)

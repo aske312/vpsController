@@ -6,6 +6,13 @@ import { notificationDuration, notificationPresentation, notificationText, order
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
 
+test('a completed warning is informational and a genuine failure remains an error', () => {
+  const warning=systemOperationNotification({id:'a'.repeat(32),state:'succeeded',result:'warning'},'Update',false);
+  assert.equal(warning.state,'info');
+  assert.equal(warning.onCancel,undefined);
+  assert.equal(systemOperationNotification({id:'a'.repeat(32),state:'failed',result:'warning'},'Update',false).state,'error');
+});
+
 test('closing an immutable command survives different publishers, changed results and late progress',()=>{
   const store=createNotificationStore(),id='operation:system:'+'a'.repeat(32);
   let closed=0;

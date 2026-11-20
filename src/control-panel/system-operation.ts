@@ -79,7 +79,7 @@ export async function submitSystemOperation(request: (path: string, options?: Re
 }
 
 export function systemActionSucceeded(action: SystemAction) {
-  return operationOutcome(action) === "success";
+  return ["success", "warning"].includes(operationOutcome(action));
 }
 
 export function protocolOperationOutcome(started: SystemAction, current: SystemAction | undefined, moduleReady: boolean) {
@@ -102,12 +102,12 @@ export function systemOperationNotification(action: SystemAction, title: string,
   const cancelled = action.state === "cancelled";
   return {
     id: systemOperationId(action), source: "system", title, kind: "operation",
-    state: cancelled ? "cancelled" : failed ? "error" : done ? "success" : outcome === "skipped" ? "info" : unconfirmed ? "unknown" : active ? "running" : "unknown",
+    state: cancelled ? "cancelled" : failed ? "error" : outcome === "warning" ? "info" : done ? "success" : outcome === "skipped" ? "info" : unconfirmed ? "unknown" : active ? "running" : "unknown",
     progress: active && !unconfirmed && !cancelled ? action.progress : undefined,
     startedAt: action.started_at && Number.isFinite(Date.parse(action.started_at)) ? Date.parse(action.started_at) : undefined,
     onCancel: outcome === "active" && active && action.cancel_requested !== true && /^[a-f0-9]{32}$/.test(action.id || "") && /^vps-control-action-[0-9]+\.service$/.test(action.unit || "") && rollbackableActions.has(action.action || "") ? onCancel : undefined,
     action: unconfirmed && onRecheck ? { label: "Проверить результат", run: onRecheck } : undefined,
-    message: action.message?.trim() || (failed ? "Команда завершилась с ошибкой." : cancelled ? "Команда отменена." : outcome === "skipped" ? "Операция пропущена." : ""),
+    message: action.message?.trim() || (failed ? "Команда завершилась с ошибкой." : cancelled ? "Команда отменена." : outcome === "warning" ? "Завершено с предупреждением." : outcome === "skipped" ? "Операция пропущена." : ""),
   };
 }
 
@@ -118,7 +118,7 @@ export function createSystemActionCompletionTracker() {
     if (!action?.unit) return;
     const id = systemOperationId(action);
     const active = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(action.state || "");
-    const terminal = ["success", "error", "cancelled", "skipped"].includes(operationOutcome(action));
+    const terminal = ["success", "warning", "error", "cancelled", "skipped"].includes(operationOutcome(action));
     const wasActive = tracked.get(id) === false;
     if (terminal || (active && !tracked.has(id))) tracked.set(id, terminal);
     if (tracked.size > 200) tracked.delete(tracked.keys().next().value!);

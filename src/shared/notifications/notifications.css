@@ -135,13 +135,15 @@
 .operationHistoryShell { display:flex; flex-direction:column; height:100%; min-height:0; }
 .operationHistoryShell button { min-height:32px; padding:6px 10px; border:1px solid #344955; border-radius:7px; background:#14242f; color:#d9e7ef; font:inherit; font-size:11px; cursor:pointer; }
 .operationHistoryShell button:disabled { cursor:default; opacity:.5; }
-.operationHistoryShell :is(button,input,summary):focus-visible { outline:2px solid #62c8ff; outline-offset:2px; }
+.operationHistoryShell :is(button,input,select,summary):focus-visible { outline:2px solid #62c8ff; outline-offset:2px; }
 .operationHistoryHeader { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; padding:20px 24px 14px; }
 .operationHistoryHeader .eyebrow { margin:0 0 6px; color:#6fa8c4; font-size:9px; letter-spacing:.14em; }
 .operationHistoryHeader h2 { margin:0; font-size:23px; }
 .operationHistoryHeader p:not(.eyebrow) { margin:7px 0 0; color:#91a8b7; font-size:12px; line-height:1.5; }
 .operationHistoryHeader > button { min-width:34px; font-size:20px; padding:2px 9px; }
-.operationHistoryTools { display:flex; align-items:flex-end; gap:12px; padding:0 24px 12px; }
+.operationHistoryTools { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; padding:0 24px 12px; }
+.operationHistoryKind { display:grid; gap:6px; color:#9bb1bf; font-size:11px; }
+.operationHistoryKind select { height:36px; padding:7px 11px; border:1px solid #30434f; border-radius:8px; background:#07111a; color:#e0ebef; font:inherit; font-size:12px; }
 .operationHistorySearch { display:grid; flex:1; gap:6px; min-width:0; color:#9bb1bf; font-size:11px; }
 .operationHistorySearch input { min-width:0; width:100%; height:36px; padding:7px 11px; border:1px solid #30434f; border-radius:8px; background:#07111a; color:#e0ebef; font:inherit; font-size:12px; }
 .operationHistoryTools > button { min-height:36px; }
@@ -162,7 +164,7 @@
 .operationState.active { color:#72c9f3; background:#163040; border-color:#31586f; }
 .operationState.success { color:#7ed9b8; background:#102c25; border-color:#285343; }
 .operationState.error { color:#f3a0a0; background:#351d24; border-color:#63333e; }
-.operationState.unknown { color:#e8c383; background:#302a1d; border-color:#5b4b2e; }
+.operationState.unknown, .operationState.warning { color:#e8c383; background:#302a1d; border-color:#5b4b2e; }
 .operationHistoryDetail { min-width:0; min-height:0; padding:24px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .operationHistoryDetailHeading h3 { margin:12px 0 8px; font-size:20px; line-height:1.4; overflow-wrap:anywhere; }
 .operationHistoryDetailHeading > p { color:#8da5b5; font-size:11px; }
@@ -195,6 +197,7 @@
   .operationHistoryHeader h2 { font-size:20px; }
   .operationHistoryHeader p:not(.eyebrow) { font-size:11px; }
   .operationHistoryTools { padding:0 14px 10px; gap:8px; }
+  .operationHistorySearch { order:2; flex-basis:100%; }
   .operationHistoryTools > button { max-width:110px; }
   .operationHistoryFilters { gap:2px; padding:0 10px 10px; }
   .operationHistoryFilters button { padding:6px; gap:5px; font-size:10px; }

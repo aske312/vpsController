@@ -1,7 +1,7 @@
 import { operationOutcome } from "./operation-outcome.mjs";
 import type { Protocol, Tab } from "../types/control-plane";
 export function applicationActionState(action?: { state?: string; result?: string }) {
-  return ({active:"RUNNING",success:"DONE",error:"FAILED",cancelled:"CANCELLED",skipped:"SKIPPED",unknown:"UNKNOWN"} as const)[operationOutcome(action)];
+  return ({active:"RUNNING",success:"DONE",warning:"WARNING",error:"FAILED",cancelled:"CANCELLED",skipped:"SKIPPED",unknown:"UNKNOWN"} as const)[operationOutcome(action)];
 }
 
 export const labels: Record<Tab | Protocol, string> = { nodera: "Nodera", overview: "Обзор", dns: "DNS", network: "Сеть", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "Xray", hysteria2: "Hysteria2", tuic: "TUIC v5", trojan: "Trojan", openvpn: "OpenVPN", ikev2: "IKEv2", mihomo: "Mihomo" };

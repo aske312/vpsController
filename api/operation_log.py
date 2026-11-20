@@ -77,7 +77,9 @@ def append(data_dir: Path, value: dict, source: str | None = None):
             if value.get('state') == 'failed' and 'evidence' not in document:
                 from operation_evidence import capture
                 archive = {'system': root / 'operations', 'mihomo': root / 'mihomo/operations', 'cdn': root / 'cdn-operations'}[source]
-                document['evidence'] = capture(root, {**read(archive / (value['id'] + '.json')), **value})
+                from application_operation import record_path
+                file = record_path(root, value['id']) if source == 'system' else archive / (value['id'] + '.json')
+                document['evidence'] = capture(root, {**read(file), **value})
             import json
             while document['events'] and (len(document["events"]) > MAX_EVENTS or len(json.dumps(document, ensure_ascii=False).encode()) > MAX_BYTES):
                 document["events"].pop(0)
@@ -135,7 +137,8 @@ def get(root, source, identity):
         if document and (document.get('id') != identity or document.get('source') != source or not isinstance(document.get('events'), list) or type(document.get('dropped')) is not int):
             raise ValueError('Invalid stage journal')
         archive = {'system': root / 'operations', 'mihomo': root / 'mihomo/operations', 'cdn': root / 'cdn-operations'}[source]
-        record = read(archive / (identity + '.json'))
+        from application_operation import record_path
+        record = read(record_path(root, identity) if source == 'system' else archive / (identity + '.json'))
         from operation_evidence import capture, needs_capture
         if record.get('state') == 'failed' and needs_capture(document.get('evidence')):
             document = document or {'id': identity, 'source': source, 'events': [], 'dropped': 0, 'state': 'failed'}
@@ -218,6 +221,26 @@ def command(root, arguments, source='system'):
         append(root, value, source)
 
 
+def migrate_checks(root):
+    """Separate legacy read-only checks without deleting or rewriting their evidence."""
+    from application_operation import locked as application_locked, read
+    from operation_outcome import is_check
+    with application_locked(root):
+        for file in (root / 'operations').glob('*.json'):
+            if file.is_symlink() or not re.fullmatch(r'[0-9a-f]{32}', file.stem): continue
+            try:
+                value = read(file)
+                if value.get('id') != file.stem or not is_check(value) or value.get('state') not in ('succeeded', 'failed', 'done', 'finished', 'cancelled'): continue
+                # Admitted/paid probes retain their original replay guard.
+                if value.get('unit') or value.get('action') == 'integration-functional-probe': continue
+                target = root / 'diagnostic-checks' / file.name
+                if target.exists() or target.is_symlink(): continue
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                file.replace(target)
+            except (OSError, ValueError):
+                continue
+
+
 class DiagnosticOperation:
     """Journal a synchronous check without claiming the application's mutation slot."""
     def __init__(self, root, action, component, *, integration_id=None, scope='provider_catalog'):
@@ -227,7 +250,7 @@ class DiagnosticOperation:
         self.root = root
         self.scope = scope
         self.stored = False
-        self.value = {'id': uuid.uuid4().hex, 'action': action, 'component': component,
+        self.value = {'id': uuid.uuid4().hex, 'kind': 'check', 'action': action, 'component': component,
                       'state': 'running', 'started_at': timestamp(),
                       **{key: value for key, value in tracing.snapshot().items() if key in ('trace_id', 'parent_request_id') and tracing.valid(value)}}
         if isinstance(integration_id, str) and re.fullmatch(r'ai:[0-9a-f]{32}', integration_id): self.value['integration_id'] = integration_id
@@ -251,10 +274,10 @@ class DiagnosticOperation:
             self.value['health_check'] = {'scope': self.scope, 'state': result,
                 'application_function': 'not_checked', 'changed_components': []}
         try:
-            atomic_json(self.root / 'operations' / (self.identity + '.json'), self.value)
+            atomic_json(self.root / 'diagnostic-checks' / (self.identity + '.json'), self.value)
             self.stored = True
             append(self.root, self.value, 'system')
-            if stage == 'complete': prune(self.root, self.identity)
+            if stage == 'complete': prune(self.root, self.identity, directory=self.root / 'diagnostic-checks')
         except (OSError, ValueError):
             self.stored = False
             logging.getLogger(__name__).warning('Diagnostic operation evidence unavailable')

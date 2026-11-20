@@ -96,6 +96,31 @@ class NoderaDiagnosticsTests(unittest.TestCase):
         self.assertEqual(report['status'], 'critical')
         self.assertTrue(any(row['name'] == 'version_consistency' and not row['ok'] for row in report['checks']))
 
+    def test_profile_snapshot_warns_only_while_its_own_worker_is_alive(self):
+        identity = 'c' * 32
+        operations.atomic_json(self.root / 'mihomo/profile-recovery/manifest.json', {'operation_id': identity})
+        operations.atomic_json(self.root / 'operations' / (identity + '.json'),
+                               {'id': identity, 'state': 'running', 'unit': 'mutation.service'})
+        self.env.mihomo_core_installed_version = lambda: '1.19.34'
+        for worker, expected in [({'active': True, 'unit_present': True}, 'warning'),
+                                 ({'active': False, 'unit_present': False}, 'critical'),
+                                 ({'active': False, 'unit_present': None, 'state': 'unknown'}, 'warning')]:
+            self.env.observe_service = lambda unit: {'runtime': {'state': 'running'}} if unit == 'manager.service' else worker
+            with patch('assistant_mihomo.request', return_value={'installed': True, 'core_version': '1.19.34', 'recovery_required': True}):
+                report = checks.inspect(self.env, 'mihomo', {'service': 'manager.service'})
+            self.assertEqual(report['status'], expected)
+        self.env.observe_service = lambda unit: {'active': True, 'runtime': {'state': 'running'}}
+        with patch('assistant_mihomo.request', return_value={'installed': True, 'core_version': 'wrong', 'recovery_required': True}):
+            self.assertEqual(checks.inspect(self.env, 'mihomo', {'service': 'manager.service'})['status'], 'critical')
+
+    def test_unknown_component_observation_is_a_warning_without_claiming_a_failure(self):
+        self.env.observe_service = lambda unit: {'runtime': {'state': 'unknown'}}
+        self.env.mihomo_core_installed_version = lambda: '1.19.34'
+        with patch('assistant_mihomo.request', return_value={'installed': True, 'core_version': '1.19.34'}):
+            report = checks.inspect(self.env, 'mihomo', {'service': 'manager.service'})
+        self.assertEqual(report['status'], 'warning')
+        self.assertIsNone(report['checks'][0]['ok'])
+
     def test_core_upgrade_uses_newer_verified_bundle_and_never_downgrades(self):
         bundled, runtime = self.root / 'bundled', self.root / 'runtime'
         bundled.write_text('1.19.34'); runtime.write_text('1.19.31')

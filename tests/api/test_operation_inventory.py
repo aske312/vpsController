@@ -28,6 +28,9 @@ class OperationInventoryTests(unittest.TestCase):
     def test_lifecycle_outcomes_do_not_confuse_successful_steps_with_failures_or_completion(self):
         for state,result,expected in [('succeeded','passed','success'),('succeeded','success','success'),('running','passed','active'),('running','failed','active'),('failed','passed','error'),('succeeded','unknown','unknown'),('unknown','timeout','unknown'),('cancelled','signal','cancelled'),('succeeded','new-code','unknown')]:
             with self.subTest(state=state,result=result): self.assertEqual(operation_outcome.outcome({'state':state,'result':result}),expected)
+        self.assertEqual(operation_outcome.outcome({'state':'succeeded','result':'warning'}), 'warning')
+        self.assertEqual(operation_outcome.outcome({'state':'running','result':'warning'}), 'active')
+        self.assertEqual(operation_outcome.outcome({'state':'failed','result':'warning'}), 'error')
 
     def test_ID_discovery_hides_background_checks_but_explicit_search_finds_them(self):
         self.write('a'*32,action='ai-catalog',result='passed')
