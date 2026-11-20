@@ -124,6 +124,17 @@ def present(api, actor, payload):
 def present_plan(api, actor, payload, title, reason, settings):
     """Called with the application lock held. One atomic file binds the whole plan."""
     records = {row['operation_id']: row for _, row in commands.pending_records(api, actor)}
+    submitted = [identity for identity in payload.operation_ids if records.get(identity, {}).get('submitted')
+                 and control.operations.read(api.DATA_DIR / 'operations' / (identity + '.json')).get('id') == identity]
+    if submitted and all(identity in records and records[identity].get('revision') == settings['revision']
+                         and (identity in submitted or records[identity].get('expires', 0) > time.time())
+                         for identity in payload.operation_ids):
+        for identity in payload.operation_ids:
+            validate(records[identity], api, actor)
+        remaining = [identity for identity in payload.operation_ids if identity not in submitted]
+        return {'confirmation_required': bool(remaining), 'status': 'user_decision_received',
+                'operation_ids': remaining, 'submitted_operation_ids': submitted,
+                'message': 'Пользователь уже принял решение по части операций. Остальные остаются в карточке подтверждения. Повторно ничего не запускайте.'}
     selected = []
     for identity in payload.operation_ids:
         row = records.get(identity)

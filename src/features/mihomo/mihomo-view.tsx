@@ -175,6 +175,9 @@ export function MihomoPage({
   const pageActive = useRef(false);
   useEffect(() => { pageActive.current = true; return () => { pageActive.current = false; }; }, []);
   const busy = requestBusy || pendingPolicySave?.id || pendingProfileSave?.mutation.payload.operation_id || (systemActionNeedsPolling(systemOperation) ? systemOperation?.action || "operation" : "");
+  const mutationInProgress = useRef(false);
+  const mutationActive = Boolean(pendingPolicySave || pendingProfileSave || systemOperation?.action?.startsWith("mihomo-") && systemActionNeedsPolling(systemOperation));
+  mutationInProgress.current = mutationActive;
   const { error: notifyError, success: notifySuccess, operation: notifyOperation } = useNotifier("mihomo", "Mihomo");
   const notifications = useNotifications();
   const [refreshErrors, setRefreshErrors] = useState<Record<string, NotificationFailure>>({});
@@ -296,6 +299,7 @@ export function MihomoPage({
     return () => { cancelled = true; };
   }, [request]);
   const refresh = useCallback(async (afterAction = true): Promise<void> => {
+    if (!afterAction && mutationInProgress.current) return;
     if (refreshInFlight.current) {
       if (!afterAction) return refreshInFlight.current;
       await refreshInFlight.current;
@@ -341,14 +345,14 @@ export function MihomoPage({
             setRoutingPolicy(value as PolicySettings);
             if (!routingDirtyRef.current && pendingPolicySaveRef.current?.kind !== "routing") resetRoutingDraft(value as PolicySettings);
           } },
-        });
+        }, () => mutationInProgress.current);
         const statsEntries = await Promise.all((profileItems || []).map(async (profile) => {
           try { return [profile.id, profileStatsSnapshot(await request(`/mihomo/profiles/${profile.id}/stats`))] as const; }
           catch (cause) { failures.stats = cause; return [profile.id, null] as const; }
         }));
         if (profileItems) setProfileStats(Object.fromEntries(statsEntries
           .filter(([, value]) => value)) as Record<string, ProfileStats>);
-        else { setProfileStats({}); setProfilesReadKnown(false); }
+        else if (failures.profiles) { setProfileStats({}); setProfilesReadKnown(false); }
         setRefreshErrors(Object.fromEntries(Object.entries(failures).map(([key, cause]) => [key, refreshFailure(cause, "Не удалось обновить данные Mihomo")])));
       } catch (cause) {
         setRefreshErrors({ overview: refreshFailure(cause, "Не удалось обновить данные Mihomo") });
@@ -1450,7 +1454,7 @@ export function MihomoPage({
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
       {readOnly && <NotificationNotice id="mihomo:read-only" title="Mihomo · только просмотр" state="info" message="Для изменения Mihomo примите его под управление в разделе «Обзор»." />}
-      {status?.recovery_required && <NotificationNotice id="mihomo:recovery" title="Восстановление Mihomo" state="unknown" message="Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы." action={{ label: "Восстановить Mihomo", disabled: Boolean(busy) || readOnly, run: recoverProfiles }} />}
+      {status?.recovery_required && !mutationActive && <NotificationNotice id="mihomo:recovery" title="Восстановление Mihomo" state="unknown" message="Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы." action={{ label: "Восстановить Mihomo", disabled: Boolean(busy) || readOnly, run: recoverProfiles }} />}
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">

@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { moduleSnapshots, profileSnapshots } from "../../src/features/mihomo/workspace-refresh.ts";
+import { moduleSnapshots, profileSnapshots, refreshWorkspaceSections } from "../../src/features/mihomo/workspace-refresh.ts";
+
+test("a read conflict during a known mutation preserves the snapshot; other failures remain errors", async () => {
+  for (const [active, status, expected] of [[true,409,false],[false,409,true],[true,500,true]]) {
+    let invalidated=false;
+    const cause=Object.assign(new Error("read unavailable"),{status});
+    const failures=await refreshWorkspaceSections(async()=>{throw cause;}, {
+      profiles:{path:"/mihomo/profiles",accept(){assert.fail("no data received");},onFailure(){invalidated=true;}},
+    },()=>active);
+    assert.equal(invalidated,expected);
+    assert.equal(Boolean(failures.profiles),expected);
+  }
+});
 
 const moduleFixture = {id:"transport-wg",name:"WG",category:"transport",installed:true,settings_values:{mtu:1420},settings:[{key:"mtu"}]};
 const profile = {id:"one",name:"Home",connections:[{id:"wg",component:"transport-wg",settings:{}}],devices:[{id:"common",name:"Common",routing:{}}]};

@@ -12,6 +12,37 @@ const action = (code, actor='panel') => ({actor,actor_name:actor,code,expires:Da
 const plan = (codes, actor='panel', id='f'.repeat(32)) => codes.map(code=>({...action(code,actor),confirmation_request:{request_id:id,title:'Repair connections',reason:'Apply prepared actions in order',operation_ids:codes.map(code=>code.repeat(4))}}));
 let fixtureSession = 0;
 
+test('preparations from one AI request share a bulk decision before the model presents a plan',async()=>{
+  const request='a'.repeat(32),other='b'.repeat(32);
+  const first={...action('aabbccdd'),source_request_id:request,created_at:1};
+  const second={...action('11223344'),source_request_id:request,created_at:2};
+  const unrelated={...action('eeff0011'),source_request_id:other};
+  const foreign={...action('22334455','11'),source_request_id:request};
+  const app=mount([second,unrelated,foreign,first]);
+  try{
+    await app.settle();
+    const cards=app.store.getSnapshot().filter(item=>item.kind==='confirmation');
+    assert.equal(cards.length,3);
+    const card=cards.find(item=>item.id===`nodera-confirm:request:panel:${request}`);
+    assert.equal(card.action.label,'Выполнить все (2)');
+    assert.equal(card.confirmationItems.length,2);
+    await card.action.run();await app.settle();
+    assert.deepEqual(app.calls.map(item=>item.code),[first.code,second.code]);
+    assert.deepEqual(new Set(app.queue.actions.map(item=>item.code)),new Set([unrelated.code,foreign.code]));
+  }finally{app.dispose();}
+});
+
+test('global operation notifications stay visible while their chat cards are displayed',async()=>{
+  const app=mount([action('aabbccdd')],{jobs:true,jobState:'running'});
+  try{
+    await app.settle();await app.queue.decide(app.queue.actions[0],'confirm');await app.settle();
+    app.renderCards({actor:'panel',active:true});await app.settle();
+    assert(app.store.getVisibleSnapshot().some(item=>item.id==='operation:system:'+ 'aabbccdd'.repeat(4)));
+    app.renderCards({actor:'panel',active:false});await app.settle();
+    assert(app.store.getVisibleSnapshot().some(item=>item.id==='operation:system:'+ 'aabbccdd'.repeat(4)));
+  }finally{app.dispose();}
+});
+
 test('closing the global result also closes its chat message and stays closed after provider restoration',async()=>{
   const previousStorage=globalThis.sessionStorage,entries=new Map();
   globalThis.sessionStorage={getItem:key=>entries.get(key)??null,setItem:(key,value)=>entries.set(key,value)};
@@ -151,6 +182,7 @@ function mount(initial, options={}) {
   const same=(a,b)=>a&&b&&a.length===b.length&&a.every((v,i)=>Object.is(v,b[i]));
   const hooks={
     createContext:()=>({Provider:'provider'}),
+    useContext:()=>queue,
     useState(initial){const index=cursor++;if(!(index in slots))slots[index]=initial;return [slots[index],value=>{slots[index]=typeof value==='function'?value(slots[index]):value;}];},
     useRef(value){const index=cursor++;return slots[index]??=( {current:value} );},
     useMemo(fn,deps){const index=cursor++;if(!same(slots[index]?.deps,deps))slots[index]={deps,value:fn()};return slots[index].value;},
@@ -188,7 +220,7 @@ function mount(initial, options={}) {
   const render=()=>{cursor=0;queue=exports.AssistantConfirmations({request,onOperation,onChanged,children:null}).props.value;while(effects.length)effects.shift()();return queue;};
   const settle=async()=>{await new Promise(resolve=>setImmediate(resolve));render();await new Promise(resolve=>setImmediate(resolve));render();};
   render();
-  return {store,remote,calls,messages,render,settle,summary:exports.confirmationSummary,get queue(){return queue;},
+  return {store,remote,calls,messages,render,settle,renderCards:exports.ConfirmationCards,summary:exports.confirmationSummary,get queue(){return queue;},
     async tick(){for(const fn of timers)fn();await settle();},
     hold(){hold=true;},release(){hold=false;heldRead?.();},
     dispose(){for(const slot of slots)slot?.cleanup?.();globalThis.window=previousWindow;},

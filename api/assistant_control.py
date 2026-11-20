@@ -1078,6 +1078,10 @@ def _runtime_request(api, mode, body):
     value['telegram_state_dir'] = str(directory(api) / 'telegram-state')
     import diagnostic_context
     value['diagnostic_trace_headers'] = diagnostic_context.outgoing()
+    import assistant_trace
+    trace = assistant_trace.current.get()
+    if mode == '--chat' and trace:
+        value['ai_request_id'] = trace['meta']['request_id']
     import assistant_contacts
     value['interlocutor'] = assistant_contacts.interlocutor(api, value, str(body.get('actor', 'panel')))
     body = dict(body)
@@ -1291,6 +1295,11 @@ def control_tool(api, name, arguments=None, actor='panel'):
         pending = operations.read(assistant_commands.pending_path(api, actor, operation_id=identity))
         own = pending.get('kind') == 'mihomo' and pending.get('operation_id') == identity
         if not own: roles.require(settings, actor, 'subscriptions_admin')
+        if own and not pending.get('submitted'):
+            active = pending.get('expires', 0) > time.time() and pending.get('revision') == settings['revision']
+            return {'id': identity, 'state': 'awaiting_confirmation' if active else 'expired', 'confirmation_required': active,
+                    'message': 'Операция подготовлена и ожидает решения пользователя; выполнение ещё не началось.' if active
+                               else 'Подтверждение больше не активно; операция не запускалась.'}
         result = api.get_application_operation(identity, None)
         if not str(result.get('action', '')).startswith('mihomo-'): raise HTTPException(403, 'Доступны только операции Mihomo')
         return {key: result.get(key) for key in ('id', 'action', 'state', 'result', 'stage', 'stage_result', 'updated_at')}

@@ -15,6 +15,20 @@ SETTINGS = {'modules': {'ai-agent': True}, 'accounts': [], 'mcp': {'vps-controll
 
 
 class ToolValidationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scoped_mcp_preparation_forwards_the_ai_request_identity_outside_model_arguments(self):
+        identity = 'a' * 32
+        settings = runner.scoped_mcp_settings({**SETTINGS, 'ai_request_id': identity}, 'panel', 'vps-controller-mcp')
+        actual = httpx.AsyncClient
+        seen = []
+        def transport(request):
+            seen.append(request)
+            return httpx.Response(200, json={'confirmation_required': True, 'operation_id': 'b' * 32})
+        with patch.object(runner.httpx, 'AsyncClient', lambda **kwargs: actual(transport=httpx.MockTransport(transport), **kwargs)):
+            result = await runner.vps_call(settings, 'panel', 'vps_service_action', service='fixture', action='restart')
+        self.assertTrue(result['confirmation_required'])
+        self.assertEqual(seen[0].headers['X-Nodera-Request-ID'], identity)
+        self.assertNotIn('ai_request_id', json.loads(seen[0].content))
+
     async def test_network_error_is_unknown_and_upstream_body_is_not_echoed(self):
         actual = httpx.AsyncClient
         def transport(request): raise httpx.ReadTimeout('PRIVATE URL AND CREDENTIAL', request=request)

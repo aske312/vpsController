@@ -753,9 +753,14 @@ def require_assistant_control(authorization: str | None = Header(default=None),
 @app.post('/api/assistant/control-tool', dependencies=[Depends(require_assistant_control)])
 def assistant_control_tool(payload: assistant_control.ToolCall,
                            actor: str = Header(default='', alias='X-MCP-Actor'),
-                           module: str | None = Header(default=None, alias='X-MCP-Module')) -> dict:
+                           module: str | None = Header(default=None, alias='X-MCP-Module'),
+                           source_request_id: str | None = Header(default=None, alias='X-Nodera-Request-ID')) -> dict:
     assistant_control.require_tool_module(sys.modules[__name__], payload.name, module)
-    return assistant_control.control_tool(sys.modules[__name__], payload.name, payload.model_dump(exclude={'name'}, exclude_none=True), actor)
+    token = assistant_commands.source_request.set(source_request_id)
+    try:
+        return assistant_control.control_tool(sys.modules[__name__], payload.name, payload.model_dump(exclude={'name'}, exclude_none=True), actor)
+    finally:
+        assistant_commands.source_request.reset(token)
 
 
 @app.get('/api/assistant/pending-action')

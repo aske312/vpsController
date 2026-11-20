@@ -16,8 +16,8 @@ test('all screens and dialogs route standalone alerts and legacy notice boxes to
   const legacy = new Set(['mcpNotice', 'mcpRuntimeUpdate', 'mihomoMessage', 'mihomoConnectionStatusNote', 'routeLibraryCallout', 'routeUsageNotice', 'networkNotice', 'relayFormValidation']);
   for (const path of [...files(join(root, 'src')), ...files(join(root, 'app'))]) {
     const name = relative(root, path).replaceAll('\\', '/');
-    // The center is the destination. Chat confirmation replies explicitly own
-    // their matching notification through setInline, preventing duplicate cards.
+    // The center is the destination. Chat replies also show their own action
+    // context, while the global notification remains visible on every screen.
     if (name === 'src/shared/notifications/notification-center.tsx' || name === 'src/features/assistant/confirmation-queue.tsx') continue;
     const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     function visit(node) {

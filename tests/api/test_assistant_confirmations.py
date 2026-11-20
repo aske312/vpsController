@@ -156,6 +156,24 @@ class ConfirmationRequestTests(unittest.TestCase):
             self.assertEqual(len(remaining), 4)
             self.assertEqual({row['confirmation_request']['request_id'] for row in remaining}, {value['request_id']})
 
+    def test_late_plan_acknowledges_a_user_started_operation_without_restarting_it(self):
+        codes = [self.prepare() for _ in range(2)]
+        path = commands.pending_path(api, '11', code=codes[0])
+        record = control.operations.read(path)
+        record['submitted'] = True
+        control.operations.atomic_json(path, record)
+        operation_path = api.DATA_DIR / 'operations' / (record['operation_id'] + '.json')
+        control.operations.atomic_json(operation_path, {'id': record['operation_id'], 'state': 'running'})
+        with patch.object(control, 'require_installed'), patch.object(api, 'manage_service') as mutate:
+            response = self.group(codes)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['status'], 'user_decision_received')
+        self.assertEqual(response.json()['submitted_operation_ids'], [record['operation_id']])
+        self.assertEqual(len(response.json()['operation_ids']), 1)
+        self.assertEqual(confirmations.plans(api, '11'), [])
+        self.assertEqual(control.operations.read(operation_path)['state'], 'running')
+        mutate.assert_not_called()
+
     def test_invalid_group_never_creates_partial_presentations_or_foreign_members(self):
         codes = [self.prepare() for _ in range(5)]
         with patch.object(control, 'require_installed'):

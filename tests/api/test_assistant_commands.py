@@ -58,6 +58,22 @@ class ServerCommandTests(unittest.TestCase):
             self.assertEqual(self.call('/security', actor=999).status_code, 403)
             security.assert_not_called()
 
+    def test_mcp_preparations_keep_their_request_scope_without_leaking_to_the_next_call(self):
+        value = control.read(api)
+        value['mcp']['vps-controller-mcp'] = True
+        control.store(api, value)
+        headers = {'Authorization': 'Bearer ' + value['control_token'], 'X-MCP-Actor': 'panel'}
+        identity = 'a' * 32
+        for scoped in (True, True, False):
+            response = self.client.post('/api/assistant/control-tool',
+                headers={**headers, **({'X-Nodera-Request-ID': identity} if scoped else {})},
+                json={'name': 'vps_service_action', 'service': 'fixture', 'action': 'restart'})
+            self.assertEqual(response.status_code, 200, response.text)
+        pending = commands.pending_actions(api, 'panel')
+        self.assertEqual(sum(row.get('source_request_id') == identity for row in pending), 2)
+        self.assertEqual(sum('source_request_id' not in row for row in pending), 1)
+        self.assertIsNone(commands.source_request.get())
+
     def test_mcp_prepares_but_cannot_confirm_and_checks_live_scope(self):
         value = control.read(api)
         value['mcp']['vps-controller-mcp'] = True

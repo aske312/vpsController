@@ -61,6 +61,8 @@ def mcp_transport_token(root, module, actor):
 
 def scoped_mcp_settings(settings, actor, module):
     value = {'modules': dict(settings['modules']), 'mcp': dict(settings['mcp']), 'accounts': []}
+    if settings.get('ai_request_id'):
+        value['ai_request_id'] = settings['ai_request_id']
     fields = ('telegram_id', 'telegram_access', 'session', 'excluded_dialogs', 'effective_permissions', 'telegram_tools', 'telegram_action_targets', 'telegram_disabled_tools') if module == 'telegram-mcp' else (
         'telegram_id', 'vps_access', 'bot_access', 'mihomo_profile_id', 'effective_permissions')
     value['accounts'] = [{key: row[key] for key in fields if key in row} for row in settings['accounts'] if str(row['telegram_id']) == str(actor)]
@@ -245,7 +247,8 @@ async def vps_call(settings, actor, name, **arguments):
     async with httpx.AsyncClient(timeout=60 if name in diagnostic_names else 25, trust_env=False) as client:
         try:
             response = await client.post(VPS_URL, json=payload, headers={
-                'Authorization': 'Bearer ' + token, 'X-MCP-Actor': str(actor), 'X-MCP-Module': module, **trace_headers})
+                'Authorization': 'Bearer ' + token, 'X-MCP-Actor': str(actor), 'X-MCP-Module': module,
+                **({'X-Nodera-Request-ID': settings['ai_request_id']} if settings.get('ai_request_id') else {}), **trace_headers})
         except httpx.TimeoutException: return tool_failure('tool_timeout')
         except httpx.RequestError: return tool_failure('tool_unavailable')
         if response.status_code != 200:

@@ -506,8 +506,9 @@ export function ControlPanel() {
   }, [application?.action?.action, actionNeedsPolling, autoRefresh, refreshCurrent, tab, token]);
 
   useEffect(() => {
-    if (!token || !actionNeedsPolling) return;
-    const timer = window.setInterval(() => void loadApplication(), 2000);
+    if (!token) return;
+    void loadApplication(true);
+    const timer = window.setInterval(() => void loadApplication(true), actionNeedsPolling ? 2000 : 5000);
     return () => window.clearInterval(timer);
   }, [actionNeedsPolling, loadApplication, token]);
 

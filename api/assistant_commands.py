@@ -5,6 +5,7 @@ import re
 import secrets
 import time
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field
 
 import assistant_control as control
 import assistant_roles as roles
+
+source_request = ContextVar('assistant_command_source_request', default=None)
 
 
 class Command(BaseModel):
@@ -135,6 +138,9 @@ def enqueue(api, actor, record):
     if len(active) - len(removed) >= 128:
         raise HTTPException(409, 'Слишком много сохранённых запросов; проверьте неизвестные результаты операций')
     record['created_at'] = now
+    identity = source_request.get()
+    if isinstance(identity, str) and re.fullmatch(r'[a-f0-9]{32}', identity):
+        record['source_request_id'] = identity
     record['expires'] = now + 600
     target = control.directory(api) / 'nodera-bot' / 'commands' / actor / (record['code'] + '.json')
     if any(prior['code'] == record['code'] for _, prior in rows): raise HTTPException(409, 'Повтор идентификатора подтверждения; подготовьте запрос заново')
@@ -181,6 +187,9 @@ def pending_actions(api, actor, *, settings=None):
         if record.get('submitted') or record.get('expires', 0) <= time.time() or record.get('revision') != settings['revision']: continue
         row = {key: record[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
         row.update(actor=actor, actor_name='Администратор' if actor == 'panel' else next((a.get('name') or actor for a in settings.get('accounts', []) if str(a['telegram_id']) == actor), actor))
+        if record.get('source_request_id'):
+            row['source_request_id'] = record['source_request_id']
+            row['created_at'] = record['created_at']
         if 'body' in record:
             import assistant_mihomo
             row['changes'] = assistant_mihomo.sanitize(record['body'])

@@ -323,11 +323,15 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
 export async function refreshWorkspaceSections(
   request: (path: string) => Promise<unknown>,
   sections: Record<string, Section>,
+  mutationInProgress: () => boolean = () => false,
 ) {
   const failures: Record<string, unknown> = {};
   await Promise.all(Object.entries(sections).map(async ([key, section]) => {
     try { section.accept(await request(section.path)); }
-    catch (cause) { failures[key] = cause; section.onFailure?.(cause); }
+    catch (cause) {
+      if (mutationInProgress() && cause instanceof Error && "status" in cause && cause.status === 409) return;
+      failures[key] = cause; section.onFailure?.(cause);
+    }
   }));
   return failures;
 }

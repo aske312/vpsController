@@ -7,7 +7,7 @@ import { useNotifications } from "../../shared/notifications/notification-center
 import { AssistantAnswer } from "./assistant-answer";
 import { closedCommandMessages, rememberClosedCommand } from "./command-message-state";
 
-export type PendingAction = { actor?: string; actor_name?: string; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string; request_id?: string; operation_ids?: string[] } };
+export type PendingAction = { actor?: string; actor_name?: string; source_request_id?: string; created_at?: number; service: string; action: string; code: string; expires: number; operation_id?: string; changes?: Record<string, unknown>; confirmation_request?: { title: string; reason: string; request_id?: string; operation_ids?: string[] } };
 type Client = ReturnType<typeof createApiClient>;
 export const confirmationKey = (action: PendingAction) => `${action.actor || "panel"}:${action.code}`;
 export type ConfirmationGroup = { key: string; actions: PendingAction[]; presentation?: PendingAction["confirmation_request"] };
@@ -16,11 +16,20 @@ export function confirmationGroups(actions: PendingAction[]): ConfirmationGroup[
   for (const action of actions) {
     const presentation = action.confirmation_request;
     const grouped = presentation?.request_id && /^[a-f0-9]{32}$/.test(presentation.request_id) && action.operation_id && presentation.operation_ids?.includes(action.operation_id);
-    const key = grouped ? `plan:${action.actor || "panel"}:${presentation.request_id}` : confirmationKey(action);
+    const source = action.source_request_id && /^[a-f0-9]{32}$/.test(action.source_request_id) && action.operation_id;
+    const key = source ? `request:${action.actor || "panel"}:${action.source_request_id}` : grouped ? `plan:${action.actor || "panel"}:${presentation.request_id}` : confirmationKey(action);
     const group = groups.get(key) ?? { key, actions: [], presentation: grouped ? presentation : undefined };
+    if (grouped) group.presentation = presentation;
     group.actions.push(action); groups.set(key, group);
   }
-  for (const group of groups.values()) if (group.presentation) group.actions.sort((a, b) => group.presentation!.operation_ids!.indexOf(a.operation_id!) - group.presentation!.operation_ids!.indexOf(b.operation_id!));
+  for (const group of groups.values()) {
+    if (group.presentation && group.actions.every(action => group.presentation!.operation_ids!.includes(action.operation_id!))) group.actions.sort((a, b) => group.presentation!.operation_ids!.indexOf(a.operation_id!) - group.presentation!.operation_ids!.indexOf(b.operation_id!));
+    else if (group.key.startsWith("request:")) {
+      group.actions.sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
+      group.presentation = { title: group.actions.length > 1 ? "Операции ИИ" : confirmationSummary(group.actions[0]).title,
+        reason: "", operation_ids: group.actions.map(action => action.operation_id!) };
+    }
+  }
   return [...groups.values()];
 }
 
@@ -223,7 +232,7 @@ export function AssistantConfirmations({ request, onOperation, onChanged, childr
           message: `${errors[group.key] ? errors[group.key] + " " : ""}${busy ? "Выполняем план. " : ""}${group.presentation.reason}`,
           confirmationItems: group.actions.map(item => `${confirmationSummary(item).title}${confirmationSummary(item).lines.length ? " · " + confirmationSummary(item).lines.slice(0, 2).join(" · ") : ""}${errors[confirmationKey(item)] ? " — " + errors[confirmationKey(item)] : ""}`),
           details: group.actions.filter(item => item.changes).map(item => `${item.action} · ${item.service}\n${JSON.stringify(item.changes, null, 2)}`).join("\n\n") || undefined,
-          action: busy ? undefined : { label: `Подтвердить все (${group.actions.length})`, run: async () => { await decideGroup(group, "confirm"); } },
+          action: busy ? undefined : { label: `Выполнить все (${group.actions.length})`, run: async () => { await decideGroup(group, "confirm"); } },
           secondaryAction: busy ? undefined : { label: `Отклонить все (${group.actions.length})`, run: async () => { await decideGroup(group, "reject"); } } });
         continue;
       }
@@ -289,7 +298,7 @@ function DecisionButtons({ group, queue }: { group: ConfirmationGroup; queue: Qu
   const decide = (decision: "confirm" | "reject") => group.presentation ? queue.decideGroup(group, decision) : queue.decide(group.actions[0], decision);
   return <div className="mcpDecisionButtons">
     {busy && <span className="mcpWorkSpinner" aria-label="Отправляем решение"/>}
-    <button type="button" className={group.actions.some(action => action.action === "DELETE") ? "dangerButton" : "primaryButton"} disabled={busy} onClick={() => void decide("confirm")}>{busy ? "Отправляем…" : group.presentation ? `Подтвердить (${group.actions.length})` : "Подтвердить"}</button>
+    <button type="button" className={group.actions.some(action => action.action === "DELETE") ? "dangerButton" : "primaryButton"} disabled={busy} onClick={() => void decide("confirm")}>{busy ? "Отправляем…" : group.presentation ? `Выполнить все (${group.actions.length})` : "Подтвердить"}</button>
     <button type="button" className="ghostButton" disabled={busy} onClick={() => void decide("reject")}>Отказать</button>
   </div>;
 }
@@ -302,16 +311,11 @@ function operationLabel(snapshot: SystemAction) {
 
 export function ConfirmationCards({ actor, active = true, embedded = false, turnId, ownerFor }: { actor: string; active?: boolean; embedded?: boolean; turnId?: number; ownerFor?: (ids: string[]) => number | undefined }) {
   const queue = useAssistantConfirmations();
-  const notifications = useNotifications();
-  const inlineOwner = useRef(Symbol('chat-decisions'));
   const belongs = (ids: string[]) => !ownerFor || ownerFor(ids) === turnId;
   const groups = confirmationGroups(queue.actions.filter(item => (item.actor || "panel") === (actor || "panel"))).filter(group => belongs(group.actions.flatMap(action => action.operation_id ? [action.operation_id] : [])));
   const activities = (queue.activities ?? []).filter(item => item.actor === (actor || "panel") && belongs(item.snapshot.id ? [item.snapshot.id] : []));
   const messages = activities.filter(item => !item.dismissed);
   const decisions = (queue.context || []).filter(item => item.actor === (actor || "panel") && belongs(item.operation_id ? [item.operation_id] : []) && !(queue.activities || []).some(activity => activity.snapshot.id === item.operation_id));
-  const inlineIds = [...groups.map(group => `nodera-confirm:${group.key}`), ...activities.map(item => `operation:system:${item.snapshot.id}`), ...decisions.map(item => `nodera-decision:${item.key}`)].join('|');
-  useEffect(() => { notifications.setInline?.(inlineOwner.current, active && inlineIds ? inlineIds.split('|') : []); }, [notifications, active, inlineIds]);
-  useEffect(() => { const owner = inlineOwner.current; return () => notifications.setInline?.(owner, []); }, [notifications]);
   if (!active || !groups.length && !messages.length && !decisions.length) return null;
   const message = (key: string, title: string, content: ReactNode) => embedded
     ? <section key={key} className="mcpCommandReply" aria-label={title}>{content}</section>
