@@ -1,80 +1,83 @@
-# 312node.net Light
+# vpsController Light
 
-312node.net Light — self-hosted панель управления Linux VPS. Она объединяет мониторинг сервера и управление подключениями в одном веб-интерфейсе.
+[Русский](#ru) · [English](#en)
 
-## Возможности
+## RU
 
-- состояние процессора, памяти, дисков, сети и системных служб;
-- установка и удаление независимых модулей;
-- создание и отзыв подключений для каждого установленного протокола;
-- выдача готовых конфигураций для клиентских устройств;
-- диагностика сервера и контроль состояния защиты;
-- безопасное обновление приложения с автоматической проверкой.
+Self-hosted панель Linux VPS: мониторинг, независимые модули протоколов,
+персональные подключения, готовые конфигурации и диагностика.
 
-## Требования
+### Установка
 
-- Debian 13 или Ubuntu Server 22.04/24.04 с systemd;
-- архитектура `amd64` или `arm64`;
-- от 1 ГБ оперативной памяти и 5 ГБ свободного места;
-- вход на сервер под `root`;
-- доступ сервера к GitHub и системным репозиториям.
+Debian 13 / Ubuntu Server 22.04/24.04, `amd64`/`arm64`, systemd, root,
+от 1 ГБ RAM и 5 ГБ диска. Нужен доступ к GitHub и репозиториям ОС.
 
-## Установка
+Выполните под root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
   | bash -s -- --edition light
 ```
 
-Установщик автоматически синхронизирует приложение с последним стабильным релизом ветки `light`. После завершения в терминале будут показаны адрес панели, сгенерированный логин и пароль.
-
-Если DNS-запись домена уже указывает на сервер, можно сразу включить HTTPS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
-  | bash -s -- --edition light --domain panel.example.com
-```
-
-Если DNS ещё не обновился, панель останется доступна по IP. После распространения записи выполните `vps-control identity`: домен будет проверен повторно и HTTPS включится автоматически.
-
-Домен можно указать или заменить и после установки:
+Устанавливается стабильная версия Light. Адрес панели и данные входа появятся в терминале.
+Домен можно передать установщику: `--domain panel.example.com`.
+Для HTTPS направьте DNS на VPS и откройте TCP 80/443, затем задайте домен:
 
 ```bash
 vps-control domain panel.example.com
 ```
 
-## Управление
+### Управление
 
 ```bash
 vps-control status
-vps-control restart
-vps-control verify
 vps-control credentials
+vps-control verify
+vps-control restart
 vps-control update
 ```
 
-## Возможные ошибки установки
+При ошибках проверьте DNS, доступ к репозиториям и системное время.
+`vps-control uninstall --yes` удаляет панель, её настройки и данные.
 
-- Если `dpkg` сообщает о незавершённой настройке, выполните `dpkg --configure -a` и повторите установку.
-- Если занят порт панели, найдите конфликтующую службу командой `ss -ltnp` и освободите порт.
-- При ошибке доступа к репозиториям проверьте DNS, исходящее HTTPS-соединение и системное время.
-- Если установка прервалась из-за разрыва SSH, повторно запустите ту же команду.
-- Для проверки установленной панели выполните `vps-control verify`.
+[AmneziaWG](docs/CONNECTION_GUIDE.md#ru) · [Приватность](docs/PRIVACY_POLICY.md#ru) · [Условия](docs/TERMS_OF_USE.md#ru) · [MIT](LICENSE)
 
-## Удаление
+## EN
 
-Команда удаляет панель, её настройки и данные. Установленные системные пакеты сохраняются.
+A self-hosted Linux VPS panel for monitoring, independent protocol modules,
+personal connections, ready-to-use configurations, and diagnostics.
+
+### Installation
+
+Debian 13 / Ubuntu Server 22.04/24.04, `amd64`/`arm64`, systemd, root,
+at least 1 GB RAM and 5 GB disk space. Requires access to GitHub and OS repositories.
+
+Run as root:
 
 ```bash
-vps-control uninstall --yes
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
+  | bash -s -- --edition light
 ```
 
-## Документы
+Installs the stable Light release. The terminal displays the panel address and credentials.
+You can pass the domain to the installer: `--domain panel.example.com`.
+For HTTPS, point DNS to the VPS and open TCP ports 80/443, then set the domain:
 
-- [Подключение AmneziaWG](docs/CONNECTION_GUIDE.md)
-- [Уведомление о приватности](docs/PRIVACY_POLICY.md)
-- [Условия использования](docs/TERMS_OF_USE.md)
+```bash
+vps-control domain panel.example.com
+```
 
-## Лицензия
+### Management
 
-312node.net Light распространяется по лицензии [MIT](LICENSE).
+```bash
+vps-control status
+vps-control credentials
+vps-control verify
+vps-control restart
+vps-control update
+```
+
+If installation fails, check DNS, repository access, and the system clock.
+`vps-control uninstall --yes` removes the panel, its settings, and data.
+
+[AmneziaWG](docs/CONNECTION_GUIDE.md#en) · [Privacy](docs/PRIVACY_POLICY.md#en) · [Terms](docs/TERMS_OF_USE.md#en) · [MIT](LICENSE)

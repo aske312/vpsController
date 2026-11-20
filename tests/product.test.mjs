@@ -29,7 +29,7 @@ test("поставка содержит установщик, образы и к
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
-  assert.match(readme, /Возможные ошибки установки/);
+  assert.match(readme, /vps-control verify/);
   assert.match(readme, /AmneziaWG/);
   assert.doesNotMatch(readme, /test-light|CI|Git-клон|Ручное обновление без сборки/);
   assert.match(readme, /установка/i);
@@ -110,9 +110,12 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(legalUi, /MIT LICENSE/);
   assert.match(legalUi, /\{branch\} \{version\} build:\{commit\.slice\(0, 18\)\}/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
-  assert.match(guide, /Подключение с помощью AmneziaWG/);
-  assert.match(guide, /Профиль уже содержит необходимые параметры обфускации/);
-  assert.match(guide, /Один файл следует использовать только на одном устройстве/);
+  for (const document of [privacy, terms, guide]) {
+    assert.match(document, /^## RU$/m);
+    assert.match(document, /^## EN$/m);
+    assert.doesNotMatch(document, /312node\.net/i);
+  }
+  assert.match(guide, /\.conf/);
   assert.match(guideUi, /Create and connect a client/);
   assert.match(guideUi, /Параметры обфускации уже включены в профиль/);
   assert.match(guideUi, /ClientAppCatalog/);
