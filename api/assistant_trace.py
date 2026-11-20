@@ -14,7 +14,7 @@ current = ContextVar('assistant_trace', default=None)
 RETENTION = 7 * 86400
 MAX_FILES = 256
 MAX_BYTES = 256 * 1024
-STAGES = {'request_started', 'request_finished', 'runtime_started', 'model_start', 'model_result', 'model_error', 'provider_transport', 'provider_error', 'tool_start', 'tool_result', 'repeat_blocked', 'summary_start', 'summary_result', 'budget_exhausted', 'trace_truncated'}
+STAGES = {'request_started', 'request_finished', 'runtime_started', 'model_start', 'model_result', 'model_error', 'provider_transport', 'provider_error', 'provider_retry', 'tool_start', 'tool_result', 'repeat_blocked', 'summary_start', 'summary_result', 'budget_exhausted', 'trace_truncated'}
 FIELDS = {'name', 'view', 'method', 'path', 'body', 'values', 'expected_revision', 'operation_id', 'profile_id', 'device_id', 'routing', 'structured_policy', 'structured_policy_selection', 'groups', 'rules', 'members', 'kind', 'value', 'target', 'connections', 'devices', 'settings', 'limits', 'section', 'module_id', 'group_id', 'service', 'action', 'selection', 'telegram_id', 'query', 'url', 'timeout', 'interval', 'strategy', 'max_failed_times', 'tolerance', 'request_id', 'operation_ids'}
 
 
@@ -55,6 +55,8 @@ def safe_event(value):
                                   'SSLV3_ALERT_HANDSHAKE_FAILURE', 'SSLV3_ALERT_BAD_CERTIFICATE', 'SSLV3_ALERT_CERTIFICATE_EXPIRED',
                                   'TLSV1_ALERT_DECODE_ERROR', 'DECRYPTION_FAILED_OR_BAD_RECORD_MAC'):
         result['tls_reason'] = value['tls_reason']
+    if type(value.get('attempt')) is int and 1 <= value['attempt'] <= 2:
+        result['attempt'] = value['attempt']
     if isinstance(value.get('validation'), list):
         result['validation'] = [{'field': safe_field(row.get('field')), 'constraint': row['constraint']} for row in value['validation'][:8]
                                 if isinstance(row, dict) and safe_field(row.get('field')) and row.get('constraint') in ('type', 'required', 'extra', 'enum', 'pattern', 'minimum', 'maximum', 'minLength', 'maxLength', 'revision_format', 'schema')]

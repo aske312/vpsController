@@ -97,15 +97,53 @@ class FlowAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool.await_count, 1)
         self.assertEqual(result['status'], 'incomplete')
 
-    async def test_provider_failure_preserves_a_prepared_action_without_retry(self):
+    async def test_provider_retries_do_not_reexecute_a_prepared_action(self):
         result, tool, provider = await self.run_chat(
-            [{'tool_calls': [call('mihomo_settings', {'method': 'PATCH'})]}, httpx.ReadTimeout('PRIVATE PROVIDER VALUE')],
+            [{'tool_calls': [call('mihomo_settings', {'method': 'PATCH'})]},
+             httpx.ReadTimeout('PRIVATE PROVIDER VALUE'), httpx.ReadTimeout('PRIVATE PROVIDER VALUE')],
             [receipt({'confirmation_required': True, 'operation_id': OPERATION})])
         self.assertEqual(tool.await_count, 1)
-        self.assertEqual(provider.await_count, 2)
+        self.assertEqual(provider.await_count, 3)
         self.assertEqual(result['status'], 'partial')
         self.assertIn('подготовлен', result['answer'])
         self.assertNotIn('PRIVATE', json.dumps(result))
+
+    async def test_provider_recovers_after_preparation_with_the_existing_receipt(self):
+        result, tool, provider = await self.run_chat(
+            [{'tool_calls': [call('mihomo_settings', {'method': 'PATCH'})]},
+             httpx.ReadTimeout('PRIVATE'), {'content': 'Изменения подготовлены и ожидают подтверждения.'}],
+            [receipt({'confirmation_required': True, 'operation_id': OPERATION})])
+        tool.assert_awaited_once()
+        self.assertEqual(provider.await_count, 3)
+        self.assertEqual(result['status'], 'awaiting_confirmation')
+        messages = provider.call_args.args[1]
+        self.assertTrue(any(row['role'] == 'tool' and OPERATION in row['content'] for row in messages))
+
+    async def test_task_can_finish_after_more_than_twelve_model_turns(self):
+        replies = [{'tool_calls': [call('mihomo_operation', identity=str(i))]} for i in range(13)]
+        result, tool, provider = await self.run_chat(
+            [*replies, {'content': 'Проверка завершена.'}],
+            [receipt({'id': OPERATION, 'state': 'running'}) for _ in replies],
+            names=('mihomo_operation',), rounds=runner.MAX_ROUNDS)
+        self.assertEqual(tool.await_count, 13)
+        self.assertEqual(provider.await_count, 14)
+        self.assertEqual(result['answer'], 'Проверка завершена.')
+
+    async def test_model_retry_is_bounded_and_does_not_retry_credentials_or_cancellation(self):
+        for exc in (runner.ProviderFailure('provider_http_401', 'Private'),
+                    runner.ProviderFailure('provider_certificate_error', 'Private'),
+                    asyncio.CancelledError()):
+            provider = AsyncMock(side_effect=exc)
+            with patch.object(runner, 'provider_request', provider):
+                with self.assertRaises(type(exc)):
+                    await runner.model_request(SETTINGS, [], [])
+            provider.assert_awaited_once()
+        provider = AsyncMock(side_effect=runner.ProviderFailure('provider_http_503', 'Unavailable'))
+        with patch.object(runner, 'provider_request', provider):
+            with self.assertRaises(runner.ProviderFailure) as error:
+                await runner.model_request(SETTINGS, [], [])
+        self.assertEqual(provider.await_count, 2)
+        self.assertIn('Повтор обращения', runner.safe_error(error.exception))
 
     async def test_unknown_write_result_blocks_a_different_write_until_user_review(self):
         result, tool, _ = await self.run_chat(

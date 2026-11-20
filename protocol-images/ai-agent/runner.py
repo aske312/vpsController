@@ -38,8 +38,8 @@ DEFAULT_CHARACTER = ('Нодера — девушка-андроид, сетев
                      'Ценит компетентность и прямоту, заботится делом, умеет тепло поддержать. Отвечает ясно, без лести, сюсюканья и навязчивых обращений. '
                      'Юмор точный и уместный, без унижения собеседника. При сбое спокойна: отделяет факты от предположений, признаёт неопределённость '
                      'и предлагает следующий полезный шаг. Характер не даёт права выдумывать результаты или обходить подтверждение действий.')
-MAX_ROUNDS = 12
-REQUEST_TIMEOUT = 600
+MAX_ROUNDS = 24
+REQUEST_TIMEOUT = 1200
 TOOL_TIMEOUT = 90
 PROVIDER_CONNECT_TIMEOUT = 15
 PROVIDER_READ_TIMEOUT = 180
@@ -1470,6 +1470,25 @@ async def provider_request(settings, messages, tools, *, completion_limit=None, 
         raise
 
 
+async def model_request(settings, messages, tools, **kwargs):
+    """Recover one model turn; never replay the surrounding tool execution loop."""
+    transient = {'provider_connect_timeout', 'provider_read_timeout', 'provider_write_timeout',
+                 'provider_transport_error', 'provider_http_408', 'provider_http_429',
+                 'provider_http_500', 'provider_http_502', 'provider_http_503', 'provider_http_504',
+                 'stream_interrupted', 'invalid_response'}
+    for attempt in range(1, 3):
+        try:
+            return await provider_request(settings, messages, tools, **kwargs)
+        except Exception as exc:
+            if attempt == 2:
+                exc.model_attempts = attempt
+            if attempt == 2 or tls_failure(exc) or error_code(exc) not in transient:
+                raise
+            diagnostic('provider_retry', attempt=attempt + 1, error_code=error_code(exc))
+            progress('waiting_model', '')
+            await asyncio.sleep(2)
+
+
 @asynccontextmanager
 async def mcp_connections(settings, actor):
     from mcp import ClientSession, StdioServerParameters
@@ -1759,9 +1778,9 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
             required_call = not observed_tools and tools and evidence_required
             try:
                 if required_call:
-                    message = provider_message(await provider_request(settings, messages, tools, tool_choice='required'))
+                    message = provider_message(await model_request(settings, messages, tools, tool_choice='required'))
                 else:
-                    message = provider_message(await provider_request(settings, messages, tools))
+                    message = provider_message(await model_request(settings, messages, tools))
             except Exception as exc:
                 diagnostic('model_error', round=round_index + 1, error_code=error_code(exc), duration_ms=(time.monotonic() - started) * 1000)
                 if used or failures:
@@ -1923,7 +1942,7 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
         messages.append({'role': 'system', 'content': 'Вызовы инструментов завершены, дополнительные действия запрещены. Дай краткий итог пользователю: что удалось проверить, какая ошибка помешала, какие поля нужно исправить и следующий шаг. Отдели факты от предположений. Не заявляй о сохранении, выполнении или подготовке изменений без квитанции подтверждения. Не выводи секреты. Изменяющие запросы не повторяй.'})
         diagnostic('summary_start')
         try:
-            review = await provider_request(settings, messages, [], completion_limit=1200)
+            review = await model_request(settings, messages, [], completion_limit=2400)
             answer = review.get('content')
             if review.get('tool_calls') or not isinstance(answer, str) or not answer.strip(): answer = fallback
             measured = review.get('_usage')
@@ -1963,6 +1982,14 @@ async def check(settings, module, actor):
 
 
 def safe_error(exc):
+    message = _safe_error(exc)
+    if getattr(exc, 'model_attempts', 0) > 1:
+        message = message.replace('Автоматического повтора не было', '').rstrip('. ')
+        message += '. Повтор обращения к модели также завершился ошибкой'
+    return message
+
+
+def _safe_error(exc):
     # Neither transport URLs (which contain bot tokens), provider payloads nor
     # Telethon exception text are returned to a browser or Telegram user.
     if isinstance(exc, (ProviderFailure, ToolRoundLimit)): return str(exc)
