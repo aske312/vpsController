@@ -43,7 +43,7 @@ export function forgetChat(client: Client, actor: string, id: string) {
   } catch { /* Server queue remains authoritative. */ }
 }
 export const chatStage = (stage: string) => ({ queued: "Подготавливаю запрос", waiting_provider: "Ожидаю завершения другого запроса", starting: "Подключаюсь к модели",
-  waiting_model: "Обдумываю ваш запрос", receiving: "Формирую ответ", tools: "Работаю с инструментами", reconnecting: "Восстанавливаю связь" }[stage] ?? "Запрос в работе");
+  waiting_model: "Обдумываю ваш запрос", receiving: "Формирую ответ", tools: "Работаю с инструментами", cancelling: "Останавливаю запрос", reconnecting: "Восстанавливаю связь" }[stage] ?? "Запрос в работе");
 
 export function chatActivityLabel(turn: { queue_state?: string; activity_stage?: string; queue_ahead?: number }, earlier = 0) {
   const ahead = turn.queue_ahead ?? earlier;

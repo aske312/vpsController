@@ -87,6 +87,7 @@ def dispatch(api):
         try:
             result = subprocess.run(['systemd-run', '--quiet', '--collect', '--property=Type=exec',
                 '--unit=' + row['unit'], '--property=RuntimeMaxSec=35min', '--property=UMask=0077',
+                '--property=KillMode=control-group', '--property=TimeoutStopSec=5s',
                 '--property=EnvironmentFile=' + str(api.ENV_FILE), '--setenv=DATA_DIR=' + str(api.DATA_DIR),
                 sys.executable, str(Path(__file__).resolve()), row['id']], capture_output=True, timeout=12, check=False)
             if result.returncode: update(api, row['id'], stage='launch_unconfirmed')
@@ -103,14 +104,23 @@ async def monitor(api):
 
 
 def recover(api):
+    stopping = []
     with operations.locked(api.DATA_DIR):
         for row in records(api):
             if row.get('state') not in TERMINAL: reconcile(api, row)
+            if row.get('cancel_requested') and row.get('state') not in TERMINAL:
+                stopping.append(row['id'])
+    for identity in stopping: stop_worker(identity)
     dispatch(api)
 
 
 def reconcile(api, record):
     """Called under the storage lock; missing workers are never rescheduled."""
+    if record.get('cancel_requested') and record.get('state') not in TERMINAL:
+        observed = api.observe_service('vps-control-chat-' + record['id'] + '.service')
+        if observed.get('state') in ('inactive', 'failed') or observed.get('unit_present') is False:
+            finish_cancellation(api, record)
+        return record
     if record.get('state') in TERMINAL or time.time() - record['created_at'] <= 30: return record
     if time.time() - record.get('worker_checked_at', record['created_at']) < 10: return record
     if record['state'] == 'queued' and not record.get('launch_requested'): return record
@@ -193,7 +203,7 @@ def update(api, identity, **values):
     with operations.locked(api.DATA_DIR):
         file = path(api, identity)
         record = operations.read(file)
-        if not record or record['state'] in TERMINAL: return
+        if not record or record['state'] in TERMINAL or record.get('cancel_requested'): return
         if all(record.get(key) == value for key, value in values.items()): return
         record.update(values, updated_at=time.time(), seq=record['seq'] + 1)
         if record['state'] in TERMINAL:
@@ -230,16 +240,45 @@ def get(api, identity, actor='panel', *, channel=None):
     return public(record)
 
 
+def discard_preparations(api, identity, actor):
+    import assistant_commands
+    for file, row in assistant_commands.pending_records(api, actor):
+        if row.get('source_request_id') == identity and not row.get('submitted'):
+            file.unlink(missing_ok=True)
+
+
+def finish_cancellation(api, row):
+    row.update(state='failed', stage='cancelled', updated_at=time.time(), seq=row['seq'] + 1,
+               duration_ms=round((time.time() - row['created_at']) * 1000), partial='',
+               error={'code': 'cancelled', 'message': 'Запрос ИИ остановлен. Уже запущенные операции выполняются отдельно.'})
+    operations.atomic_json(path(api, row['id']), row)
+    input_path(api, row['id']).unlink(missing_ok=True)
+    discard_preparations(api, row['id'], row['actor'])
+
+
+def stop_worker(identity):
+    try:
+        subprocess.run(['systemctl', '--no-block', 'stop', 'vps-control-chat-' + identity + '.service'],
+                       capture_output=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # Reconciliation retries; never report a stop until the unit is gone.
+
+
 def cancel(api, identity, actor='panel'):
     authorize(api, actor)
     with operations.locked(api.DATA_DIR):
         row = operations.read(path(api, identity))
         if not row or row['actor'] != actor: raise HTTPException(404, 'Запрос не найден')
-        if row['state'] != 'queued': raise HTTPException(409, 'Сообщение уже обрабатывается; отмена очереди недоступна')
-        row.update(state='failed', stage='cancelled', updated_at=time.time(), seq=row['seq'] + 1,
-                   error={'code': 'cancelled', 'message': 'Сообщение убрано из очереди'})
+        if row['state'] in TERMINAL: return public(row)
+        row.update(cancel_requested=True, stage='cancelling', updated_at=time.time(), seq=row['seq'] + 1)
+        if row['state'] == 'queued':
+            finish_cancellation(api, row)
+            row['error']['message'] = 'Запрос ИИ отменён до начала выполнения.'
+        discard_preparations(api, identity, actor)
         operations.atomic_json(path(api, identity), row)
-        input_path(api, identity).unlink(missing_ok=True)
+    stop_worker(identity)
+    with operations.locked(api.DATA_DIR):
+        row = reconcile(api, operations.read(path(api, identity)))
     dispatch(api)
     return public(row)
 
@@ -272,7 +311,7 @@ def execute(api, identity):
     import assistant_control as control
     with operations.locked(api.DATA_DIR):
         record = operations.read(path(api, identity))
-        if not record or record['state'] != 'queued': return
+        if not record or record['state'] != 'queued' or record.get('cancel_requested'): return
         earlier = [row for row in records(api) if order(row) < order(record) and row.get('state') not in TERMINAL]
         if any(row['actor'] == record['actor'] or row.get('provider') == record.get('provider') for row in earlier):
             record.pop('launch_requested', None)

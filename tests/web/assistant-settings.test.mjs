@@ -93,7 +93,7 @@ function mount(status, catalog = [], overrides = {}) {
     if (options?.method === 'PUT' && overrides.save) return overrides.save(options);
     if (path === '/assistant/requests') {
       const payload=JSON.parse(options.body);
-      const accepted={id:payload.request_id,seq:0,state:'queued',stage:'queued',question:payload.prompt,model:payload.model,stream:payload.stream};
+      const accepted={id:payload.request_id,seq:0,state:overrides.jobState||'queued',stage:'queued',question:payload.prompt,model:payload.model,stream:payload.stream};
       const result=Promise.resolve(overrides.chat ? overrides.chat(options) : {result:{answer:'OK',tools_used:[]}}).then(
         output=>({...accepted,seq:1,state:'done',stage:'complete',output}),
         error=>({...accepted,seq:1,state:'failed',stage:'error',error:{code:'provider_transport_error',message:error.message}}));
@@ -102,7 +102,7 @@ function mount(status, catalog = [], overrides = {}) {
     }
     if (path.startsWith('/assistant/requests/')) {
       const identity=path.split('/')[3].split('?')[0];
-      if(options?.method==='DELETE'){cancellations.get(identity)?.();return {};}
+      if(options?.method==='DELETE'){await overrides.cancel?.(identity);cancellations.get(identity)?.();return {};}
       return jobs.get(identity);
     }
     return status;
@@ -479,6 +479,29 @@ test('pending turn survives inactive page and answer notification opens chat wit
   assert.match(JSON.stringify(tree), /completed answer/);
 });
 
+test('running requests can be stopped once and keep their question without an error or resubmission', async () => {
+  const status=fixture();
+  Object.assign(status.settings,{model:'fixture-model',memory_enabled:false,modules:{'ai-agent':true,'nodera-bot':true}});
+  Object.assign(status.modules[0],{enabled:true,configured:true});
+  let stops=0;
+  const view=mount(status,[],{jobState:'running',chat:()=>new Promise(()=>{}),cancel:()=>{stops++;}});
+  view.render();await Promise.resolve();
+  let tree=view.render();
+  nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'stop this task',style:{},scrollHeight:48}});
+  tree=view.render();nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();
+  await new Promise(setImmediate);
+  tree=view.render();
+  const stop=nodes(tree,n=>n.type==='button'&&n.props.children==='Остановить ИИ')[0];
+  assert(stop);assert.equal(stop.disabled,false);
+  await Promise.all([stop.node.props.onClick(),stop.node.props.onClick()]);
+  await new Promise(setImmediate);
+  tree=view.render();
+  assert.equal(stops,1);assert.equal(view.writes.length,1);
+  assert.match(JSON.stringify(tree),/stop this task/);assert.match(JSON.stringify(tree),/cancelled/);
+  assert.doesNotMatch(JSON.stringify(tree),/Нужна проверка/);
+  assert.equal(nodes(tree,n=>n.type==='button'&&n.props.children==='Остановить ИИ').length,0);
+});
+
 test('follow-ups are durably admitted with predecessor IDs and queued messages can be removed', async () => {
   const status = fixture();
   status.chat_attachments = true;
@@ -502,7 +525,9 @@ test('follow-ups are durably admitted with predecessor IDs and queued messages c
   const removals = nodes(tree, n => n.type === 'button' && n.props.children === 'Отменить запрос');
   assert.equal(removals.length, 4);
   await removals[2].node.props.onClick();
-  assert.doesNotMatch(JSON.stringify(view.render()), /remove me/);
+  await new Promise(setImmediate);
+  assert.match(JSON.stringify(view.render()), /remove me/);
+  assert.match(JSON.stringify(view.render()), /cancelled/);
   view.setActive(false); view.render();
   replies[0]({result:{answer:'first answer',tools_used:[]},conversation_id:'conversation-one'});
   await new Promise(setImmediate);

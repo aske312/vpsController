@@ -73,6 +73,12 @@ class ServerCommandTests(unittest.TestCase):
         self.assertEqual(sum(row.get('source_request_id') == identity for row in pending), 2)
         self.assertEqual(sum('source_request_id' not in row for row in pending), 1)
         self.assertIsNone(commands.source_request.get())
+        control.operations.atomic_json(api.DATA_DIR / 'assistant' / 'requests' / (identity + '.json'),
+                                       {'actor': 'panel', 'cancel_requested': True})
+        denied = self.client.post('/api/assistant/control-tool', headers={**headers, 'X-Nodera-Request-ID': identity},
+            json={'name': 'vps_service_action', 'service': 'fixture', 'action': 'restart'})
+        self.assertEqual(denied.status_code, 409)
+        self.assertEqual(len(commands.pending_actions(api, 'panel')), 3)
 
     def test_mcp_prepares_but_cannot_confirm_and_checks_live_scope(self):
         value = control.read(api)

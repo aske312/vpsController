@@ -53,6 +53,48 @@ class AssistantCredentialSystemdTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'linux' and os.environ.get('CORE_SYSTEMD_TESTS') == '1', 'Requires isolated systemd runner')
 class DurableChatSystemdTests(unittest.TestCase):
+    def test_cancellation_stops_the_job_and_a_runtime_in_another_process_session(self):
+        import json
+        import time
+        import types
+        import assistant_jobs as jobs
+        identity = uuid.uuid4().hex
+        unit = 'vps-control-chat-' + identity + '.service'
+        with tempfile.TemporaryDirectory(prefix='chat-cancel-', dir='/run') as directory:
+            root = Path(directory)
+            fixture = root / 'worker.py'
+            child = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(90)"
+            fixture.write_text("import subprocess,sys,time\nfrom pathlib import Path\n"
+                               "p=subprocess.Popen([sys.executable,'-c',%r],start_new_session=True)\n"
+                               "Path(%r).write_text(str(p.pid))\ntime.sleep(90)\n" % (child, str(root/'child.pid')))
+            isolated = types.SimpleNamespace(DATA_DIR=root/'data', observe_service=api.observe_service)
+            try:
+                with patch.object(control, 'read', return_value={'revision':'fixture','model':'m'}), patch.object(jobs, 'dispatch'):
+                    jobs.submit(isolated, control.Chat(prompt='fixture', model='m', request_id=identity))
+                    jobs.update(isolated, identity, state='running')
+                    subprocess.run(['systemd-run','--quiet','--collect','--unit='+unit,
+                                    '--property=KillMode=control-group','--property=TimeoutStopSec=1s',
+                                    sys.executable,str(fixture)], check=True,capture_output=True)
+                    deadline = time.monotonic() + 15
+                    while not (root/'child.pid').exists() and time.monotonic() < deadline: time.sleep(.05)
+                    self.assertTrue((root/'child.pid').exists())
+                    child_pid = int((root/'child.pid').read_text())
+                    time.sleep(.1)  # Let the child install its SIGTERM handler.
+                    result = jobs.cancel(isolated, identity)
+                    while result['state'] not in jobs.TERMINAL and time.monotonic() < deadline:
+                        time.sleep(.1)
+                        result = jobs.get(isolated, identity)
+                    self.assertEqual(result['error']['code'], 'cancelled')
+                    self.assertFalse(jobs.input_path(isolated, identity).exists())
+                    process = Path('/proc') / str(child_pid) / 'stat'
+                    try: process_state = process.read_text().split()[2]
+                    except FileNotFoundError: process_state = None
+                    self.assertIn(process_state, (None, 'Z'))
+                    self.assertNotIn('output', json.loads(jobs.path(isolated, identity).read_text()))
+            finally:
+                subprocess.run(['systemctl','stop',unit],capture_output=True)
+                subprocess.run(['systemctl','reset-failed',unit],capture_output=True)
+
     def test_chat_outlives_its_submitting_process_and_delivers_once(self):
         import json
         import time

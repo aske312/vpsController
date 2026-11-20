@@ -138,6 +138,60 @@ class ChatJobsTests(unittest.TestCase):
         self.assertTrue(jobs.input_path(api, self.payload.request_id).exists())
         self.assertEqual(self.launch.call_count, 1)
 
+    def test_running_cancellation_waits_for_worker_exit_and_blocks_late_results(self):
+        jobs.submit(api, self.payload)
+        jobs.update(api, self.payload.request_id, state='running', partial='draft')
+        pending = jobs.cancel(api, self.payload.request_id)
+        self.assertEqual((pending['state'], pending['stage']), ('running', 'cancelling'))
+        self.assertTrue(jobs.input_path(api, self.payload.request_id).exists())
+        self.assertIn('stop', self.launch.call_args.args[0])
+        self.assertEqual(self.launch.call_args.args[0][-1], 'vps-control-chat-' + self.payload.request_id + '.service')
+        jobs.update(api, self.payload.request_id, state='done', output={'result': {'answer': 'late', 'tools_used': []}})
+        self.assertEqual(jobs.get(api, self.payload.request_id)['state'], 'running')
+        with patch.object(api, 'observe_service', return_value={'state': 'inactive', 'active': False}):
+            cancelled = jobs.get(api, self.payload.request_id)
+        self.assertEqual(cancelled['error']['code'], 'cancelled')
+        self.assertEqual(cancelled['partial'], '')
+        self.assertNotIn('output', cancelled)
+        self.assertFalse(jobs.input_path(api, self.payload.request_id).exists())
+        self.assertEqual(jobs.cancel(api, self.payload.request_id)['seq'], cancelled['seq'])
+
+    def test_cancellation_discards_only_this_requests_unsubmitted_preparations_and_blocks_new_ones(self):
+        import assistant_commands as commands
+        jobs.submit(api, self.payload)
+        jobs.update(api, self.payload.request_id, state='running')
+        folder = control.directory(api) / 'nodera-bot' / 'commands' / 'panel'
+        rows = [('11111111', self.payload.request_id, False), ('22222222', self.payload.request_id, True),
+                ('33333333', 'b' * 32, False)]
+        for code, source, submitted in rows:
+            operations.atomic_json(folder / (code + '.json'), {'code': code, 'operation_id': code * 4,
+                'source_request_id': source, 'submitted': submitted})
+        jobs.cancel(api, self.payload.request_id)
+        self.assertFalse((folder / '11111111.json').exists())
+        self.assertTrue((folder / '22222222.json').exists())
+        self.assertTrue((folder / '33333333.json').exists())
+        token = commands.source_request.set(self.payload.request_id)
+        try:
+            with self.assertRaises(HTTPException) as caught:
+                commands.enqueue(api, 'panel', {})
+            self.assertEqual(caught.exception.status_code, 409)
+        finally:
+            commands.source_request.reset(token)
+
+    def test_stop_failure_does_not_release_the_provider_or_claim_cancellation(self):
+        jobs.submit(api, self.payload)
+        jobs.update(api, self.payload.request_id, state='running')
+        with patch.object(jobs.subprocess, 'run', side_effect=OSError('unavailable')):
+            result = jobs.cancel(api, self.payload.request_id)
+        self.assertEqual(result['stage'], 'cancelling')
+        self.assertEqual(result['state'], 'running')
+        second = self.payload.model_copy(update={'request_id': 'b' * 32})
+        queued = jobs.submit(api, second)
+        self.assertNotIn('launch_requested', queued)
+        with patch.object(api, 'observe_service', return_value={'unit_present': False}):
+            jobs.recover(api)
+        self.assertEqual(jobs.get(api, self.payload.request_id)['error']['code'], 'cancelled')
+
     def test_cancel_only_unstarted_request_and_parent_is_scoped_to_actor_and_channel(self):
         jobs.submit(api, self.payload)
         cancelled = jobs.cancel(api, self.payload.request_id)

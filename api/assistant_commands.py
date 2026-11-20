@@ -112,6 +112,12 @@ def pending_path(api, actor, code=None, operation_id=None):
 
 def enqueue(api, actor, record):
     """Called with the application lock held. Each request keeps its own identity."""
+    identity = source_request.get()
+    if isinstance(identity, str) and re.fullmatch(r'[a-f0-9]{32}', identity):
+        import assistant_jobs
+        job = control.operations.read(assistant_jobs.path(api, identity))
+        if job.get('actor') == actor and job.get('cancel_requested'):
+            raise HTTPException(409, 'Запрос ИИ остановлен; подготовка новых операций запрещена')
     rows = pending_records(api, actor)
     now = time.time()
     active = []

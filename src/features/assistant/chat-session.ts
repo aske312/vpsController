@@ -3,11 +3,12 @@ import type { createApiClient } from "../../shared/lib/api-request";
 import type { ChatReplyStatus } from "./chat-jobs";
 
 type Client = Pick<ReturnType<typeof createApiClient>, "sessionKey">;
-export type SessionTurn = { status?: ChatReplyStatus; duration_ms?: number; command_ids?: string[]; system_event?: boolean; request_id?: string; id: number; question: string; model: string; answer?: string; error?: string; tools?: string[]; context_safe?: boolean; files: [] };
+export type SessionTurn = { cancelled?: boolean; status?: ChatReplyStatus; duration_ms?: number; command_ids?: string[]; system_event?: boolean; request_id?: string; id: number; question: string; model: string; answer?: string; error?: string; tools?: string[]; context_safe?: boolean; files: [] };
 export type ChatSession = { model: string; provider: string; streaming: boolean; conversation_id: string | null; prompt: string; turns: SessionTurn[] };
 const MAX_CHARS = 240000;
-function replyState(turn: { status?: unknown; duration_ms?: unknown }): { status?: ChatReplyStatus; duration_ms?: number } {
+function replyState(turn: { cancelled?: unknown; status?: unknown; duration_ms?: unknown }): { cancelled?: boolean; status?: ChatReplyStatus; duration_ms?: number } {
   return {
+    ...(turn.cancelled === true ? { cancelled: true } : {}),
     ...(turn.status === "incomplete" || turn.status === "partial" || turn.status === "awaiting_confirmation" ? { status: turn.status } : {}),
     ...(typeof turn.duration_ms === "number" && Number.isFinite(turn.duration_ms) && turn.duration_ms >= 0 ? { duration_ms: turn.duration_ms } : {}),
   };

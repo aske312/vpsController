@@ -756,6 +756,10 @@ def assistant_control_tool(payload: assistant_control.ToolCall,
                            module: str | None = Header(default=None, alias='X-MCP-Module'),
                            source_request_id: str | None = Header(default=None, alias='X-Nodera-Request-ID')) -> dict:
     assistant_control.require_tool_module(sys.modules[__name__], payload.name, module)
+    if isinstance(source_request_id, str) and re.fullmatch(r'[a-f0-9]{32}', source_request_id):
+        job = application_operation.read(assistant_jobs.path(sys.modules[__name__], source_request_id))
+        if job.get('actor') == actor and job.get('cancel_requested'):
+            raise HTTPException(409, 'Запрос ИИ остановлен; новые команды запрещены')
     token = assistant_commands.source_request.set(source_request_id)
     try:
         return assistant_control.control_tool(sys.modules[__name__], payload.name, payload.model_dump(exclude={'name'}, exclude_none=True), actor)

@@ -39,6 +39,15 @@ function shortTitle(title: string) {
   return characters.length > 20 ? characters.slice(0, 19).join("") + "…" : title;
 }
 
+function failedChatTurn(cause: unknown): Partial<Turn> {
+  if (cause instanceof ChatJobError && cause.job.error?.code === "cancelled") return {
+    queue_state: undefined, stop_pending: false, cancelled: true, error: undefined,
+    answer: cause.job.error.message, duration_ms: cause.job.duration_ms, context_safe: false,
+  };
+  return { queue_state: undefined, stop_pending: false, answer: undefined,
+    error: cause instanceof Error ? cause.message : "Результат AI не подтверждён" };
+}
+
 export function AssistantView({ active, onOpenChat, request, refreshKey, busy, onDirtyChange, confirmAction, admitOperation, onOperation }: Props) {
   const [panel, setPanel] = useState<Panel>('chat');
   const [streaming, setStreaming] = useState(false);
@@ -127,6 +136,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const writing = useRef(false);
   const chatRunning = useRef(false);
   const liveChatObservers = useRef(new Set<AbortController>());
+  const chatAdmissions = useRef(new Map<string, Promise<string>>());
+  const stoppingRequests = useRef(new Set<string>());
   const admissionQueue = useRef<{ actor: string; client: typeof request; tail: Promise<string | undefined> } | null>(null);
   const activeMessages = useRef(0);
   const dirtyRef = useRef(false);
@@ -300,8 +311,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     }).catch(cause => {
       if (controller.signal.aborted) return;
       if (cause instanceof ChatJobError) forgetChat(request, actor, identity);
-      setMemoryError(cause instanceof Error ? cause.message : "Результат AI не подтверждён");
-      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, queue_state: undefined, answer: undefined, error: cause instanceof Error ? cause.message : "Результат AI не подтверждён" } : turn));
+      if (!(cause instanceof ChatJobError && cause.job.error?.code === "cancelled")) setMemoryError(cause instanceof Error ? cause.message : "Результат AI не подтверждён");
+      setTurns(current => current.map(turn => turn.id === turnId ? { ...turn, ...failedChatTurn(cause) } : turn));
     }).finally(() => {
       if (controller.signal.aborted) return;
       chatRunning.current = false; setChatBusy(false); setHasPendingChat(Boolean(savedChat(request, actor))); if (savedChat(request, actor) && savedChat(request, actor) !== identity) setRecoveryKey(value => value + 1);
@@ -319,12 +330,16 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const retryTurn = useCallback((turn: Turn) => { setPrompt(turn.question); setFiles(turn.files); }, []);
   const cancelTurn = useCallback(async (id: number) => {
     const turn = turns.find(item => item.id === id);
-    if (!turn?.request_id) return;
+    if (!turn?.request_id || stoppingRequests.current.has(turn.request_id)) return;
+    stoppingRequests.current.add(turn.request_id);
+    setTurns(current => current.map(item => item.id === id ? { ...item, stop_pending: true } : item));
     try {
+      await chatAdmissions.current.get(turn.request_id);
       await request(`/assistant/requests/${turn.request_id}${actor ? `?telegram_id=${actor}` : ""}`, { method: "DELETE" });
-      forgetChat(request, actor, turn.request_id);
-      setTurns(current => current.filter(item => item.id !== id));
-    } catch (cause) { notify.error(cause instanceof Error ? cause.message : "Не удалось убрать сообщение из очереди"); }
+    } catch (cause) {
+      setTurns(current => current.map(item => item.id === id ? { ...item, stop_pending: false } : item));
+      notify.error(cause instanceof Error ? cause.message : "Остановка запроса не подтверждена");
+    } finally { stoppingRequests.current.delete(turn.request_id); }
   }, [request, actor, turns, notify]);
   async function attachFiles(incoming: File[]) {
     if (!incoming.length || fileRead.current || writing.current) return;
@@ -479,15 +494,20 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       try {
         const accepted = await request<ChatJob>("/assistant/requests", { method: "POST", body: JSON.stringify({ ...payload, previous_request_id: previous }) });
         if (accepted.id !== identity) throw new Error("Ответ очереди не соответствует сообщению");
+        if (client.current === request && activeActor.current === actor) setTurns(current => current.map(item => item.id === turn.id ? {
+          ...item, queue_state: accepted.state === "queued" ? "queued" : "running", activity_stage: accepted.stage, queue_ahead: accepted.queue_ahead,
+        } : item));
       } catch (cause) { if (mutationFailureState(cause) !== "unknown") throw cause; }
       rememberChat(request, actor, identity);
       return identity;
     });
     scope.tail = admitted.catch(() => undefined);
+    chatAdmissions.current.set(identity, admitted);
     const controller = new AbortController();
     liveChatObservers.current.add(controller);
     try {
       await admitted;
+      chatAdmissions.current.delete(identity);
       const result = await observeChatJob(request, identity, actor, payload.stream, job => {
         if (client.current !== request || activeActor.current !== actor || controller.signal.aborted) return;
         setTurns(current => current.map(item => item.id === turn.id ? { ...item,
@@ -511,11 +531,11 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
       });
     } catch (cause) {
       if (client.current !== request || activeActor.current !== actor || controller.signal.aborted) return;
-      setTurns(current => current.map(item => item.id === turn.id ? { ...item, queue_state: undefined, answer: undefined,
-        error: cause instanceof Error ? cause.message : "AI не ответил" } : item));
+      setTurns(current => current.map(item => item.id === turn.id ? { ...item, ...failedChatTurn(cause) } : item));
       // Other accepted requests stay on the server queue even if this request fails.
     } finally {
       liveChatObservers.current.delete(controller);
+      chatAdmissions.current.delete(identity);
       if (client.current === request && activeActor.current === actor) {
         activeMessages.current = Math.max(0, activeMessages.current - 1);
         if (!activeMessages.current) {
