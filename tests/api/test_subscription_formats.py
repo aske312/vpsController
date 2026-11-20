@@ -12,6 +12,45 @@ from tests.api.support import manager, ROOT, managed_mihomo_fixture
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def snell_chain(self):
+        self.store[0]['connections'].extend([
+            {'id': 'common-carrier', 'name': 'Outer CDN', 'device_id': 'common', 'component': 'transport-reality',
+             'settings': {'route_mode': 'cdn', 'cdn_domain': 'cdn.example'},
+             'credential': {'uuid': '11111111-1111-4111-8111-111111111111', 'port': 443, 'cdn_enabled': True,
+                            'cdn_domain': 'cdn.example', 'cdn_path': '/snell', 'cdn_transport': 'websocket'}},
+            {'id': 'common-snell', 'name': 'Inner Snell', 'device_id': 'common', 'component': 'transport-snell',
+             'settings': {'carrier_connection_id': 'common-carrier'},
+             'credential': {'instance_id': 'profile-snell', 'port': 33000, 'server_address': '192.0.2.1',
+                            'password': 'native-snell-test-password', 'mode': 'default'}},
+        ])
+        self.store[0] = manager.normalize_profile(self.store[0])
+
+    def test_public_yaml_keeps_snell_key_endpoint_and_named_cdn_dependency(self):
+        import yaml
+        self.snell_chain()
+        before = deepcopy(self.store)
+        text, _ = manager.render_client_profile(self.store[0], 'common', core_version='1.19.34')
+        nodes = yaml.safe_load(text)['proxies']
+        snell = next(row for row in nodes if row['type'] == 'snell')
+        outer = next(row for row in nodes if row['name'] == snell['dialer-proxy'])
+        self.assertEqual((snell['server'], snell['port'], snell['psk']),
+                         ('192.0.2.1', 33000, 'native-snell-test-password'))
+        self.assertEqual((outer['type'], outer['server'], outer['tls'], outer['network']),
+                         ('vless', 'cdn.example', True, 'ws'))
+        self.assertEqual(self.store, before)
+
+    def test_new_hwid_clones_snell_dependency_with_device_local_ids(self):
+        self.snell_chain()
+        before = deepcopy(self.store[0]['connections'])
+        profile, device_id = manager.subscription_device(self.store[0], 'new-hwid', 'test-token',
+            {'client_name': 'Nodera', 'user_agent': 'Nodera/0.0.11 (Windows; Mihomo)', 'core_version': '1.19.34'})
+        connections = [row for row in profile['connections'] if row['device_id'] == device_id]
+        inner = next(row for row in connections if row['component'] == 'transport-snell')
+        outer = next(row for row in connections if row['component'] == 'transport-reality')
+        self.assertEqual(inner['settings']['carrier_connection_id'], outer['id'])
+        self.assertNotEqual(outer['id'], 'common-carrier')
+        self.assertEqual([row for row in profile['connections'] if row['device_id'] == 'common'], before)
+
     def test_subscription_omits_existing_snell_for_old_or_unknown_core(self):
         import yaml
         self.store[0]['devices'][0]['core_version'] = '1.19.34'

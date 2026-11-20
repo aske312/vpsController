@@ -25,6 +25,27 @@ def profile(identity="first"):
 
 
 class SubscriptionLimitsTests(unittest.TestCase):
+    def test_snell_carrier_internal_hop_is_not_charged_twice_and_other_traffic_stays_metered(self):
+        item = profile()
+        item['connections'].append({'id': 'snell', 'component': 'transport-snell', 'device_id': 'common',
+            'settings': {'carrier_connection_id': 'xray'},
+            'credential': {'port': 33000, 'server_address': '8.8.8.8', 'instance_id': 'first-snell'}})
+        policy = limits.plan([item, profile('second')])
+        first = next(row for row in policy['profiles'] if row['id'] == 'first')
+        self.assertEqual(first['snell_carriers'], [{'user': 'mihomo-first-xray', 'ip': '8.8.8.8', 'port': 33000}])
+        config = limits.decorate_xray({'outbounds': [{'tag': 'direct', 'protocol': 'freedom'}]}, policy)
+        outbounds = {row['tag']: row for row in config['outbounds']}
+        rules = config['routing']['rules']
+        bypass = rules[0]
+        self.assertEqual({key: bypass[key] for key in ('user', 'ip', 'port', 'network')},
+                         {'user': ['mihomo-first-xray'], 'ip': ['8.8.8.8'], 'port': '33000', 'network': 'tcp'})
+        self.assertEqual(outbounds[bypass['outboundTag']]['streamSettings']['sockopt']['mark'], 0)
+        for identity in ('first', 'second'):
+            fallback = next(row for row in rules[1:] if row['user'] == ['mihomo-' + identity + '-xray'])
+            self.assertEqual(outbounds[fallback['outboundTag']]['streamSettings']['sockopt']['mark'],
+                             limits.profile_mark(identity))
+        self.assertIn('first-snell', first['shadowsocks'][1]['unit'])
+
     def test_refresh_reads_policy_after_acquiring_lock_not_before(self):
         from contextlib import contextmanager
         old = limits.plan([profile()])

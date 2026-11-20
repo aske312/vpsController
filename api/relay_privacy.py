@@ -153,7 +153,7 @@ def protect_node(node, profile, destination):
     endpoint = targets([destination])[0]
     if endpoint not in value['targets']:
         raise ValueError('Destination is outside the protected transport policy')
-    if not isinstance(node, dict) or node.get('type') not in {'vless', 'vmess', 'trojan', 'ss', 'hysteria2', 'tuic', 'wireguard'}:
+    if not isinstance(node, dict) or node.get('type') not in {'vless', 'vmess', 'trojan', 'ss', 'snell', 'hysteria2', 'tuic', 'wireguard'}:
         raise ValueError('Unsupported protected client protocol')
     if node.get('dialer-proxy'):
         raise ValueError('Existing client dialer must be reviewed before protection')

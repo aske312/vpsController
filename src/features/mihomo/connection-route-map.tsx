@@ -1,5 +1,5 @@
 import type { RelayHost, RelayStatus } from "../network/relay-state";
-import { connectionAddressModes, isRelayOriginTls } from "./connection-address";
+import { connectionAddressModes, isRelayOriginTls, snellCarriers } from "./connection-address";
 import type { ProfileConnection } from "./types";
 
 type HopKind = "client" | "relay" | "cdn" | "vps" | "internet";
@@ -10,10 +10,17 @@ export type ConnectionRoute = {
   originPort?: number;
   domain?: string;
   relay?: { address?: string; port?: number; afterCdn?: boolean };
+  inner?: { address?: string; port?: number };
+  unavailable?: boolean;
 };
 
-export function profileConnectionRoute(connection: ProfileConnection, inventory: { status: RelayStatus | null }): ConnectionRoute {
+export function profileConnectionRoute(connection: ProfileConnection, inventory: { status: RelayStatus | null }, connections: ProfileConnection[] = []): ConnectionRoute {
   const settings = connection.settings;
+  if (connection.component === "transport-snell" && settings.carrier_connection_id) {
+    const carrier = snellCarriers(connection, connections).find(item => item.id === settings.carrier_connection_id);
+    if (!carrier) return { mode: "direct", unavailable: true };
+    return { ...profileConnectionRoute(carrier, inventory), inner: { address: connection.credential?.server_address, port: connectionPort(connection.credential?.port) } };
+  }
   const modes = connectionAddressModes(connection.component);
   const mode = (modes.tls ? String(settings.route_mode || (settings.cdn_enabled ? "both" : "direct")) : modes.udp ? "udp" : "direct") as ConnectionRoute["mode"];
   const relay = String(settings.relay_host_id || "");
@@ -67,6 +74,7 @@ function RouteHopIcon({ kind }: { kind: HopKind }) {
 
 /** Endpoint information only: never infer a forwarding port from an unrelated rule. */
 export function ConnectionRouteMap({ route }: { route: ConnectionRoute }) {
+  if (route.unavailable) return <div className="mihomoConnectionRoute" role="status">Внешний канал Snell недоступен. Выберите существующее Xray TLS/CDN-подключение этого устройства.</div>;
   const origin: RouteHop = { kind: "vps", label: "VPS", address: route.originAddress, port: route.originPort };
   const relay: RouteHop | undefined = route.relay && { kind: "relay", label: "Relay", address: route.relay.address, port: route.relay.port, pendingPort: !route.relay.port };
   const cdn: RouteHop = { kind: "cdn", label: "CDN", address: route.domain, port: 443 };
@@ -75,7 +83,8 @@ export function ConnectionRouteMap({ route }: { route: ConnectionRoute }) {
   const hops = route.mode === "cdn"
     ? route.relay?.afterCdn ? [cdn, relay!, origin] : [relay, cdn, origin]
     : [relay, { ...origin, address: !relay && route.domain && ["tls", "udp"].includes(route.mode) ? route.domain : origin.address }];
-  const paths = [[client, ...hops.filter((hop): hop is RouteHop => Boolean(hop)), internet]];
+  const inner: RouteHop[] = route.inner ? [{ kind: "vps", label: "Snell v6", ...route.inner }] : [];
+  const paths = [[client, ...hops.filter((hop): hop is RouteHop => Boolean(hop)), ...inner, internet]];
   if (route.mode === "both") paths.push([client, cdn, { ...origin, port: 443 }, internet]);
   const text = paths.map(path => path.map(hopText).join(" → ")).join("; ");
   return <div className="mihomoConnectionRoute" data-connection-route role="img" aria-label={text}>

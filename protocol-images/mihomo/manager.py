@@ -4117,6 +4117,11 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
         )
         settings = validate_connection(component, settings_input, allow_unverified_network_route=preserves_network_route)
         result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "device_id": value.device_id, "settings": settings})
+    import snell_delivery
+    try:
+        snell_delivery.validate(result)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     return result
 
 
@@ -4885,7 +4890,7 @@ def client_connection_keys(component: str) -> set[str]:
         "transport-reality": {"fingerprint"},
         "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},
         "transport-tuic": {"congestion_control", "heartbeat", "udp_relay_mode", "sni", "skip_cert_verify", "zero_rtt"},
-        "transport-snell": {"udp", "reuse"},
+        "transport-snell": {"udp", "reuse", "carrier_connection_id"},
     }.get(component, set())
 
 
@@ -5386,6 +5391,11 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     for rule in rules:
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")
     text = "\n".join(lines) + "\n"
+    import snell_delivery
+    try:
+        text = snell_delivery.apply(text, rendered)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
     if resolve_relays:
         selections = {name: connection for connection, direct, cdn, tls in rendered for name in (direct, cdn, tls) if name}
         text = relay_privacy.protect_subscription(relay_connection_control(), text, selections)
@@ -5682,16 +5692,25 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
     identity_hash = hmac.new(identity_secret.encode(), f"{hwid_hash}:{client_identity_key(metadata)}".encode(), hashlib.sha256).hexdigest()
     device_id = f"hwid-{identity_hash[:16]}"
     definitions = []
+    identities = {}
     for connection in normalized["connections"]:
         if str(connection.get("device_id", template_id)) != template_id:
             continue
+        identity = f"hwid-{hwid_hash[:10]}-{uuid.uuid4().hex[:8]}"
+        identities[connection['id']] = identity
         definitions.append({
-            "id": f"hwid-{hwid_hash[:10]}-{uuid.uuid4().hex[:8]}",
+            "id": identity,
             "component": connection["component"], "name": connection.get("name", ""),
             "device_id": device_id, "settings": dict(connection.get("settings", {})),
         })
     if not definitions:
         raise HTTPException(status_code=409, detail="В общем профиле нет совместимых подключений для этого клиента")
+    import snell_delivery
+    try:
+        snell_delivery.remap(definitions, identities)
+        snell_delivery.validate(definitions)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
     components = {str(definition["component"]) for definition in definitions}
     with profile_runtime_transaction(components):
         inherited_routing = yaml_profile_routing(device_routing(normalized, template_id))

@@ -11,7 +11,7 @@ from relay_addresses import normalize_address, normalize_addresses, authority
 
 
 UDP_COMPONENTS = {'transport-wg', 'transport-awg', 'transport-hysteria2', 'transport-tuic'}
-COMPONENTS = UDP_COMPONENTS | {'transport-shadowsocks', 'transport-reality'}
+COMPONENTS = UDP_COMPONENTS | {'transport-shadowsocks', 'transport-reality', 'transport-snell'}
 
 
 def profile_summaries(profiles, hosts, origin):
@@ -25,7 +25,7 @@ def profile_summaries(profiles, hosts, origin):
             settings = connection.get('settings', {})
             selected = settings.get('relay_host_id', '')
             transports = ('tcp', 'udp') if connection['component'] == 'transport-shadowsocks' else (
-                'tcp' if connection['component'] == 'transport-reality' else 'udp',)
+                'tcp' if connection['component'] in {'transport-reality', 'transport-snell'} else 'udp',)
             try:
                 groups = connection_groups(connection)
                 targets = {transport: {port for group in groups for kind, port in group if kind == transport}
@@ -109,6 +109,8 @@ def connection_groups(connection, direct_settings=None):
                 groups.append([('tcp', 80)])
         return groups
     port = int(credential['port'])
+    if component == 'transport-snell':
+        return [[('tcp', port)]]
     return [[('tcp', port), ('udp', port)]] if component == 'transport-shadowsocks' else [[('udp', port)]]
 
 

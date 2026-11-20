@@ -83,6 +83,20 @@ def plan(profiles):
                "expires_at": started + limits["days"] * 86400 if limits["days"] is not None else None,
                "xray_users": [], "quic_users": {}, "shadowsocks": [], "peers": []}
         connections = [*profile.get("connections", []), *profile.get("retiring_connections", [])]
+        carriers = []
+        for inner in connections:
+            carrier_id = inner.get('settings', {}).get('carrier_connection_id')
+            if inner.get('component') != 'transport-snell' or not carrier_id:
+                continue
+            credential = inner.get('credential', {})
+            address = str(ipaddress.ip_address(credential['server_address']))
+            for outer in connections:
+                if (outer.get('id') == carrier_id and outer.get('component') == 'transport-reality'
+                        and outer.get('device_id') == inner.get('device_id')):
+                    carriers.append({'user': str(outer.get('credential', {}).get('email') or f"mihomo-{identity}-{outer['id']}"),
+                                     'ip': address, 'port': int(credential['port'])})
+        if carriers:
+            row['snell_carriers'] = carriers
         for connection in connections:
             component = connection.get("component")
             credential = connection.get("credential", {})
@@ -133,6 +147,19 @@ def decorate_xray(config, policy):
             cloned[key] = tag
         return cloned[key]
     next_rules = []
+    for profile in controlled:
+        # The inner Snell service accounts and enforces the same payload once.
+        # Only this user's TCP path to their own Snell listener is exempt here;
+        # every other use of the outer Xray connection remains metered.
+        if profile.get('snell_carriers'):
+            tag = PREFIX + profile['id'] + '-snell-carrier'
+            unmarked = deepcopy(direct)
+            unmarked['tag'] = tag
+            unmarked.setdefault('streamSettings', {}).setdefault('sockopt', {})['mark'] = 0
+            outbounds.append(unmarked)
+            for carrier in profile['snell_carriers']:
+                next_rules.append({'type': 'field', 'user': [carrier['user']], 'ip': [carrier['ip']],
+                                   'port': str(carrier['port']), 'network': 'tcp', 'outboundTag': tag})
     for rule in rules:
         outbound = originals.get(rule.get("outboundTag"), {})
         if outbound.get("protocol") == "freedom":

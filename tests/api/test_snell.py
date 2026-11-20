@@ -1,8 +1,9 @@
 """Snell credentials, accounting and real native TCP/UDP forwarding."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import socket
 import socketserver
@@ -96,13 +97,17 @@ class SnellTests(unittest.TestCase):
 
     def test_component_schema_validates_modes_and_keeps_client_options_independent(self):
         with patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'), patch.object(manager, 'module_is_installed', return_value=True), patch.object(manager, 'module_is_ready', return_value=True):
-            settings = manager.validate_connection(snell.MODULE, {'mode': 'unshaped', 'udp': False, 'reuse': True})
+            settings = manager.validate_connection(snell.MODULE, {'mode': 'unshaped', 'udp': False, 'reuse': True,
+                                                                 'ip_version': 'ipv6-prefer', 'tfo': True, 'mptcp': True})
             self.assertEqual(settings['mode'], 'unshaped')
             self.assertFalse(settings['udp'])
             self.assertTrue(settings['reuse'])
             with self.assertRaises(manager.HTTPException): manager.validate_connection(snell.MODULE, {'mode': 'unsafe-raw'})
-        self.assertTrue({'udp', 'reuse'} <= manager.client_connection_keys(snell.MODULE))
+        self.assertTrue({'udp', 'reuse', 'ip_version', 'tfo', 'mptcp'} <= manager.client_connection_keys(snell.MODULE))
         self.assertNotIn('mode', manager.client_connection_keys(snell.MODULE))
+        exported = '\n'.join(manager.render_proxy(snell.MODULE, {**self.credential(), **settings}, 'Snell'))
+        for option in ('ip-version: "ipv6-prefer"', 'tfo: true', 'mptcp: true'):
+            self.assertIn(option, exported)
 
     def test_private_stats_are_directional_and_invalid_samples_remain_unknown(self):
         command = SimpleNamespace(returncode=0, stdout=json.dumps({'uploadTotal': 20, 'downloadTotal': 30, 'connections': []}))
@@ -139,6 +144,10 @@ def native(config):
             process = subprocess.Popen([binary, '-d', directory, '-f', str(path)], stdout=log, stderr=log)
             try:
                 yield process
+            except BaseException:
+                log.flush()
+                print((root / 'core.log').read_text(encoding='utf-8', errors='replace')[-3000:])
+                raise
             finally:
                 process.terminate()
                 try: process.wait(timeout=5)
@@ -166,12 +175,15 @@ def exact(channel, count):
 
 @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires native Mihomo 1.19.34+')
 class SnellNativeTests(unittest.TestCase):
+    def test_snell_tcp_and_udp_inside_vless_tls_websocket_transport(self):
+        self.forward('default', carrier=True)
+
     def test_generated_config_forwards_tcp_udp_and_rejects_wrong_key(self):
         for mode in ('default', 'unshaped'):
             with self.subTest(mode=mode):
                 self.forward(mode)
 
-    def forward(self, mode):
+    def forward(self, mode, carrier=False):
         tcp = self.enterContext(socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo))
         udp = self.enterContext(socketserver.ThreadingUDPServer(('127.0.0.1', 0), UdpEcho))
         for server in (tcp, udp):
@@ -183,10 +195,35 @@ class SnellNativeTests(unittest.TestCase):
         # Only the controller's filesystem path differs outside Linux/systemd.
         config.pop('external-controller-unix')
         config['listeners'][0]['listen'] = '127.0.0.1'
-        with native(config) as server:
+        outer_port = free_port()
+        identity = '11111111-1111-4111-8111-111111111111'
+        with native(config) as server, ExitStack() as stack:
             wait_port(port, server)
+            if carrier:
+                cert_root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='snell-tls-')))
+                certificate, key = cert_root / 'certificate.pem', cert_root / 'key.pem'
+                subprocess.run([shutil.which('openssl') or 'D:/Git/usr/bin/openssl.exe', 'req', '-x509', '-newkey',
+                                'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
+                                '-keyout', str(key), '-out', str(certificate)], check=True, capture_output=True)
+                outer = stack.enter_context(native({'listeners': [
+                    {'name': 'carrier', 'type': 'vless', 'listen': '127.0.0.1', 'port': outer_port,
+                     'users': [{'username': 'test', 'uuid': identity}], 'ws-path': '/snell-carrier',
+                     'certificate': certificate.read_text(), 'private-key': key.read_text()}],
+                    'rules': ['MATCH,DIRECT'], 'log-level': 'warning'}))
+                wait_port(outer_port, outer)
             proxy = yaml.safe_load('\n'.join(['proxies:', *snell.render(credential, 'Snell', '127.0.0.1')]))['proxies'][0]
             client = {'mixed-port': mixed, 'mode': 'rule', 'log-level': 'warning', 'proxies': [proxy], 'rules': ['MATCH,Snell']}
+            if carrier:
+                import snell_delivery
+                client['proxies'].append({'name': 'WebSocket carrier', 'type': 'vless', 'server': '127.0.0.1',
+                                          'port': outer_port, 'uuid': identity, 'network': 'ws',
+                                          'tls': True, 'skip-cert-verify': True,
+                                          'ws-opts': {'path': '/snell-carrier'}})
+                rows = [({'id': 'snell', 'component': 'transport-snell', 'device_id': 'test',
+                          'settings': {'carrier_connection_id': 'outer'}}, 'Snell', None, None),
+                        ({'id': 'outer', 'component': 'transport-reality', 'device_id': 'test',
+                          'settings': {'route_mode': 'cdn'}}, None, 'WebSocket carrier', None)]
+                client = yaml.safe_load(snell_delivery.apply(yaml.safe_dump(client), rows))
             with native(client) as process:
                 wait_port(mixed, process)
                 # SOCKS UDP association remains open while its datagram crosses Snell TCP.
@@ -208,7 +245,7 @@ class SnellNativeTests(unittest.TestCase):
                                 packet = b'\x00\x00\x00\x01' + socket.inet_aton('127.0.0.1') + struct.pack('!H', udp.server_address[1]) + payload
                                 channel.sendto(packet, ('127.0.0.1', struct.unpack('!H', reply[-2:])[0]))
                                 self.assertTrue(channel.recv(2048).endswith(payload))
-            proxy['psk'] = 'different-native-snell-key'
+            client['proxies'][0]['psk'] = 'different-native-snell-key'
             with native(client) as process:
                 wait_port(mixed, process)
                 with socket.create_connection(('127.0.0.1', mixed), timeout=3) as control:

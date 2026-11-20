@@ -96,5 +96,15 @@ class PrivateTransportTests(unittest.TestCase):
         profile['targets'].append({'ip': '8.8.8.8', 'port': 443, 'network': 'udp'})
         self.assertTrue(privacy.protect_node({'type': 'ss', 'udp': True}, profile, profile['targets'][0])['udp'])
 
+    def test_snell_udp_needs_only_the_approved_tcp_destination(self):
+        profile = self.profile()
+        node = {'name': 'Snell', 'type': 'snell', 'version': 6, 'mode': 'default',
+                'server': 'relay.example', 'port': 20010, 'psk': 'private-snell-key', 'udp': True}
+        result = privacy.protect_node(node, profile, profile['targets'][0])
+        self.assertEqual(result['psk'], node['psk'])
+        self.assertTrue(result['udp'])
+        self.assertEqual(result['dialer-proxy'], privacy.PREFIX + profile['generation'])
+        self.assertEqual((result['server'], result['port']), ('8.8.8.8', 443))
+
 
 if __name__ == '__main__':unittest.main()

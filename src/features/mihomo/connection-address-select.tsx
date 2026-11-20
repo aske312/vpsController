@@ -3,12 +3,13 @@
 import { NotificationNotice } from "../../shared/notifications/notification-center";
 import { useId, useState } from "react";
 import { relayAddresses, type RelayStatus } from "../network/relay-state";
-import { connectionAddressModes, isRelayOriginTls, relayOriginTlsSettings, xrayProtocolSettings } from "./connection-address";
+import { connectionAddressModes, isRelayOriginTls, relayOriginTlsSettings, snellCarriers, xrayProtocolSettings } from "./connection-address";
 import type { ProfileConnection } from "./types";
 
 /** Protocol mode and the address of the next hop are independent choices. */
-export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udpDomains, cdnDomains, webTransports, supported, disabled, onChange }: {
+export function MihomoConnectionAddress({ connection, connections = [], inventory, tlsDomains, udpDomains, cdnDomains, webTransports, supported, disabled, onChange }: {
   connection: ProfileConnection;
+  connections?: ProfileConnection[];
   inventory: { status: RelayStatus | null; failed: boolean };
   tlsDomains: string[]; udpDomains: string[]; cdnDomains: string[]; webTransports: string[];
   supported: boolean; disabled: boolean; onChange: (settings: ProfileConnection["settings"]) => void;
@@ -37,6 +38,16 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
   const canRelay = modes.relay && (originTls || mode !== "cdn" && mode !== "both");
   const savedOnly = Boolean(relay && !cdnRelay && (!canRelay || !choices.some(choice => choice.key === selected)));
   const locked = disabled || !supported;
+  const snell = connection.component === "transport-snell";
+  const carrierId = snell ? String(settings.carrier_connection_id || "") : "";
+  const carriers = snellCarriers(connection, connections);
+  const delivery = snell && <label className="mihomoConnectionEndpoint"><span>Доставка Snell</span><select aria-label="Доставка Snell" value={carrierId} disabled={locked} onChange={event => onChange({ ...settings,
+    carrier_connection_id: event.target.value, relay_host_id: "", relay_address: "", route_mode: "direct", cdn_enabled: false, relay_cdn: false, cdn_domain: "", tls_domain: "" })}>
+    <option value="">Напрямую или через Relay</option>
+    {carrierId && !carriers.some(item => item.id === carrierId) && <option value={carrierId}>Внешний канал недоступен · выберите другой</option>}
+    {carriers.map(item => <option key={item.id} value={item.id}>{item.name} · Xray {String(item.settings.route_mode).toUpperCase()}</option>)}
+  </select></label>;
+  if (carrierId) return <div className="mihomoConnectionAddress">{delivery}<small>Snell проходит внутри выбранного Xray-канала. Домен, CDN, транспорт и Relay настраиваются в этом Xray-подключении. Обновите подписку клиента после сохранения.</small></div>;
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase());
   const change = (patch: ProfileConnection["settings"]) => onChange({ ...settings, ...patch });
   function selectMode(next: "direct" | "tls" | "cdn") {
@@ -52,6 +63,7 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
     }
   }
   return <div className="mihomoConnectionAddress">
+    {delivery}
     <div className="mihomoConnectionControls">
     {modes.tls && <><select className="mihomoConnectionProtocol" aria-label="Протокол Xray" title="Протокол Xray" value={xrayProtocol} disabled={locked} onChange={event => onChange(xrayProtocolSettings(settings, event.target.value, tlsDomains, cdnDomains))}>
       <option value="vless">VLESS</option><option value="vmess">VMess</option><option value="trojan">Trojan</option>
@@ -101,5 +113,6 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
     {savedOnly && <NotificationNotice id={`mihomo:saved-route:${connection.id}`} title="Адрес подключения" state="info" message="Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес." />}
     {modes.tls && webTransports.length > 0 && !tlsServices.length && !originTls && <small>Для отдельного TLS-сервиса сначала добавьте TLS-домен основного VPS в Сеть → ROUTES.</small>}
     {canRelay && inventory.failed && <NotificationNotice id="relay:inventory" title="Адреса Relay" message="Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." />}
+    {snell && <small>Snell v6 передаёт TCP и UDP внутри TCP. Для Relay нужен TCP-маршрут. Обычный HTTP-CDN напрямую не поддерживается: добавьте Xray TLS/CDN-подключение этого устройства и выберите его в «Доставка Snell». Требуется Mihomo 1.19.34 или новее.</small>}
   </div>;
 }

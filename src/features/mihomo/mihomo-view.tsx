@@ -28,7 +28,6 @@ import { useRelayInventory } from "../network/relay-endpoint-select";
 import { ConnectionEditor } from "./connection-editor";
 import { ConnectionRouteMap, profileConnectionRoute } from "./connection-route-map";
 import { MihomoConnectionAddress } from "./connection-address-select";
-import { applyConnectionAddress } from "./connection-address";
 import { reorderDeviceConnections } from "./connection-order";
 import { ConnectionOrderNav } from "./connection-order-nav";
 import { connectionAppearance } from "./connection-status";
@@ -1852,18 +1851,15 @@ export function MihomoPage({
                     onNameChange={name => updateProfileConnection(connection.id, { name })}
                     onSettingChange={(key, value) => updateConnectionSetting(connection.id, key, value)}
                     onDelete={() => { setSelectedConnectionId((deviceConnections[connectionIndex + 1] || deviceConnections[connectionIndex - 1])?.id || ""); setProfileConnections(current => current.filter(item => item.id !== connection.id)); }}
-                    address={<MihomoConnectionAddress connection={connection} inventory={relayInventory}
+                    address={<MihomoConnectionAddress connection={connection} connections={profileConnections} inventory={relayInventory}
                       tlsDomains={availableNetworkRoutes("tls")} udpDomains={availableNetworkRoutes("udp")} cdnDomains={configuredCdnDomains(networkStatus)}
                       webTransports={webTransports} supported={supported} disabled={Boolean(busy) || Boolean(pendingProfileSave)}
                       onChange={settings => updateProfileConnection(connection.id, { settings })} />}
-                    footer={!supported || deviceConnections.length > 1 ? <>
-                      {!supported && <p>Подключение несовместимо с YAML-профилем. Измените параметры подключения.</p>}
-                      {deviceConnections.length > 1 && <button type="button" title="Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля." disabled={!supported || Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {(["cdn", "tls"].includes(vlessRoute) && (!connection.settings.relay_host_id || connection.settings.relay_cdn)) ? "Xray-подключениям" : connection.settings.udp_domain ? "UDP-подключениям" : "всем подключениям"} устройства</button>}
-                    </> : null}
+                    footer={!supported ? <p>Подключение несовместимо с YAML-профилем. Измените параметры подключения.</p> : null}
                     /></div>
                     <aside className="mihomoConnectionMapPane" aria-label="Карта соединения">
                       <b>Карта соединения</b>
-                      <ConnectionRouteMap route={profileConnectionRoute(connection, relayInventory)} />
+                      <ConnectionRouteMap route={profileConnectionRoute(connection, relayInventory, profileConnections)} />
                     </aside>
                   </div>;
                 })}
