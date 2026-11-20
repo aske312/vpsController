@@ -1,76 +1,75 @@
-# Relay Agent
+# vpsController Relay Agent
 
-Передаёт TCP/UDP-трафик по схеме **клиент → Relay → VPS**. Устанавливается на отдельный сервер, маршруты задаются из панели.
+[Русский](#ru) · [English](#en)
 
-PRO может отдельно включить зашифрованный транспорт на обоих участках цепочки.
-Для него Agent по запросу загружает sing-box с закреплённой контрольной суммой.
-По умолчанию режим выключен; обычные маршруты сохраняют прежнее поведение.
-Внешние соединения проверяют сертификаты, журналы потоков не включаются.
-IP-адреса, время и объёмы обмена остаются видимыми; обход DPI и снижение задержек
-не гарантируются. Для клиента нужна обновлённая подписка Mihomo.
+## RU
 
-## Установка
+Передаёт TCP/UDP по схеме **клиент → Relay → VPS**. Устанавливается на отдельный
+сервер; маршруты задаются из панели. PRO поддерживает дополнительный зашифрованный
+транспорт при использовании обновлённой подписки Mihomo.
 
-Нужны Debian/Ubuntu с systemd, публичный IPv4, `curl` и права root.
+### Установка
+
+Debian/Ubuntu, systemd, публичный IPv4, `curl` и root. Выполните под root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/agent/install.sh -o /tmp/relay-agent-install.sh
-sudo bash /tmp/relay-agent-install.sh
+bash /tmp/relay-agent-install.sh
 ```
 
-Установщик настроит и запустит Agent, затем покажет JSON для добавления Relay в панели. Сохраните эти данные: они содержат токен доступа.
+Добавьте выданный JSON в панель. Он содержит секретный токен.
+Повторный вывод: `python3 /usr/local/lib/vps-control-relay-agent/credentials.py`.
+Необязательные параметры: `--public-ip IPv4`, `--api-port PORT`, `--domain NAME`,
+`--cdn-domain NAME`. Обычный домен должен указывать на Relay; CDN требует
+поддерживаемого Cloudflare proxy с IPv4. Доступность транспорта проверяется отдельно.
 
-Повторно показать данные:
+Обновления проверяются ежедневно; настройки и маршруты сохраняются.
+Обновление может прервать соединения. Лимиты ресурсов рассчитываются автоматически;
+индивидуальные настройки — объект `limits` в `/etc/vps-control-relay-agent/config.json`.
 
-```bash
-sudo python3 /usr/local/lib/vps-control-relay-agent/credentials.py
-```
+### Удаление
 
-Транспортные домены берутся из настроек Network/CDN установленной панели или
-явных параметров установки `--domain NAME` и `--cdn-domain NAME`. Обычный домен
-должен разрешаться на IP Relay; CDN-домен — в поддерживаемый Cloudflare proxy
-с IPv4. Имена панели, hostname и произвольные сайты не добавляются автоматически.
-Непроверенные и устаревшие имена не передаются; DNS-проверка не подтверждает
-работоспособность конкретного транспорта.
-
-Обновления проверяются автоматически раз в сутки. Повторная установка сохраняет настройки и маршруты. При обновлении соединения могут прерваться.
-
-## Ресурсы и текущая диагностика
-
-Agent рассчитывает общий пул по RAM/cgroup и лимиту файловых дескрипторов.
-Предел 128 сессий на маршрут снят: маршрут может использовать свободный общий
-пул. TCP учитывается с большим запасом памяти, чем UDP; реальные UDP receive
-буферы учитываются отдельно и уменьшаются при давлении. Память не выделяется
-заранее. Служба допускает 131072 дескриптора и не ограничивается прежними 256 МиБ.
-Agent оставляет резерв ОС; другие приложения на выделенном сервере также могут
-влиять на доступные ресурсы. Лимиты — верхние границы, а не гарантия ёмкости.
-
-В `/etc/vps-control-relay-agent/config.json` можно добавить объект `limits`:
-
-```json
-{"udp_budget_mib":0,"max_sessions":0,"max_sessions_per_route":0,"tcp_idle_seconds":300,"udp_idle_seconds":60,"tcp_connect_seconds":10,"tcp_drain_seconds":30,"statistics_reset_seconds":86400}
-```
-
-Ноль у памяти/сессий означает авторасчёт. У `statistics_reset_seconds` ноль
-выключает очистку, иначе допускается 300–2592000 секунд. Ручной бюджет UDP:
-32–65536 МиБ в пределах RAM; сессии 1–65536 в пределах ресурсов; маршрут не выше
-общего пула. TCP idle 30–86400 с, UDP idle 10–3600 с, connect 1–120 с, drain 1–300 с.
-Неверные типы, неизвестные поля и завышенные значения отклоняются.
-Настройки сохраняются при обновлении; применяются при следующем запуске Agent.
-
-PRO получает агрегаты последних 60 секунд: ошибки по категориям, сброшенные
-пакеты, новые сессии, текущие сессии без ответа, занятость общих UDP-буферов.
-Идентификаторы потоков и payload не записываются. Раз в сутки очищаются
-накопленные ошибки/сбросы; трафик, активные соединения и последняя минута
-сохраняются. Суточная перезагрузка сервера не нужна для очистки счётчиков.
-
-## Удаление
-
-Сначала уберите Relay из маршрутов в панели, затем выполните на его сервере:
+Сначала исключите Relay из маршрутов панели. Команда удалит Agent, настройки и маршруты:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/agent/protocol-images/relay-agent/uninstall.sh -o /tmp/relay-agent-uninstall.sh
-sudo bash /tmp/relay-agent-uninstall.sh
+bash /tmp/relay-agent-uninstall.sh
 ```
 
-Команда остановит Agent, удалит его файлы, настройки, маршруты и созданные им правила UFW.
+Лицензия [MIT](LICENSE).
+
+## EN
+
+Forwards TCP/UDP along **client → Relay → VPS**. Install it on a separate server;
+manage routes from the panel. PRO supports an additional encrypted transport
+when clients use an updated Mihomo subscription.
+
+### Installation
+
+Requires Debian/Ubuntu, systemd, a public IPv4 address, `curl`, and root. Run as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/agent/install.sh -o /tmp/relay-agent-install.sh
+bash /tmp/relay-agent-install.sh
+```
+
+Add the generated JSON to the panel. It contains a secret access token.
+Show it again: `python3 /usr/local/lib/vps-control-relay-agent/credentials.py`.
+Optional flags: `--public-ip IPv4`, `--api-port PORT`, `--domain NAME`,
+`--cdn-domain NAME`. A regular domain must point to the Relay; CDN requires
+supported Cloudflare proxying with IPv4. Transport connectivity is checked separately.
+
+Updates are checked daily and preserve settings and routes.
+An update may interrupt connections. Resource limits are calculated automatically;
+custom settings belong in `limits` in `/etc/vps-control-relay-agent/config.json`.
+
+### Removal
+
+Remove the Relay from panel routes first. This removes the Agent, settings, and routes:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/agent/protocol-images/relay-agent/uninstall.sh -o /tmp/relay-agent-uninstall.sh
+bash /tmp/relay-agent-uninstall.sh
+```
+
+Licensed under [MIT](LICENSE).
