@@ -1,4 +1,4 @@
-# 312node.net PRO
+# vpsController PRO
 
 Панель управления Linux VPS: мониторинг, защищённые подключения, DNS,
 маршрутизация и подписки Mihomo с модулями WireGuard, AmneziaWG,

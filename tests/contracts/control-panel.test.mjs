@@ -37,15 +37,18 @@ test("PRO shows ISO country flags and the release identity used by Light", async
 });
 
 test("MIT license and privacy notice are included in Russian", async () => {
-  const [privacy, terms, legalUi] = await Promise.all([
+  const [privacy, terms, legalUi, readme, license] = await Promise.all([
     read("docs/PRIVACY_POLICY.md"),
     read("docs/TERMS_OF_USE.md"),
     read("src/shared/components/legal-footer.tsx"),
+    read("README.md"),
+    read("LICENSE"),
   ]);
-  assert.match(privacy, /Уведомление о приватности 312node\.net/);
   assert.match(privacy, /Privacy Notice/);
-  assert.match(terms, /Свободная лицензия и условия 312node\.net/);
   assert.match(terms, /Free Software Terms/);
+  for (const document of [privacy, terms, readme, license]) {
+    assert.doesNotMatch(document, /312node\.net/i);
+  }
   assert.match(privacy, /не требует указания имени, адреса/);
   assert.match(privacy, /does not require an author.s legal name/);
   assert.match(terms, /лицензии MIT/);
