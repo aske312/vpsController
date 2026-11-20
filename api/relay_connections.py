@@ -72,13 +72,14 @@ def selected_endpoint(control, settings, transport, port, **kwargs):
     return control.endpoint(host_id(settings), transport, port, **kwargs)
 
 
-def consumer_state(control, settings, fallback):
+def consumer_state(control, settings, fallback, *, registry=None):
     """Overlay missing saved Relay bindings without modifying consumer settings."""
     selected = host_id(settings)
     if not selected:
         return fallback
     try:
-        exists = any(host['id'] == selected for host in control.read()['hosts'])
+        snapshot = control.read() if registry is None else registry
+        exists = any(host['id'] == selected for host in snapshot['hosts'])
     except (OSError, ValueError, KeyError, TypeError):
         return {'state': 'unknown', 'reason': 'Реестр Relay недоступен', 'addresses': [], 'bindings': []}
     if not exists:

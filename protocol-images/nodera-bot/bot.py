@@ -317,8 +317,21 @@ async def remember_incoming(settings, message):
         await remember_message(settings, quoted, 'assistant')
 
 
+telegram_client = ContextVar('telegram_client', default=None)
+
+
+@asynccontextmanager
+async def telegram_transport():
+    client = telegram_client.get()
+    if client is not None:
+        yield client
+    else:
+        async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
+            yield client
+
+
 async def bot_api(settings, method, **payload):
-    async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
+    async with telegram_transport() as client:
         if method == 'sendDocument':
             document = payload.pop('document')
             data = {key:json.dumps(value) if isinstance(value,dict) else str(value) for key,value in payload.items()}
@@ -917,6 +930,17 @@ def bot_state_directory(base, token):
 
 
 async def bot(settings):
+    # Polling and deliveries share a pool, with separate connections for concurrent
+    # requests. The client closes only after the dispatcher has stopped.
+    async with httpx.AsyncClient(timeout=40, trust_env=False) as client:
+        token = telegram_client.set(client)
+        try:
+            await run_bot(settings)
+        finally:
+            telegram_client.reset(token)
+
+
+async def run_bot(settings):
     if not settings['modules']['nodera-bot'] or not settings.get('bot_token'):
         raise ValueError('Нужен токен включённого NoderaBot')
     if (await bot_api(settings, 'getWebhookInfo')).get('url'):

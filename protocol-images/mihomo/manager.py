@@ -773,7 +773,21 @@ def check_profile_revision(item: dict[str, Any], expected: str | None) -> None:
         raise HTTPException(status_code=409, detail="Профиль изменился на сервере. Ваши правки не применены; загрузите актуальный профиль перед сохранением")
 
 
-def profile_response(item: dict[str, Any]) -> dict[str, Any]:
+def profile_relay_registry(items):
+    """Read and validate Relay once per response, without caching across requests."""
+    if not any(connection.get('settings', {}).get('relay_host_id')
+               for item in items for connection in item.get('connections', [])):
+        return {'hosts': []}
+    try:
+        return relay_connection_control().read()
+    except (OSError, ValueError, KeyError, TypeError):
+        # consumer_state maps an unreadable registry to the existing unknown state.
+        return {'hosts': None}
+
+
+def profile_response(item: dict[str, Any], *, relay_registry=None) -> dict[str, Any]:
+    if relay_registry is None:
+        relay_registry = profile_relay_registry([item])
     result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "device_identity_secret", "retiring_connections", "last_operation_revision"}}
     result["revision"] = profile_revision(item)
     result["limits_status"] = subscription_limits.status(item, DATA_ROOT / "subscription-limits")
@@ -791,7 +805,8 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
         for connection in result.get("connections", []):
             connection["route_state"] = {"state": "unknown", "reason": "Реестр маршрутов недоступен", "addresses": [], "bindings": []}
     for connection in result.get('connections', []):
-        connection['route_state'] = relay_connections.consumer_state(relay_connection_control(), connection.get('settings', {}), connection['route_state'])
+        connection['route_state'] = relay_connections.consumer_state(
+            None, connection.get('settings', {}), connection['route_state'], registry=relay_registry)
     result["export_filename"] = profile_export_filename(item)
     result["protection_status"] = {}
     for device in result["devices"]:
@@ -4367,7 +4382,9 @@ def repair_reconciliation() -> dict[str, Any]:
 
 @app.get("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
 def list_profiles() -> dict[str, Any]:
-    return {"items": [profile_response(item) for item in profiles()]}
+    items = profiles()
+    relay_registry = profile_relay_registry(items)
+    return {"items": [profile_response(item, relay_registry=relay_registry) for item in items]}
 
 
 @app.get("/api/mihomo/profiles/schema", dependencies=[Depends(auth_required)])
