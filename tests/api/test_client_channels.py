@@ -259,6 +259,17 @@ class ClientChannelTests(unittest.TestCase):
         self.assertFalse(any('retired.example.com' in str(row) for row in definitions))
         self.assertTrue(all(row['device_id'] == device for row in definitions))
 
+    def test_snell_candidate_requires_a_core_that_can_parse_version_six(self):
+        device = self.register()
+        with patch.object(manager.network_routes, 'migrate', return_value={'bindings': []}), \
+                patch.object(manager, 'module_is_installed', side_effect=lambda module: module == 'transport-snell'), \
+                patch.object(manager, 'module_is_ready', return_value=True), \
+                patch.object(manager, 'validate_connection', return_value={}):
+            for version in (None, '', 'unknown', '1.19.33'):
+                self.assertEqual(manager.client_route_definitions(self.store[0], device, version), [])
+            self.assertEqual(len(manager.client_route_definitions(self.store[0], device, '1.19.34')), 1)
+            self.assertEqual(len(manager.client_route_definitions(self.store[0], device, 'v1.20.0')), 1)
+
     def test_candidate_failure_does_not_save_profile_and_busy_mutations_are_denied(self):
         self.register()
         before = deepcopy(self.store)

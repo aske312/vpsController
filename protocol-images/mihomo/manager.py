@@ -5867,7 +5867,7 @@ class ChannelSelectionRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-def client_route_definitions(profile, device_id):
+def client_route_definitions(profile, device_id, core_version=None):
     """Build bounded proposals from PRO inventory, never from client-supplied settings."""
     try:
         settings = load_json(NETWORK_ENDPOINTS_FILE, {})
@@ -5883,6 +5883,10 @@ def client_route_definitions(profile, device_id):
     for component in sorted(TRANSPORTS):
         if not module_is_installed(component) or not module_is_ready(component):
             continue
+        if component == 'transport-snell':
+            version = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', core_version or '')
+            if version is None or tuple(map(int, version.groups())) < (1, 19, 34):
+                continue
         variants = [{}]
         if component == 'transport-reality':
             variants = [{'route_mode': 'direct', 'transport': transport} for transport in ('xhttp', 'raw', 'grpc')]
@@ -5922,12 +5926,12 @@ def client_route_definitions(profile, device_id):
     return definitions
 
 
-def provision_client_routes(profile, device_id):
+def provision_client_routes(profile, device_id, core_version=None):
     record = application_operation.read(client_channels.path(DATA_ROOT, profile['id'], device_id))
     # A retry must not change the source of an awaiting client decision.
     if client_channels.state(record) == 'pending':
         return profile
-    definitions = client_route_definitions(profile, device_id)
+    definitions = client_route_definitions(profile, device_id, core_version)
     if not definitions:
         return profile
     import yaml
@@ -6041,7 +6045,7 @@ def select_client_channels(token: str, request: Request, payload: ChannelSelecti
     try:
         with profile_mutation_lock:
             profile, device_id = registered_command_device(token, request)
-            profile = provision_client_routes(profile, device_id)
+            profile = provision_client_routes(profile, device_id, subscription_device_metadata(request).get('core_version'))
             config, _ = render_client_profile(profile, device_id, selected_channels=False)
     except (ValueError, OSError, RuntimeError, HTTPException):
         raise HTTPException(409, "Не удалось подготовить каналы. Проверьте настройки профиля и Relay") from None
