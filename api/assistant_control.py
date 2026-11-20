@@ -780,8 +780,14 @@ def configure(api, payload):
                 except Exception:
                     raise HTTPException(503, 'Настройки восстановлены, но запуск Telegram-бота не подтверждён. Проверьте состояние службы') from None
                 raise HTTPException(409, 'Новый токен не применён. Прежние настройки и работа Telegram-бота восстановлены') from None
+        import assistant_access_notifications
+        try:
+            notices = assistant_access_notifications.enqueue_changes(api, old, value)
+        except (OSError, ValueError, KeyError, TypeError):
+            api.logger.warning('Access settings saved; Telegram permission notices could not be queued')
+            notices = {'state': 'unavailable', 'queued': 0}
     result = status(api)
-    result['settings_apply'] = {'bot_restarted': bool(restart_bot)}
+    result['settings_apply'] = {'bot_restarted': bool(restart_bot), 'access_notifications': notices}
     return result
 
 

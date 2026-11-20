@@ -134,6 +134,7 @@ async def lifespan(_: FastAPI):
     relay_recovery_task = None
     component_health_task = None
     owner_alert_task = None
+    access_notice_task = None
     chat_queue_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
@@ -144,10 +145,16 @@ async def lifespan(_: FastAPI):
         component_health_task = asyncio.create_task(component_checks.monitor(sys.modules[__name__]))
         import telegram_alerts
         owner_alert_task = asyncio.create_task(telegram_alerts.monitor(sys.modules[__name__]))
+        import assistant_access_notifications
+        access_notice_task = asyncio.create_task(assistant_access_notifications.monitor(sys.modules[__name__]))
         chat_queue_task = asyncio.create_task(assistant_jobs.monitor(sys.modules[__name__]))
     try:
         yield
     finally:
+        if access_notice_task is not None:
+            access_notice_task.cancel()
+            try: await access_notice_task
+            except asyncio.CancelledError: pass
         if chat_queue_task is not None:
             chat_queue_task.cancel()
             try: await chat_queue_task

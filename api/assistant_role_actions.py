@@ -74,9 +74,11 @@ def confirm(api, actor, record):
     settings = control.read(api)
     roles.require(settings, actor, 'roles_manage')
     if settings['revision'] != record['revision']: raise HTTPException(409, 'Права изменились; подготовьте подтверждение заново')
-    control.configure(api, payload(settings, record['body']))
+    applied = control.configure(api, payload(settings, record['body']))
     import assistant_commands
     text = 'Привязка подписки пользователя обновлена.' if 'mihomo_profile_id' in record['body'] and set(record['body']) <= {'telegram_id', 'mihomo_profile_id', 'products'} else 'Роли и права Nodera обновлены.'
+    if applied.get('settings_apply', {}).get('access_notifications', {}).get('state') == 'unavailable':
+        text += ' Уведомления пользователям не поставлены в очередь; проверьте журнал приложения.'
     with control.operations.locked(api.DATA_DIR):
         control.operations.atomic_json(assistant_commands.pending_path(api, actor, code=record['code']), {**record, 'completed_text': text})
         control.operations.atomic_json(api.DATA_DIR / 'operations' / (record['operation_id'] + '.json'), {

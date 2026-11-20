@@ -387,7 +387,9 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         dirtyRef.current = false;
         setDraft(saved);
       }
-      setChecks({}); setMessage(next.settings_apply?.bot_restarted ? "Настройки сохранены; Telegram-бот перезапущен" : "Настройки сохранены");
+      setChecks({});
+      if (next.settings_apply?.access_notifications?.state === "unavailable") setError("Права сохранены, но уведомления в Telegram не поставлены в очередь. Проверьте журнал приложения.");
+      else setMessage(next.settings_apply?.bot_restarted ? "Настройки сохранены; Telegram-бот перезапущен" : "Настройки сохранены");
       return next;
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Настройки не сохранены"); }
     finally { writing.current = false; setWorking(""); }
