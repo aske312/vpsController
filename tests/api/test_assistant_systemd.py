@@ -54,6 +54,7 @@ class AssistantCredentialSystemdTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform == 'linux' and os.environ.get('CORE_SYSTEMD_TESTS') == '1', 'Requires isolated systemd runner')
 class DurableChatSystemdTests(unittest.TestCase):
     def test_cancellation_stops_the_job_and_a_runtime_in_another_process_session(self):
+        from tests.api.support import api
         import json
         import time
         import types
