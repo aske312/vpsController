@@ -47,6 +47,13 @@ def order(row):
     return (row.get('queue_order', int(row['created_at'] * 10**9)), row['id'])
 
 
+def awaiting_input(record):
+    result = record.get('output', {}).get('result', {})
+    clarification = result.get('clarification')
+    return (isinstance(clarification, dict) and clarification.get('awaiting_input') is True
+            and isinstance(clarification.get('question'), str) and 8 <= len(clarification['question']) <= 1000)
+
+
 def records(api):
     values = [operations.read(file) for file in root(api).glob('*.json')]
     return sorted((row for row in values if row.get('id') and row.get('created_at')), key=order)
@@ -139,6 +146,7 @@ def submit(api, payload, *, actor=None, channel='panel'):
             return public(record)  # Never submit the same worker twice, even after a lost launch reply.
         files = list(root(api).glob('*.json'))
         active, own, size, retained, queue_order = 0, 0, 0, 0, 0
+        latest_dialog = None
         for entry in files:
             old = reconcile(api, operations.read(entry))
             queue_order = max(queue_order, order(old)[0])
@@ -149,19 +157,28 @@ def submit(api, payload, *, actor=None, channel='panel'):
             size += entry.stat().st_size
             active += old.get('state') not in TERMINAL
             own += old.get('actor') == actor and old.get('state') not in TERMINAL
+            if old.get('actor') == actor and old.get('channel', 'panel') == channel:
+                if latest_dialog is None or order(old) > order(latest_dialog): latest_dialog = old
         for entry in (root(api) / 'inputs').glob('*.json'):
             if entry.stat().st_mtime < time.time() - RETENTION: entry.unlink()
             else: size += entry.stat().st_size
-        if payload.previous_request_id:
-            previous = operations.read(path(api, payload.previous_request_id))
+        previous_id = payload.previous_request_id
+        if previous_id:
+            previous = operations.read(path(api, previous_id))
             if not previous or previous.get('actor') != actor or previous.get('channel', 'panel') != channel:
                 raise HTTPException(404, 'Предыдущее сообщение очереди не найдено')
+        elif (channel == 'bot' and latest_dialog and latest_dialog.get('state') == 'done'
+              and time.time() - latest_dialog.get('updated_at', latest_dialog['created_at']) <= 3600
+              and awaiting_input(latest_dialog)):
+            # Keep a pending question in the task queue even with chat memory
+            # disabled. Only the latest turn of this same actor/channel qualifies.
+            previous_id = latest_dialog['id']
         if active >= 64 or own >= 16 or size + len(json.dumps(body).encode()) > 96 * 1024 * 1024 or retained >= 256:
             raise HTTPException(429, 'Очередь или хранилище AI заполнены; дождитесь завершения запросов')
         record = {'id': identity, 'actor': actor, 'fingerprint': fingerprint, 'revision': settings['revision'],
                   'state': 'queued', 'stage': 'queued', 'created_at': time.time(), 'updated_at': time.time(),
                   'seq': 0, 'model': payload.model or settings.get('model', ''), 'question': payload.prompt,
-                  'channel': channel, 'previous_request_id': payload.previous_request_id,
+                  'channel': channel, 'previous_request_id': previous_id,
                   'queue_order': max(time.time_ns(), queue_order + 1),
                   'provider': settings.get('provider_url') or 'default',
                   'stream': payload.stream, 'unit': 'vps-control-chat-' + identity + '.service'}
@@ -279,7 +296,7 @@ def execute(api, identity):
                 if not body.get('conversation_id') and output.get('conversation_id'): body['conversation_id'] = output['conversation_id']
                 answer = output.get('result', {}).get('answer')
                 if answer and not body.get('conversation_id'):
-                    verified = not output.get('result', {}).get('status')
+                    verified = not output.get('result', {}).get('status') or awaiting_input(previous)
                     body['history'] = (body.get('history', []) + [
                         {'role': 'user', 'content': (previous.get('question') or 'Файлы')[:8000]},
                         {'role': 'assistant', 'content': answer[:8000] if verified else 'Предыдущий ответ не завершён; состояние действий нужно проверить.'}])[-40:]

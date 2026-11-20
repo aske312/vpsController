@@ -125,6 +125,12 @@ def persona(settings, actor='panel'):
             'Администратор управляет сервером и всеми подписками. Пользователь управляет только привязанной подпиской; права проверяет API. '
             'Контуры MCP независимы: VPS Controller — сервер, службы и системная диагностика; Mihomo — профили, подключения, модули и маршрутизация движка. '
             'Отвечай прежде всего на текущий вопрос собеседника. Короткие продолжения вроде «что не так?» сохраняют предмет разговора, но не означают просьбу повторить прежнюю операцию. Вопрос о возможностях, опциях или причинах ошибки не является разрешением заново подготовить создание или изменение. '
+            'Веди задачу до результата: определяй цель, проверяй доступные данные, выбирай следующий полезный шаг и проверяй результат. '
+            'Если существенных вводных не хватает, используй ask_user. Сначала найди сведения, доступные через разрешённые инструменты; не проси человека искать внутренние ID, которые можешь прочитать сама. '
+            'Спрашивай только то, что влияет на правильность, выбор объекта, стоимость или последствия. Не угадывай пользователя, профиль, узел или неоднозначную цель изменения. '
+            'Задавай один короткий вопрос, при необходимости с 2–4 понятными вариантами. Можно объединить до трёх тесно связанных уточнений в одном вопросе. Не запрашивай пароли и ключи API в переписке. '
+            'Для малозначительных обратимых деталей выбирай разумный вариант и кратко называй допущение. Не переспрашивай уже сказанное и не проси повторного разрешения на уже порученную работу. '
+            'Ответ на уточнение связывай с исходной задачей и продолжай её; новый вопрос или отмена пользователя меняют цель. Уточнение не является подтверждением изменения: подготовленные операции подтверждаются только штатным механизмом. '
             'Перед сообщением о текущей ошибке, ревизии или результате операции прочитай актуальные данные профильным инструментом. Коды ошибок и ID из прежних ответов ИИ не являются результатами проверки. Не считай прежнюю операцию активной по тексту истории: проверь актуальные pending_confirmations и состояние операции, если вопрос касается именно её. '
             'При вопросах о подписке используй Mihomo MCP: mihomo_capabilities, mihomo_api, mihomo_compare; при вопросах о собеседнике — mihomo_user. '
             'Для создания YAML-подписки есть mihomo_profile_create: прочитай mihomo_read(view="profile-schema") и modules, подготовь подключения и routing со structured_policy. '
@@ -597,7 +603,15 @@ class NativeTools:
         self.settings, self.actor = settings, actor
 
     async def call_tool(self, name, arguments):
-        if name == 'offer_telegram_setup':
+        if name == 'ask_user':
+            question = arguments['question'].strip()
+            options = [option.strip() for option in arguments.get('options', [])]
+            if (len(question) < 8 or any(not option for option in options)
+                    or len({option.casefold() for option in options}) != len(options)
+                    or ungrounded_operation_claim('\n'.join([question, *options]))):
+                raise ToolValidationError([{'field': 'question', 'issue': 'Нужен уточняющий вопрос без утверждений о выполнении; варианты должны различаться'}])
+            result = {'question': question, 'options': options, 'awaiting_input': True}
+        elif name == 'offer_telegram_setup':
             if not self.settings.get('offer_telegram_setup'):
                 raise PermissionError('Настройка доступна владельцу в личном чате с ботом')
             result = {'offered': True, 'saved': False, 'next': 'Владелец вводит API ID и API hash и подтверждает сохранение в форме.'}
@@ -646,6 +660,10 @@ def native_connections(settings, actor):
     def add(name, description, properties, required=()):
         result[name] = (session, SimpleNamespace(name=name, description=description,
             inputSchema={'type': 'object', 'properties': properties, 'required': list(required), 'additionalProperties': False}))
+    add('ask_user', 'Запросить существенные недостающие вводные и завершить текущий ход до ответа пользователя. Сначала прочитай доступные сведения сама. Не выполняет действий и не заменяет подтверждение изменений. Вызывай отдельно от других инструментов; не используй для необязательных деталей или повторного разрешения.',
+        {'question': {'type': 'string', 'minLength': 8, 'maxLength': 1000},
+         'options': {'type': 'array', 'minItems': 2, 'maxItems': 4,
+                     'items': {'type': 'string', 'minLength': 1, 'maxLength': 120}}}, ['question'])
     if settings.get('offer_telegram_setup'):
         add('offer_telegram_setup', 'Добавить в ответ владельцу кнопку настройки общих API ID и API hash Telegram MCP. Вызывай по просьбе настроить или заменить эти параметры. Инструмент не получает секреты и не сохраняет данные. Попроси владельца самостоятельно ввести параметры в форме и подтвердить сохранение.', {})
     if settings.get('confirmation_request_token'):
@@ -1834,6 +1852,11 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                 return result
             if len(calls) > 8:
                 raise RuntimeError('AI превысил лимит вызовов инструментов')
+            clarification = next((call for call in calls if call['function']['name'] == 'ask_user'), None)
+            if clarification and 'ask_user' in connections:
+                # A batch containing a question cannot execute changes before
+                # obtaining the missing input, regardless of the model's order.
+                calls = [clarification]
             messages.append({'role': 'assistant', 'content': message.get('content'), 'tool_calls': calls})
             for call in calls:
                 progress('tools', '')
@@ -1887,6 +1910,17 @@ async def chat(settings, actor, prompt, attachments=None, history=None):
                         failures.append(failure_evidence(name, receipt))
                         diagnostic('tool_result', round=round_index + 1, status='failed', duration_ms=(time.monotonic() - tool_started) * 1000, **failures[-1])
                     else:
+                        if name == 'ask_user' and isinstance(receipt, dict) and receipt.get('awaiting_input') is True:
+                            answer = receipt['question']
+                            if receipt.get('options'):
+                                answer += '\n\n' + '\n'.join(f'{index}. {option}' for index, option in enumerate(receipt['options'], 1))
+                                answer += '\n\nМожно выбрать вариант или ответить своими словами.'
+                            diagnostic('tool_result', round=round_index + 1, tool=name, status='awaiting_input', duration_ms=(time.monotonic() - tool_started) * 1000)
+                            output = {'answer': answer, 'tools_used': used, 'clarification': receipt,
+                                      'prepared_operation_ids': sorted(prepared_ids)}
+                            if prepared_operation: output['status'] = 'awaiting_confirmation'
+                            if complete_usage: output['usage'] = usage
+                            return output
                         if not evidence_required or not name.startswith('files_'): successful += 1
                         failed_calls.pop(fingerprint, None)
                         attempts.pop(fingerprint, None)

@@ -173,7 +173,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         settings['context_permits'] = {'remember': 'signed-proof'}
         self.assertIn('context_remember', runner.native_connections(settings, 'panel'))
         settings.update(web_enabled=False, personalization_enabled=False)
-        self.assertEqual(runner.native_connections(settings, 'panel'), {})
+        self.assertEqual(set(runner.native_connections(settings, 'panel')), {'ask_user'})
 
     async def test_html_search_decodes_results_and_keeps_site_scope(self):
         html = b'<html><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.example.com%2Fpage">Official <b>documentation</b></a><div class="result__snippet">Useful <b>summary</b></div></html>'
