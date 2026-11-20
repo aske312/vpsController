@@ -68,11 +68,6 @@ export function AIUsage({ request, names }: { request: ReturnType<typeof createA
       {loading && <p className="mcpFieldHint" role="status">Загружаю статистику…</p>}
       {!loading && !error && !users.length && <p className="mcpFieldHint">За этот период запросов не учтено.</p>}
       {users.length > 0 && <AIUsageTable users={users} names={names}/>}
-      <details className="noderaUsageNotes"><summary>Как считается</summary>
-        <p className="mcpFieldHint">Один запрос может включать несколько обращений к модели. Токены — по данным провайдера, включая известный расход до ошибок. Неполный учёт не означает нулевой расход.</p>
-        <p className="mcpFieldHint">Денежные списания недоступны. Лимиты пользователей не включены.</p>
-        {data?.earliest_record_at && <p className="mcpFieldHint">Данные с {new Date(data.earliest_record_at * 1000).toLocaleDateString("ru-RU")} · хранение {data.retention_days} дней. Старые запросы — в пределах сохранённых журналов.</p>}
-      </details>
     </div>}
   </details>;
 }

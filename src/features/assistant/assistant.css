@@ -59,9 +59,6 @@
 .noderaUsage .noderaAccessTable small { display:block; color:var(--muted); font-size:10px; margin-top:1px; }
 .noderaUsage .noderaAccessTable .noderaUsageIncomplete { color:var(--amber); }
 .noderaUsageIssues { display:flex; flex-wrap:wrap; gap:0 6px; }
-.noderaUsageNotes { color:var(--muted); font-size:10px; }
-.noderaUsageNotes > summary { cursor:pointer; }
-.noderaUsageNotes p { margin:5px 0 0; }
 @keyframes mcpActivityWave { 0%,100% { transform:scaleY(.6); opacity:.35; } 50% { transform:scaleY(2.2); opacity:1; } }
 @keyframes mcpActivityReveal { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 @media(prefers-reduced-motion:reduce) { .mcpActivitySignal i,.mcpActivityLabel { animation:none; } }
