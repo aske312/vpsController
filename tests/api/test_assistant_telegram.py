@@ -79,6 +79,7 @@ class TelegramPolicyTests(unittest.TestCase):
         settings = control.read(api)
         settings['memory_enabled'] = False
         settings['accounts'][0]['bot_chat_access'] = True
+        control.store(api, settings)
         with patch.object(control, 'runtime_request', return_value={'ok': True, 'result': {'answer': 'Fixture', 'tools_used': ['tg_send_message'], 'prepared_operation_ids': [identity]}}):
             output = control.chat_request(api, control.Chat(prompt='Fixture'), '11', settings=settings)
         self.assertEqual(output['pending_action']['changes']['arguments']['group'], '42')

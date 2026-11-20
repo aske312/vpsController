@@ -15,7 +15,7 @@ SERVER_PERMISSIONS = VPS_PERMISSIONS - MIHOMO
 DEFAULTS = {
     'owner': list(PERMISSIONS),
     'administrator': [item for item in PERMISSIONS if item != 'roles_manage'],
-    'moderator': [item for item in PERMISSIONS if item in USER_ALLOWED | {'server_read'}],
+    'moderator': [item for item in PERMISSIONS if item in USER_ALLOWED],
     'user': [item for item in PERMISSIONS if item in USER_ALLOWED], 'guest': [],
 }
 EXPANSIONS = {
@@ -111,7 +111,35 @@ def account_grants(settings, account):
     enabled = products(account)
     if 'mihomo' not in enabled: grants -= MIHOMO
     if 'assistant' not in enabled: grants &= MIHOMO
+    # Templates and individual overrides cannot grant infrastructure access to
+    # a non-administrative role (including legacy accounts).
+    if role(account) not in ('owner', 'administrator'):
+        ceiling = USER_ALLOWED | ({'subscription_quota', 'subscription_speed', 'subscription_expiry'} if role(account) == 'moderator' else set())
+        grants &= ceiling
     return grants
+
+
+def privileged(settings, actor):
+    if str(actor) == 'panel': return True
+    account = next((row for row in settings.get('accounts', []) if str(row['telegram_id']) == str(actor)), {})
+    return role(account) in ('owner', 'administrator')
+
+
+def context_scope(settings, actor):
+    """Bind stored model context to current authority, never to client claims."""
+    import hashlib
+    import json
+    account = next((row for row in settings.get('accounts', []) if str(row['telegram_id']) == str(actor)), {})
+    value = {'actor': str(actor), 'role': 'owner' if str(actor) == 'panel' else role(account),
+             'permissions': sorted(effective(settings, actor)), 'profile': account.get('mihomo_profile_id'),
+             'telegram_tools': account.get('telegram_tools'), 'telegram_disabled_tools': account.get('telegram_disabled_tools'),
+             'telegram_action_targets': account.get('telegram_action_targets'), 'excluded_dialogs': account.get('excluded_dialogs')}
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def context_matches(record, settings, actor):
+    return record.get('access_scope') == context_scope(settings, actor) or (
+        not record.get('access_scope') and privileged(settings, actor))
 
 
 def effective(settings, actor):

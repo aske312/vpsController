@@ -6,6 +6,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, patch
 import uuid
 
@@ -172,7 +173,11 @@ class BotHistoryRuntimeTests(unittest.TestCase):
         value['bot_token'] = '123456:' + 'f' * 32
         control.store(api, value)
         history.append(api, value, '11', history.Message(message_id=1, role='assistant', text='Actual command response', date=int(time.time())))
-        with patch.object(control.subprocess, 'Popen') as factory:
+        with self.assertRaises(HTTPException) as obsolete:
+            control.runtime_request(api, '--chat', {'prompt': 'Hello', 'actor': '11'})
+        self.assertEqual(obsolete.exception.status_code, 409)
+        with patch.object(control.subprocess, 'Popen') as factory, \
+             patch.object(control, 'version_at_least', side_effect=lambda file, minimum: minimum == (1, 51, 0)):
             process = factory.return_value.__enter__.return_value
             process.returncode = 0
             process.communicate.return_value = (json.dumps({'ok': True, 'result': {'answer': 'OK'}}), '')

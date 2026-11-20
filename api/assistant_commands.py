@@ -39,7 +39,7 @@ HELP = ('Команды сервера:\n'
         '/security — состояние безопасности\n'
         '/logs [служба] — последние логи\n'
         '/diagnostics — пассивная диагностика\n'
-        '/profiles — доступные профили Mihomo\n'
+        '/profiles — доступные профили\n'
         '/profile [ID] — параметры подписки\n'
         '/devices [ID] — устройства подписки\n'
         '/traffic [ID] — учтённый трафик подписки\n'
@@ -161,7 +161,7 @@ def profile_reply(api, settings, actor, command, args):
     items = assistant_mihomo.profiles(api, actor)['items']
     if command == '/profiles':
         rows = [f"{item['id']} · {str(item.get('name') or item['id'])[:100]}" for item in items[:40]]
-        return 'Доступные профили Mihomo:\n' + ('\n'.join(rows) or 'Нет доступных профилей') + '\n/profile <ID> — параметры профиля'
+        return 'Доступные профили:\n' + ('\n'.join(rows) or 'Нет доступных профилей') + '\n/profile <ID> — параметры профиля'
     linked = assistant_mihomo.profile_for(settings, actor).get('mihomo_profile_id')
     identity = args[0] if args else linked
     item = next((row for row in items if row['id'] == identity), None)
@@ -225,7 +225,7 @@ def execute(api, actor, prompt, *, source='bot'):
         import connection_apps
         return connection_apps.guide(args[0].lower() if args else None)
     if command == '/connect' and not args:
-        return 'Подключение Mihomo:\n1. Выберите приложение: /apps. Для Windows рекомендуем наш Nodera: https://github.com/aske312/NoderaClient.\n2. Получите ссылку: /subscription.\n3. Добавьте подписку по URL в приложении (в Nodera нажмите «+»).\n4. Выберите сервер и включите подключение.\nПосле изменения настроек обновите подписку в клиенте.'
+        return 'Подключение:\n1. Выберите приложение: /apps. Для Windows рекомендуем наш Nodera: https://github.com/aske312/NoderaClient.\n2. Получите ссылку: /subscription.\n3. Добавьте подписку по URL в приложении (в Nodera нажмите «+»).\n4. Выберите сервер и включите подключение.\nПосле изменения настроек обновите подписку в клиенте.'
     if command in ('/confirm', '/operation'):
         pending = control.operations.read(pending_path(api, actor, code=args[0] if command == '/confirm' and args else None,
                                                        operation_id=args[0] if command == '/operation' and args else None))
@@ -242,10 +242,10 @@ def execute(api, actor, prompt, *, source='bot'):
     if command == '/subscription' and len(args) <= 1:
         import assistant_mihomo
         linked = args[0] if args else assistant_mihomo.profile_for(settings, actor).get('mihomo_profile_id')
-        if not linked: return 'К учётной записи не привязана подписка Mihomo. Обратитесь к владельцу.'
+        if not linked: return 'К учётной записи не привязана подписка. Обратитесь к владельцу.'
         if not re.fullmatch(assistant_mihomo.ID, linked): raise HTTPException(422, 'Укажите ID профиля из /profiles')
         result = assistant_mihomo.call(api, actor, 'GET', '/profiles/' + linked + '/subscription', {})
-        return 'Ваша подписка Mihomo:\n' + result['url'] if result.get('url') else 'Подписка привязана, но публичная ссылка ещё не настроена. Обратитесь к владельцу.'
+        return 'Ваша подписка:\n' + result['url'] if result.get('url') else 'Подписка привязана, но публичная ссылка ещё не настроена. Обратитесь к владельцу.'
     if command in ('/profile', '/devices', '/traffic', '/profiles') and len(args) <= (0 if command == '/profiles' else 1):
         return profile_reply(api, settings, actor, command, args)
     if command in ('/network', '/security', '/diagnostics', '/logs') and (not args or command == '/logs' and len(args) == 1):
@@ -331,7 +331,7 @@ def execute(api, actor, prompt, *, source='bot'):
             if record.get('completed_text'):
                 return record['completed_text']
             if record.get('kind') == 'mihomo' and record.get('source') != 'bot-command' and not settings.get('mcp', {}).get('mihomo-mcp', settings.get('mcp', {}).get('vps-controller-mcp', False)):
-                raise HTTPException(403, 'Контур Mihomo MCP выключен; изменение не отправлено')
+                raise HTTPException(403, 'Контур MCP выключен; изменение не отправлено')
             if record.get('kind') == 'relay':
                 import assistant_relay
                 assistant_relay.require(settings, actor, manage=True)

@@ -13,8 +13,6 @@ import uuid
 import application_operation as operations
 import assistant_roles as roles
 
-ROLE_NAMES = {'owner': 'Владелец', 'administrator': 'Администратор', 'moderator': 'Модератор',
-              'user': 'Пользователь', 'guest': 'Гость'}
 PERMISSION_NAMES = {
     'chat': 'Общение с ИИ', 'model_select': 'Выбор модели ИИ', 'web': 'Поиск в интернете',
     'memory': 'Личная память и персонализация', 'telegram_read': 'Работа с подключённым аккаунтом Telegram',
@@ -27,8 +25,8 @@ PERMISSION_NAMES = {
     'subscription_quota': 'Изменение квоты трафика', 'subscription_speed': 'Изменение скорости',
     'subscription_expiry': 'Изменение срока подписки', 'subscriptions_admin': 'Доступ ко всем подпискам',
     'subscriptions_create': 'Создание подписок', 'subscriptions_delete': 'Удаление подписок',
-    'modules_manage': 'Управление модулями Mihomo', 'routing_manage': 'Общая маршрутизация Mihomo',
-    'dns_manage': 'Общие настройки DNS', 'recovery': 'Восстановление Mihomo', 'roles_manage': 'Управление ролями и правами',
+    'modules_manage': 'Управление модулями подключения', 'routing_manage': 'Общая маршрутизация',
+    'dns_manage': 'Общие настройки DNS', 'recovery': 'Восстановление подключения', 'roles_manage': 'Управление доступом пользователей',
 }
 RETENTION = 7 * 86400
 _delivery_guard = threading.Lock()
@@ -99,33 +97,20 @@ def enqueue_changes(api, before, after):
 
 
 def message(before, after, *, blocked=False):
-    old, new = set(before['permissions']), set(after['permissions'])
+    new = set(after['permissions'])
     lines = ['Ваши права в Nodera изменены.']
-    if before['role'] != after['role']:
-        lines.append('Роль: ' + ROLE_NAMES[before['role']] + ' → ' + ROLE_NAMES[after['role']] + '.')
-    else: lines.append('Роль: ' + ROLE_NAMES[after['role']] + '.')
-    for title, grants in (('Добавлены разрешения', new - old), ('Сняты разрешения', old - new)):
-        if grants: lines += ['', title + ':', *['• ' + PERMISSION_NAMES[key] for key in roles.PERMISSIONS if key in grants]]
-    if before['profile'] != after['profile']:
-        lines += ['', 'Назначенная подписка Mihomo: /subscription.' if after['profile'] else
-                  'Подписка Mihomo больше не назначена.' if 'subscription_read' in new else 'Доступ к своей подписке Mihomo отозван.']
-    if 'telegram_read' in new:
-        import assistant_telegram
-        for title, tools in (('Telegram — добавлены инструменты', set(after['telegram_tools']) - set(before['telegram_tools'])),
-                             ('Telegram — сняты инструменты', set(before['telegram_tools']) - set(after['telegram_tools']))):
-            if tools:
-                labels = [assistant_telegram.TOOLS[name]['title'] for name in sorted(tools) if name in assistant_telegram.TOOLS]
-                lines += ['', title + ': ' + '; '.join(labels[:5]) + (f'; ещё {len(labels) - 5}' if len(labels) > 5 else '') + '.']
-        if before['telegram_scope'] != after['telegram_scope']:
-            lines += ['', 'Изменён список разрешённых диалогов подключённого аккаунта Telegram.']
     if blocked:
         lines += ['', 'Доступ к боту заблокирован администратором. Команды пока недоступны.']
-    elif new:
-        lines += ['', 'Теперь вам разрешено:', *['• ' + PERMISSION_NAMES[key] for key in roles.PERMISSIONS if key in new],
-                  '', '/myprofile — ваш профиль; /id — ваш Telegram ID.']
     else:
-        lines += ['', 'Административные команды, чат ИИ и управление подписками недоступны.',
-                  'Остаются /myprofile — ваш профиль и /id — ваш Telegram ID.']
+        labels = [PERMISSION_NAMES[key] for key in roles.PERMISSIONS if key in new
+                  and not (key == 'subscription_manage' and new.intersection(roles.OWN_EDIT))]
+        if 'telegram_read' in new:
+            import assistant_telegram
+            tools = [assistant_telegram.TOOLS[name]['title'] for name in after['telegram_tools'] if name in assistant_telegram.TOOLS]
+            labels = [label for label in labels if label != PERMISSION_NAMES['telegram_read']]
+            if tools: labels.append('В подключённом Telegram: ' + '; '.join(tools))
+        lines += ['', 'Теперь вам доступно:', *['• ' + label for label in labels],
+                  '', '/myprofile — ваш профиль; /id — ваш Telegram ID.']
     text = '\n'.join(lines)
     return text if len(text) <= 4000 else text[:3998] + '…'
 

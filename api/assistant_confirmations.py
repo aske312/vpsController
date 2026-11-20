@@ -88,8 +88,11 @@ def annotate(api, actor, rows, settings):
 
 
 def for_model(api, actor):
-    return [{key: row[key] for key in ('operation_id', 'service', 'action', 'expires', 'confirmation_request') if key in row}
-            for row in commands.pending_actions(api, actor)]
+    settings = control.read(api)
+    privileged = control.roles.privileged(settings, actor)
+    return [{key: row[key] for key in ('operation_id', 'service', 'action', 'expires', 'confirmation_request') if key in row
+             and (privileged or key not in ('service', 'action'))}
+            for row in commands.pending_actions(api, actor) if row.get('revision', settings['revision']) == settings['revision']]
 
 
 def present(api, actor, payload):

@@ -94,8 +94,8 @@ def command_list(text):
 def styled_message(command, text):
     if not text: return text
     command = (command.split() or [''])[0].split('@')[0].lower()
-    if text == 'Изменения Mihomo сохранены.':
-        return notice('Изменения сохранены', 'Настройки Mihomo обновлены.\n\nЕсли меняли конфигурацию подключения, обновите подписку в клиенте.', '✅')
+    if text in ('Изменения сохранены.', 'Изменения Mihomo сохранены.'):
+        return notice('Изменения сохранены', 'Настройки обновлены.\n\nЕсли меняли конфигурацию подключения, обновите подписку в клиенте.', '✅')
     if text == 'Ожидающая команда отменена.':
         return notice('Действие отклонено', 'Запрос закрыт до отправки. Изменения по нему не выполнялись.', '⏸')
     operation = re.match(r'^Операция ([0-9a-f]{32})\n([^\n]+)\n/operation \1$', text)
@@ -140,9 +140,9 @@ def styled_message(command, text):
     if command in ('/profile', '/traffic', '/devices') and text.startswith(('Подписка · ', 'Устройства · ')):
         lines = text.splitlines()
         return notice('Ваша подписка' if command != '/devices' else 'Устройства подписки', '**Профиль:** ' + code(lines[0].split(' · ', 1)[1].rstrip(':')) + '\n\n' + labelled(lines[1:]), '📋')
-    if command == '/subscription' and text.startswith('Ваша подписка Mihomo:\n'):
-        return notice('Ваша подписка Mihomo', text.split('\n', 1)[1] + '\n\nСкопируйте ссылку в клиент Mihomo → «Импорт подписки по URL».\nСсылка даёт доступ к подключению — храните её у себя.', '🔗')
-    titles = {'/components': ('Компоненты', '🧩'), '/profiles': ('Профили Mihomo', '📋'), '/connect': ('Подключение Mihomo', '🔗'),
+    if command == '/subscription' and text.startswith('Ваша подписка:\n'):
+        return notice('Ваша подписка', text.split('\n', 1)[1] + '\n\nСкопируйте ссылку в клиент → «Импорт подписки по URL».\nСсылка даёт доступ к подключению — храните её у себя.', '🔗')
+    titles = {'/components': ('Компоненты', '🧩'), '/profiles': ('Профили', '📋'), '/connect': ('Подключение', '🔗'),
               '/help': ('Навигатор Nodera', '🧭'), '/start': ('Nodera на связи', '👋'), '/id': ('Ваш Telegram ID', '🪪'),
               '/network': ('Сеть', '🌐'), '/security': ('Безопасность', '🛡️'), '/diagnostics': ('Диагностика', '🔎'), '/logs': ('Последние события', '📑')}
     if command in titles:

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import assistant_roles as roles
 import time
 
 from fastapi import HTTPException
@@ -104,9 +105,14 @@ async def monitor(api):
 
 
 def recover(api):
+    import assistant_control as control
     stopping = []
     with operations.locked(api.DATA_DIR):
+        settings = control._read(api)
         for row in records(api):
+            if row.get('state') not in TERMINAL and not roles.context_matches(row, settings, row['actor']):
+                row.update(cancel_requested=True, stage='cancelling', partial='')
+                operations.atomic_json(path(api, row['id']), row)
             if row.get('state') not in TERMINAL: reconcile(api, row)
             if row.get('cancel_requested') and row.get('state') not in TERMINAL:
                 stopping.append(row['id'])
@@ -152,6 +158,7 @@ def submit(api, payload, *, actor=None, channel='panel'):
         record = operations.read(file)
         if record:
             if record['actor'] != actor or record.get('channel', 'panel') != channel: raise HTTPException(404, 'Запрос не найден')
+            if not roles.context_matches(record, settings, actor): raise HTTPException(404, 'Запрос недоступен с текущими правами')
             if record['fingerprint'] != fingerprint: raise HTTPException(409, 'ID уже занят другим сообщением')
             return public(record)  # Never submit the same worker twice, even after a lost launch reply.
         files = list(root(api).glob('*.json'))
@@ -186,6 +193,7 @@ def submit(api, payload, *, actor=None, channel='panel'):
         if active >= 64 or own >= 16 or size + len(json.dumps(body).encode()) > 96 * 1024 * 1024 or retained >= 256:
             raise HTTPException(429, 'Очередь или хранилище AI заполнены; дождитесь завершения запросов')
         record = {'id': identity, 'actor': actor, 'fingerprint': fingerprint, 'revision': settings['revision'],
+                  'access_scope': roles.context_scope(settings, actor),
                   'state': 'queued', 'stage': 'queued', 'created_at': time.time(), 'updated_at': time.time(),
                   'seq': 0, 'model': payload.model or settings.get('model', ''), 'question': payload.prompt,
                   'channel': channel, 'previous_request_id': previous_id,
@@ -228,10 +236,14 @@ def update(api, identity, **values):
 
 
 def get(api, identity, actor='panel', *, channel=None):
-    authorize(api, actor)
+    settings = authorize(api, actor)
     with operations.locked(api.DATA_DIR):
         record = operations.read(path(api, identity))
         if not record or record['actor'] != actor or channel is not None and record.get('channel', 'panel') != channel: raise HTTPException(404, 'Запрос не найден')
+        if actor != 'panel':
+            import assistant_control as control
+            settings = control._read(api)
+        if not roles.context_matches(record, settings, actor): raise HTTPException(404, 'Запрос недоступен с текущими правами')
         if record['updated_at'] < time.time() - RETENTION: raise HTTPException(410, 'Срок хранения результата истёк')
         before = (record['state'], record.get('launch_requested'))
         record = reconcile(api, record)
@@ -265,10 +277,14 @@ def stop_worker(identity):
 
 
 def cancel(api, identity, actor='panel'):
-    authorize(api, actor)
+    settings = authorize(api, actor)
     with operations.locked(api.DATA_DIR):
         row = operations.read(path(api, identity))
         if not row or row['actor'] != actor: raise HTTPException(404, 'Запрос не найден')
+        if actor != 'panel':
+            import assistant_control as control
+            settings = control._read(api)
+        if not roles.context_matches(row, settings, actor): raise HTTPException(404, 'Запрос недоступен с текущими правами')
         if row['state'] in TERMINAL: return public(row)
         row.update(cancel_requested=True, stage='cancelling', updated_at=time.time(), seq=row['seq'] + 1)
         if row['state'] == 'queued':
@@ -321,16 +337,20 @@ def execute(api, identity):
         operations.atomic_json(path(api, identity), record)
     token = current_job.set((api, identity))
     try:
-        authorize(api, record['actor'])
+        settings = authorize(api, record['actor'])
+        if not control.roles.context_matches(record, settings, record['actor']):
+            raise HTTPException(409, 'Ваш доступ изменился. Отправьте вопрос заново.')
         body = operations.read(input_path(api, identity))
         fingerprint = hashlib.sha256(json.dumps([record['actor'], body], sort_keys=True).encode()).hexdigest()
         if fingerprint != record['fingerprint']: raise HTTPException(409, 'Входные данные запроса AI не подтверждены; генерация не запускалась')
+        if not control.roles.privileged(settings, record['actor']): body['history'] = []
         previous_id = record.get('previous_request_id')
         visited = set()
         while previous_id and previous_id not in visited and len(visited) < 64:
             visited.add(previous_id)
             previous = operations.read(path(api, previous_id))
-            if previous.get('actor') == record['actor'] and previous.get('channel', 'panel') == record.get('channel', 'panel'):
+            if (previous.get('actor') == record['actor'] and previous.get('channel', 'panel') == record.get('channel', 'panel')
+                    and control.roles.context_matches(previous, settings, record['actor'])):
                 output = previous.get('output', {})
                 if not body.get('conversation_id') and output.get('conversation_id'): body['conversation_id'] = output['conversation_id']
                 answer = output.get('result', {}).get('answer')

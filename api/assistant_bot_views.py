@@ -64,7 +64,7 @@ def subscription(api, settings, actor, command, args):
     link=None
     if command=='/subscription':
         if not identity or not re.fullmatch(assistant_mihomo.ID,identity):
-            return result('Подписка Mihomo\nПодписка ещё не оформлена. Передайте ваш Telegram ID владельцу продукта, чтобы он создал и привязал подписку.\n\nВаш ID: `' + actor + '`\n\nА пока — молите Императора.')
+            return result('Подписка\nПодписка ещё не оформлена. Передайте ваш Telegram ID владельцу продукта, чтобы он создал и привязал подписку.\n\nВаш ID: `' + actor + '`\n\nА пока — молите Императора.')
         link=assistant_mihomo.call(api,actor,'GET','/profiles/'+identity+'/subscription',{}).get('url')
     try: item = profile_item(api, settings, actor, identity)
     except HTTPException:
@@ -166,7 +166,7 @@ def prepared_record(api, actor, identity):
         record=control.operations.read(file)
         if record.get('operation_id')!=identity or record.get('kind')!='mihomo': raise HTTPException(409,'Подтверждение не найдено')
         # A direct human bot command is independent of opt-in AI/MCP tools.
-        # Live Mihomo permissions and the explicit confirmation still apply.
+        # Live permissions and the explicit confirmation still apply.
         record['source']='bot-command'
         control.operations.atomic_json(file,record)
     return record
@@ -194,7 +194,7 @@ def admin(api, settings, actor, args, request_id):
     state = value.get('admin_dialog') or {}
     if action == 'cancel':
         value.pop('admin_dialog', None)
-        output = result('Администрирование Mihomo', [[button('Подписки', '/admin list'),button('Создать', '/admin create')]])
+        output = result('Администрирование', [[button('Подписки', '/admin list'),button('Создать', '/admin create')]])
     elif action == 'create':
         roles.require(settings,actor,'subscriptions_create')
         value['admin_dialog'] = {'action':'create'}
@@ -264,7 +264,7 @@ def admin(api, settings, actor, args, request_id):
         if nav: rows.append(nav)
         if roles.allows(settings,actor,'subscriptions_create'): rows.append([button('Создать подписку','/admin create')])
         value.pop('admin_dialog',None)
-        output = result(f'Подписки Mihomo · {len(items)}',rows)
+        output = result(f'Подписки · {len(items)}',rows)
     if request_id:
         cache[request_id] = {'fingerprint':fingerprint,'result':output}
         value['admin_receipts'] = dict(list(cache.items())[-32:])

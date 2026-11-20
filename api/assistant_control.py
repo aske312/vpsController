@@ -912,6 +912,11 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     files = [item.model_dump() for item in payload.attachments]
     body = {'prompt': payload.prompt, 'actor': actor, 'model': payload.model, 'attachments': files, 'stream': payload.stream, 'request_id': payload.request_id,
             'history': [item.model_dump() for item in payload.history]}
+    # Client-supplied assistant history is not evidence of present authority.
+    if not roles.privileged(settings, actor):
+        import assistant_jobs
+        job = assistant_jobs.current_job.get()
+        if not job or job != (api, payload.request_id): body['history'] = []
     if (channel == 'bot' and actor != 'panel' and roles.allows(settings, actor, 'roles_manage')
             and not files and not payload.alert and getattr(api, 'PUBLIC_DOMAIN', '')):
         body['offer_telegram_setup'] = True
@@ -947,7 +952,8 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     if payload.previous_request_id:
         import assistant_jobs
         previous = operations.read(assistant_jobs.path(api, payload.previous_request_id))
-        if previous.get('actor') == actor and previous.get('channel', 'panel') == channel:
+        if (previous.get('actor') == actor and previous.get('channel', 'panel') == channel
+                and roles.context_matches(previous, settings, actor)):
             prior_status = previous.get('output', {}).get('result', {}).get('status')
             if previous.get('state') in ('failed', 'unknown') or prior_status:
                 state = ('Действие ожидает подтверждения человека; само по себе оно не выполнено.' if prior_status == 'awaiting_confirmation'
@@ -959,6 +965,8 @@ def _chat_request(api, payload, actor='panel', channel='panel', *, settings=None
     import assistant_commands
     previous_pending = {row['operation_id'] for row in assistant_commands.pending_actions(api, actor)}
     output = runtime_request(api, '--chat', body)
+    if roles.context_scope(read(api), actor) != roles.context_scope(settings, actor):
+        raise HTTPException(409, 'Ваш доступ изменился во время запроса. Отправьте вопрос заново.')
     current_pending = assistant_commands.pending_actions(api, actor)
     prepared = output['result'].get('prepared_operation_ids')
     # New runtimes identify this request's preparations explicitly. For older
@@ -1079,7 +1087,7 @@ def _runtime_request(api, mode, body):
         value['offer_telegram_setup'] = True
     value['web_enabled'] = value.get('web_enabled', True) and 'web' in grants
     value['personalization_enabled'] = value.get('personalization_enabled', True) and 'memory' in grants
-    value['accounts'] = [{**row, 'effective_permissions': sorted(roles.account_grants(value, row)), 'bot_access': roles.allows(value, str(row['telegram_id']), 'subscriptions_admin'), 'bot_chat_access': roles.allows(value, str(row['telegram_id']), 'chat'), 'vps_access': bool(roles.account_grants(value, row) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), 'telegram_access': roles.allows(value, str(row['telegram_id']), 'telegram_read')} for row in value['accounts']]
+    value['accounts'] = [{**roles.migrated(value, row), 'effective_permissions': sorted(roles.account_grants(value, row)), 'bot_access': roles.allows(value, str(row['telegram_id']), 'subscriptions_admin'), 'bot_chat_access': roles.allows(value, str(row['telegram_id']), 'chat'), 'vps_access': bool(roles.account_grants(value, row) & {'server_read', 'server_manage', 'diagnostics', 'logs_read', 'network_read', 'security_read'}), 'telegram_access': roles.allows(value, str(row['telegram_id']), 'telegram_read')} for row in value['accounts']]
     value['server_name'] = socket.gethostname()
     value['telegram_state_dir'] = str(directory(api) / 'telegram-state')
     import diagnostic_context
@@ -1090,6 +1098,15 @@ def _runtime_request(api, mode, body):
         value['ai_request_id'] = trace['meta']['request_id']
     import assistant_contacts
     value['interlocutor'] = assistant_contacts.interlocutor(api, value, str(body.get('actor', 'panel')))
+    # Child processes receive only the requesting account, never another user's session.
+    actor = str(body.get('actor', 'panel'))
+    if actor != 'panel':
+        value['accounts'] = [row for row in value['accounts'] if str(row['telegram_id']) == actor]
+    if not roles.privileged(value, actor):
+        value.pop('server_name', None)
+        value['assistant_instructions'] = ''
+        if mode == '--chat' and not version_at_least(runtime_directory(component) / 'version', (1, 51, 0)):
+            raise HTTPException(409, 'Обновите компонент Nodera для безопасного доступа пользователей к ИИ')
     body = dict(body)
     import assistant_personalization
     if value.get('personalization_enabled', True):
@@ -1283,6 +1300,13 @@ def require_bot_actor(value, actor, *, chat=False):
 def control_tool(api, name, arguments=None, actor='panel'):
     import assistant_commands
     arguments = arguments or {}
+    if name == 'vps_operation' and not roles.privileged(read(api), actor):
+        # Compatibility for older clients polling their own subscription action.
+        identity = arguments.get('operation_id', '')
+        pending = operations.read(assistant_commands.pending_path(api, actor, operation_id=identity))
+        if pending.get('kind') == 'mihomo': name = 'mihomo_operation'
+    if tool_module(name) == 'vps-controller-mcp' and not roles.privileged(read(api), actor):
+        raise HTTPException(403, 'Настройка и диагностика сервера доступны только администратору и владельцу')
     if name in ('relay_read', 'relay_prepare'):
         import assistant_relay
         return (assistant_relay.read if name == 'relay_read' else assistant_relay.prepare)(api, actor, arguments.get('body', {}))

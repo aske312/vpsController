@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import HTTPException
 import application_operation as operations
+import assistant_roles as roles
 
 MAX_BYTES = 5 * 1024 * 1024 * 1024
 MAX_CONVERSATIONS = 10
@@ -55,6 +56,8 @@ def get(api, identity, actor='panel', channel='panel', *, settings=None):
         record = _read(file)
     if not record:
         raise HTTPException(404, 'Диалог не найден. Создайте новый чат')
+    if settings is not None and not roles.context_matches(record, settings, actor):
+        return {**record, 'title': 'Новый диалог', 'turns': []}
     return record
 
 
@@ -84,7 +87,7 @@ def listing(api, settings, actor='panel', channel='panel'):
         items = []
         for file in folder(api, actor, channel).glob('*.json'):
             record = _read(file)
-            if record:
+            if record and roles.context_matches(record, settings, actor):
                 items.append({key: record[key] for key in ('id', 'title', 'updated_at') } | {'turns': len(record['turns'])})
     return {'enabled': True, 'items': sorted(items, key=lambda item: item['updated_at'], reverse=True)}
 
@@ -93,6 +96,9 @@ def append(api, identity, actor, channel, question, files, result, model, settin
     with operations.locked(api.DATA_DIR):
         file = path(api, identity, actor, channel)
         record = _read(file) or {'schema': 1, 'id': identity, 'title': (question.strip().splitlines() or [files[0]['name'] if files else 'Новый диалог'])[0][:80], 'turns': []}
+        if not roles.context_matches(record, settings, actor):
+            record.update(turns=[], title=(question.strip() or 'Новый диалог')[:80])
+        record['access_scope'] = roles.context_scope(settings, actor)
         attachments = [{**item, 'id': uuid.uuid4().hex, 'size': len(item['data']) * 3 // 4 - (len(item['data']) - len(item['data'].rstrip('=')))} for item in files]
         identity_turn = max((turn['id'] for turn in record['turns']), default=0) + 1
         record['turns'].append({'id': identity_turn, 'question': question, 'at': operations.timestamp(), 'files': attachments, 'answer': result['answer'], 'tools': result.get('tools_used', []), 'model': model})

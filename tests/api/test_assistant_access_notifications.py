@@ -49,9 +49,9 @@ class AccessNoticeTests(unittest.TestCase):
             notices.deliver(self.env)
         self.assertEqual(self.sender.call_args.args[:2], (self.current['bot_token'], 11))
         text = self.sender.call_args.args[2]
-        self.assertIn('Администратор → Гость', text)
-        self.assertIn('Сняты разрешения', text)
-        self.assertIn('чат ИИ и управление подписками недоступны', text)
+        self.assertNotIn('Роль:', text)
+        self.assertNotIn('Сняты разрешения', text)
+        self.assertNotIn('Mihomo', text)
         self.assertIn('/myprofile', text)
         self.assertNotIn('Теперь вам разрешено', text)
         notices.deliver(self.env)
@@ -62,10 +62,10 @@ class AccessNoticeTests(unittest.TestCase):
         self.change(settings('moderator'))
         notices.deliver(self.env)
         text = self.sender.call_args.args[2]
-        self.assertIn('Гость → Модератор', text)
-        self.assertIn('Добавлены разрешения', text)
+        self.assertNotIn('Роль:', text)
+        self.assertNotIn('Добавлены разрешения', text)
         self.assertIn('Общение с ИИ', text)
-        self.assertIn('Просмотр сервера и служб', text)
+        self.assertNotIn('Просмотр сервера и служб', text)
         self.assertNotIn('Управление службами', text)
 
     def test_role_policy_changes_notify_only_users_whose_effective_rights_changed(self):
@@ -79,7 +79,7 @@ class AccessNoticeTests(unittest.TestCase):
         notices.deliver(self.env)
         self.sender.assert_called_once()
         self.assertEqual(self.sender.call_args.args[1], 11)
-        self.assertIn('Сняты разрешения:\n• Общение с ИИ', self.sender.call_args.args[2])
+        self.assertNotIn('Общение с ИИ', self.sender.call_args.args[2])
 
     def test_individual_revocation_and_account_removal_are_not_hidden_by_the_new_ACL(self):
         self.current = settings('user')
@@ -87,11 +87,11 @@ class AccessNoticeTests(unittest.TestCase):
         after['accounts'][0]['permission_overrides']['chat'] = False
         self.change(after)
         notices.deliver(self.env)
-        self.assertIn('Сняты разрешения:\n• Общение с ИИ', self.sender.call_args.args[2])
+        self.assertNotIn('Общение с ИИ', self.sender.call_args.args[2])
         self.now += 5
         self.change({**copy.deepcopy(self.current), 'accounts': []})
         notices.deliver(self.env)
-        self.assertIn('Пользователь → Гость', self.sender.call_args.args[2])
+        self.assertNotIn('Роль:', self.sender.call_args.args[2])
 
     def test_unchanged_saves_are_silent_and_pending_changes_are_coalesced(self):
         unrelated = {**copy.deepcopy(self.current), 'model': 'another-model', 'api_key': 'PRIVATE_AI_KEY'}
@@ -102,7 +102,7 @@ class AccessNoticeTests(unittest.TestCase):
         self.change(settings('guest'))
         self.assertEqual(len(notices.load(self.env)['queue']), 1)
         notices.deliver(self.env)
-        self.assertIn('Администратор → Гость', self.sender.call_args.args[2])
+        self.assertNotIn('Роль:', self.sender.call_args.args[2])
         self.sender.assert_called_once()
 
     def test_reverting_an_unsent_change_does_not_notify(self):
@@ -154,7 +154,7 @@ class AccessNoticeTests(unittest.TestCase):
         self.now += 1
         notices.deliver(self.env)
         self.assertEqual(self.sender.call_count, 2)
-        self.assertIn('Администратор → Гость', self.sender.call_args.args[2])
+        self.assertNotIn('Роль:', self.sender.call_args.args[2])
         self.assertEqual(notices.load(self.env)['queue'], [])
 
     def test_bot_disabled_defers_delivery_and_a_different_bot_never_sends_old_notices(self):
@@ -199,7 +199,7 @@ class AccessNoticeTests(unittest.TestCase):
         after['accounts'][0]['telegram_disabled_tools'] = ['tg_get_messages']
         self.assertEqual(self.change(after)['queued'], 1)
         notices.deliver(self.env)
-        self.assertIn('Telegram — сняты инструменты:', self.sender.call_args.args[2])
+        self.assertNotIn('Сняты', self.sender.call_args.args[2])
 
     def test_same_bot_token_rotation_does_not_lose_known_contact_profiles(self):
         self.known.return_value = []

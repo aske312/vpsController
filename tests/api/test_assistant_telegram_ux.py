@@ -78,11 +78,11 @@ class TelegramViewsTests(unittest.TestCase):
             self.assertFalse(views.capabilities(api,settings,'11')['sections']['subscription'])
         account.update(role='moderator',products=['assistant'],permission_overrides={'server_read':False,'network_read':True,'chat':False})
         cap=views.capabilities(api,settings,'11')
-        self.assertTrue(cap['sections']['server']); self.assertFalse(cap['sections']['ai'])
+        self.assertFalse(cap['sections']['server']); self.assertFalse(cap['sections']['ai'])
         token=bot.access_details.set(cap)
         try:
             actions={}; bot.inline_keyboard('','/menu server',True,actions)
-            self.assertIn('/network',actions.values()); self.assertNotIn('/status',actions.values())
+            self.assertNotIn('/network',actions.values()); self.assertNotIn('/status',actions.values())
             self.assertNotIn('ai',dict(bot.available_commands()))
         finally: bot.access_details.reset(token)
 

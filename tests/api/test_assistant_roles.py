@@ -49,7 +49,7 @@ class AssistantRoleTests(unittest.TestCase):
         self.save(payload)
         fresh = control.read(api)
         self.assertEqual(fresh['accounts'][0]['role'], 'moderator')
-        self.assertEqual(roles.effective(fresh, '11'), {'chat', 'server_read'})
+        self.assertEqual(roles.effective(fresh, '11'), {'chat'})
         payload.pop('role_permissions'); payload['expected_revision'] = fresh['revision']
         self.save(payload)
         self.assertEqual(control.read(api)['role_permissions']['moderator'], ['chat', 'server_read'])

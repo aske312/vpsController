@@ -60,6 +60,7 @@ def usage(api):
 def snapshot(api, settings, actor, exclude=None):
     with control.operations.locked(api.DATA_DIR):
         record = read_record(api, actor)
+        if not roles.context_matches(record, settings, actor): record = {}
         cutoff = time.time() - settings.get('memory_days', 30) * 86400
         facts = [row for row in record.get('facts', []) if row.get('permanent', False) or row.get('at', 0) >= cutoff]
         if facts != record.get('facts', []):
@@ -69,7 +70,9 @@ def snapshot(api, settings, actor, exclude=None):
             files = [file for channel in ('panel', 'bot') for file in memory.folder(api, actor, channel).glob('*.json')
                      if file.stem != exclude and file.stat().st_mtime >= cutoff]
             for file in sorted(files, key=lambda entry: entry.stat().st_mtime, reverse=True)[:3]:
-                for turn in memory._read(file).get('turns', [])[-3:]:
+                conversation = memory._read(file)
+                if not roles.context_matches(conversation, settings, actor): continue
+                for turn in conversation.get('turns', [])[-3:]:
                     if record.get('reset_at'):
                         try: at = datetime.fromisoformat(turn.get('at', '').replace('Z', '+00:00')).timestamp()
                         except ValueError: continue
@@ -90,6 +93,8 @@ def update(api, settings, actor, action):
         return snapshot(api, settings, actor)
     with control.operations.locked(api.DATA_DIR):
         record = read_record(api, actor)
+        if not roles.context_matches(record, settings, actor): record = {}
+        record['access_scope'] = roles.context_scope(settings, actor)
         facts = record.get('facts', [])
         if action.operation == 'remember':
             text = ' '.join(action.text.split())

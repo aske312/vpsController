@@ -180,7 +180,8 @@ class RelayToolsTests(unittest.TestCase):
 
     def test_network_and_management_grants_are_enforced_before_observation_or_mutation(self):
         value = control.read(api)
-        value['accounts'] = [{'telegram_id': 11, 'name': 'User', 'role': 'moderator', 'products': ['assistant'], 'permission_overrides': {}}]
+        value['role_permissions'] = {'administrator': ['server_read']}
+        value['accounts'] = [{'telegram_id': 11, 'name': 'User', 'role': 'administrator', 'products': ['assistant', 'mihomo'], 'permission_overrides': {}}]
         control.store(api, value)
         headers = {**self.headers, 'X-MCP-Actor': '11'}
         with patch.object(api, 'get_relays') as observe:
@@ -237,7 +238,7 @@ class RelayToolsTests(unittest.TestCase):
 
     def test_live_management_revocation_prevents_a_prepared_telegram_actors_change(self):
         value = control.read(api)
-        value['accounts'] = [{'telegram_id': 11, 'name': 'Operator', 'role': 'moderator', 'products': ['assistant'],
+        value['accounts'] = [{'telegram_id': 11, 'name': 'Operator', 'role': 'administrator', 'products': ['assistant', 'mihomo'],
                               'permission_overrides': {'network_read': True, 'server_manage': True}}]
         control.store(api, value)
         headers = {**self.headers, 'X-MCP-Actor': '11'}

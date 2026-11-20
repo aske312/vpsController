@@ -205,13 +205,17 @@ def capabilities(api, actor):
                            'inheritance': 'Unset group health fields inherit shared routing settings. Select has no health checks. max_failed_times is a failure threshold, not retries.',
                            'group_members': ['*', 'connection:<id>', 'group:<name>'],
                            'strategies': ['consistent-hashing', 'round-robin', 'sticky-sessions']},
-        'instructions': 'Для создания прочитайте /profiles/schema и /modules: POST /profiles принимает name, connections, devices, routing, limits. '
+        'instructions': ('Сначала прочитайте /profiles и схему настроек своей подписки. '
+                        'При PATCH и перевыпуске ссылки передавайте expected_revision из свежего ответа. '
+                        'Списки устройств и подключений передавайте полностью, сохраняя остальные записи. '
+                        'Изменения требуют подтверждения пользователем.' if not admin else
+                        'Для создания прочитайте /profiles/schema и /modules: POST /profiles принимает name, connections, devices, routing, limits. '
                         'Профиль можно создать с подключениями и правилами сразу. Для другого пользователя: владелец читает /accounts, создаёт профиль, '
                         'после подтверждения и успешного завершения находит его по create_operation_id и отдельно подтверждает PATCH /accounts/<telegram_id>/profile. '
                         'Привязка существующего профиля не требует его пересоздания. DELETE /profiles/<id> удаляет подписку только после подтверждения. '
                         'Сначала прочитайте /profiles и схему настроек. При PATCH и перевыпуске ссылки передавайте expected_revision из свежего ответа. '
                         'Для устройств передавайте полный список с сохранением остальных устройств; для подключений — полный список без credential. '
-                        'Квота, скорость и срок — отдельные административные разрешения, пользователь их не меняет. Изменения требуют подтверждения собеседником.',
+                        'Квота, скорость и срок — отдельные административные разрешения, пользователь их не меняет. Изменения требуют подтверждения собеседником.'),
     }
 
 

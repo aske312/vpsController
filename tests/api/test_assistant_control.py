@@ -375,7 +375,7 @@ class AssistantTests(unittest.TestCase):
         with patch.object(worker, 'checked') as commands:
             result = self.save(payload)
         current = control.read(api)
-        self.assertEqual(control.roles.effective(current, '11'), {'server_read'})
+        self.assertEqual(control.roles.effective(current, '11'), set())
         self.assertFalse(result['settings_apply']['bot_restarted'])
         self.assertEqual(snapshot.read_text(), 'existing-credentials')
         commands.assert_not_called()

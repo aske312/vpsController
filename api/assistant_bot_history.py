@@ -84,8 +84,14 @@ def append(api, settings, actor, message):
         current = control._read(api)  # The application lock is already held.
         if bot_key(current) != bot_key(settings) or not enabled(current, actor): return {'stored': False}
         settings = current
+        row['access_scope'] = roles.context_scope(settings, actor)
         file = path(api, settings, actor)
         record = load(file)
+        if not roles.privileged(settings, actor):
+            quoted = next((entry for entry in record.get('messages', [])
+                           if entry['message_id'] == row.get('reply_to_message_id')
+                           and roles.context_matches(entry, settings, actor)), None)
+            row['reply_to_text'] = quoted['text'][:3000] if quoted else ''
         since = cutoff(api, settings, actor)
         rows = [entry for entry in record.get('messages', []) if entry['date'] >= since and entry['message_id'] != row['message_id']]
         if row['date'] >= since: rows.append(row)
@@ -140,7 +146,7 @@ def read(api, settings, actor, request, *, cached=True):
         file = path(api, settings, selected)
         record = load(file)
         since = cutoff(api, settings, selected)
-        rows = [row for row in record.get('messages', []) if row['date'] >= since]
+        rows = [row for row in record.get('messages', []) if row['date'] >= since and roles.context_matches(row, settings, selected)]
         if record and rows != record['messages']:
             operations.atomic_json(file, {**record, 'messages': rows})
         matching = [row for row in rows if (request.before_id is None or row['message_id'] < request.before_id)

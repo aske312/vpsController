@@ -70,7 +70,7 @@ SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подпис
 CHAT_COMMANDS = MEMBER_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI'), ('ai', 'Вопрос AI-ассистенту')]
 ADMIN_COMMANDS = SUBSCRIPTION_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
-    ('services', 'Состояние служб'), ('components', 'Установленные компоненты'), ('profiles', 'Доступные профили Mihomo'),
+    ('services', 'Состояние служб'), ('components', 'Установленные компоненты'), ('profiles', 'Доступные профили'),
     ('network', 'Состояние сети'), ('security', 'Состояние безопасности'), ('logs', 'Последние логи'),
     ('diagnostics', 'Пассивная диагностика'), ('ai', 'Вопрос AI-ассистенту')]
 TYPING_INTERVAL = 4
@@ -404,12 +404,12 @@ async def agent_request(settings, actor, prompt, attachments=None, alert=None):
             action = {'start': 'Запуск', 'stop': 'Остановка', 'restart': 'Перезапуск'}.get(pending['action'], pending['action'])
             path = pending['service'].removeprefix('Mihomo ')
             impact = 'Изменения ожидают подтверждения.'
-            if path == '/profiles' and pending['action'] == 'POST': action = 'Создание подписки Mihomo'
+            if path == '/profiles' and pending['action'] == 'POST': action = 'Создание подписки'
             elif path.endswith('/subscription/rotate'):
                 action = 'Перевыпуск ссылки подписки'
                 impact = 'После подтверждения старый URL и ссылки устройств перестанут работать. Подключения, устройства, правила и лимиты сохранятся. Новую ссылку нужно импортировать в клиент.'
             elif re.fullmatch(r'/profiles/[A-Za-z0-9_-]+', path):
-                action = 'Удаление подписки Mihomo' if pending['action'] == 'DELETE' else 'Изменение подписки Mihomo'
+                action = 'Удаление подписки' if pending['action'] == 'DELETE' else 'Изменение подписки'
             answer += '\n\n' + notice('Нужно ваше решение', f"**Действие:** {action}\n**Объект:** `{pending['service']}`\n\n{impact}", '✋')
             if pending.get('changes'):
                 answer += '\n\n**Детали изменений**\n```json\n' + json.dumps(pending['changes'], ensure_ascii=False, indent=2)[:4000] + '\n```'
@@ -614,11 +614,11 @@ def available_commands():
         items = MEMBER_COMMANDS.copy()
     candidates = []
     if sections.get('subscription'): candidates += SUBSCRIPTION_COMMANDS[len(MEMBER_COMMANDS):]
-    elif sections.get('subscription_setup'): candidates += [('subscription','Оформить подписку Mihomo')]
+    elif sections.get('subscription_setup'): candidates += [('subscription','Оформить подписку')]
     if sections.get('telegram'): candidates += [('telegram','Telegram API')]
     if sections.get('ai'): candidates += CHAT_COMMANDS[len(MEMBER_COMMANDS):]
     if sections.get('server'): candidates += [(key,label) for key,label in ADMIN_COMMANDS if key in ('status','services','network','security','diagnostics','logs')]
-    if sections.get('admin'): candidates += [('admin','Администрирование Mihomo')]
+    if sections.get('admin'): candidates += [('admin','Администрирование')]
     items += [(key,label) for key,label in candidates if COMMAND_GRANTS.get(key) in grants]
     return list(dict(items).items())
 
@@ -663,7 +663,7 @@ async def scoped_reply(settings, sender, prompt, access):
     if permission and permission not in grants: return 'Это действие недоступно для вашей учётной записи.'
     if command=='/connect':
         command_view.set({'buttons':[[{'text':'Моя подписка','command':'/subscription'},{'text':'Приложения','command':'/apps'}]]})
-        return '1. Установите клиент Mihomo.\n2. Скопируйте ссылку своей подписки и добавьте её в клиент по URL.\n3. Обновите подписку, выберите сервер и включите подключение.'
+        return '1. Выберите и установите приложение: /apps.\n2. Скопируйте ссылку своей подписки и добавьте её в приложение по URL.\n3. Обновите подписку, выберите сервер и включите подключение.'
     if command.startswith('/') and command!='/ai':
         if command not in ('/confirm','/cancel','/operation') and permission is None: return 'Откройте /help — доступные команды.'
         return await server_command(settings,sender['id'],prompt)
@@ -687,13 +687,13 @@ def public_reply(sender, command):
 
 def assistant_help(admin=False, subscription=False):
     text = ('Привет! Я Нодера, ваш AI-ассистент.\n\n' +
-            ('Отвечаю на вопросы, помогаю с вашей подпиской Mihomo и доступными настройками. ' if subscription else 'Отвечаю на вопросы и помогаю с доступными вам задачами. ') +
+            ('Отвечаю на вопросы, помогаю с вашей подпиской и доступными настройками. ' if subscription else 'Отвечаю на вопросы и помогаю с доступными вам задачами. ') +
             '\n\n**Как общаться**\nТиповые запросы выполняю без AI: можно писать «мой трафик», «моя подписка» или выбирать кнопки. Для вопроса к AI используйте `/ai <вопрос>`.\n\n'
             '**Фото и документы**\nДобавьте вопрос в подпись к файлу. Можно прислать до 4 файлов: 2 МБ каждый, 6 МБ суммарно. Для изображений нужна модель с поддержкой зрения.\n\n'
             'Команды:\n/id — ваш Telegram ID\n/models — доступные модели\n/model — текущая модель')
-    if subscription: text += '\n/subscription — ваша подписка Mihomo\n/profile — параметры и лимиты\n/devices — устройства\n/traffic — трафик\n/apps — приложения для подключения\n/connect — как подключиться'
+    if subscription: text += '\n/subscription — ваша подписка\n/profile — параметры и лимиты\n/devices — устройства\n/traffic — трафик\n/apps — приложения для подключения\n/connect — как подключиться'
     if admin:
-        text += '\n/status — состояние сервера\n/resources — ресурсы\n/services — состояние служб\n/components — компоненты\n/profiles — профили Mihomo\n/network — сеть\n/security — безопасность\n/logs [служба] — последние логи\n/diagnostics — пассивная диагностика'
+        text += '\n/status — состояние сервера\n/resources — ресурсы\n/services — состояние служб\n/components — компоненты\n/profiles — профили\n/network — сеть\n/security — безопасность\n/logs [служба] — последние логи\n/diagnostics — пассивная диагностика'
     return text
 
 
@@ -717,19 +717,19 @@ async def reply(settings, sender, prompt, access):
     if command in ('/id', '/userid'): return public_reply(sender, '/id')
     if command == '/menu': return menu_text(prompt, access)
     if access == 'subscription' and command in ('/start', '/help'):
-        return ('Команды вашей подписки Mihomo работают без AI:\n'
+        return ('Команды вашей подписки работают без AI:\n'
                 '/subscription — ссылка\n/profile — параметры, лимиты и срок\n'
                 '/devices — устройства\n/traffic — учтённый трафик\n/apps — приложения для подключения\n/connect — как подключиться\n/id — ваш Telegram ID.\n'
                 'Можно писать обычным текстом: «мой трафик», «мои устройства», «моя подписка».')
     if access == 'subscription' and command not in (*SUBSCRIPTION_READS, '/confirm', '/cancel', '/operation'):
-        return 'Доступна ваша подписка Mihomo: /subscription. AI-ассистент для этой учётной записи не подключён.'
+        return 'Доступна ваша подписка: /subscription. AI-ассистент для этой учётной записи не подключён.'
     if command in ('/start', '/help'):
         return assistant_help(access is True, access in (True, 'chat-subscription'))
     if command == '/hello': return 'Здравствуйте! /help — возможности и команды. Типовые запросы выполняются без AI.'
     if command == '/thanks': return 'Пожалуйста!'
     if command == '/connect':
-        return ('Подключение Mihomo:\n/apps — приложения для подключения. Наш Nodera для Windows: https://github.com/aske312/NoderaClient.\n1. Получите свою ссылку: /subscription.\n'
-                '2. В совместимом клиенте Mihomo выберите импорт подписки по URL и вставьте ссылку.\n'
+        return ('Подключение:\n/apps — приложения для подключения. Наш Nodera для Windows: https://github.com/aske312/NoderaClient.\n1. Получите свою ссылку: /subscription.\n'
+                '2. В совместимом клиенте выберите импорт подписки по URL и вставьте ссылку.\n'
                 '3. Обновите подписку, выберите профиль и включите подключение.\n'
                 'После изменения настроек в панели обновите подписку в клиенте. Не передавайте ссылку другим людям.')
     if command == '/ai':
@@ -768,7 +768,7 @@ def menu_text(prompt, access):
         return {'subscription':'Подписка и подключение\nПодписка, устройства и приложения для подключения.',
                 'server':'Сервер\nСостояние, службы и диагностика.',
                 'ai':'AI-ассистент\nНапишите вопрос или прикрепите файл. Переписка с ИИ сохраняется.',
-                'admin':'Админ Mihomo\nВыберите подписку или создайте новую.'}.get(section,'Меню Nodera\nВыберите нужный раздел.') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
+                'admin':'Админ\nВыберите подписку или создайте новую.'}.get(section,'Меню Nodera\nВыберите нужный раздел.') if not section or sections.get(section) else 'Раздел недоступен для вашей учётной записи.'
     if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
         return 'Подписка и подключение. Выберите нужное действие ниже.'
     if section == 'server' and access is True:
@@ -817,9 +817,9 @@ def inline_keyboard_content(answer, prompt, access, actions):
                 if row: rows.append(row)
         elif section=='admin' and sections.get('admin'): rows.append([button('Подписки','/admin list'),button('Создать','/admin create')] if 'subscriptions_create' in grants else [button('Подписки','/admin list')])
         elif not section:
-            for key,label in [('subscription','Подписка Mihomo'),('ai','ИИ-ассистент'),('telegram','Telegram API'),('server','Контроль VPS'),('admin','Админ Mihomo')]:
+            for key,label in [('subscription','Подписка'),('ai','ИИ-ассистент'),('telegram','Telegram API'),('server','Контроль VPS'),('admin','Админ')]:
                 if sections.get(key): rows.append([button(label,'/telegram' if key=='telegram' else '/menu '+key)])
-            if sections.get('subscription_setup'): rows.append([button('Оформить подписку Mihomo','/subscription')])
+            if sections.get('subscription_setup'): rows.append([button('Оформить подписку','/subscription')])
             if not any(sections.values()): rows.append([button('Мой профиль','/myprofile')] + ([button('Мой ID','/id')] if detail.get('role','guest')=='guest' else []))
         if section: rows.append([button('← Главное меню','/menu')])
         return {'inline_keyboard':rows} if rows else None
