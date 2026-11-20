@@ -7,6 +7,14 @@ import {commandMessageOwner,closedCommandMessages,rememberClosedCommand} from '.
 function storage(){const entries=new Map();return {get length(){return entries.size;},key:i=>[...entries.keys()][i]??null,getItem:k=>entries.get(k)??null,setItem:(k,v)=>entries.set(k,v),removeItem:k=>entries.delete(k),entries};}
 const snapshot={provider:'provider-one',model:'selected-model',streaming:true,conversation_id:'a'.repeat(32),prompt:'Unsent draft',turns:[{id:1,question:'Question',answer:'Answer',model:'selected-model',context_safe:true,files:[]}]};
 
+test('finished response duration survives a local chat reload',()=>{
+ const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();
+ try {
+  saveChatSession({sessionKey:'timing'},'11',{...snapshot,turns:[{...snapshot.turns[0],duration_ms:42123}]});
+  assert.equal(readChatSession({sessionKey:'timing'},'11').turns[0].duration_ms,42123);
+ } finally {globalThis.sessionStorage=previous;}
+});
+
 test('operation links survive reload without confirmation codes and closed results are scoped and cleared on logout',()=>{
   const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();
   try {

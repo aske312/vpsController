@@ -17,6 +17,16 @@ import application_operation as operations
 runner = load_module('stream_test_runner', 'protocol-images/ai-agent/runner.py')
 
 class ChatJobsTests(unittest.TestCase):
+    def test_queue_count_is_zero_for_first_request_and_counts_only_blocking_work(self):
+        first = jobs.submit(api, self.payload)
+        self.assertEqual(first['queue_ahead'], 0)
+        second = self.payload.model_copy(update={'request_id': 'b' * 32})
+        queued = jobs.submit(api, second)
+        self.assertEqual(queued['queue_ahead'], 1)
+        jobs.update(api, first['id'], state='done', output={'result': {'answer': 'ok', 'tools_used': []}})
+        jobs.dispatch(api)  # The worker dispatches the next request on completion.
+        self.assertEqual(jobs.get(api, second.request_id)['queue_ahead'], 0)
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(patch.object(api, 'DATA_DIR', self.root))

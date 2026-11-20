@@ -11,6 +11,20 @@ after(() => loader.close());
 const { AssistantAnswer } = await loader.ssrLoadModule('/src/features/assistant/assistant-answer.tsx');
 const { ChatTurnRow } = await loader.ssrLoadModule('/src/features/assistant/chat-turn.tsx');
 
+test('pending chat renders one animated status with elapsed time inside its own response',()=>{
+ const html=renderToStaticMarkup(createElement(ChatTurnRow,{turn:{id:1,question:'Check',model:'m',files:[],queue_state:'queued'},activityLabel:'Подготавливаю запрос',canRetry:false,onRetry(){},onCancel(){},onError(){}}));
+ assert.equal((html.match(/role="status"/g)||[]).length,1);
+ assert(html.includes('mcpActivitySignal'));assert(html.includes('0:00'));
+ assert(html.includes('Подготавливаю запрос'));assert(!html.includes('Думает'));
+});
+
+test('completed reply keeps its duration below the answer without an active timer',()=>{
+ const html=renderToStaticMarkup(createElement(ChatTurnRow,{turn:{id:1,question:'Check',model:'m',files:[],answer:'Ready',duration_ms:62400},canRetry:false,onRetry(){},onCancel(){},onError(){}}));
+ assert(html.includes('Ответ за 1 мин 2 с'));
+ assert(html.indexOf('mcpResponseTime') > html.indexOf('Ready'));
+ assert(!html.includes('mcpActivitySignal'));assert(!html.includes('role="status"'));
+});
+
 test('a failed message renders readable feedback and keeps its diagnostic trace hidden',()=>{
   const html=renderToStaticMarkup(createElement(ChatTurnRow,{turn:{id:1,request_id:'a'.repeat(32),question:'Check',model:'m',files:[],error:'<script>bad()</script>'},waiting:'',canRetry:true,onRetry(){},onCancel(){},onError(){},onTrace(){}}));
   assert(html.includes('Нужна проверка'));assert(!html.includes('Журнал запроса'));assert(html.includes('&lt;script&gt;'));assert(!html.includes('<script>'));

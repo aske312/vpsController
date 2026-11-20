@@ -98,6 +98,14 @@ def append(api, identity, actor, channel, question, files, result, model, settin
         record['turns'].append({'id': identity_turn, 'question': question, 'at': operations.timestamp(), 'files': attachments, 'answer': result['answer'], 'tools': result.get('tools_used', []), 'model': model})
         if isinstance(request_id, str) and re.fullmatch(r'[a-f0-9]{32}', request_id):
             record['turns'][-1]['request_id'] = request_id
+            # Retain the same wall-clock duration shown by the durable chat job,
+            # including queue time, when the dialogue is reopened later.
+            request = operations.read(api.DATA_DIR / 'assistant' / 'requests' / (request_id + '.json'))
+            started = request.get('created_at')
+            now = time.time()
+            if (request.get('actor') == actor and request.get('channel', 'panel') == channel
+                    and type(started) in (int, float) and 0 < started <= now):
+                record['turns'][-1]['duration_ms'] = round((now - started) * 1000)
         if result.get('status') in ('incomplete', 'partial', 'awaiting_confirmation'):
             record['turns'][-1]['status'] = result['status']
         record['turns'] = record['turns'][-40:]

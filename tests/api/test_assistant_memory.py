@@ -15,6 +15,16 @@ import assistant_memory as memory
 
 
 class AssistantMemoryTests(unittest.TestCase):
+    def test_reopened_answer_preserves_queue_and_response_duration(self):
+        from application_operation import atomic_json
+        request_id = 'a' * 32
+        atomic_json(self.root / 'assistant' / 'requests' / (request_id + '.json'),
+                    {'actor': 'panel', 'channel': 'panel', 'created_at': 50})
+        with patch.object(memory.time, 'time', return_value=100):
+            memory.append(self.env, self.identity, 'panel', 'panel', 'Question', [],
+                          {'answer': 'Answer'}, 'test', self.settings, request_id=request_id)
+        self.assertEqual(memory.get(self.env, self.identity)['turns'][0]['duration_ms'], 50000)
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.env = SimpleNamespace(DATA_DIR=self.root)

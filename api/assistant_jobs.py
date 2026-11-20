@@ -59,6 +59,14 @@ def dispatch(api):
         rows = records(api)
         active = [row for row in rows if row.get('state') not in TERMINAL]
         occupied = [row for row in active if row.get('state') == 'running' or row.get('launch_requested')]
+        # Refresh queue positions when work changes, not on every status poll.
+        for index, row in enumerate(active):
+            if row.get('state') != 'queued': continue
+            ahead = sum(old['actor'] == row['actor'] or old.get('provider') == row.get('provider')
+                        for old in active[:index])
+            if row.get('queue_ahead') != ahead:
+                row.update(queue_ahead=ahead, updated_at=time.time(), seq=row['seq'] + 1)
+                operations.atomic_json(path(api, row['id']), row)
         for row in active:
             if row.get('state') != 'queued' or row.get('launch_requested') or row.get('not_before', 0) > time.time(): continue
             earlier = active[:active.index(row)]

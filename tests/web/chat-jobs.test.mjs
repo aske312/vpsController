@@ -2,10 +2,19 @@
 import { test, afterEach } from 'node:test';
 import { createApiClient, invalidateApiSession } from '../../src/shared/lib/api-request.ts';
 import { readEventStream } from '../../src/shared/lib/event-stream.ts';
-import { observeChatJob, rememberChat, savedChat, savedChats, forgetChat, ChatJobError } from '../../src/features/assistant/chat-jobs.ts';
+import { observeChatJob, rememberChat, savedChat, savedChats, forgetChat, ChatJobError, chatActivityLabel } from '../../src/features/assistant/chat-jobs.ts';
 import { observedApplicationRequest } from '../../src/control-panel/application-snapshot.ts';
 import { observedServicesRequest } from '../../src/control-panel/services-snapshot.ts';
 const originalFetch=globalThis.fetch;
+
+test('a lone accepted request is preparing, while real backlog and tool work have distinct statuses',()=>{
+ assert.equal(chatActivityLabel({queue_state:'queued',activity_stage:'queued',queue_ahead:0}), 'Подготавливаю запрос');
+ assert.match(chatActivityLabel({queue_state:'queued',queue_ahead:2}), /запросов впереди: 2/);
+ assert.match(chatActivityLabel({queue_state:'queued'},1), /запросов впереди: 1/);
+ assert.equal(chatActivityLabel({queue_state:'running',activity_stage:'tools'}), 'Работаю с инструментами');
+ assert.equal(chatActivityLabel({queue_state:'running',activity_stage:'waiting_model'}), 'Обдумываю ваш запрос');
+ assert.equal(chatActivityLabel({queue_state:'queued',queue_ahead:0},2), 'Подготавливаю запрос');
+});
 afterEach(()=>{globalThis.fetch=originalFetch;invalidateApiSession('sse-test',false);});
 const id='a'.repeat(32);
 const job=(extra={})=>({id,seq:1,state:'running',stage:'waiting_model',question:'q',model:'m',stream:false,...extra});
@@ -27,6 +36,12 @@ test('terminal results are restored by ID without any POST or a second generatio
  const methods=[];globalThis.fetch=async(u,o)=>{methods.push(o.method??'GET');return Response.json(complete);};
  const result=await observeChatJob(createApiClient('sse-test'),id,'',false,()=>{},new AbortController().signal);
  assert.equal(result.result.answer,'ok');assert.deepEqual(methods,['GET']);
+});
+
+test('completion retains the measured duration from the server job',async()=>{
+ globalThis.fetch=async()=>Response.json({...complete,duration_ms:42123});
+ const result=await observeChatJob(createApiClient('sse-test'),id,'',false,()=>{},new AbortController().signal);
+ assert.equal(result.duration_ms,42123);
 });
 test('control-panel observation wrappers preserve authenticated streams and restoration scope',()=>{
  const client=createApiClient('sse-test');

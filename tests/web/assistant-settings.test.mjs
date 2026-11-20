@@ -48,9 +48,10 @@ function mount(status, catalog = [], overrides = {}) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   const settings = {}, alerts = {};
   const confirmationModule = {}, commandMenuModule = {}, turnModule = {};
+  const activityModule = { ChatActivity({label}) { return requireActual('react/jsx-runtime').jsx('div', {role:'status',children:label}); } };
   const sessionHelpers = { ...chatSession, createChatSessionWriter(...args) { const writer = chatSession.createChatSessionWriter(...args); persistence.push(writer); return writer; } };
   const confirmations = { actions: [], working: [], results: {}, errors: {}, ingest: (actor, actions) => { confirmations.actions = actions.map(item => ({...item,actor})); }, async decide() {} };
-  const require = name => name.endsWith('/command-message-state') ? commandMessages : name === 'react' ? hooks : name.endsWith('/use-dialog-focus') ? {useDialogFocus:()=>({current:null})} : name === './chat-session' ? sessionHelpers : name === './chat-turn' ? turnModule : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
+  const require = name => name.endsWith('/command-message-state') ? commandMessages : name === 'react' ? hooks : name.endsWith('/use-dialog-focus') ? {useDialogFocus:()=>({current:null})} : name === './chat-session' ? sessionHelpers : name === './chat-activity' ? activityModule : name === './chat-turn' ? turnModule : name === './chat-commands' ? chatCommands : name === './chat-command-menu' ? commandMenuModule : name === './confirmation-queue' ? confirmationModule : name === './chat-jobs' ? chatJobs : name === './assistant-state' ? helpers : name === './nodera-settings' ? settings : name === './telegram-alerts' ? alerts : name === './chat-files' ? chatFiles : name === './answer-format' ? answerFormat : name === './assistant-answer' ? { AssistantAnswer() {} } : name === './chat-icon' ? { ChatIcon() {} }
     : name === './alert-watches' ? { AlertWatches() {} } : name === './alert-diagnostic-rules' ? { AlertDiagnosticRules() {} } : name === './provider-connection' ? providerConnection : name === './provider-details' ? providerDetails : name.endsWith('/notification-center') ? { usePageError: (source, title, message, action) => {
       const id = `page-error:${source}`, index = notifications.findIndex(item => item.id === id);
       if (index >= 0) notifications.splice(index, 1);
@@ -114,7 +115,7 @@ function mount(status, catalog = [], overrides = {}) {
     const expand = node => {
       if (Array.isArray(node)) return node.map(expand);
       if (!node?.props) return node;
-      if (node.type?.name === 'DecisionButtons' || node.type === turnModule.ChatTurnRow || node.type === commandMenuModule.ChatCommandMenu || node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
+      if (node.type?.name === 'DecisionButtons' || node.type === activityModule.ChatActivity || node.type === turnModule.ChatTurnRow || node.type === commandMenuModule.ChatCommandMenu || node.type === confirmationModule.ConfirmationCards || node.type === settings.NoderaSettings) return expand(node.type(node.props));
       return { ...node, props: { ...node.props, children: expand(node.props.children) } };
     };
     const expanded = expand(tree);
@@ -426,7 +427,7 @@ test('saved connection data is visible in AI settings before a manual check and 
   assert.doesNotMatch(text, /Аккаунт ·/);
 });
 
-test('a pending background chat shows acceptance and submits the question only once', async () => {
+test('one pending request renders one preparing status without a duplicate or a false queue', async () => {
   const status = fixture();
   Object.assign(status.settings, {model:'fixture-model', modules:{'ai-agent':true,'nodera-bot':true}});
   Object.assign(status.modules[0], {enabled:true, configured:true});
@@ -438,12 +439,14 @@ test('a pending background chat shows acceptance and submits the question only o
   tree = view.render();
   nodes(tree, n => n.props['aria-label'] === 'Отправить сообщение')[0].node.props.onClick();
   view.render(); await new Promise(setImmediate); tree = view.render();
-  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('В очереди AI')).length, 1);
+  const pending = nodes(tree, n => n.props.role === 'status');
+  assert.equal(pending.length, 1);
+  assert.match(JSON.stringify(pending[0].node.props.children), /Подготавливаю запрос/);
   assert.match(view.writes[0].request_id, /^[0-9a-f]{32}$/);
   resolve({result:{answer:'finished', tools_used:[]}});
   await new Promise(setImmediate); tree = view.render();
   assert.equal(view.writes.length, 1);
-  assert.equal(nodes(tree, n => n.props.role === 'status' && JSON.stringify(n.props.children).includes('В очереди AI')).length, 0);
+  assert.equal(nodes(tree, n => n.props.role === 'status').length, 0);
 });
 
 test('pending turn survives inactive page and answer notification opens chat without another POST', async () => {
@@ -496,7 +499,7 @@ test('follow-ups are durably admitted with predecessor IDs and queued messages c
   await new Promise(setImmediate);
   assert.equal(view.writes.length, 4);
   let tree = view.render();
-  const removals = nodes(tree, n => n.type === 'button' && n.props.children === 'Убрать из очереди');
+  const removals = nodes(tree, n => n.type === 'button' && n.props.children === 'Отменить запрос');
   assert.equal(removals.length, 4);
   await removals[2].node.props.onClick();
   assert.doesNotMatch(JSON.stringify(view.render()), /remove me/);
@@ -517,7 +520,7 @@ test('follow-ups are durably admitted with predecessor IDs and queued messages c
   await new Promise(setImmediate);
   view.setActive(true); tree = view.render();
   assert.match(JSON.stringify(tree), /third answer/);
-  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Убрать из очереди').length, 0);
+  assert.equal(nodes(tree, n => n.type === 'button' && n.props.children === 'Отменить запрос').length, 0);
 });
 
 test('confirmation preserves follow-ups on the server queue and keeps the decision card', async () => {

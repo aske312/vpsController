@@ -37,12 +37,18 @@
 .mcpConnectionDot.available { background:#72dfbd; box-shadow:0 0 8px #72dfbd55; }
 .mcpConnectionDot.failed { background:#ff9b8d; }
 .mcpThinking { display:flex; align-items:center; gap:10px; color:var(--muted); min-height:32px; font-size:13px; }
-.mcpThinkingDots { display:inline-flex; gap:4px; }
-.mcpThinkingDots i { width:5px; height:5px; border-radius:50%; background:currentColor; animation:mcpThinking 1.4s ease-in-out infinite; }
-.mcpThinkingDots i:nth-child(2) { animation-delay:.18s; }
-.mcpThinkingDots i:nth-child(3) { animation-delay:.36s; }
-@keyframes mcpThinking { 0%,70%,100% { opacity:.3; transform:translateY(0); } 35% { opacity:1; transform:translateY(-4px); } }
-@media(prefers-reduced-motion:reduce) { .mcpThinkingDots i { animation:none; } }
+.mcpActivitySignal { display:inline-flex; align-items:center; justify-content:center; gap:3px; width:28px; height:24px; flex-shrink:0; color:var(--cyan); }
+.mcpActivitySignal i { width:3px; height:7px; border-radius:3px; background:currentColor; animation:mcpActivityWave 1.3s ease-in-out infinite; }
+.mcpActivitySignal i:nth-child(2) { animation-delay:.13s; }
+.mcpActivitySignal i:nth-child(3) { animation-delay:.26s; }
+.mcpActivitySignal i:nth-child(4) { animation-delay:.39s; }
+.mcpActivitySignal i:nth-child(5) { animation-delay:.52s; }
+.mcpActivityLabel { min-width:0; animation:mcpActivityReveal .25s ease-out; }
+.mcpActivityClock { margin-left:auto; padding-left:8px; flex-shrink:0; font-size:11px; font-variant-numeric:tabular-nums; opacity:.7; }
+.mcpResponseTime { margin-right:auto; color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; opacity:.7; }
+@keyframes mcpActivityWave { 0%,100% { transform:scaleY(.6); opacity:.35; } 50% { transform:scaleY(2.2); opacity:1; } }
+@keyframes mcpActivityReveal { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
+@media(prefers-reduced-motion:reduce) { .mcpActivitySignal i,.mcpActivityLabel { animation:none; } }
 .mcpChatHead .mcpActor { flex:0 1 auto; width:auto; max-width:210px; }
 .mcpConversationPicker { flex:0 1 auto; max-width:100%; }
 .mcpWorkspace .mcpChatHead select { min-height:28px; height:28px; padding:3px 8px; width:auto; max-width:100%; field-sizing:content; }
