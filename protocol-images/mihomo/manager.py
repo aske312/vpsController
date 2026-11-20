@@ -3831,7 +3831,7 @@ def quic_profile_stats(module_id: str, credential: dict[str, Any]) -> dict[str, 
             "stats_available": False, "activity_available": False, "traffic_scope": "observation"}
 
 
-def add_quic_credential(profile_id: str, module_id: str, connection_id: str) -> dict[str, Any]:
+def add_quic_credential(profile_id: str, module_id: str, connection_id: str, *, apply_runtime: bool = True) -> dict[str, Any]:
     module = quic_module_name(module_id)
     instance_id = uuid.uuid4().hex
     credential: dict[str, Any] = {
@@ -3853,18 +3853,20 @@ def add_quic_credential(profile_id: str, module_id: str, connection_id: str) -> 
     path = quic_root(module_id) / "credentials" / f"{instance_id}.json"
     atomic_json(path, credential)
     try:
-        write_quic_runtime(module_id)
+        if apply_runtime:
+            write_quic_runtime(module_id)
     except Exception:
         path.unlink(missing_ok=True)
         raise
     return credential
 
 
-def remove_quic_credential(module_id: str, credential: dict[str, Any]) -> None:
+def remove_quic_credential(module_id: str, credential: dict[str, Any], *, apply_runtime: bool = True) -> None:
     instance_id = str(credential.get("instance_id", ""))
     if re.fullmatch(r"[0-9a-f]{32}", instance_id):
         (quic_root(module_id) / "credentials" / f"{instance_id}.json").unlink(missing_ok=True)
-        write_quic_runtime(module_id)
+        if apply_runtime:
+            write_quic_runtime(module_id)
 
 
 def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]] | None:
@@ -4032,7 +4034,7 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
     return profile_stats_payload(item)
 
 
-def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False, privacy_enabled: bool = False) -> dict[str, Any]:
+def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False, privacy_enabled: bool = False, *, defer_quic_restart: bool = False) -> dict[str, Any]:
     try:
         address = server_addresses.primary_for_new_config(DATA_ROOT.parent, public_endpoint())
     except (OSError, ValueError) as exc:
@@ -4047,11 +4049,11 @@ def provision(profile_id: str, module_id: str, connection_id: str = "default", s
     if module_id == "transport-reality":
         return {**add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart, privacy_enabled=privacy_enabled), "server_address": address}
     if module_id in {"transport-hysteria2", "transport-tuic"}:
-        return {**add_quic_credential(profile_id, module_id, connection_id), "server_address": address}
+        return {**add_quic_credential(profile_id, module_id, connection_id, apply_runtime=not defer_quic_restart), "server_address": address}
     raise RuntimeError(f"{module_id} is not a transport")
 
 
-def deprovision(profile_id: str, module_id: str, credential: dict[str, Any], defer_reality_restart: bool = False) -> None:
+def deprovision(profile_id: str, module_id: str, credential: dict[str, Any], defer_reality_restart: bool = False, *, defer_quic_restart: bool = False) -> None:
     if module_id in ("transport-wg", "transport-awg"):
         remove_wg_credential(profile_id, module_id, credential)
     elif module_id == "transport-shadowsocks":
@@ -4062,7 +4064,7 @@ def deprovision(profile_id: str, module_id: str, credential: dict[str, Any], def
     elif module_id == "transport-reality":
         remove_reality_credential(profile_id, credential, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart)
     elif module_id in {"transport-hysteria2", "transport-tuic"}:
-        remove_quic_credential(module_id, credential)
+        remove_quic_credential(module_id, credential, apply_runtime=not defer_quic_restart)
 
 
 def validate_channels(channels: list[str]) -> list[str]:
@@ -4259,6 +4261,8 @@ def cleanup_profile_transitions() -> None:
 def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False, profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
     batch_reality = any(definition["component"] == "transport-reality" for definition in definitions)
+    quic_modules = {"transport-hysteria2", "transport-tuic"}
+    applied_quic: list[str] = []
     try:
         for definition in definitions:
             credential = provision(
@@ -4267,9 +4271,13 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
                 definition["id"],
                 definition.get("settings", {}),
                 defer_reality_restart=batch_reality and definition["component"] == "transport-reality",
+                defer_quic_restart=definition["component"] in quic_modules,
                 privacy_enabled=bool(device_routing(profile, str(definition.get("device_id", "device-1"))).get("tunnel_privacy", False)) if profile is not None else privacy_enabled,
             )
             completed.append({**definition, "credential": credential})
+        for module_id in sorted({row["component"] for row in completed} & quic_modules):
+            applied_quic.append(module_id)
+            write_quic_runtime(module_id)
         if batch_reality:
             apply_batched_reality_runtime()
         prepare_profile_relays({'id': profile_id, 'connections': completed}, os.getenv('VPS_CONTROL_OPERATION_ID'), partial=True)
@@ -4281,7 +4289,13 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
                     connection["component"],
                     connection.get("credential", {}),
                     defer_reality_restart=batch_reality and connection["component"] == "transport-reality",
+                    defer_quic_restart=connection["component"] in quic_modules,
                 )
+            except Exception:
+                pass
+        for module_id in reversed(applied_quic):
+            try:
+                write_quic_runtime(module_id)
             except Exception:
                 pass
         if batch_reality:

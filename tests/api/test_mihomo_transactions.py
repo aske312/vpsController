@@ -11,6 +11,44 @@ manager = load_module("mihomo_manager_under_test", "protocol-images/mihomo/manag
 
 
 class MihomoTransactionTests(unittest.TestCase):
+    def test_batch_quic_credentials_apply_each_transport_once(self):
+        self.assert_quic_batch(rollback=False)
+
+    def test_batch_quic_rollback_restores_existing_credentials(self):
+        self.assert_quic_batch(rollback=True)
+
+    def assert_quic_batch(self, *, rollback):
+        tuic, hy2 = 'transport-tuic', 'transport-hysteria2'
+        definitions = [{'component': module, 'id': str(index)}
+                       for index, module in enumerate((tuic, hy2, tuic, tuic))]
+        applied = []
+
+        def apply(module):
+            applied.append((module, len(manager.quic_credentials(module))))
+
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch.object(manager, 'CONFIG_ROOT', Path(temp)),
+            patch.object(manager, 'public_endpoint', return_value='192.0.2.1'),
+            patch.object(manager.server_addresses, 'primary_for_new_config', return_value='192.0.2.1'),
+            patch.object(manager, 'module_settings', return_value={
+                'port': 443, 'congestion_control': 'bbr', 'heartbeat': '10s',
+                'up_mbps': 100, 'down_mbps': 100, 'obfs': False,
+            }),
+            patch.object(manager, 'write_quic_runtime', side_effect=apply),
+            patch.object(manager, 'prepare_profile_relays', side_effect=RuntimeError('relay') if rollback else None),
+        ):
+            previous = manager.add_quic_credential('profile', tuic, 'existing', apply_runtime=False)
+            if rollback:
+                with self.assertRaisesRegex(RuntimeError, 'relay'):
+                    manager.provision_connections('profile', definitions)
+                self.assertEqual(manager.quic_credentials(tuic), [previous])
+                self.assertEqual(manager.quic_credentials(hy2), [])
+                self.assertEqual(applied, [(hy2, 1), (tuic, 4), (tuic, 1), (hy2, 0)])
+            else:
+                self.assertEqual(len(manager.provision_connections('profile', definitions)), 4)
+                self.assertEqual(applied, [(hy2, 1), (tuic, 4)])
+
     def test_udp_domain_edit_preserves_credentials_and_does_not_restart_protocol(self):
         self.legacy_channel_fixture()
         credential = {'public_key': 'key', 'server_address': '195.14.118.112', 'port': 51830}
