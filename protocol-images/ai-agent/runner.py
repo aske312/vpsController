@@ -39,10 +39,10 @@ DEFAULT_CHARACTER = ('Нодера — девушка-андроид, сетев
                      'Юмор точный и уместный, без унижения собеседника. При сбое спокойна: отделяет факты от предположений, признаёт неопределённость '
                      'и предлагает следующий полезный шаг. Характер не даёт права выдумывать результаты или обходить подтверждение действий.')
 MAX_ROUNDS = 24
-REQUEST_TIMEOUT = 1200
+REQUEST_TIMEOUT = 1800
 TOOL_TIMEOUT = 90
 PROVIDER_CONNECT_TIMEOUT = 15
-PROVIDER_READ_TIMEOUT = 180
+PROVIDER_READ_TIMEOUT = 600
 WEB_RESULT_LIMIT = 240000
 TOOL_RESULT_LIMIT = 96000
 VPS_URL = 'http://127.0.0.1:8000/api/assistant/control-tool'
@@ -1369,7 +1369,7 @@ class ProviderTransportTrace:
                 **({'http_status': self.http_status} if self.http_status is not None else {})}
 
 
-async def stream_message(response):
+async def stream_message(response, *, publish=True):
     content, calls, usage, finished, done, size = '', {}, None, False, False, 0
     data_lines = []
     async for line in response.aiter_lines():
@@ -1394,7 +1394,8 @@ async def stream_message(response):
         if isinstance(delta.get('content'), str):
             content += delta['content']
             if len(content) > 200000: raise ProviderFailure('response_limit', 'Ответ AI превысил допустимый размер')
-            progress('receiving', content)
+            if publish:
+                progress('receiving', content)
         for call in delta.get('tool_calls') or []:
             index = call.get('index')
             if type(index) is not int or not 0 <= index < 8:
@@ -1439,7 +1440,10 @@ async def provider_request(settings, messages, tools, *, completion_limit=None, 
             payload['tools'] = tools
             if tool_choice is not None: payload['tool_choice'] = tool_choice
         progress('waiting_model', '')
-        streaming = settings.get('streaming', False)
+        # Nyxos supports SSE even when the UI wants only the completed answer.
+        # Incoming reasoning deltas/heartbeats keep the read timeout alive; never
+        # use a separate /models health check as evidence about this generation.
+        streaming = settings.get('streaming', False) or parsed.hostname == 'api.nyxos.shop'
         if streaming: payload.update(stream=True, stream_options={'include_usage': True})
         async with httpx.AsyncClient(timeout=httpx.Timeout(PROVIDER_READ_TIMEOUT, connect=PROVIDER_CONNECT_TIMEOUT, write=30, pool=15), follow_redirects=False, trust_env=False) as client:
             headers = {'Host': parsed.hostname, 'Authorization': 'Bearer ' + settings['api_key']}
@@ -1449,7 +1453,7 @@ async def provider_request(settings, messages, tools, *, completion_limit=None, 
                     if response.status_code != 200:
                         raise ProviderFailure('provider_http_' + str(response.status_code), 'AI-провайдер вернул HTTP ' + str(response.status_code))
                     network.start('response_body')
-                    result = await stream_message(response)
+                    result = await stream_message(response, publish=settings.get('streaming', False))
                     network.complete()
                     return result
             response = await client.post(url, headers=headers, json=payload, extensions={'sni_hostname': parsed.hostname, 'trace': network.trace})

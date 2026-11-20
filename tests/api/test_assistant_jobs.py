@@ -34,7 +34,7 @@ class ChatJobsTests(unittest.TestCase):
             jobs.submit(api,self.payload.model_copy(update={'prompt':'another'}))
         self.assertEqual(caught.exception.status_code,409);self.assertEqual(self.launch.call_count,1)
         args=self.launch.call_args.args[0]
-        self.assertIn('--property=RuntimeMaxSec=25min',args)
+        self.assertIn('--property=RuntimeMaxSec=35min',args)
         self.assertNotIn('private question',' '.join(args))
     def test_lost_launch_reply_is_not_replayed_and_can_finish(self):
         self.launch.side_effect=subprocess.TimeoutExpired('systemd-run',12)
@@ -195,6 +195,36 @@ class ChatJobsTests(unittest.TestCase):
 async def async_value(value):return value
 
 class StreamingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nyxos_streams_transport_for_complete_answer_ui_without_exposing_reasoning(self):
+        import httpx
+        client = httpx.AsyncClient
+        chunks = [
+            {'choices': [{'delta': {'reasoning_content': 'PRIVATE reasoning'}}]},
+            {'choices': [{'delta': {'content': 'Ready'}, 'finish_reason': 'stop'}]},
+            {'choices': [], 'usage': {'prompt_tokens': 5, 'completion_tokens': 3}},
+        ]
+        events = ': heartbeat\n\n' + '\n\n'.join('data: ' + json.dumps(c) for c in chunks)
+        events += '\n\ndata: [DONE]\n\n'
+        seen = []
+        def handler(request):
+            seen.append(request)
+            payload = json.loads(request.content)
+            self.assertTrue(payload['stream'])
+            self.assertTrue(payload['stream_options']['include_usage'])
+            self.assertEqual(request.extensions['timeout']['read'], 600)
+            return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=events)
+        settings = {'provider_url': 'https://api.nyxos.shop/v1', 'model': 'glm-5.3',
+                    'api_key': 'key', 'streaming': False}
+        with (patch.object(runner.httpx, 'AsyncClient', lambda **kw: client(transport=httpx.MockTransport(handler), **kw)),
+              patch.object(asyncio.get_running_loop(), 'getaddrinfo', return_value=[(2, 1, 6, '', ('8.8.8.8', 443))]),
+              patch.object(runner, 'progress') as progress):
+            result = await runner.provider_request(settings, [], [])
+        self.assertEqual(len(seen), 1)  # No /models probe or duplicate generation.
+        self.assertEqual(result['content'], 'Ready')
+        self.assertEqual(result['_usage']['completion_tokens'], 3)
+        self.assertNotIn('PRIVATE', json.dumps(result))
+        self.assertFalse(any(c.args[0] == 'receiving' for c in progress.call_args_list))
+
     def response(self,chunks,done=True):
         async def lines():
             for chunk in chunks:

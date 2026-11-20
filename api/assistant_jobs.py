@@ -71,7 +71,7 @@ def dispatch(api):
     for row in ready:
         try:
             result = subprocess.run(['systemd-run', '--quiet', '--collect', '--property=Type=exec',
-                '--unit=' + row['unit'], '--property=RuntimeMaxSec=25min', '--property=UMask=0077',
+                '--unit=' + row['unit'], '--property=RuntimeMaxSec=35min', '--property=UMask=0077',
                 '--property=EnvironmentFile=' + str(api.ENV_FILE), '--setenv=DATA_DIR=' + str(api.DATA_DIR),
                 sys.executable, str(Path(__file__).resolve()), row['id']], capture_output=True, timeout=12, check=False)
             if result.returncode: update(api, row['id'], stage='launch_unconfirmed')
@@ -221,7 +221,7 @@ def cancel(api, identity, actor='panel'):
 
 async def events(api, identity, actor, request):
     last, heartbeat, started = -1, 0, time.monotonic()
-    while time.monotonic() - started < 1800:
+    while time.monotonic() - started < 2400:
         if await request.is_disconnected(): return
         record = await asyncio.to_thread(get, api, identity, actor)
         if record['seq'] != last:
