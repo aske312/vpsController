@@ -8,6 +8,8 @@ import yaml
 
 from application_operation import atomic_json, read
 
+SELECTION_ENABLED = False
+
 
 def digest(config):
     return hashlib.sha256(json.dumps(config, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()

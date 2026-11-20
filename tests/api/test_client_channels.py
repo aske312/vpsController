@@ -16,6 +16,31 @@ class ClientChannelTests(unittest.TestCase):
     def setUp(self):
         subscription_formats.SubscriptionFormatTests.setUp(self)
         self.enterContext(patch.object(manager, 'module_is_ready', return_value=False))
+        self.enterContext(patch.object(manager.client_channels, 'SELECTION_ENABLED', True))
+
+    def test_hidden_selection_rejects_old_client_requests_without_mutation(self):
+        self.register()
+        before = deepcopy(self.store)
+        with patch.object(manager.client_channels, 'SELECTION_ENABLED', False), \
+                patch.object(manager, 'provision_client_routes') as provision:
+            client = TestClient(manager.app)
+            for prefix in ('/s/test-token', '/api/mihomo/subscriptions/test-token'):
+                for suffix, body in (('', {}), ('/prepare', {})):
+                    response = client.post(prefix + '/commands/select-channels' + suffix, json=body)
+                    self.assertEqual(response.status_code, 404)
+            provision.assert_not_called()
+        self.assertEqual(self.store, before)
+
+    def test_hidden_selection_keeps_status_and_rollback_for_existing_preparations(self):
+        config, payload, device = self.lifecycle()
+        self.assertEqual(self.command('/prepare', payload).status_code, 200)
+        suffix = '/' + payload['operation_id'] + '/decision'
+        with patch.object(manager.client_channels, 'SELECTION_ENABLED', False):
+            self.assertEqual(self.command(suffix, {'action': 'accept'}).status_code, 404)
+            self.assertEqual(self.command('/' + payload['operation_id']).status_code, 200)
+            restored = self.command(suffix, {'action': 'rollback'})
+            self.assertEqual(restored.status_code, 200)
+            self.assertEqual(restored.json()['state'], 'rolled_back')
 
     fetch = subscription_formats.SubscriptionFormatTests.fetch
 

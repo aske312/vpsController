@@ -5867,6 +5867,11 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
 client_channel_slots = threading.BoundedSemaphore(2)
 
 
+def require_client_channel_selection():
+    if not client_channels.SELECTION_ENABLED:
+        raise HTTPException(404, 'Авто-маршруты временно недоступны')
+
+
 class ChannelSelectionRequest(BaseModel):
     # Keep the public command bounded and independent of administrative operations.
     require_udp: bool = False
@@ -6037,8 +6042,8 @@ def profile_client_reports(profile_id: str, device_id: str | None = None):
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
-@app.post("/s/{token}/commands/select-channels")
-@app.post("/api/mihomo/subscriptions/{token}/commands/select-channels")
+@app.post("/s/{token}/commands/select-channels", dependencies=[Depends(require_client_channel_selection)], include_in_schema=client_channels.SELECTION_ENABLED)
+@app.post("/api/mihomo/subscriptions/{token}/commands/select-channels", dependencies=[Depends(require_client_channel_selection)], include_in_schema=client_channels.SELECTION_ENABLED)
 def select_client_channels(token: str, request: Request, payload: ChannelSelectionRequest,
                            allow_changes: bool = Depends(subscription_mutation_access)):
     if allow_changes is not True:
@@ -6098,8 +6103,8 @@ def channel_command_response(record, base, profile, device_id, core_version):
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
-@app.post('/s/{token}/commands/select-channels/prepare')
-@app.post('/api/mihomo/subscriptions/{token}/commands/select-channels/prepare')
+@app.post('/s/{token}/commands/select-channels/prepare', dependencies=[Depends(require_client_channel_selection)], include_in_schema=client_channels.SELECTION_ENABLED)
+@app.post('/api/mihomo/subscriptions/{token}/commands/select-channels/prepare', dependencies=[Depends(require_client_channel_selection)], include_in_schema=client_channels.SELECTION_ENABLED)
 def prepare_client_channels(token: str, request: Request, payload: ChannelPreparation,
                             allow_changes: bool = Depends(subscription_mutation_access)):
     if allow_changes is not True:
@@ -6122,10 +6127,10 @@ def prepare_client_channels(token: str, request: Request, payload: ChannelPrepar
         return channel_command_response(record, base, profile, device_id, core_version)
 
 
-@app.get('/s/{token}/commands/select-channels/{identity}')
-@app.get('/api/mihomo/subscriptions/{token}/commands/select-channels/{identity}')
-@app.get('/s/{token}/commands/select-channels')
-@app.get('/api/mihomo/subscriptions/{token}/commands/select-channels')
+@app.get('/s/{token}/commands/select-channels/{identity}', include_in_schema=client_channels.SELECTION_ENABLED)
+@app.get('/api/mihomo/subscriptions/{token}/commands/select-channels/{identity}', include_in_schema=client_channels.SELECTION_ENABLED)
+@app.get('/s/{token}/commands/select-channels', include_in_schema=client_channels.SELECTION_ENABLED)
+@app.get('/api/mihomo/subscriptions/{token}/commands/select-channels', include_in_schema=client_channels.SELECTION_ENABLED)
 def client_channels_status(token: str, request: Request, identity: str | None = None):
     with profile_mutation_lock:
         profile, device_id = registered_command_device(token, request)
@@ -6137,10 +6142,12 @@ def client_channels_status(token: str, request: Request, identity: str | None = 
         return channel_command_response(record, base, profile, device_id, core_version)
 
 
-@app.post('/s/{token}/commands/select-channels/{identity}/decision')
-@app.post('/api/mihomo/subscriptions/{token}/commands/select-channels/{identity}/decision')
+@app.post('/s/{token}/commands/select-channels/{identity}/decision', include_in_schema=client_channels.SELECTION_ENABLED)
+@app.post('/api/mihomo/subscriptions/{token}/commands/select-channels/{identity}/decision', include_in_schema=client_channels.SELECTION_ENABLED)
 def decide_client_channels(token: str, identity: str, request: Request, payload: ChannelDecision,
                            allow_changes: bool = Depends(subscription_mutation_access)):
+    if payload.action == 'accept':
+        require_client_channel_selection()
     if allow_changes is not True:
         raise HTTPException(409, 'Изменения подписки временно недоступны')
     with profile_mutation_lock:
