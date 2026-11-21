@@ -22,7 +22,7 @@ export function RelayLiveDiagnostics({ route, stale }: { route: RelayRoute; stal
     <p>Активных сессий маршрута: {route.sessions ?? "нет данных"}{value.route_session_limit !== undefined ? ` / ${value.route_session_limit}` : ""} · Без ответа более 5 с: {value.no_return_sessions ?? "нет данных"}</p>
     <p>Сессий на всём Relay: {value.session_budget_used ?? "нет данных"} / {value.session_budget_limit ?? "нет данных"}</p>
     {route.transport === "tcp" && value.tcp_idle_closes !== undefined && <p>Закрыто по простою: {value.tcp_idle_closes} · Отклонено без доступа: {value.authentication_rejections ?? 0}</p>}
-    {Boolean(value.upstream_backoff_seconds) && <p>Повторное подключение к серверу через {value.upstream_backoff_seconds} с · Ожидавших подключений: {value.backoff_rejections ?? 0}</p>}
+    {Boolean(value.upstream_backoff_seconds) && <p>Повторное подключение к серверу через {value.upstream_backoff_seconds} с · Отклонено во время паузы: {value.backoff_rejections ?? 0}</p>}
     <p>Буферы UDP на всём Relay: {value.udp_receive_budget_used_bytes !== undefined && value.udp_receive_budget_bytes !== undefined ? <>{mib(value.udp_receive_budget_used_bytes)} / {mib(value.udp_receive_budget_bytes)} МиБ · {Math.round(value.udp_receive_budget_used_bytes / Math.max(1, value.udp_receive_budget_bytes) * 100)}%</> : "нет данных"}</p>
     {route.transport === "udp" && <p>Буферы UDP этого маршрута: {value.udp_receive_allocated_bytes !== undefined ? `${mib(value.udp_receive_allocated_bytes)} МиБ` : "нет данных"}</p>}
     {value.statistics_since !== undefined && <small>Ошибок с {new Date(value.statistics_since * 1000).toLocaleString("ru-RU")}: {route.errors ?? "нет данных"}. Очистка счётчиков не разрывает соединения.</small>}
