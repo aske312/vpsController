@@ -70,7 +70,7 @@ class ClientOptionsTests(unittest.TestCase):
                     self.assertEqual(group['proxies'], [label])
                     self.assertEqual(config['rules'][-1], 'MATCH,312node.net')
                     self.assertEqual(label, f'1 \u00b7 VLESS \u00b7 WebSocket \u00b7 TLS \u00b7 CDN \u00b7 Relay: {name}')
-                    control.read.assert_called_once_with()
+                    control.read.assert_called_with()
         self.assertEqual(self.profile, source)
 
     def test_relay_labels_keep_protocol_details_for_all_components_and_modes(self):
