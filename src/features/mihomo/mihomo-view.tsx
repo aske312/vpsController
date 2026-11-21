@@ -214,6 +214,7 @@ export function MihomoPage({
   const profileDraftRef = useRef(profileDraft);
   profileDraftRef.current = profileDraft;
   const profileDirty = Boolean(profileDialog && profileDraft !== profileInitialDraft);
+  const profileUnchanged = profileDialog !== "new" && !profileDirty;
   const profileDialogRef = useDialogFocus<HTMLFormElement>(Boolean(profileDialog), () => { void closeProfile(); });
   const [activeDeviceId, setActiveDeviceId] = useState("profile-common");
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
@@ -1053,7 +1054,7 @@ export function MihomoPage({
 
   async function saveProfile(event: FormEvent) {
     event.preventDefault();
-    if (!profileDialog) return;
+    if (!profileDialog || profileUnchanged) return;
     if (profileRevisionConflict) { notifyError("Профиль изменился на сервере. Загрузите актуальные данные перед сохранением"); return; }
     if (busy || pendingProfileSave || pendingPolicySaveRef.current) return;
     const session = profileSession.current;
@@ -1876,7 +1877,7 @@ export function MihomoPage({
               {!pendingProfileSave && <span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span>}
               {pendingProfileSave
                 ? <button type="button" className="primaryButton" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button>
-                : <button type="submit" className="primaryButton" disabled={Boolean(busy) || profileRevisionConflict || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button>}
+                : <button type="submit" className="primaryButton" disabled={Boolean(busy) || profileUnchanged || profileRevisionConflict || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button>}
             </footer>
           </form>
         </div>
