@@ -234,6 +234,8 @@ def direct_result(control, protocol, settings, result):
     selected = host_id(settings)
     if not selected:
         return result
+    if relay_cdn.before(settings) and control.cdn_route(selected, settings['cdn_domain']).get('auth'):
+        raise ValueError('Защищённый TCP Relay доступен через подписку Mihomo')
     from relay_private_transport import active
     if active(control, selected):
         raise ValueError('Защищённый Relay доступен через подписку Mihomo; отдельный формат не поддерживает внешний транспорт')

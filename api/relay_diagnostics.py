@@ -1,5 +1,5 @@
 """Validated optional Agent 1.2 status, compatible with older Agents."""
-ERROR_CODES = {'tcp_connect_timeout', 'tcp_connect_error', 'tcp_transfer_timeout', 'tcp_transfer_error',
+ERROR_CODES = {'tcp_connect_timeout', 'tcp_connect_error', 'tcp_transfer_timeout', 'tcp_transfer_error', 'tcp_write_timeout',
                'udp_upstream_error', 'udp_listener_error', 'udp_buffer_full', 'udp_receive_buffer_unavailable',
                'udp_pending_full', 'udp_session_error', 'session_limit'}
 
@@ -29,7 +29,7 @@ def diagnostics(value):
         result.update(return_state=value['return_state'], no_return_sessions=value['no_return_sessions'])
     for key in ('udp_receive_buffer_bytes', 'udp_receive_allocated_bytes', 'udp_receive_budget_bytes',
                 'udp_receive_budget_used_bytes', 'session_budget_used', 'session_budget_limit',
-                'route_session_limit', 'statistics_since'):
+                'route_session_limit', 'statistics_since', 'tcp_idle_closes', 'authentication_rejections', 'backoff_rejections', 'upstream_backoff_seconds'):
         if key in value:
             number = value[key]
             maximum = 65536 if key in ('session_budget_used', 'session_budget_limit', 'route_session_limit') else 253402300799 if key == 'statistics_since' else 2**53-1

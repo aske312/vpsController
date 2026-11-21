@@ -5413,6 +5413,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolv
     if resolve_relays:
         selections = {name: connection for connection, direct, cdn, tls in rendered for name in (direct, cdn, tls) if name}
         text = relay_privacy.protect_subscription(relay_connection_control(), text, selections)
+        import relay_ingress
+        text = relay_ingress.protect_subscription(relay_connection_control(), text, selections)
     return text
 
 

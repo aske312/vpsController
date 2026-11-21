@@ -201,6 +201,7 @@ def protect_subscription(control, text, selections):
         route = next((row for row in registry['routes'] if row['host_id'] == selected
                       and row['transport'] == network and row['listen_port'] == node['port']), None)
         if not route: raise ValueError('Не найден защищённый маршрут подключения')
+        if route.get('auth'): continue  # TCP authentication remains independent of UDP availability.
         destination = {'ip': route['target_ip'], 'port': route['target_port'], 'network': network}
         config['proxies'][index] = protect_node(node, profile, destination)
         helper = mihomo_transport(profile);helpers[helper['name']] = helper

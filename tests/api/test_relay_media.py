@@ -14,6 +14,30 @@ from network_probe import ProbePlan, ProbeUnavailable
 
 
 class RelayMediaTests(unittest.TestCase):
+    def test_authenticated_tcp_probe_uses_the_exported_carrier_and_rejects_weaker_tls(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); (root/'mihomo').mkdir()
+            profiles = [{'id':'profile','connections':[{'id':'connection','component':'transport-reality','settings':{'relay_host_id':'host'}}]}]
+            (root/'mihomo/profiles.json').write_text(json.dumps(profiles))
+            secret = {'username':'fixture_username','password':'fixture_password','credential_id':'b'*32}
+            route = {'id':'route','transport':'tcp','listen_port':20001,'target_ip':'104.16.1.2','target_port':443,'auth':{'type':'tls-connect',**{key:secret[key] for key in ('username','credential_id')}}}
+            host = {'id':'host','certificate_sha256':'a'*64}
+            control = SimpleNamespace(addresses=lambda _: {'ipv4':['1.1.1.1'],'ipv6':[],'domains':[]})
+            context = SimpleNamespace(DATA_DIR=root,ADMIN_USER='fixture',ADMIN_PASSWORD='fixture',relay_control=lambda:control)
+            helper = {'name':'__312_transport_tcp_'+secret['credential_id'],'type':'http','server':'1.1.1.1','port':20001,'tls':True,'skip-cert-verify':False,'fingerprint':host['certificate_sha256'],'username':secret['username'],'password':secret['password']}
+            node = {'name':'CDN','type':'vless','server':route['target_ip'],'port':443,'uuid':'fixture','servername':'cdn.example','tls':True,'dialer-proxy':helper['name']}
+            with patch.object(relay_media.urllib.request,'build_opener') as opener, patch('relay_ingress.credential',return_value=secret):
+                read = opener.return_value.open.return_value.__enter__.return_value.read
+                read.return_value = json.dumps({'proxies':[node,helper]}).encode()
+                plan = relay_media.mihomo_plan(context,route,host,'mihomo:profile:connection')
+                self.assertEqual((plan.address,plan.port),('1.1.1.1',20001))
+                config = relay_media.client_config(plan,32123)
+                self.assertEqual(config['proxies'][1],helper)
+                self.assertNotIn('__relay_helpers',config['proxies'][0])
+                for changed in ({'tls':False},{'skip-cert-verify':True},{'fingerprint':'f'*64},{'server':'8.8.8.8'},{'port':20002}):
+                    read.return_value = json.dumps({'proxies':[node,{**helper,**changed}]}).encode()
+                    with self.assertRaises(ProbeUnavailable): relay_media.mihomo_plan(context,route,host,'mihomo:profile:connection')
+
     def test_mihomo_plan_preserves_export_security_and_rejects_different_socket(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); (root/'mihomo').mkdir()

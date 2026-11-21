@@ -49,20 +49,41 @@ def mihomo_plan(api, route, host, consumer_id, *, allow_disposable=False):
         raise ProbeUnavailable('Экспорт слишком большой')
     exported = yaml.safe_load(body)
     nodes = exported.get('proxies', []) if isinstance(exported, dict) else []
-    if not isinstance(nodes, list) or any(not isinstance(node, dict) for node in nodes) or len(nodes) != len(own) or profiles_path.read_bytes() != raw:
+    if not isinstance(nodes, list) or any(not isinstance(node, dict) for node in nodes) or len(nodes) > 512 or profiles_path.read_bytes() != raw:
         raise ProbeUnavailable('Экспорт неоднозначен или профиль изменился')
-    node = nodes[next(index for index, item in enumerate(own) if item['id'] == connection['id'])]
+    helpers = [node for node in nodes if str(node.get('name', '')).startswith('__312_transport_tcp_')]
+    clients = [node for node in nodes if node not in helpers]
+    if len(clients) != len(own): raise ProbeUnavailable('Экспорт неоднозначен или профиль изменился')
+    node = copy.deepcopy(clients[next(index for index, item in enumerate(own) if item['id'] == connection['id'])])
     transport = 'udp' if node.get('type') in ('tuic', 'hysteria2', 'wireguard') else 'tcp'
     allowed = api.relay_control().addresses(host)
     endpoints = set(allowed['ipv4'] + allowed['ipv6'] + allowed['domains'] + [host.get('client_address', '')])
     types = ('vless', 'vmess', 'trojan', 'tuic', 'hysteria2', 'wireguard') if allow_disposable else ('vless', 'vmess', 'trojan', 'tuic', 'hysteria2')
-    if node.get('type') not in types or node.get('server') not in endpoints or node.get('port') != route['listen_port'] or transport != route['transport']:
+    address, port = node.get('server'), node.get('port')
+    if route.get('auth'):
+        import relay_ingress
+        secret = relay_ingress.credential(api.relay_control(), route)
+        name = '__312_transport_tcp_'+secret['credential_id']
+        selected = [helper for helper in helpers if helper.get('name') == name]
+        if len(selected) != 1 or node.get('dialer-proxy') != name or node.get('server') != route['target_ip'] or node.get('port') != route['target_port']:
+            raise ProbeUnavailable('Экспорт не использует защищённый вход Relay')
+        helper = selected[0]
+        if (helper.get('type') != 'http' or helper.get('tls') is not True or helper.get('skip-cert-verify') is not False
+                or helper.get('fingerprint') != host['certificate_sha256'] or helper.get('username') != secret['username']
+                or helper.get('password') != secret['password'] or helper.get('dialer-proxy')):
+            raise ProbeUnavailable('Защита входа Relay не подтверждена')
+        address, port = helper.get('server'), helper.get('port')
+        node['__relay_helpers'] = [copy.deepcopy(helper)]
+    elif node.get('dialer-proxy'):
+        raise ProbeUnavailable('Транспорт экспорта требует отдельной проверки')
+    if node.get('type') not in types or address not in endpoints or port != route['listen_port'] or transport != route['transport']:
         raise ProbeUnavailable('Экспорт не использует выбранный вход Relay; тест не будет подменять маршрут')
     material = [hashlib.sha256(raw).hexdigest(), route, host['certificate_sha256']]
     # Saved check results are not part of the tested configuration.
     material[1] = {key: route[key] for key in ('id', 'transport', 'listen_port', 'target_ip', 'target_port')}
+    if route.get('auth'): material[1]['auth'] = route['auth']
     fingerprint = hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
-    return ProbePlan(route['id'], 1, consumer_id, node['server'], node['port'], '', route['target_port'], transport,
+    return ProbePlan(route['id'], 1, consumer_id, address, port, '', route['target_port'], transport,
                      fingerprint, node, producer='mihomo_export', engine='mihomo', relay_host_id=host['id'], relay_route_id=route['id'])
 
 

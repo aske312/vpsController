@@ -9,6 +9,15 @@ const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', t
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
 const status = { revision: 'c'.repeat(32), hosts: [host], pending: false, origin_ip: '195.14.118.112', origin_hosts: ['195.14.118.112'], targets: [{ transport: 'tcp', port: 443 }] };
 
+test('Relay security keeps legacy exposure explicit and rejects credential leaks', () => {
+  const security = {state:'legacy_exposed',controller_ip:status.origin_ip,api_source_restricted:true,unauthenticated_external_routes:['legacy']};
+  const route = {id:'pro-'+'d'.repeat(32),host_id:host.id,transport:'tcp',listen_port:20001,target_ip:'104.16.1.2',target_port:443,state:'listening',target_verified:false,auth:{type:'tls-connect',username:'fixture_username',credential_id:'e'.repeat(32)}};
+  const value = {...status,hosts:[{...host,security,routes:[route]}]};
+  assert.equal(relaySnapshot(value).hosts[0].security.state,'legacy_exposed');
+  for(const changed of [{state:'safe'},{controller_ip:null},{api_source_restricted:false},{unauthenticated_external_routes:['../bad'] }]) assert.throws(()=>relaySnapshot({...status,hosts:[{...host,security:{...security,...changed}}]}));
+  for(const changed of [{password:'private'},{password_sha256:'a'.repeat(64)},{credential_id:'invalid'}])assert.throws(()=>relaySnapshot({...value,hosts:[{...value.hosts[0],routes:[{...route,auth:{...route.auth,...changed}}]}]}));
+});
+
 test('Relay country override accepts ISO countries and automatic mode',()=>{
  for(const code of ['DE','US',''])assert.equal(relaySnapshot({...status,hosts:[{...host,country_code_override:code}]}).hosts[0].country_code_override,code);
  for(const code of ['ZZ','EU','de','Germany',null,42])assert.throws(()=>relaySnapshot({...status,hosts:[{...host,country_code_override:code}]}));

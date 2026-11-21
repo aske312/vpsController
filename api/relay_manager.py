@@ -19,6 +19,7 @@ from relay_client import RelayClient, AgentAPIError
 from relay_addresses import normalize_address, normalize_addresses, all_addresses, authority
 import relay_cdn
 import relay_diagnostics
+import relay_ingress
 from resource_country import country_override
 
 CONFIG_KEYS = ('transport', 'listen_port', 'target_ip', 'target_port')
@@ -56,6 +57,7 @@ def route_snapshot(value):
         raise ValueError('Некорректные защищённые порты Agent')
     for item in value['items']:
         validate_config(item)
+        if 'auth' in item: item['auth'] = relay_ingress.metadata(item['auth'])
         identity = item.get('id')
         if not isinstance(identity, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', identity) or identity in seen:
             raise ValueError('Некорректный ID маршрута агента')
@@ -83,6 +85,7 @@ def status_snapshot(value):
         raise ValueError('Несовместимые лимиты агента')
     if 'addresses' in value:normalize_addresses(value['addresses'], None)
     if 'updates' in value: value['updates'] = relay_diagnostics.updates(value['updates'])
+    if 'security' in value: value['security'] = relay_ingress.security(value['security'])
     if 'capabilities' in value and (not isinstance(value['capabilities'], list) or len(value['capabilities']) > 16 or any(not isinstance(item, str) or not re.fullmatch(r'[a-z0-9-]{1,64}', item) for item in value['capabilities'])):
         raise ValueError('Некорректные возможности Agent')
     if 'address_checks' in value: value['address_checks'] = relay_diagnostics.address_checks(value['address_checks'])
@@ -92,7 +95,7 @@ def status_snapshot(value):
 
 
 def same_route(left, right):
-    return all(left.get(key) == right.get(key) for key in CONFIG_KEYS)
+    return all(left.get(key) == right.get(key) for key in CONFIG_KEYS) and left.get('auth') == right.get('auth')
 
 
 class RelayManager:
@@ -121,6 +124,7 @@ class RelayManager:
         route_ids = set()
         for route in value['routes']:
             validate_config(route)
+            if 'auth' in route: relay_ingress.metadata(route['auth'])
             if route.get('cdn_domain'):
                 relay_cdn.domain(route['cdn_domain'])
                 relay_cdn.edge_ip(route['target_ip'])
@@ -218,6 +222,7 @@ class RelayManager:
                 continue  # A lost delete acknowledgement may have closed this route.
             if not found or not same_route(found, route):
                 raise OperationConflict('Маршруты узла не совпадают с реестром PRO; параметры не заменены')
+        relay_ingress.bind_controller(client, status, public_ipv4(self.origin), required=not previous)
         registry['hosts'] = [item for item in registry['hosts'] if item['id'] != host_id] + [host]
         self.write(registry)
         if intent:
@@ -271,7 +276,8 @@ class RelayManager:
         registry = self.read()
         host = self.host(registry, host_id)
         client = self.client(host)
-        status_snapshot(client.request('GET', '/v1/status'))
+        status = status_snapshot(client.request('GET', '/v1/status'))
+        relay_ingress.bind_controller(client, status, public_ipv4(self.origin))
         for group in groups:
             sockets = list(dict.fromkeys((transport, port) for transport, port in group))
             if not sockets or any(transport not in ('tcp', 'udp') or type(port) is not int or not 1 <= port <= 65535 or port in (22, 8000, 9443) or port == 80 and not (allow_acme and transport == 'tcp') for transport, port in sockets):
@@ -402,6 +408,11 @@ class RelayManager:
                 if route['transport'] != 'tcp' or route['target_port'] != 443:
                     raise ValueError('Relay к CDN поддерживает TCP 443')
                 route['cdn_domain'] = relay_cdn.domain(_cdn_domain)
+                status = status_snapshot(client.request('GET', '/v1/status'))
+                if 'authenticated-tcp-v1' not in status.get('capabilities', []):
+                    raise ValueError('Обновите Relay Agent для защищённого подключения к CDN')
+                relay_ingress.bind_controller(client, status, public_ipv4(self.origin), required=True)
+                route['auth'] = relay_ingress.provision(self, route)
             if route['target_ip'] == client.host or route['target_port'] in (22, 8000, 9443) or route['target_port'] == 80 and not (allow_acme and route['transport'] == 'tcp'):
                 raise ValueError('Этот порт назначения нельзя публиковать через relay')
             if len(remote['items']) >= 64 or any(item['transport'] == route['transport'] and item['listen_port'] == route['listen_port'] for item in remote['items']):
@@ -412,10 +423,10 @@ class RelayManager:
         atomic_json(self.pending, intent)  # Durable before the first remote mutation.
         try:
             client.request('DELETE' if delete else 'PUT', '/v1/routes/'+route['id'],
-                           None if delete else {key: route[key] for key in CONFIG_KEYS}, revision=remote['revision'])
+                           None if delete else relay_ingress.wire_config(self, route), revision=remote['revision'])
             intent['acknowledged'] = True
         except AgentAPIError as exc:
-            intent['rejected'] = exc.status in (401, 409, 422, 428, 495)
+            intent['rejected'] = exc.status in (401, 403, 409, 422, 428, 495)
             intent['last_error'] = f'agent_http_{exc.status}'
         except Exception:
             # The response can be lost after apply; resolve by read, never replay.
@@ -496,7 +507,7 @@ class RelayManager:
                     return public
                 remote = route_snapshot(client.request('GET', '/v1/routes'))
                 public.update(state='connected', version=status['version'], agent_revision=remote['revision'])
-                public.update({key: status[key] for key in ('updates', 'address_checks', 'capabilities') if key in status})
+                public.update({key: status[key] for key in ('updates', 'address_checks', 'capabilities', 'security') if key in status})
                 ids = {item['id'] for item in owned}
                 public['foreign_routes'] = sum(item['id'] not in ids for item in remote['items'])
                 for route in owned:

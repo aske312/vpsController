@@ -22,9 +22,10 @@ MEDIA_SHA256 = 'b670602fa00934ca27c4351bb0efe7ea7a07fae57284e44226025eeed7c51254
 def client_config(plan, port):
     node = copy.deepcopy(plan.client)
     if plan.engine == 'mihomo':
+        helpers = node.pop('__relay_helpers', [])
         node['name'] = 'relay-media'
         return {**({'interface-name': plan.interface} if getattr(plan, 'interface', '') else {}), 'mixed-port': port, 'bind-address': '127.0.0.1', 'allow-lan': False, 'mode': 'rule', 'log-level': 'silent',
-                'proxies': [node], 'rules': ['MATCH,relay-media'], 'dns': {'enable': True, 'nameserver': ['https://1.1.1.1/dns-query'], 'proxy-server-nameserver': ['https://1.1.1.1/dns-query']}}
+                'proxies': [node, *helpers], 'rules': ['MATCH,relay-media'], 'dns': {'enable': True, 'nameserver': ['https://1.1.1.1/dns-query'], 'proxy-server-nameserver': ['https://1.1.1.1/dns-query']}}
     node['tag'] = 'relay-media'
     if plan.engine == 'singbox':
         return {'log': {'disabled': True}, 'inbounds': [{'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': port}],

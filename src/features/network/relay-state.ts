@@ -5,13 +5,14 @@ export type RelayMeasurement = { state: "ready" | "failed" | "warning" | "unknow
 export type RelayDeviceTest = { id: string; state: "preparing" | "awaiting_client" | "processing" | "ready" | "warning" | "failed" | "unknown" | "expired" | "cancelled"; reason: string; created_at: number; expires_at: number; finished_at?: number; consumer_id: string; cleanup_state?: "cleaned" | "failed" | "pending"; media?: { state: "ready" | "failed" | "unknown"; reason: string; verified_bytes?: number | null; seconds?: number | null }; measurement?: RelayMeasurement; vantage_point: "client"; verification: "client_report_with_udp_witness" };
 
 export type RelayRoute = {
+  auth?: { type: "tls-connect"; username: string; credential_id: string };
   cdn_domain?: string;
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;
   diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number>; return_state?: "no_return" | "waiting" | "flowing" | "idle"; no_return_sessions?: number;
     interval?: { seconds: number; errors: number; dropped_packets: number; new_sessions: number; error_counts: Record<string, number> };
-    statistics_since?: number; udp_receive_buffer_bytes?: number; udp_receive_allocated_bytes?: number; udp_receive_budget_bytes?: number; udp_receive_budget_used_bytes?: number; session_budget_used?: number; session_budget_limit?: number; route_session_limit?: number;
+    statistics_since?: number; tcp_idle_closes?: number; authentication_rejections?: number; backoff_rejections?: number; upstream_backoff_seconds?: number; udp_receive_buffer_bytes?: number; udp_receive_allocated_bytes?: number; udp_receive_budget_bytes?: number; udp_receive_budget_used_bytes?: number; session_budget_used?: number; session_budget_limit?: number; route_session_limit?: number;
   };
   check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number; measurement?: RelayMeasurement; cleanup_state?: "cleaned" | "failed" | "pending" };
   device_test?: RelayDeviceTest;
@@ -23,6 +24,7 @@ export type RelayHost = {
   foreign_routes: number; routes: RelayRoute[]; error?: string;
   profile_failures?: number;
   capabilities?: string[];
+  security?: { state: "ready" | "unpaired" | "legacy_exposed"; controller_ip: string | null; api_source_restricted: boolean; unauthenticated_external_routes: string[] };
   private_transport?: { state: "preparing" | "sending" | "ready" | "unknown" | "disabling" | "disabled"; generation?: string; verified_at?: number };
   agent_release?: { state: "unknown" | "current" | "outdated" | "newer"; version?: string; digest?: string };
   agent_update?: { state: "sending" | "queued" | "running" | "updated" | "failed" | "unknown"; id?: string; version?: string; requested_at?: number; polling?: boolean };
@@ -90,6 +92,14 @@ export function relaySnapshot(value: unknown): RelayStatus {
     if (host.agent_release !== undefined && (!object(host.agent_release) || !["unknown", "current", "outdated", "newer"].includes(String(host.agent_release.state)) || host.agent_release.state !== "unknown" && (typeof host.agent_release.version !== "string" || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(host.agent_release.version) || typeof host.agent_release.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(host.agent_release.digest)))) return invalid();
     if (host.agent_update !== undefined && (!object(host.agent_update) || !["sending", "queued", "running", "updated", "failed", "unknown"].includes(String(host.agent_update.state)))) return invalid();
     if (host.capabilities !== undefined && (!Array.isArray(host.capabilities) || host.capabilities.length > 16 || host.capabilities.some(item => typeof item !== "string" || !/^[a-z0-9-]{1,64}$/.test(item)))) return invalid();
+    if (host.security !== undefined) {
+      const security = host.security;
+      if (!object(security) || !["ready", "unpaired", "legacy_exposed"].includes(String(security.state))
+        || security.controller_ip !== null && typeof security.controller_ip !== "string" || typeof security.api_source_restricted !== "boolean"
+        || !Array.isArray(security.unauthenticated_external_routes) || security.unauthenticated_external_routes.length > 64
+        || security.unauthenticated_external_routes.some(id => typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id))
+        || (security.state === "unpaired") !== (security.controller_ip === null) || security.api_source_restricted !== (security.controller_ip !== null)) return invalid();
+    }
     if (host.excluded_addresses !== undefined && (!Array.isArray(host.excluded_addresses) || host.excluded_addresses.some(address => typeof address !== "string" || !address || address.length > 253))) return invalid();
     if (host.updates !== undefined && (!object(host.updates) || typeof host.updates.enabled !== "boolean" || host.updates.interval_hours !== 24 || !["unchecked", "current", "updated", "disabled", "failed", "unknown"].includes(String(host.updates.state)))) return invalid();
     if (host.address_checks !== undefined && (!Array.isArray(host.address_checks) || host.address_checks.length > 64 || host.address_checks.some(item => !object(item) || typeof item.domain !== "string" || !["verified", "dns_only", "unresolved", "mismatch"].includes(String(item.state))))) return invalid();
@@ -108,11 +118,14 @@ export function relaySnapshot(value: unknown): RelayStatus {
         || !["listening", "failed", "missing", "drift", "unknown"].includes(String(route.state)) || route.target_verified !== false
         || host.state === "unknown" && route.state !== "unknown") return invalid();
       for (const key of ["sent_bytes", "received_bytes", "sessions", "errors"]) if (route[key] !== undefined && !integer(route[key])) return invalid();
+      if (route.auth !== undefined && (!object(route.auth) || Object.keys(route.auth).some(key => !["type", "username", "credential_id"].includes(key)) || route.auth.type !== "tls-connect"
+        || typeof route.auth.username !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(route.auth.username)
+        || typeof route.auth.credential_id !== "string" || !/^[0-9a-f]{32}$/.test(route.auth.credential_id))) return invalid();
       if (route.diagnostics !== undefined) {
         const data = route.diagnostics;
         if (!object(data) || ["sent_packets", "received_packets", "dropped_packets"].some(key => !integer(data[key])) || ["last_sent_at", "last_received_at", "last_error_at"].some(key => data[key] !== null && !integer(data[key], 0, 253402300799)) || data.last_error !== null && typeof data.last_error !== "string" || !object(data.error_counts) || Object.values(data.error_counts).some(item => !integer(item))) return invalid();
         if (data.return_state !== undefined && (!["no_return", "waiting", "flowing", "idle"].includes(String(data.return_state)) || !integer(data.no_return_sessions, 0, 65536))) return invalid();
-        for (const key of ["udp_receive_buffer_bytes", "udp_receive_allocated_bytes", "udp_receive_budget_bytes", "udp_receive_budget_used_bytes", "statistics_since", "session_budget_used", "session_budget_limit", "route_session_limit"]) if (data[key] !== undefined && !integer(data[key], 0, ["session_budget_used", "session_budget_limit", "route_session_limit"].includes(key) ? 65536 : Number.MAX_SAFE_INTEGER)) return invalid();
+        for (const key of ["udp_receive_buffer_bytes", "udp_receive_allocated_bytes", "udp_receive_budget_bytes", "udp_receive_budget_used_bytes", "statistics_since", "session_budget_used", "session_budget_limit", "route_session_limit", "tcp_idle_closes", "authentication_rejections", "backoff_rejections", "upstream_backoff_seconds"]) if (data[key] !== undefined && !integer(data[key], 0, ["session_budget_used", "session_budget_limit", "route_session_limit"].includes(key) ? 65536 : Number.MAX_SAFE_INTEGER)) return invalid();
         for (const [used, limit] of [["udp_receive_budget_used_bytes", "udp_receive_budget_bytes"], ["session_budget_used", "session_budget_limit"]]) if (data[used] !== undefined && (!integer(data[limit]) || Number(data[used]) > Number(data[limit]))) return invalid();
         if (data.interval !== undefined) {
           const interval = data.interval;

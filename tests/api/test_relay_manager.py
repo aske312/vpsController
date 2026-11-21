@@ -40,14 +40,18 @@ class FakeAgent:
         self.offline_after_write = False
         self.reject = False
         self.addresses = None
+        self.controller = None
 
     def request(self, method, path, body=None, revision=None):
         self.calls.append((method, path))
         if self.offline:
             raise OSError('offline')
+        if method == 'PUT' and path == '/v1/controller':
+            self.controller = body['origin_ip']
+            return {'schema': 1, 'origin_ip': self.controller}
         if method == 'GET':
             if path == '/v1/status':
-                return {'api_version': 1, 'version': '1.0.0', 'revision': self.revision, 'routes': len(self.items), 'failed_routes': 0, 'transports': ['tcp', 'udp'], 'address_family': 'ipv4', 'listen_ports': {'min': 20000, 'max': 20999}, 'max_routes': 64, **({'addresses':self.addresses,'client_address_families':['ipv4','ipv6']} if self.addresses else {})}
+                return {'api_version': 1, 'version': '1.6.0', 'revision': self.revision, 'routes': len(self.items), 'failed_routes': 0, 'transports': ['tcp', 'udp'], 'address_family': 'ipv4', 'listen_ports': {'min': 20000, 'max': 20999}, 'max_routes': 64, 'capabilities': ['controller-binding-v1', 'authenticated-tcp-v1'], 'security': {'state': 'ready' if self.controller else 'unpaired', 'controller_ip': self.controller, 'api_source_restricted': bool(self.controller), 'unauthenticated_external_routes': []}, **({'addresses':self.addresses,'client_address_families':['ipv4','ipv6']} if self.addresses else {})}
             return copy.deepcopy({'revision': self.revision, 'items': self.items})
         if self.reject:
             raise AgentAPIError(409, 'rejected')
@@ -56,6 +60,8 @@ class FakeAgent:
         self.items = [item for item in self.items if item['id'] != route_id]
         if method == 'PUT':
             self.items.append({'id': route_id, **body, 'state': 'listening', 'target_verified': False, 'sent_bytes': 0, 'received_bytes': 0, 'sessions': 0, 'errors': 0})
+            if 'auth' in body:
+                self.items[-1]['auth'] = {key: value for key, value in body['auth'].items() if key != 'password_sha256'}
         self.revision += 1
         if self.offline_after_write:
             self.offline = True
@@ -323,6 +329,7 @@ class RelayManagementTests(unittest.TestCase):
         self.control.save_host({'name': 'Relay', 'agent_url': f'https://{AGENT}:9443', 'token': TOKEN,
                                 'certificate_sha256': PIN, 'expected_revision': '0'*32})
         self.host_id = self.control.read()['hosts'][0]['id']
+        self.agent.calls.clear()  # Controller pairing belongs to fixture registration.
 
     def payload(self, port=20001):
         return {'host_id': self.host_id, 'transport': 'tcp', 'listen_port': port, 'target_port': 443,

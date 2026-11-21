@@ -8,6 +8,8 @@ from relay_addresses import authority
 
 
 def rewrite(text, route, address, origin_hosts):
+    if route.get('auth'):
+        raise ValueError('Для защищённого TCP Relay используйте подписку Mihomo из профиля устройства')
     if len(text.encode('utf-8')) > 262144:
         raise ValueError('Файл слишком большой')
     hosts = {route['cdn_domain']} if route.get('cdn_domain') else {str(host).lower() for host in origin_hosts}
