@@ -96,8 +96,32 @@ class ClientReportTests(unittest.TestCase):
     def test_expired_and_readonly_subscriptions_cannot_write(self):
         with patch.object(manager.subscription_limits, 'status', return_value={'state': 'expired'}):
             self.assertEqual(self.send().status_code, 403)
-        with patch.dict(manager.app.dependency_overrides, {manager.subscription_mutation_access: lambda: False}):
+        with patch.dict(manager.app.dependency_overrides, {manager.client_report_access: lambda: False}):
             self.assertEqual(self.send().status_code, 409)
+
+    def test_reports_remain_available_during_runtime_operations(self):
+        before = deepcopy(self.store)
+        manager.application_operation.atomic_json(manager.DATA_ROOT.parent / 'application-action.json',
+                                                  {'action': 'network-check', 'state': 'running'})
+        with manager.application_operation.mutation_lock(manager.DATA_ROOT.parent):
+            response = self.send()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store, before)
+
+    def test_reports_are_blocked_for_unmanaged_component_and_update_recovery(self):
+        with patch.object(manager, 'component_is_managed', return_value=False):
+            self.assertEqual(self.send().status_code, 409)
+        for action in ('update', 'test-update', 'test-rollback', 'safe-update', 'auto-safe-update', 'kernel-update'):
+            with self.subTest(action=action):
+                manager.application_operation.atomic_json(manager.DATA_ROOT.parent / 'application-action.json',
+                                                          {'action': action, 'state': 'running'})
+                self.assertEqual(self.send().status_code, 409)
+        manager.application_operation.atomic_json(manager.DATA_ROOT.parent / 'application-action.json',
+                                                  {'action': 'test-update', 'state': 'succeeded'})
+        recovery = manager.DATA_ROOT.parent / 'recovery/application-update'
+        recovery.mkdir(parents=True)
+        self.assertEqual(self.send().status_code, 409)
+        self.assertFalse((manager.DATA_ROOT / 'client-reports/reports.sqlite3').exists())
 
     def test_storage_retention_bounds_and_reuse_after_throttle(self):
         root = manager.DATA_ROOT

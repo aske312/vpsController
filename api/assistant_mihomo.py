@@ -197,7 +197,7 @@ def capabilities(api, actor):
         'permissions': sorted(roles.effective(settings, actor)),
         'profile_fields': ['name', 'channels', 'connections', 'devices', 'routing'] + (['limits'] if admin else []),
         'connection_fields': {'id': 'optional existing ID', 'component': 'module ID', 'name': 'label', 'device_id': 'device ID', 'settings': 'module connection settings'},
-        'device_fields': {'id': 'existing ID or new manual ID', 'name': 'label', 'manual': 'true for new manual device', 'routing': 'device policy', 'personal_rule_ids': 'array of IDs'},
+        'device_fields': {'id': 'stable device ID shown as ID устройства in the UI; use this exact ID to select an existing HWID device; new IDs only for manual devices', 'name': 'label', 'manual': 'true for new manual device', 'routing': 'device policy', 'personal_rule_ids': 'array of IDs'},
         'settings_fields': ['values', 'expected_revision'],
         'routing_policy': {'schema_path': '/routing/schema', 'schema_field': 'structured_policy_schema',
                            'value_key': 'structured_policy', 'selection_key': 'structured_policy_selection',

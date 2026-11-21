@@ -4,6 +4,14 @@ import { profileStatsSnapshot } from "../../src/features/mihomo/workspace-refres
 
 const snapshot = { summary: { configured: 2, active: 1, rx_bytes: 1000, tx_bytes: 2000 }, connections: { one: { active: true, rx_bytes: 1000, tx_bytes: 2000 } } };
 
+test("partial activity counts survive decoding without contradicting known channels", () => {
+  const summary = {...snapshot.summary, activity_available:false, activity_known:1, activity_unknown:1};
+  assert.equal(profileStatsSnapshot({...snapshot,summary}).summary.active, 1);
+  for (const fields of [{activity_known:-1}, {activity_unknown:3}, {activity_known:0}, {activity_unknown:0}]) {
+    assert.throws(() => profileStatsSnapshot({...snapshot,summary:{...summary,...fields}}));
+  }
+});
+
 test("valid and unavailable telemetry preserves its values without inventing counters", () => {
   assert.deepEqual(profileStatsSnapshot(snapshot), snapshot);
   const unknown = { summary: { configured: 2, active: 0, stats_available: false, activity_available: false, rx_bytes: 0, tx_bytes: 0 }, connections: { one: { active: null, rx_bytes: null, tx_bytes: null, stats_available: false, activity_available: false } } };

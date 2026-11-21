@@ -68,6 +68,24 @@ class TelemetryTests(unittest.TestCase):
         for direction in ("rx_bytes", "tx_bytes"):
             self.assertEqual(stats["summary"][direction], sum(row[direction] for row in stats["devices"].values()))
 
+    def test_partial_activity_keeps_known_sessions_per_device(self):
+        profile = {"id": "activity", "devices": [{"id": "phone"}, {"id": "pc"}], "connections": [
+            {"id": key, "device_id": device, "component": "transport-reality", "credential": {}}
+            for key, device in (("live", "phone"), ("unknown", "phone"), ("idle", "pc"))]}
+        samples = {"live": {"active": True, "activity_available": True},
+                   "unknown": {"active": None, "activity_available": False},
+                   "idle": {"active": False, "activity_available": True}}
+        with (patch.object(manager, "normalize_profile", return_value=profile),
+              patch.object(manager, "reality_profile_stats", side_effect=lambda _, key: samples[key]),
+              patch.object(manager.traffic_usage, "snapshot", return_value={})):
+            stats = manager.profile_stats_payload(profile)
+        self.assertEqual((stats["summary"]["active"], stats["summary"]["activity_known"], stats["summary"]["activity_unknown"]), (1, 2, 1))
+        phone, pc = stats["devices"]["phone"], stats["devices"]["pc"]
+        self.assertEqual((phone["active"], phone["activity_known"], phone["activity_unknown"]), (1, 1, 1))
+        self.assertFalse(phone["activity_available"])
+        self.assertEqual((pc["active"], pc["activity_unknown"]), (0, 0))
+        self.assertTrue(pc["activity_available"])
+
     def test_maintenance_failure_does_not_disable_other_protocols(self):
         stopped = threading.Event()
         with patch.object(stopped, "wait", side_effect=lambda _: stopped.set()), patch.object(manager, "cleanup_profile_transitions"), patch.object(manager, "ensure_reality_telemetry", side_effect=RuntimeError("unavailable")), patch.object(manager, "ensure_quic_telemetry") as quic, patch.object(manager.logger, "error"):

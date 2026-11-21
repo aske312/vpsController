@@ -195,6 +195,7 @@ class MihomoOperatorTests(unittest.TestCase):
         result = self.tool(name='mihomo_api', path='/profiles')
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual([entry['id'] for entry in result.json()['items']], ['own'])
+        self.assertEqual(result.json()['items'][0]['devices'][0]['id'], 'phone')
         self.assertNotIn('secret-wireguard', result.text)
         identity = self.tool(name='vps_user').json()
         self.assertEqual(identity['role'], 'user')

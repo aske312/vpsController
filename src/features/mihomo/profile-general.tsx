@@ -27,6 +27,7 @@ export function ProfileGeneral({ device, profileName, limits, status, traffic, d
       <header className={styles.heading}><h3>{common ? "Подписка" : "Устройство"}</h3>{!common && <span className={styles.binding}>{binding}</span>}</header>
       <label className={styles.nameRow}><span>Название</span><input className={styles.nameInput} value={common ? profileName : device.name} required maxLength={80} disabled={disabled} onChange={event => common ? onProfileNameChange(event.target.value) : onDeviceNameChange(event.target.value)} /></label>
       {!common && <><dl className={styles.facts}>
+        <div><dt>ID устройства</dt><dd><code className={styles.deviceId}>{device.id}</code></dd></div>
         <div><dt>Система</dt><dd>{deviceSystemLabel(device)}</dd></div>
         <div><dt>Приложение</dt><dd>{client}</dd></div>
         <div><dt>Ядро</dt><dd>{core}</dd></div>

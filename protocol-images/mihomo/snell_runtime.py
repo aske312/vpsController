@@ -77,14 +77,18 @@ def stats(api, credential):
     try:
         value = json.loads(result.stdout)
         upload, download = value['uploadTotal'], value['downloadTotal']
-        if any(type(count) is not int or count < 0 for count in (upload, download)) or not isinstance(value.get('connections'), list):
+        # Mihomo serializes its empty connection slice as null.
+        connections = value['connections']
+        if connections is None:
+            connections = []
+        if any(type(count) is not int or count < 0 for count in (upload, download)) or not isinstance(connections, list):
             return unknown
         epoch = api.run('systemctl', 'show', unit, '--property=InvocationID', '--value')
         if epoch.returncode or not re.fullmatch(r'[a-f0-9]{32}', epoch.stdout.strip()): return unknown
-        return {**unknown, 'active': bool(value['connections']), 'rx_bytes': upload, 'tx_bytes': download,
+        return {**unknown, 'active': bool(connections), 'rx_bytes': upload, 'tx_bytes': download,
                 'counter_epoch': epoch.stdout.strip(), 'stats_available': True, 'activity_available': True,
-                'active_connections': len(value['connections']), 'activity_source': 'mihomo_connections',
-                'traffic_observed_at': time.time()}
+                'active_connections': len(connections), 'activity_source': 'mihomo_connections',
+                'traffic_observed_at': int(time.time())}
     except (ValueError, KeyError, TypeError): return unknown
 
 

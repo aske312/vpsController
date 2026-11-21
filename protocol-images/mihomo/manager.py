@@ -3996,13 +3996,17 @@ def collect_profile_stats(item: dict[str, Any], *, collect_latency: bool = True)
             connections[connection_id] = quic_profile_stats(module_id, credential)
     def directional(row):
         return row.get("stats_available", True) and row.get("rx_bytes") is not None and row.get("tx_bytes") is not None
+    def activity(rows):
+        known = sum(row.get("activity_available") is not False and type(row.get("active")) is bool for row in rows)
+        return {"activity_available": known == len(rows), "activity_known": known,
+                "activity_unknown": len(rows) - known}
     values = list(connections.values())
     for value in values:
         if collect_latency and value.get("endpoint") and (value.get("active") or int(value.get("active_connections", 0) or 0) > 0 or value.get("handshake_age_s") is not None):
             value["latency_ms"] = endpoint_latency_ms(str(value["endpoint"]))
     rx_bytes = sum(int(value.get("rx_bytes", 0) or 0) for value in values)
     tx_bytes = sum(int(value.get("tx_bytes", 0) or 0) for value in values)
-    active = sum(1 for value in values if value.get("active") is True)
+    active = sum(1 for value in values if value.get("active") is True and value.get("activity_available") is not False)
     handshake_ages = [int(value["handshake_age_s"]) for value in values if value.get("handshake_age_s") is not None]
     device_summaries: dict[str, dict[str, Any]] = {}
     for device in item.get("devices", [{"id": "device-1"}]):
@@ -4011,7 +4015,7 @@ def collect_profile_stats(item: dict[str, Any], *, collect_latency: bool = True)
         rows = [connections[value] for value in ids if value in connections]
         ages = [int(row["handshake_age_s"]) for row in rows if row.get("handshake_age_s") is not None]
         latencies = [float(row["latency_ms"]) for row in rows if row.get("latency_ms") is not None]
-        device_summaries[device_id] = {"stats_available": not rows or any(directional(row) for row in rows), "stats_partial": any(not directional(row) for row in rows), "activity_available": all(row.get("activity_available", True) for row in rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
+        device_summaries[device_id] = {"stats_available": not rows or any(directional(row) for row in rows), "stats_partial": any(not directional(row) for row in rows), **activity(rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True and row.get("activity_available") is not False), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
     latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
     try:
         usage = traffic_usage.snapshot(normalize_profile(item), connections, DATA_ROOT / "traffic-usage", load_json, atomic_json)
@@ -4019,7 +4023,7 @@ def collect_profile_stats(item: dict[str, Any], *, collect_latency: bool = True)
             connections[identity].update(evidence)
     except (OSError, ValueError, KeyError, TypeError):
         usage = None
-    return {"id": profile_id, "usage": usage, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": not values or any(directional(value) for value in values), "stats_partial": any(not directional(value) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
+    return {"id": profile_id, "usage": usage, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": not values or any(directional(value) for value in values), "stats_partial": any(not directional(value) for value in values), **activity(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
 
 
 @app.get("/api/mihomo/stats", dependencies=[Depends(auth_required)])
@@ -6033,11 +6037,27 @@ def registered_command_device(token: str, request: Request):
     raise HTTPException(404, "Subscription not found")
 
 
+def client_report_access():
+    # Reports write only their own SQLite store. Runtime maintenance and profile
+    # operations must not discard observations by taking the global worker lock.
+    # Update recovery can restore that store; keep its writer disabled until done.
+    recovery = DATA_ROOT.parent / 'recovery/application-update'
+    if not component_is_managed() or recovery.exists() or recovery.is_symlink():
+        return False
+    try:
+        current = application_operation.read(DATA_ROOT.parent / 'application-action.json')
+    except (OSError, ValueError):
+        return False
+    restoring = {'update', 'test-update', 'test-rollback', 'safe-update', 'auto-safe-update', 'kernel-update'}
+    return not (current and current.get('state') not in application_operation.TERMINAL
+                and current.get('action') in restoring)
+
+
 @app.post('/s/{token}/reports')
 @app.post('/api/mihomo/subscriptions/{token}/reports')
 def receive_client_report(token: str, request: Request, payload: client_reports.Report,
-                          allow_changes: bool = Depends(subscription_mutation_access)):
-    if allow_changes is not True:
+                          allow_reports: bool = Depends(client_report_access)):
+    if allow_reports is not True:
         raise HTTPException(409, 'Приём статистики временно недоступен')
     require_client_reports_pro()
     with profile_mutation_lock:

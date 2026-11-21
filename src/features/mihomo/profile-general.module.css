@@ -70,6 +70,7 @@ section.root input.limitInput {
 .facts > div, .sharedValues > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); align-items: baseline; gap: 16px; }
 .facts dt, .sharedValues dt { color: var(--muted); font-size: 13px; }
 .facts dd, .sharedValues dd { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.deviceId { font-family: var(--font-mono); font-size: 12px; user-select: all; }
 .editLink { padding: 4px 0; border: 0; background: none; color: var(--cyan); font-size: 12px; cursor: pointer; }
 .editLink:disabled { opacity: .5; cursor: default; }
 .usage { display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; gap: 8px 16px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }

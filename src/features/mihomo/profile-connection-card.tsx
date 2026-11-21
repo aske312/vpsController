@@ -10,6 +10,10 @@ export function ProfileConnectionCard({ connection, stats, status }: { connectio
     <span className={`protocol-${connection.component}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /><i /></span>
     <p><b>{connection.name}</b><small className="mihomoConnectionStateLabel">{status.label}</small>
       <small>{stats?.used_bytes != null ? `Обмен: ${usageBytes({ used_bytes: stats.used_bytes, stats_available: stats.stats_available !== false, stats_partial: Boolean(stats.stats_partial) })}` : <>↓ {trafficBytes(stats, "rx_bytes")} · ↑ {trafficBytes(stats, "tx_bytes")}</>}</small>
+      <small>{stats?.activity_available === false || typeof stats?.active !== "boolean" ? "Активность неизвестна"
+        : stats.activity_source === "handshake_180s" ? stats.active ? "Handshake за последние 3 минуты" : "Нет свежего handshake"
+        : stats.active ? stats.active_connections != null ? `Открытых соединений: ${stats.active_connections}` : "Есть активные подключения"
+        : "Нет активных подключений"}</small>
       {(!stats || stats.stats_available === false) && <em>Статистика недоступна</em>}
       {stats && stats.stats_available !== false && <em>{stats.traffic_scope === "observation"
         ? stats.observed_since != null && Number.isFinite(stats.observed_since) && stats.observed_since > 0

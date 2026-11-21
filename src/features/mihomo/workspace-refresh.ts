@@ -283,6 +283,17 @@ export function profileStatsSnapshot(value: unknown): ProfileStats {
     || Number(summary.configured) < 0 || Number(summary.active) < 0 || Number(summary.active) > Number(summary.configured)) {
     throw new Error("Некорректные счётчики активности профиля");
   }
+  for (const key of ["activity_known", "activity_unknown"]) {
+    if (summary[key] !== undefined && (!Number.isInteger(summary[key]) || Number(summary[key]) < 0 || Number(summary[key]) > Number(summary.configured))) {
+      throw new Error("Некорректная полнота активности профиля");
+    }
+  }
+  if (summary.activity_known !== undefined && summary.activity_unknown !== undefined
+    && (Number(summary.activity_known) + Number(summary.activity_unknown) !== summary.configured
+      || Number(summary.active) > Number(summary.activity_known)
+      || summary.activity_available !== (summary.activity_unknown === 0))) {
+    throw new Error("Противоречивая полнота активности профиля");
+  }
   const connections = value.connections === undefined ? {} : value.connections;
   if (!record(connections)) throw new Error("Некорректная статистика подключений профиля");
   if (value.usage != null) {

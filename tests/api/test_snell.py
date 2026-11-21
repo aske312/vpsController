@@ -115,6 +115,19 @@ class SnellTests(unittest.TestCase):
         api = SimpleNamespace(run=lambda *args: epoch if args[0] == 'systemctl' else command, systemctl_active=lambda _: True)
         sample = snell.stats(api, self.credential())
         self.assertEqual((sample['rx_bytes'], sample['tx_bytes'], sample['counter_epoch']), (20, 30, 'a' * 32))
+        self.assertIs(type(sample['traffic_observed_at']), int)
+        for connections, expected in ((None, 0), ([], 0), ([{'id': 'session'}], 1)):
+            with self.subTest(connections=connections):
+                command.stdout = json.dumps({'uploadTotal': 20, 'downloadTotal': 30, 'connections': connections})
+                sample = snell.stats(api, self.credential())
+                self.assertTrue(sample['stats_available'])
+                self.assertTrue(sample['activity_available'])
+                self.assertEqual(sample['active_connections'], expected)
+                self.assertEqual(sample['active'], expected > 0)
+        for invalid in ({'uploadTotal': 20, 'downloadTotal': 30},
+                        {'uploadTotal': 20, 'downloadTotal': 30, 'connections': {}}):
+            command.stdout = json.dumps(invalid)
+            self.assertFalse(snell.stats(api, self.credential())['stats_available'])
         command.stdout = '{"uploadTotal": -1, "downloadTotal": 3, "connections": []}'
         self.assertFalse(snell.stats(api, self.credential())['stats_available'])
 
