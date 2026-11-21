@@ -495,7 +495,7 @@ class RelayRoute(asyncio.DatagramProtocol):
         period = self.limits.get('statistics_reset_seconds', 86400)
         if period and time.monotonic()-self.last_reset >= period:
             self.errors = self.dropped_packets = 0
-            self.idle_closes = self.authentication_rejections = 0
+            self.idle_closes = self.authentication_rejections = self.backoff_rejections = 0
             self.error_counts.clear()
             self.last_error = self.last_error_at = None
             self.last_reset = time.monotonic()
