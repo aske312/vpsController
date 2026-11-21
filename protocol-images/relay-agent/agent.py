@@ -19,8 +19,9 @@ import platform
 import tarfile
 import urllib.request
 from collections import deque
+from security import ControllerPolicy, SecurityError, authentication, public_route, connect_request
 
-VERSION = '1.5.1'
+VERSION = '1.6.0'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -220,6 +221,14 @@ class RelayError(ValueError):
         self.status = status
 
 
+class IdleClose(Exception):
+    """The configured inactivity limit expired; no transfer failure is implied."""
+
+
+class WriteTimeout(Exception):
+    pass
+
+
 def atomic_json(path, value):
     path = Path(path)
     fd, temporary = tempfile.mkstemp(prefix='.relay-', dir=path.parent)
@@ -237,8 +246,12 @@ def atomic_json(path, value):
 def validate_route(route_id, body, own_ips=()):
     if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', route_id):
         raise RelayError('Invalid route id')
-    if not isinstance(body, dict) or set(body) != {'transport', 'listen_port', 'target_ip', 'target_port'}:
+    if not isinstance(body, dict) or set(body) - {'transport', 'listen_port', 'target_ip', 'target_port', 'auth'} or not {'transport', 'listen_port', 'target_ip', 'target_port'} <= set(body):
         raise RelayError('Expected transport, listen_port, target_ip and target_port only')
+    if 'auth' in body:
+        try: authentication(body['auth'])
+        except SecurityError as exc: raise RelayError(str(exc), exc.status) from None
+        if body['transport'] != 'tcp': raise RelayError('TLS CONNECT ingress requires TCP')
     if body['transport'] not in ('tcp', 'udp'):
         raise RelayError('Transport must be tcp or udp')
     for key, low, high in [('listen_port', PORT_MIN, PORT_MAX), ('target_port', 1, 65535)]:
@@ -320,6 +333,9 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.sessions, self.pending = {}, {}
         self.tasks, self.writers = set(), set()
         self.sent = self.received = self.errors = 0
+        self.idle_closes = self.authentication_rejections = 0
+        self.connect_failures = self.connect_retry_at = self.backoff_rejections = 0
+        self.tls_context = None
         self.sent_packets = self.received_packets = self.dropped_packets = 0
         self.error_counts = {}
         self.last_error = self.last_error_at = None
@@ -344,6 +360,7 @@ class RelayRoute(asyncio.DatagramProtocol):
         period = self.limits.get('statistics_reset_seconds', 86400)
         if period and time.monotonic()-self.last_reset >= period:
             self.errors = self.dropped_packets = 0
+            self.idle_closes = self.authentication_rejections = 0
             self.error_counts.clear()
             self.last_error = self.last_error_at = None
             self.last_reset = time.monotonic()
@@ -423,9 +440,23 @@ class RelayRoute(asyncio.DatagramProtocol):
         pumps = []
         phase = 'tcp_connect'
         try:
-            incoming, upstream = await asyncio.wait_for(asyncio.open_connection(self.config['target_ip'], self.config['target_port']), self.limits.get('tcp_connect_seconds', 10))
+            if self.config.get('auth'):
+                try:
+                    await writer.start_tls(self.tls_context, ssl_handshake_timeout=5)
+                    await connect_request(reader, writer, self.config)
+                except (SecurityError, OSError, asyncio.TimeoutError, ConnectionError):
+                    self.authentication_rejections += 1
+                    return
+            if time.monotonic() < self.connect_retry_at:
+                self.backoff_rejections += 1
+                return
+            incoming, upstream = await self.connect_upstream()
             self.writers.add(upstream)
             phase = 'tcp_transfer'
+            if self.config.get('auth'):
+                writer.write(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+                try: await asyncio.wait_for(writer.drain(), self.limits.get('tcp_drain_seconds', 30))
+                except asyncio.TimeoutError: raise WriteTimeout() from None
             last_activity = time.monotonic()
 
             async def pump(source, destination, direction):
@@ -436,15 +467,20 @@ class RelayRoute(asyncio.DatagramProtocol):
                         data = await asyncio.wait_for(source.read(65536), remaining)
                     except asyncio.TimeoutError:
                         if time.monotonic() - last_activity >= self.limits.get('tcp_idle_seconds', TCP_IDLE_TIMEOUT):
-                            raise
+                            raise IdleClose() from None
                         continue  # The opposite direction is still transferring.
                     if not data:
                         if destination.can_write_eof():
                             destination.write_eof()
+                        else:
+                            destination.close()  # TLS has no half-close; deliver close_notify promptly.
                         return
                     last_activity = time.monotonic()
                     destination.write(data)
-                    await asyncio.wait_for(destination.drain(), self.limits.get('tcp_drain_seconds', 30))
+                    try:
+                        await asyncio.wait_for(destination.drain(), self.limits.get('tcp_drain_seconds', 30))
+                    except asyncio.TimeoutError:
+                        raise WriteTimeout() from None
                     if direction == 'sent':
                         self.sent += len(data)
                         self.last_sent_at = int(time.time())
@@ -457,6 +493,10 @@ class RelayRoute(asyncio.DatagramProtocol):
             pumps = [asyncio.create_task(pump(reader, upstream, 'sent')), asyncio.create_task(pump(incoming, writer, 'received'))]
             # Preserve half-close: a client can finish its request before the response.
             await asyncio.gather(*pumps)
+        except IdleClose:
+            self.idle_closes += 1
+        except WriteTimeout:
+            self.failure('tcp_write_timeout')
         except (OSError, asyncio.TimeoutError) as exc:
             self.failure(phase + ('_timeout' if isinstance(exc, asyncio.TimeoutError) else '_error'))
         finally:
@@ -469,6 +509,27 @@ class RelayRoute(asyncio.DatagramProtocol):
             self.tasks.discard(task)
             self.tcp_waiting.pop(task, None)
             slot.release()
+
+    async def connect_upstream(self):
+        # Only retry the TCP handshake. No application bytes have been sent.
+        loop = asyncio.get_running_loop()
+        budget = self.limits.get('tcp_connect_seconds', 10)
+        deadline = loop.time() + budget
+        try:
+            for attempt in range(2):
+                try:
+                    result = await asyncio.wait_for(asyncio.open_connection(self.config['target_ip'], self.config['target_port']),
+                                                    max(.001, (deadline-loop.time()) / (2-attempt)))
+                    self.connect_failures = self.connect_retry_at = 0
+                    return result
+                except (OSError, asyncio.TimeoutError):
+                    if attempt or loop.time() >= deadline: raise
+                    await asyncio.sleep(min(.1, max(0, (deadline-loop.time()) / 10)))
+        except (OSError, asyncio.TimeoutError):
+            self.connect_failures = min(10, self.connect_failures + 1)
+            if self.connect_failures >= 3:
+                self.connect_retry_at = time.monotonic() + min(30, 2 ** (self.connect_failures-3))
+            raise
 
     def connection_made(self, transport):
         self.transport = transport
@@ -569,11 +630,14 @@ class RelayRoute(asyncio.DatagramProtocol):
         waiting = list(self.tcp_waiting.values()) + [item.awaiting_since for item in self.sessions.values() if getattr(item, 'awaiting_since', None) is not None]
         unanswered = sum(now - value >= 5 for value in waiting)
         return_state = 'no_return' if unanswered else 'waiting' if waiting else 'flowing' if self.last_received_at and time.time() - self.last_received_at < 30 else 'idle'
-        return {**self.config, 'state': 'listening', 'sent_bytes': self.sent, 'received_bytes': self.received,
+        return {**public_route(self.config), 'state': 'listening', 'sent_bytes': self.sent, 'received_bytes': self.received,
                 'sessions': len(self.slots), 'errors': self.errors,
                 'target_verified': False,
                 'diagnostics': {'sent_packets': self.sent_packets, 'received_packets': self.received_packets,
                     'interval': self.recent.snapshot(), 'statistics_since': self.statistics_since,
+                    'tcp_idle_closes': self.idle_closes, 'authentication_rejections': self.authentication_rejections,
+                    'upstream_backoff_seconds': max(0, int(self.connect_retry_at-time.monotonic()+.999)),
+                    'backoff_rejections': self.backoff_rejections,
                     'session_budget_used': self.session_budget.used, 'session_budget_limit': self.session_budget.limit,
                     'route_session_limit': self.limits.get('max_sessions_per_route', MAX_SESSIONS),
                     'udp_receive_buffer_bytes': self.receive_buffer_bytes,
@@ -927,6 +991,17 @@ class Agent:
         self.http_connections = 0
         self.measurements = {}
         self.private_transport = PrivateTransport(self)
+        self.security = ControllerPolicy(self.state_dir, atomic_json)
+        self.api_context = None
+
+    def make_route(self, config):
+        route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
+        if config.get('auth'):
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(self.config_dir / 'server.crt', self.config_dir / 'server.key')
+            route.tls_context = context
+        return route
 
     def settings(self):
         config = json.loads((self.config_dir / 'config.json').read_text())
@@ -951,7 +1026,7 @@ class Agent:
         for config in stored['items']:
             route_id = config['id']
             config = validate_route(route_id, {k: v for k, v in config.items() if k != 'id'}, self.settings()['own_ips'])
-            route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
+            route = self.make_route(config)
             try:
                 await route.start()
                 self.routes[route_id] = route
@@ -966,21 +1041,30 @@ class Agent:
         actual = hashlib.sha256(token[7:].encode()).hexdigest()
         if not hmac.compare_digest(actual, expected): raise RelayError('Unauthorized', 401)
 
-    async def dispatch(self, method, path, headers, body):
+    async def dispatch(self, method, path, headers, body, peer=None):
         self.authorize(headers)
+        try:
+            if not self.security.permits_peer(peer): raise SecurityError('Controller source is not allowed')
+        except SecurityError as exc:
+            raise RelayError(str(exc), exc.status) from None
+        if path == '/v1/controller' and method == 'PUT':
+            async with self.lock:
+                try: return self.security.bind(peer, body)
+                except (SecurityError, ValueError) as exc: raise RelayError(str(exc), getattr(exc, 'status', 422)) from None
         if method == 'GET' and path == '/v1/status':
             return {'api_version': 1, 'version': VERSION, 'revision': self.revision, 'routes': len(self.routes),
                     'failed_routes': len(self.failed), 'transports': ['tcp', 'udp'], 'address_family': 'ipv4',
                     'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
                     'addresses': read_inventory(self.config_dir, self.settings()),
                     'updates': self.update_status(),
-                    'capabilities': ['udp-measurement-v1', 'manual-update-v1', 'private-transport-v1', 'interval-diagnostics-v1'],
+                    'capabilities': ['udp-measurement-v1', 'manual-update-v1', 'private-transport-v1', 'interval-diagnostics-v1', 'controller-binding-v1', 'authenticated-tcp-v1'],
+                    'security': self.security.snapshot(self.configs()),
                     'limits': dict(self.limits),
                     'address_checks': self.address_checks(),
                     'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
             return {'revision': self.revision, 'private_ingress_ports': self.private_transport.ports(), 'reserved_udp_ports': sorted(item.port for item in self.measurements.values() if not item.closed), 'items': [route.status() for route in self.routes.values()] +
-                    [{**item['config'], 'state': 'failed', 'error': item['error'], 'target_verified': False} for item in self.failed.values()]}
+                    [{**public_route(item['config']), 'state': 'failed', 'error': item['error'], 'target_verified': False} for item in self.failed.values()]}
         update = re.fullmatch(r'/v1/updates/([0-9a-f]{32})', path)
         if update and method in ('PUT', 'GET'):
             async with self.lock:
@@ -1004,6 +1088,8 @@ class Agent:
                 if existing and config == existing.config:
                     return {'revision': self.revision, 'item': existing.status()}
                 if existing or failed: raise RelayError('Route id already exists; delete before replacing', 409)
+                try: self.security.authorize_route(config)
+                except SecurityError as exc: raise RelayError(str(exc), exc.status) from None
             elif not existing and not failed:
                 return {'revision': self.revision, 'deleted': route_id}
             if 'if-match' not in headers: raise RelayError('If-Match revision is required', 428)
@@ -1020,7 +1106,7 @@ class Agent:
                 raise RelayError('UDP listener reserved by protected transport', 409)
             if any(item['listen_port'] == config['listen_port'] and item['transport'] == config['transport'] for item in self.configs()):
                 raise RelayError('Listener already reserved', 409)
-            route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
+            route = self.make_route(config)
             try:
                 await route.start()
             except OSError:
@@ -1122,7 +1208,13 @@ class Agent:
             return
         self.http_connections += 1
         status, payload = 200, {}
+        respond = False
         try:
+            peer = writer.get_extra_info('peername')
+            if peer is None or not self.security.permits_peer(peer[0]): return
+            if self.api_context is not None:
+                await writer.start_tls(self.api_context, ssl_handshake_timeout=5)
+            respond = True
             raw = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 5)
             if len(raw) > 8192: raise RelayError('Headers too large', 431)
             lines = raw.decode('ascii').split('\r\n')
@@ -1140,18 +1232,21 @@ class Agent:
             size = int(headers.get('content-length', '0'))
             if not 0 <= size <= 16384: raise RelayError('Body too large', 413)
             data = await asyncio.wait_for(reader.readexactly(size), 5) if size else b'{}'
-            payload = await self.dispatch(method, path, headers, json.loads(data))
+            payload = await self.dispatch(method, path, headers, json.loads(data), peer[0])
+        except SecurityError as exc:
+            status, payload = exc.status, {'detail': str(exc)}
         except RelayError as exc:
             status, payload = exc.status, {'detail': str(exc)}
-        except (ValueError, UnicodeError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
+        except (OSError, ValueError, UnicodeError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
             status, payload = 400, {'detail': 'Malformed or incomplete request'}
         except Exception:
             status, payload = 503, {'detail': 'Agent storage or configuration unavailable'}
         finally:
             try:
-                output = json.dumps(payload).encode()
-                writer.write(f'HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {len(output)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n'.encode() + output)
-                await asyncio.wait_for(writer.drain(), 5)
+                if respond:
+                    output = json.dumps(payload).encode()
+                    writer.write(f'HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {len(output)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n'.encode() + output)
+                    await asyncio.wait_for(writer.drain(), 5)
             except (OSError, asyncio.TimeoutError): pass
             writer.close()
             self.http_connections -= 1
@@ -1162,6 +1257,7 @@ class Agent:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.config_dir / 'server.crt', self.config_dir / 'server.key')
+        self.api_context = context
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGTERM, signal.SIGINT): loop.add_signal_handler(signum, stop.set)
@@ -1175,8 +1271,7 @@ class Agent:
         sock.bind((self.listen_host, port))
         sock.listen(128)
         sock.setblocking(False)
-        server = await asyncio.start_server(self.http_client, sock=sock, ssl=context,
-                                            ssl_handshake_timeout=5, limit=8192)
+        server = await asyncio.start_server(self.http_client, sock=sock, limit=8192)
         async with server:
             await stop.wait()
         for item in self.measurements.values(): item.close()

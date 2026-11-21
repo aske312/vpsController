@@ -179,7 +179,7 @@ install_complete=0
 rollback() {
   result=$?
   if [[ "${install_complete}" != 1 && -f "${backup}/agent.py" ]]; then
-    for name in agent.py addresses.py credentials.py manifest.json update.py; do
+    for name in agent.py addresses.py security.py credentials.py manifest.json update.py; do
       if [[ -f "${backup}/${name}" ]]; then cp -p "${backup}/${name}" "${LIB}/${name}"; else rm -f "${LIB}/${name}"; fi
     done
     systemctl restart vps-control-relay-agent.service || true
@@ -199,12 +199,13 @@ rollback() {
   return "${result}"
 }
 trap rollback EXIT
-for name in agent.py addresses.py credentials.py manifest.json update.py; do
+for name in agent.py addresses.py security.py credentials.py manifest.json update.py; do
   [[ ! -f "${LIB}/${name}" ]] || cp -p "${LIB}/${name}" "${backup}/${name}"
 done
 install -m 0755 "${SOURCE}/agent.py" "${LIB}/agent.py"
 install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
 install -m 0644 "${SOURCE}/addresses.py" "${LIB}/addresses.py"
+install -m 0644 "${SOURCE}/security.py" "${LIB}/security.py"
 install -m 0644 "${SOURCE}/manifest.json" "${LIB}/manifest.json"
 install -m 0700 "${SOURCE}/update.py" "${LIB}/update.py"
 if [[ ! -f "${ROOT}/updates.json" ]]; then
@@ -212,6 +213,20 @@ if [[ ! -f "${ROOT}/updates.json" ]]; then
 fi
 chown root:vps-relay "${ROOT}/updates.json"
 chmod 0640 "${ROOT}/updates.json"
+python3 - "${ROOT}/channel.json" "${SOURCE}/manifest.json" <<'PY_CHANNEL'
+import json, os, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+branch = os.environ.get('VPS_CONTROL_BRANCH', '')
+if branch in ('agent', 'test-agent') or not path.exists():
+    branch = branch or json.loads(Path(sys.argv[2]).read_text())['source_branch']
+    value = {'channel': 'test' if branch == 'test-agent' else 'stable'}
+    temporary = path.with_suffix('.new')
+    temporary.write_text(json.dumps(value))
+    temporary.chmod(0o640)
+    os.chown(temporary, 0, path.parent.stat().st_gid)
+    os.replace(temporary, path)
+PY_CHANNEL
 python3 "${LIB}/addresses.py" "${ROOT}"
 cat >/etc/systemd/system/vps-control-relay-agent.service <<'EOF'
 [Unit]

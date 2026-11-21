@@ -17,6 +17,18 @@ spec.loader.exec_module(update)
 
 
 class UpdateTests(unittest.TestCase):
+    def test_test_channel_cannot_consume_stable_assets_and_stable_cannot_consume_test(self):
+        asset = {'name': 'relay-agent.tar.gz', 'browser_download_url': update.ASSET_PREFIX.replace('agent-latest/', 'agent-test-latest/')+'relay-agent.tar.gz', 'digest': 'sha256:'+'a'*64}
+        release = {'tag_name': 'agent-test-latest', 'assets': [asset]}
+        self.assertEqual(update.release_asset(release, 'test'), asset)
+        with self.assertRaises(ValueError): update.release_asset(release)
+        with self.assertRaises(ValueError): update.release_asset({**release, 'tag_name': 'agent-latest'}, 'test')
+        with tempfile.TemporaryDirectory() as folder, patch.object(update, 'ROOT', Path(folder)):
+            self.assertEqual(update.channel(), 'stable')
+            (Path(folder)/'channel.json').write_text('{"channel":"test"}')
+            self.assertEqual(update.channel(), 'test')
+            (Path(folder)/'channel.json').write_text('{"channel":"unknown"}')
+            with self.assertRaises(ValueError): update.channel()
     def test_manual_update_uses_verified_package_even_when_daily_updates_are_disabled(self):
         from contextlib import ExitStack
         with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:

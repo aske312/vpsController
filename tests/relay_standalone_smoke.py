@@ -50,7 +50,7 @@ def inside(source, sandbox, api_port=None, occupy_default=False):
     staged = sandbox / 'qa/source'
     for name in ('install.sh', 'scripts/install-agent.sh',
                  'protocol-images/relay-agent/install.sh', 'protocol-images/relay-agent/agent.py',
-                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/uninstall.sh', 'protocol-images/relay-agent/update.py'):
+                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/security.py', 'protocol-images/relay-agent/uninstall.sh', 'protocol-images/relay-agent/update.py'):
         target = staged / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, target)
@@ -162,6 +162,13 @@ if sys.argv[1] in ('restart', 'disable'):
     except HTTPError as error: assert error.code == 401
     else: raise AssertionError('Unauthenticated request was accepted')
     route = {'transport': 'tcp', 'listen_port': 20001, 'target_ip': '1.1.1.1', 'target_port': 443}
+    # Seed a paired controller in the isolated fixture. Public-source pairing is
+    # exercised separately; a loopback caller cannot claim a public controller.
+    binding = Path('/var/lib/vps-control-relay-agent/controller.json')
+    binding.write_text(json.dumps({'schema': 1, 'origin_ip': '1.1.1.1'}))
+    import pwd
+    user = pwd.getpwnam('vps-relay')
+    os.chown(binding, user.pw_uid, user.pw_gid); binding.chmod(0o600)
     create = Request(f'https://127.0.0.1:{expected_port}/v1/routes/smoke', data=json.dumps(route).encode(), method='PUT',
         headers={'Authorization': 'Bearer ' + connection['token'], 'If-Match': '0', 'Content-Type': 'application/json'})
     with urlopen(create, context=context, timeout=5) as response: assert response.status == 200

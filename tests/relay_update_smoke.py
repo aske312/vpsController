@@ -26,7 +26,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='relay-update-smoke-') as folder:
         root = Path(folder); root.chmod(0o755)
         runtime = root/'runtime'; runtime.mkdir(mode=0o755)
-        for name in ('agent.py','addresses.py'): shutil.copy(source/name, runtime/name)
+        for name in ('agent.py','addresses.py','security.py'): shutil.copy(source/name, runtime/name)
         config = root/'config'; config.mkdir(mode=0o755)
         state = root/'state'; state.mkdir(mode=0o700)
         user = pwd.getpwnam('nobody'); os.chown(state, user.pw_uid, user.pw_gid)
@@ -37,7 +37,7 @@ def main():
         shutil.copy(source/'update.py', library/'update.py')
         shutil.copy(source/'manifest.json', library/'manifest.json')
         stage = root/'stage'; stage.mkdir()
-        for name in ('agent.py','addresses.py','credentials.py','manifest.json','install.sh','uninstall.sh','update.py'):
+        for name in ('agent.py','addresses.py','security.py','credentials.py','manifest.json','install.sh','uninstall.sh','update.py'):
             shutil.copy(source/name,stage/name)
         (stage/'manifest.json').write_text(json.dumps({'id':'relay-agent','source_branch':'agent','version':'9.0.0'}))
         # The real installer is covered by the separate isolated installer smoke.

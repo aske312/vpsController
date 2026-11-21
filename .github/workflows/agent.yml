@@ -2,9 +2,9 @@ name: Verify standalone Agent installer
 on:
   workflow_dispatch:
   push:
-    branches: [agent]
+    branches: [agent, test-agent]
   pull_request:
-    branches: [agent]
+    branches: [agent, test-agent]
 permissions:
   contents: read
 jobs:
@@ -25,6 +25,7 @@ jobs:
           bash -n install.sh scripts/install-agent.sh protocol-images/relay-agent/install.sh protocol-images/relay-agent/uninstall.sh
           python3 tests/relay_standalone_test.py
           python3 tests/relay_agent_test.py
+          python3 tests/relay_security_test.py
           python3 tests/relay_update_test.py
       - name: Install twice in isolated namespaces without a panel
         run: |
@@ -34,17 +35,26 @@ jobs:
       - name: Verify authenticated manual update through systemd
         run: sudo python3 tests/relay_update_smoke.py
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/agent'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/agent' || github.ref == 'refs/heads/test-agent')
     needs: verify
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-    concurrency: agent-release
+    concurrency: agent-release-${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7
       - name: Package tested Agent
+        env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
         run: |
-          tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py credentials.py manifest.json install.sh uninstall.sh update.py
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('protocol-images/relay-agent/manifest.json')
+          value = json.loads(path.read_text()); value['source_branch'] = os.environ['SOURCE_BRANCH']
+          path.write_text(json.dumps(value))
+          PY
+          tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py security.py credentials.py manifest.json install.sh uninstall.sh update.py
           python3 - <<'PY'
           import hashlib, json
           from pathlib import Path
@@ -55,7 +65,8 @@ jobs:
       - name: Publish Agent update
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name == 'test-agent' && 'agent-test-latest' || 'agent-latest' }}
         run: |
-          gh release view agent-latest >/dev/null 2>&1 || gh release create agent-latest --title 'Relay Agent' --notes 'Daily update channel; published after Agent verification.' --target "$GITHUB_SHA" --prerelease
-          gh release upload agent-latest relay-agent.tar.gz --clobber
-          gh release upload agent-latest relay-agent-version.json --clobber
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title 'Relay Agent' --notes 'Published after Agent verification.' --target "$GITHUB_SHA" --prerelease
+          gh release upload "$RELEASE_TAG" relay-agent.tar.gz --clobber
+          gh release upload "$RELEASE_TAG" relay-agent-version.json --clobber

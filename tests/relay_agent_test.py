@@ -478,7 +478,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(relay, 'TCP_IDLE_TIMEOUT', .05):
                 reader, writer = await asyncio.open_connection('127.0.0.1', self.body['listen_port'])
                 self.assertEqual(await asyncio.wait_for(reader.read(), 2), b'')
-                self.assertEqual(route.error_counts, {'tcp_transfer_timeout': 1})
+                self.assertEqual(route.error_counts, {})
+                self.assertEqual(route.idle_closes, 1)
                 writer.close(); await writer.wait_closed()
         finally:
             await route.close(); origin.close(); await origin.wait_closed()
@@ -610,6 +611,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.token = 'test-token-which-is-not-the-panel-password'
         (root / 'config.json').write_text(json.dumps({'token_sha256': hashlib.sha256(self.token.encode()).hexdigest(), 'own_ips': ['8.8.8.8']}))
         self.agent = relay.Agent(root, root, '127.0.0.1')
+        self.agent.security.bind('1.1.1.1', {'origin_ip': '1.1.1.1'})
         self.headers = {'authorization': 'Bearer '+self.token, 'if-match': '0'}
         self.body = {'transport': 'tcp', 'listen_port': free_port(), 'target_ip': '1.1.1.1', 'target_port': 443}
 
@@ -732,7 +734,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         server_context.load_cert_chain(root/'cert', root/'key')
         client_context = ssl.create_default_context(cafile=str(root/'cert'))
-        server = await asyncio.start_server(self.agent.http_client, '127.0.0.1', 0, ssl=server_context)
+        self.agent.api_context = server_context
+        server = await asyncio.start_server(self.agent.http_client, '127.0.0.1', 0)
         async def request(auth=''):
             reader, writer = await asyncio.open_connection('127.0.0.1', server.sockets[0].getsockname()[1], ssl=client_context)
             writer.write(('GET /v1/status HTTP/1.1\r\nHost: localhost\r\n'+auth+'\r\n').encode()); await writer.drain()

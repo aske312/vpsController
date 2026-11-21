@@ -17,7 +17,14 @@ ROOT = Path('/etc/vps-control-relay-agent')
 STATE = Path('/var/lib/vps-control-relay-agent')
 RELEASE = 'https://api.github.com/repos/aske312/vpsController/releases/tags/agent-latest'
 ASSET_PREFIX = 'https://github.com/aske312/vpsController/releases/download/agent-latest/'
-FILES = {'agent.py', 'addresses.py', 'credentials.py', 'manifest.json', 'install.sh', 'uninstall.sh', 'update.py'}
+FILES = {'agent.py', 'addresses.py', 'security.py', 'credentials.py', 'manifest.json', 'install.sh', 'uninstall.sh', 'update.py'}
+
+
+def channel():
+    try: value = json.loads((ROOT/'channel.json').read_text())
+    except FileNotFoundError: return 'stable'
+    if value not in ({'channel': 'stable'}, {'channel': 'test'}): raise ValueError('Invalid Agent channel')
+    return value['channel']
 
 
 def fetch(url, limit):
@@ -29,19 +36,21 @@ def fetch(url, limit):
     return data
 
 
-def release_asset(release):
-    if release.get('draft') or release.get('tag_name') != 'agent-latest':
+def release_asset(release, selected='stable'):
+    tag = 'agent-test-latest' if selected == 'test' else 'agent-latest'
+    prefix = ASSET_PREFIX.replace('agent-latest/', tag+'/')
+    if release.get('draft') or release.get('tag_name') != tag:
         raise ValueError('Invalid release')
     assets = [item for item in release.get('assets', []) if item.get('name') == 'relay-agent.tar.gz']
     if len(assets) != 1:
         raise ValueError('Missing release asset')
     asset = assets[0]
-    if asset.get('browser_download_url') != ASSET_PREFIX + 'relay-agent.tar.gz' or not re.fullmatch(r'sha256:[0-9a-f]{64}', asset.get('digest', '')):
+    if asset.get('browser_download_url') != prefix + 'relay-agent.tar.gz' or not re.fullmatch(r'sha256:[0-9a-f]{64}', asset.get('digest', '')):
         raise ValueError('Invalid release digest or source')
     return asset
 
 
-def unpack(archive, destination):
+def unpack(archive, destination, selected='stable'):
     with tarfile.open(archive, 'r:gz') as source:
         members = source.getmembers()
         if len(members) != len(FILES) or {item.name for item in members} != FILES:
@@ -51,7 +60,7 @@ def unpack(archive, destination):
                 raise ValueError('Unsafe release member')
             (destination / member.name).write_bytes(source.extractfile(member).read())
     manifest = json.loads((destination / 'manifest.json').read_text())
-    if manifest.get('id') != 'relay-agent' or manifest.get('source_branch') != 'agent' or not re.fullmatch(r'\d+\.\d+\.\d+', manifest.get('version', '')):
+    if manifest.get('id') != 'relay-agent' or manifest.get('source_branch') != ('test-agent' if selected == 'test' else 'agent') or not re.fullmatch(r'\d+\.\d+\.\d+', manifest.get('version', '')):
         raise ValueError('Invalid Agent manifest')
     subprocess.run(['python3', '-m', 'py_compile', *[str(destination / name) for name in FILES if name.endswith('.py')]], check=True, capture_output=True)
     subprocess.run(['bash', '-n', str(destination / 'install.sh')], check=True, capture_output=True)
@@ -129,7 +138,9 @@ def main():
             if not request and settings.get('enabled') is not True:
                 publish_status({'state': 'disabled'})
                 return
-            asset = release_asset(json.loads(fetch(RELEASE, 1024 * 1024)))
+            selected = channel()
+            url = RELEASE.replace('/agent-latest', '/agent-test-latest') if selected == 'test' else RELEASE
+            asset = release_asset(json.loads(fetch(url, 1024 * 1024)), selected)
             if request and request['digest'] != asset['digest']: raise ValueError('Published release changed')
             installed = ROOT / 'installed-release.json'
             previous = json.loads(installed.read_text()) if installed.exists() else {}
@@ -146,7 +157,7 @@ def main():
                 archive.write_bytes(data)
                 stage = directory / 'source'
                 stage.mkdir()
-                unpack(archive, stage)
+                unpack(archive, stage, selected)
                 version = json.loads((stage / 'manifest.json').read_text())['version']
                 if request and request['version'] != version: raise ValueError('Published version changed')
                 # Existing installer preserves identity/routes and rolls back runtime files on failed health check.
