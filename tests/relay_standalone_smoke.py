@@ -162,13 +162,26 @@ if sys.argv[1] in ('restart', 'disable'):
     except HTTPError as error: assert error.code == 401
     else: raise AssertionError('Unauthenticated request was accepted')
     route = {'transport': 'tcp', 'listen_port': 20001, 'target_ip': '1.1.1.1', 'target_port': 443}
-    # Seed a paired controller in the isolated fixture. Public-source pairing is
-    # exercised separately; a loopback caller cannot claim a public controller.
-    binding = Path('/var/lib/vps-control-relay-agent/controller.json')
-    binding.write_text(json.dumps({'schema': 1, 'origin_ip': '1.1.1.1'}))
-    import pwd
-    user = pwd.getpwnam('vps-relay')
-    os.chown(binding, user.pw_uid, user.pw_gid); binding.chmod(0o600)
+    # Real pairing over TLS, using public addresses confined to this network
+    # namespace. Neither the host's interfaces nor its routes are changed.
+    from http.client import HTTPSConnection
+    run('ip', 'addr', 'add', '1.1.1.1/32', 'dev', 'lo')
+    def pair(origin):
+        client = HTTPSConnection('127.0.0.1', expected_port, context=context, timeout=5, source_address=('1.1.1.1', 0))
+        try:
+            client.request('PUT', '/v1/controller', json.dumps({'origin_ip': origin}),
+                           {'Authorization': 'Bearer '+connection['token'], 'Content-Type': 'application/json'})
+            response = client.getresponse(); response.read(); return response.status
+        finally: client.close()
+    assert pair('8.8.8.8') == 403
+    assert pair('1.1.1.1') == 200
+    assert pair('1.1.1.1') == 200
+    denied = HTTPSConnection('127.0.0.1', expected_port, context=context, timeout=5, source_address=('8.8.4.4', 0))
+    try:
+        denied.connect()
+    except (OSError, ssl.SSLError): pass
+    else: raise AssertionError('Foreign control source reached TLS')
+    finally: denied.close()
     create = Request(f'https://127.0.0.1:{expected_port}/v1/routes/smoke', data=json.dumps(route).encode(), method='PUT',
         headers={'Authorization': 'Bearer ' + connection['token'], 'If-Match': '0', 'Content-Type': 'application/json'})
     with urlopen(create, context=context, timeout=5) as response: assert response.status == 200
