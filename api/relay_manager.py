@@ -500,6 +500,7 @@ class RelayManager:
                 # carry no live state, counters or saved readiness evidence.
                 public['routes'] = [{**{key: route[key] for key in ('id', 'host_id', 'transport', 'listen_port', 'target_ip', 'target_port')},
                                      **({'cdn_domain':route['cdn_domain']} if route.get('cdn_domain') else {}),
+                                     **({'auth':route['auth']} if route.get('auth') else {}),
                                      'state': 'unknown', 'target_verified': False} for route in owned]
                 if not probe:
                     return public

@@ -39,6 +39,9 @@ def profile_summaries(profiles, hosts, origin):
                           if route['transport'] == transport and route['target_port'] in ports
                           and (route.get('cdn_domain') == settings.get('cdn_domain') if relay_cdn.before(settings)
                                else not route.get('cdn_domain') and route['target_ip'] == origin)]
+                if relay_cdn.before(settings):
+                    protected = [route['id'] for route in host.get('routes', []) if route['id'] in routes and route.get('auth')]
+                    if protected: routes = protected
                 channels.append({'id': f"mihomo:{profile['id']}:{connection['id']}",
                                  'label': str(connection.get('name') or connection['id']),
                                  'transport': transport, 'host_id': selected, 'route_ids': routes})
