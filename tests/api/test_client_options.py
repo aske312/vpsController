@@ -59,7 +59,7 @@ class ClientOptionsTests(unittest.TestCase):
         control.endpoint.return_value = ('example.com', 443)
         with patch.object(manager, 'relay_connection_control', return_value=control):
             for name in ['Relay West', 'Москва · "CDN"']:
-                control.read.return_value = {'hosts': [{'id': 'a'*32, 'name': name}]}
+                control.read.return_value = {'hosts': [{'id': 'a'*32, 'name': name}], 'routes': []}
                 with self.subTest(name=name):
                     control.read.reset_mock()
                     data, _ = manager.render_client_profile(self.profile, 'common')
