@@ -35,9 +35,10 @@ def address(value):
 def authentication(value):
     if not isinstance(value, dict) or set(value) != {'type', 'username', 'password_sha256', 'credential_id'}:
         raise SecurityError('Expected a complete authenticated TCP ingress', 422)
-    if value['type'] != 'tls-connect' or not re.fullmatch(r'[A-Za-z0-9_-]{16,64}', str(value['username'])):
+    if value['type'] != 'tls-connect' or not isinstance(value['username'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,64}', value['username']):
         raise SecurityError('Invalid TCP ingress identity', 422)
-    if not re.fullmatch(r'[0-9a-f]{64}', str(value['password_sha256'])) or not re.fullmatch(r'[0-9a-f]{32}', str(value['credential_id'])):
+    if (not isinstance(value['password_sha256'], str) or not isinstance(value['credential_id'], str)
+            or not re.fullmatch(r'[0-9a-f]{64}', value['password_sha256']) or not re.fullmatch(r'[0-9a-f]{32}', value['credential_id'])):
         raise SecurityError('Invalid TCP ingress credential', 422)
     return dict(value)
 
