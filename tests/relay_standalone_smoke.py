@@ -50,7 +50,7 @@ def inside(source, sandbox, api_port=None, occupy_default=False):
     staged = sandbox / 'qa/source'
     for name in ('install.sh', 'scripts/install-agent.sh',
                  'protocol-images/relay-agent/install.sh', 'protocol-images/relay-agent/agent.py',
-                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/security.py', 'protocol-images/relay-agent/uninstall.sh', 'protocol-images/relay-agent/update.py'):
+                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/uninstall.sh', 'protocol-images/relay-agent/update.py'):
         target = staged / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, target)

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch, AsyncMock
 from relay_agent_test import relay, free_port
-from security import ControllerPolicy, SecurityError, public_route
+ControllerPolicy, SecurityError, public_route = relay.ControllerPolicy, relay.SecurityError, relay.public_route
 
 
 class ControllerTests(unittest.TestCase):

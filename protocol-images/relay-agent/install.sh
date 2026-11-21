@@ -179,7 +179,7 @@ install_complete=0
 rollback() {
   result=$?
   if [[ "${install_complete}" != 1 && -f "${backup}/agent.py" ]]; then
-    for name in agent.py addresses.py security.py credentials.py manifest.json update.py; do
+    for name in agent.py addresses.py credentials.py manifest.json update.py; do
       if [[ -f "${backup}/${name}" ]]; then cp -p "${backup}/${name}" "${LIB}/${name}"; else rm -f "${LIB}/${name}"; fi
     done
     systemctl restart vps-control-relay-agent.service || true
@@ -199,13 +199,12 @@ rollback() {
   return "${result}"
 }
 trap rollback EXIT
-for name in agent.py addresses.py security.py credentials.py manifest.json update.py; do
+for name in agent.py addresses.py credentials.py manifest.json update.py; do
   [[ ! -f "${LIB}/${name}" ]] || cp -p "${LIB}/${name}" "${backup}/${name}"
 done
 install -m 0755 "${SOURCE}/agent.py" "${LIB}/agent.py"
 install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
 install -m 0644 "${SOURCE}/addresses.py" "${LIB}/addresses.py"
-install -m 0644 "${SOURCE}/security.py" "${LIB}/security.py"
 install -m 0644 "${SOURCE}/manifest.json" "${LIB}/manifest.json"
 install -m 0700 "${SOURCE}/update.py" "${LIB}/update.py"
 if [[ ! -f "${ROOT}/updates.json" ]]; then

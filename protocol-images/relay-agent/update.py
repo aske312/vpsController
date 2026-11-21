@@ -17,7 +17,7 @@ ROOT = Path('/etc/vps-control-relay-agent')
 STATE = Path('/var/lib/vps-control-relay-agent')
 RELEASE = 'https://api.github.com/repos/aske312/vpsController/releases/tags/agent-latest'
 ASSET_PREFIX = 'https://github.com/aske312/vpsController/releases/download/agent-latest/'
-FILES = {'agent.py', 'addresses.py', 'security.py', 'credentials.py', 'manifest.json', 'install.sh', 'uninstall.sh', 'update.py'}
+FILES = {'agent.py', 'addresses.py', 'credentials.py', 'manifest.json', 'install.sh', 'uninstall.sh', 'update.py'}
 
 
 def channel():

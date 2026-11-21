@@ -54,7 +54,7 @@ jobs:
           value = json.loads(path.read_text()); value['source_branch'] = os.environ['SOURCE_BRANCH']
           path.write_text(json.dumps(value))
           PY
-          tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py security.py credentials.py manifest.json install.sh uninstall.sh update.py
+          tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py credentials.py manifest.json install.sh uninstall.sh update.py
           python3 - <<'PY'
           import hashlib, json
           from pathlib import Path
@@ -70,3 +70,5 @@ jobs:
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title 'Relay Agent' --notes 'Published after Agent verification.' --target "$GITHUB_SHA" --prerelease
           gh release upload "$RELEASE_TAG" relay-agent.tar.gz --clobber
           gh release upload "$RELEASE_TAG" relay-agent-version.json --clobber
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA"
