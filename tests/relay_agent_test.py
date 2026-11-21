@@ -219,7 +219,7 @@ class ValidationTests(unittest.TestCase):
             (root/'hosts').write_text('8.8.4.4 alias.example\n10.0.0.1 private.example\n')
             (root/'Caddyfile').write_text('https://web.example:19443, other.example {\n reverse_proxy hidden.example:8000\n}\n')
             with patch('socket.getaddrinfo', side_effect=AssertionError('Discovery must not probe DNS')):
-                value = addresses.discover({'public_ip':'8.8.8.8','domains':['manual.example']}, addresses=['8.8.8.8','8.8.4.4','2606:4700::1111','fe80::1','10.0.0.1'], environment_paths=[root/'environment'],caddy_root=root,hostname_path=root/'hostname',hosts_path=root/'hosts')
+                value = addresses.discover({'public_ip':'8.8.8.8','domains':['manual.example']}, addresses=['8.8.8.8','8.8.4.4','2606:4700::1111','fe80::1','10.0.0.1'], environment_paths=[root/'environment'],endpoint_paths=[],caddy_root=root,hostname_path=root/'hostname',hosts_path=root/'hosts')
             self.assertEqual(value['ipv4'],['8.8.8.8','8.8.4.4'])
             self.assertEqual(value['ipv6'],['2606:4700::1111'])
             self.assertEqual(set(value['domains']),{'manual.example','edge.example'})
@@ -239,7 +239,7 @@ class ValidationTests(unittest.TestCase):
                 {'address':'remote.example','kind':'cdn','state':'active','relay_host_id':'other'},
             ]}}
             (data/'network-endpoints.json').write_text(json.dumps(settings))
-            value=addresses.discover({'public_ip':'8.8.8.8'},addresses=['8.8.8.8'],environment_paths=[root/'environment'])
+            value=addresses.discover({'public_ip':'8.8.8.8'},addresses=['8.8.8.8'],environment_paths=[root/'environment'],endpoint_paths=[data/'network-endpoints.json'])
             self.assertEqual(set(value['domains']),{'edge.example','cdn.example','tls.example','udp.example','endpoint.example'})
             self.assertEqual(set(value['cdn_domains']),{'edge.example','cdn.example'})
             (data/'network-endpoints.json').write_text(json.dumps({'cdn_domain':'old-cdn.example','tls_relay_domains':['old-tls.example'],'udp_relay_domain':'old-udp.example'}))
