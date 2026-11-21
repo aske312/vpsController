@@ -23,13 +23,13 @@ import snell_runtime as snell
 
 class SnellTests(unittest.TestCase):
     def test_tcp_echo_preserves_multiple_writes_on_one_connection(self):
-        with socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo) as server:
-            threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True).start()
-            self.addCleanup(server.shutdown)
-            with socket.create_connection(server.server_address, timeout=2) as channel:
-                for payload in (b'first-fragment', b'second-fragment'):
-                    channel.sendall(payload)
-                    self.assertEqual(exact(channel, len(payload)), payload)
+        server = self.enterContext(socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo))
+        threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        with socket.create_connection(server.server_address, timeout=2) as channel:
+            for payload in (b'first-fragment', b'second-fragment'):
+                channel.sendall(payload)
+                self.assertEqual(exact(channel, len(payload)), payload)
 
     def test_system_service_launcher_needs_only_standard_library(self):
         result = subprocess.run([sys.executable, '-S', str(ROOT / 'protocol-images/mihomo/snell_runtime.py')],
