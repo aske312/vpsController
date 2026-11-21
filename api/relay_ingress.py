@@ -10,8 +10,8 @@ from application_operation import atomic_json, OperationConflict
 
 def metadata(value):
     if (not isinstance(value, dict) or set(value) != {'type', 'username', 'credential_id'}
-            or value['type'] != 'tls-connect' or not re.fullmatch(r'[A-Za-z0-9_-]{16,64}', str(value['username']))
-            or not re.fullmatch(r'[0-9a-f]{32}', str(value['credential_id']))):
+            or value['type'] != 'tls-connect' or not isinstance(value['username'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,64}', value['username'])
+            or not isinstance(value['credential_id'], str) or not re.fullmatch(r'[0-9a-f]{32}', value['credential_id'])):
         raise ValueError('Некорректная защита TCP Relay')
     return dict(value)
 
