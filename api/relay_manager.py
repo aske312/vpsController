@@ -285,6 +285,10 @@ class RelayManager:
             registry = self.read()
             remote = route_snapshot(client.request('GET', '/v1/routes'))
             owned = [route for route in registry['routes'] if route['host_id'] == host_id and route.get('cdn_domain') == cdn_domain]
+            if cdn_domain:
+                # Add a protected listener beside legacy sockets. Previously
+                # delivered clients keep working until their exports refresh.
+                owned = [route for route in owned if route.get('auth')]
             candidates = sorted({route['listen_port'] for route in owned if (route['transport'], route['target_port']) in sockets})
             candidates.extend(port for port in range(20000, 21000) if port not in candidates)
             def compatible(port):
@@ -320,7 +324,7 @@ class RelayManager:
         routes = [route for route in self.read()['routes'] if route['host_id'] == host_id and route.get('cdn_domain') == domain]
         if not routes:
             raise OperationConflict('Пересылка Relay к CDN не подготовлена. Сохраните настройки подключения')
-        return min(routes, key=lambda route: route['listen_port'])
+        return min(routes, key=lambda route: (not bool(route.get('auth')), route['listen_port']))
 
     def cdn_endpoint(self, host_id, domain, *, address=None):
         route = self.cdn_route(host_id, domain)

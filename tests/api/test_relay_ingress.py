@@ -58,5 +58,22 @@ class SecurityTests(unittest.TestCase):
         saved['auth']['credential_id'] = 'f'*32
         with self.assertRaises(OperationConflict): relay_ingress.credential(self.control, saved)
 
+    def test_legacy_cdn_migration_adds_a_secure_entry_and_keeps_delivered_ports_alive(self):
+        with patch('relay_cdn.resolve', return_value='104.16.1.2'):
+            self.control.ensure_cdn(self.host_id, 'cdn.example', 'c'*32)
+        registry = self.control.read()
+        original = registry['routes'][0]
+        original.pop('auth')
+        self.agent.items[0].pop('auth')
+        self.control.write(registry)
+        self.control.ensure_cdn(self.host_id, 'cdn.example', 'd'*32)
+        routes = self.control.read()['routes']
+        self.assertEqual(len(routes), 2)
+        self.assertEqual(routes[0], original)
+        self.assertNotEqual(routes[0]['listen_port'], routes[1]['listen_port'])
+        self.assertIn('auth', routes[1])
+        self.assertEqual(self.control.cdn_route(self.host_id, 'cdn.example')['id'], routes[1]['id'])
+        self.assertEqual(len(self.agent.items), 2)
+
 
 if __name__ == '__main__': unittest.main()
