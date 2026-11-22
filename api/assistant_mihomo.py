@@ -110,16 +110,17 @@ def authorize(settings, actor, method, path, body):
     if not isinstance(path, str) or not path.startswith('/') or '%' in path or '\\' in path or '#' in path:
         raise HTTPException(422, 'Укажите путь API Mihomo из списка возможностей')
     parsed = urllib.parse.urlsplit(path)
-    if parsed.scheme or parsed.netloc or '..' in parsed.path or len(path) > 256:
+    source_read = parsed.path == '/profiles/catalog' or re.fullmatch(rf'/profiles/{ID}/source', parsed.path)
+    if parsed.scheme or parsed.netloc or '..' in parsed.path or len(path) > (512 if source_read else 256):
         raise HTTPException(422, 'Недопустимый путь Mihomo')
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-    source_read = parsed.path == '/profiles/catalog' or re.fullmatch(rf'/profiles/{ID}/source', parsed.path)
     def valid_query(key, values):
         if len(values) != 1: return False
         if source_read:
             if key in ('offset', 'limit'):
                 return values[0].isdigit() and len(values[0]) <= 7 and (0 <= int(values[0]) <= 1000000 if key == 'offset' else 1 <= int(values[0]) <= 20)
             if parsed.path.endswith('/source'):
+                if key == 'expected_revision': return re.fullmatch(r'[a-f0-9]{64}', values[0])
                 return (key == 'device_id' and re.fullmatch(ID, values[0])) or (key == 'section' and values[0] in ('devices', 'connections'))
             return False
         return key in ('device_id', 'format') and re.fullmatch(ID, values[0])
@@ -208,7 +209,7 @@ def capabilities(api, actor):
         'source_reads': {'catalog': '/profiles/catalog?offset=0&limit=10' if admin else None,
                          'profile': '/profiles/<id>/source?section=devices&offset=0&limit=10',
                          'connections': '/profiles/<id>/source?section=connections&device_id=<id>&offset=0&limit=10',
-                         'continue': 'next_offset until null; revision belongs to the whole profile; no YAML rendering'},
+                         'continue': 'next_offset until null; pass profile.revision as expected_revision on continuation; no YAML rendering'},
         'copy_creation': {'method': 'POST', 'path': '/profiles', 'fields': ['name', 'copy_from'],
                           'source_fields': ['profile_id', 'device_id', 'expected_revision', 'connection_ids', 'copy_routing'],
                           'new_credentials': True, 'copy_personal_rules': False, 'confirmation_required': True} if admin else None,
@@ -242,7 +243,7 @@ def capabilities(api, actor):
 
 
 def require_copy_preview(body, preview):
-    if not body.get('copy_from'):
+    if body.get('copy_from') is None:
         return
     copy = preview.get('copy_preview') if isinstance(preview, dict) else None
     if not isinstance(preview, dict) or preview.get('valid') is not True or not isinstance(copy, dict) or copy.get('new_credentials') is not True or type(copy.get('connection_count')) is not int or copy['connection_count'] <= 0:
@@ -322,7 +323,7 @@ def call(api, actor, method, path, body):
     record = {'kind': 'mihomo', 'service': 'Mihomo ' + path, 'action': method,
               'method': method, 'path': path, 'body': body, 'code': secrets.token_hex(4),
               'operation_id': identity, 'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
-    if method == 'POST' and route == '/profiles' and body.get('copy_from'):
+    if method == 'POST' and route == '/profiles' and body.get('copy_from') is not None:
         record['copy_preview'] = preview.get('copy_preview', {})
     with control.operations.locked(api.DATA_DIR):
         assistant_commands.enqueue(api, actor, record)
@@ -335,7 +336,7 @@ def confirm(api, actor, record):
     settings = control.read(api)
     authorize(settings, actor, record['method'], record['path'], record['body'])
     body = dict(record['body'])
-    if record['method'] == 'POST' and record['path'] == '/profiles' and body.get('copy_from'):
+    if record['method'] == 'POST' and record['path'] == '/profiles' and body.get('copy_from') is not None:
         # Revalidate after updates/downgrades and source changes while approval waited.
         require_copy_preview(body, request('POST', '/profiles/validate', body))
     if record['method'] == 'PATCH' and re.fullmatch(rf'/profiles/{ID}', record['path']) and 'limits' in body:

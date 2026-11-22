@@ -4443,9 +4443,10 @@ def profile_catalog(offset: int = Query(0, ge=0, le=1000000), limit: int = Query
 @app.get('/api/mihomo/profiles/{profile_id}/source', dependencies=[Depends(auth_required)])
 def profile_source(profile_id: str, device_id: str | None = None,
                    section: Literal['devices', 'connections'] = 'connections',
-                   offset: int = Query(0, ge=0, le=1000000), limit: int = Query(10, ge=1, le=20)):
+                   offset: int = Query(0, ge=0, le=1000000), limit: int = Query(10, ge=1, le=20),
+                   expected_revision: str | None = Query(None, pattern=r'^[a-f0-9]{64}$')):
     import mihomo_sources
-    return mihomo_sources.source(sys.modules[__name__], profile_id, device_id, section, offset, limit)
+    return mihomo_sources.source(sys.modules[__name__], profile_id, device_id, section, offset, limit, expected_revision)
 
 
 @app.get("/api/mihomo/profiles/schema", dependencies=[Depends(auth_required)])

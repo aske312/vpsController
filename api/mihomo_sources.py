@@ -55,8 +55,9 @@ def public_settings(value):
     return value
 
 
-def source(api, identity, device_id, section, offset, limit):
+def source(api, identity, device_id, section, offset, limit, expected_revision=None):
     item = profile(api, identity)
+    api.check_profile_revision(item, expected_revision)
     devices = item.get('devices', [])
     if device_id is not None and not any(device['id'] == device_id for device in devices):
         raise HTTPException(404, 'Устройство не найдено')
@@ -97,7 +98,7 @@ def resolve_copy(api, payload):
         control = api.relay_connection_control()
         for host_id in relay_hosts:
             active(control, host_id)  # A not-ready encrypted Relay must not become an open copy.
-    routing = {**deepcopy(item.get('routing', {})), **deepcopy(device.get('routing', {}))} if spec.copy_routing else {}
+    routing = deepcopy(api.device_routing(item, spec.device_id)) if spec.copy_routing else {}
     # Per-profile connection IDs can be retained for routing references; native
     # credentials are provisioned with a new profile ID, never copied from here.
     definitions = [{**{key: connection[key] for key in ('id', 'component', 'name') if key in connection},

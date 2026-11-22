@@ -350,6 +350,13 @@ class MihomoOperatorTests(unittest.TestCase):
             self.assertIn(self.tool(name='mihomo_api', path=path).status_code, (403, 422))
         self.assertEqual(self.tool(name='mihomo_api', method='POST', path='/profiles',
                                   body={'name': 'New', 'copy_from': {'profile_id': 'own'}}).status_code, 403)
+        self.assertEqual(self.tool(name='mihomo_api', path='/profiles/own/source?offset=10&expected_revision=' + 'a' * 64).status_code, 200)
+        settings = control.read(api)
+        settings['accounts'][0]['bot_access'] = True
+        control.store(api, settings)
+        long_path = '/profiles/' + 'p' * 64 + '/source?section=connections&device_id=' + 'd' * 48 + '&offset=1000000&limit=20&expected_revision=' + 'a' * 64
+        self.assertGreater(len(long_path), 256)
+        self.assertEqual(self.tool(name='mihomo_api', path=long_path).status_code, 200)
 
     def test_copy_only_validates_before_human_confirmation_and_submits_once(self):
         settings = control.read(api)
@@ -393,6 +400,15 @@ class MihomoOperatorTests(unittest.TestCase):
                 bridge.confirm(api, '11', record)
         self.assertEqual(caught.exception.status_code, 409)
         self.assertEqual(request.call_count, 1)
+
+    def test_old_manager_cannot_ignore_empty_or_invalid_copy_references(self):
+        settings = control.read(api)
+        settings['accounts'][0]['bot_access'] = True
+        control.store(api, settings)
+        for source in ({}, False, []):
+            with self.subTest(source=source), patch.object(bridge, 'request', return_value={'valid': True}):
+                response = self.tool(name='mihomo_api', method='POST', path='/profiles', body={'name': 'New', 'copy_from': source})
+                self.assertEqual(response.status_code, 409)
 
     def test_typed_relay_error_reaches_the_agent_without_private_diagnostics(self):
         with patch.object(bridge, 'request', side_effect=api.HTTPException(409, {'code': 'relay_not_verified', 'message': 'PRIVATE DEBUG'})):

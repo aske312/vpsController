@@ -51,7 +51,8 @@ class AutomationScheduleTests(unittest.TestCase):
     def test_manual_reboot_and_ui_action_remain_independent_of_disabled_schedule(self):
         self.settings['reboot']['enabled'] = False
         self.save()
-        for origin in ('', 'vps-control-action-fixture.service', 'ssh.service'):
+        for origin in ('', 'vps-control-action-fixture.service', 'vps-control-action-123456.service',
+                       'ssh.service', 'sshd.service', 'user@0.service', 'user@1000.service'):
             with self.subTest(origin=origin):
                 self.assertEqual(self.check('reboot', origin=origin, manual=True), 'allow')
         self.assertFalse((self.root / 'automation-runs.json').exists())
@@ -63,6 +64,12 @@ class AutomationScheduleTests(unittest.TestCase):
                 marker.touch()
                 self.assertEqual(self.check(), 'paused')
                 marker.unlink()
+        self.assertFalse((self.root / 'automation-runs.json').exists())
+
+    def test_unrelated_system_services_cannot_disguise_scheduled_reboot_as_manual(self):
+        for origin in ('cron.service', 'apt-daily.service', 'other-maintenance.service'):
+            with self.subTest(origin=origin):
+                self.assertEqual(self.check('reboot', origin=origin, manual=True), 'foreign-scheduler')
         self.assertFalse((self.root / 'automation-runs.json').exists())
 
     def test_duplicate_slot_is_durable_across_worker_and_server_restarts(self):

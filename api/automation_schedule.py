@@ -5,6 +5,7 @@ import argparse
 from copy import deepcopy
 from datetime import datetime, timedelta
 import json
+import re
 from pathlib import Path
 
 DEFAULTS = {
@@ -66,7 +67,11 @@ def admit(data_dir: Path, kind: str, *, origin: str, now: datetime, manual=False
         raise ValueError('Unsupported automatic action')
     automatic_origin = origin.startswith('vps-control-auto-') or origin == 'apt-daily-upgrade.service'
     if manual and not automatic_origin:
-        return 'allow'
+        # Explicit UI actions and operator sessions are manual. cron/other units
+        # cannot bypass the schedule just by invoking the same CLI command.
+        if not origin or origin in ('ssh.service', 'sshd.service') or re.fullmatch(r'(?:vps-control-action-[A-Za-z0-9_-]+|user@[0-9]+)\.service', origin):
+            return 'allow'
+        return 'foreign-scheduler'
     if origin != f'vps-control-auto-{kind}.service':
         return 'foreign-scheduler'
     with locked(data_dir):

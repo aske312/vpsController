@@ -33,6 +33,8 @@ class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(actor, '11')
             self.calls.append(copy.deepcopy(arguments))
             if arguments['method'] == 'GET':
+                if '/source?' in arguments['path']:
+                    return {'profile': {'id': 'own', 'revision': 'b' * 64}, 'items': [], 'total': 0, 'next_offset': None}
                 if arguments['path'] == '/profiles': return {'items': [copy.deepcopy(self.profile)]}
                 return copy.deepcopy(self.snapshot)
             return {'confirmation_required': True}
@@ -59,8 +61,9 @@ class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_pages_and_copy_use_bounded_reads_and_a_server_reference(self):
         self.assertTrue(runner.changing_tool('mihomo_profile_copy', {}))
         self.assertFalse(runner.changing_tool('mihomo_source', {}))
-        await self.call('source', section='connections', profile_id='own', device_id='phone', offset=20, limit=20)
-        self.assertEqual(self.calls[0]['path'], '/profiles/own/source?section=connections&offset=20&limit=20&device_id=phone')
+        page = await self.call('source', section='connections', profile_id='own', device_id='phone', offset=20, limit=20, expected_revision='b' * 64)
+        self.assertNotIn('error', page)
+        self.assertEqual(self.calls[0]['path'], '/profiles/own/source?section=connections&offset=20&limit=20&device_id=phone&expected_revision=' + 'b' * 64)
         result = await self.call('profile_copy', profile_id='own', device_id='phone', expected_revision='b' * 64, name='New')
         self.assertTrue(result['confirmation_required'])
         self.assertEqual(self.writes()[0]['body'], {'name': 'New', 'copy_from': {
@@ -70,6 +73,23 @@ class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.call('source', limit=True))['error'], 'tool_validation_error')
         self.assertEqual((await self.call('profile_copy', profile_id='own', device_id='phone', expected_revision='stale', name='New'))['error'], 'tool_validation_error')
         self.assertEqual(self.writes(), [])
+
+    async def test_source_continuation_requires_revision_and_explains_concurrent_edits(self):
+        result = await self.call('source', section='connections', profile_id='own', offset=10)
+        self.assertEqual(result['error'], 'tool_validation_error')
+        self.assertEqual(self.calls, [])
+        async def changed(*args, **kwargs):
+            return {'error': 'tool_rejected', 'http_status': 409}
+        with patch.object(runner, 'vps_call', side_effect=changed):
+            result = await self.call('source', section='connections', profile_id='own', offset=10, expected_revision='b' * 64)
+        self.assertEqual(result['error'], 'source_changed')
+        self.assertIn('offset=0', result['instruction'])
+        async def old_manager(*args, **kwargs):
+            return {'profile': {'revision': 'c' * 64}, 'items': [{'id': 'unexpected-new-row'}]}
+        with patch.object(runner, 'vps_call', side_effect=old_manager):
+            result = await self.call('source', section='connections', profile_id='own', offset=10, expected_revision='b' * 64)
+        self.assertEqual(result['error'], 'source_changed')
+        self.assertNotIn('items', result)
 
     async def test_create_prepares_connections_and_rules_together_with_explicit_default_device(self):
         result = await self.call('profile_create', name='For user', connections=[{'component': 'transport-wg', 'settings': {'mtu': 1400}}],

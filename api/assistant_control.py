@@ -350,7 +350,7 @@ class ToolCall(BaseModel):
     action: Literal['start', 'stop', 'restart'] | None = None
     operation_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     method: Literal['GET', 'POST', 'PATCH', 'DELETE'] = 'GET'
-    path: str | None = Field(default=None, max_length=256)
+    path: str | None = Field(default=None, max_length=512)
     body: dict = Field(default_factory=dict)
     lines: int = Field(default=60, strict=True, ge=20, le=120)
     endpoint: Literal['/overview', '/services', '/components', '/metrics', '/application', '/logs', '/network', '/security', '/diagnostics'] | None = None

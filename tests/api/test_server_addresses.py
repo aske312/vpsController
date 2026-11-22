@@ -27,6 +27,8 @@ class Ipv6EgressTests(unittest.TestCase):
             ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'down0'}], False),
             ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'type': 'unreachable'}], False),
             ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'flags': ['linkdown']}], False),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'flags': ['dead']}], False),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'nexthops': [{'dev': 'ens3', 'flags': ['dead']}]}], False),
             ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'expires': 0}], False),
         ]:
             with self.subTest(found=found, routes=routes), patch.object(addresses, 'detect', return_value=found), \
@@ -45,6 +47,13 @@ class Ipv6EgressTests(unittest.TestCase):
                 self.assertEqual(state['state'], 'unknown')
         with patch.object(addresses, 'detect', side_effect=OSError('unavailable')):
             self.assertEqual(addresses.ipv6_egress_state()['state'], 'unknown')
+
+    def test_multipath_ipv6_accepts_a_live_matching_hop_and_rejects_dead_hops(self):
+        for hops, ready in [([{'dev': 'ens3'}], True), ([{'dev': 'ens3', 'flags': ['dead']}], False),
+                            ([{'dev': 'down0'}, {'dev': 'ens3'}], True)]:
+            with self.subTest(hops=hops), patch.object(addresses, 'detect', return_value={V6: ['ens3']}), \
+                    patch.object(addresses.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=json.dumps([{'dst': 'default', 'nexthops': hops}]))):
+                self.assertEqual(addresses.ipv6_egress_state()['available'], ready)
 
 
 class ServerAddressesTests(unittest.TestCase):

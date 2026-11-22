@@ -34,6 +34,8 @@ class Endpoint(BaseHTTPRequestHandler):
         value = {'server': {'name': 'isolated-fixture'}, 'resources': {'cpu_percent': 12}}
         if body['name'] == 'mihomo_api' and body.get('path') == '/profiles' and body.get('method') == 'GET':
             value = {'items': [{'id': 'own', 'revision': 'a' * 64}]}
+        if body['name'] == 'mihomo_api' and '/source?' in body.get('path', ''):
+            value = {'profile': {'id': 'own', 'revision': 'a' * 64}, 'items': [], 'total': 0, 'next_offset': None}
         encoded = json.dumps(value).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -107,7 +109,7 @@ async def main():
                                             ('mihomo_settings', {'section': 'routing'}), ('mihomo_groups', {}),
                                             ('mihomo_read', {'view': 'profile-schema'}), ('mihomo_accounts', {}),
                                             ('mihomo_source', {'section': 'catalog', 'limit': 10}),
-                                            ('mihomo_source', {'section': 'connections', 'profile_id': 'own', 'device_id': 'phone', 'offset': 10, 'limit': 10}),
+                                            ('mihomo_source', {'section': 'connections', 'profile_id': 'own', 'device_id': 'phone', 'offset': 10, 'limit': 10, 'expected_revision': 'a' * 64}),
                                             ('mihomo_profile_copy', {'profile_id': 'own', 'device_id': 'phone', 'expected_revision': 'a' * 64, 'name': 'Copy'}),
                                             ('mihomo_profile_create', {'name': 'For user', 'connections': [{'component': 'transport-wg'}]}),
                                             ('mihomo_profile_assign', {'telegram_id': 123, 'profile_id': 'own'}),

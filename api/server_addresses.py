@@ -72,11 +72,20 @@ def ipv6_egress_state():
         routes = json.loads(result.stdout)
         if not isinstance(routes, list) or any(not isinstance(route, dict) for route in routes):
             raise ValueError('Некорректные маршруты IPv6')
+        def usable(entry):
+            flags = entry.get('flags', [])
+            if not isinstance(flags, list) or not all(isinstance(flag, str) for flag in flags):
+                raise ValueError('Некорректные флаги маршрута IPv6')
+            return not {'linkdown', 'dead'}.intersection(flags)
         for route in routes:
             if (route.get('dst') not in ('default', '::/0') or route.get('type', 'unicast') != 'unicast'
-                    or 'linkdown' in route.get('flags', []) or route.get('expires') == 0):
+                    or not usable(route) or route.get('expires') == 0):
                 continue
-            address = next((address for address, names in found.items() if route.get('dev') in names), None)
+            hops = route.get('nexthops', [])
+            if not isinstance(hops, list) or any(not isinstance(hop, dict) for hop in hops):
+                raise ValueError('Некорректные шлюзы IPv6')
+            devices = {hop.get('dev') for hop in (hops or [route]) if usable(hop)}
+            address = next((address for address, names in found.items() if devices.intersection(names)), None)
             if address:
                 return {**state, 'available': True, 'state': 'ready', 'address': address,
                         'default_route': True, 'reason': 'Публичный IPv6 и маршрут сервера подтверждены'}

@@ -790,11 +790,23 @@ async def mihomo_manage(settings, actor, command, **arguments):
             if section == 'catalog':
                 path = '/profiles/catalog?offset=' + str(offset) + '&limit=' + str(limit)
             elif section in ('devices', 'connections'):
+                revision = arguments.get('expected_revision')
+                if (offset > 0 and revision is None) or (revision is not None and (not isinstance(revision, str) or not re.fullmatch(r'[a-f0-9]{64}', revision))):
+                    raise ToolValidationError([{'field': 'expected_revision', 'issue': 'Для продолжения возьми profile.revision первой страницы; при изменении начни чтение заново'}])
                 path = '/profiles/' + mihomo_identifier(arguments.get('profile_id'), 'profile_id') + '/source?section=' + section + '&offset=' + str(offset) + '&limit=' + str(limit)
                 if arguments.get('device_id'): path += '&device_id=' + mihomo_identifier(arguments['device_id'], 'device_id')
+                if revision is not None: path += '&expected_revision=' + revision
             else:
                 raise ToolValidationError([{'field': 'section', 'issue': 'catalog, devices или connections'}])
-            return await call('GET', path)
+            result = await call('GET', path)
+            stale = isinstance(result, dict) and result.get('error') and result.get('http_status') == 409
+            if section in ('devices', 'connections') and revision is not None and isinstance(result, dict) and not result.get('error'):
+                # An older Manager may silently ignore the new query parameter.
+                stale = result.get('profile', {}).get('revision') != revision if isinstance(result.get('profile'), dict) else True
+            if stale:
+                return {**{key: result[key] for key in ('http_status', 'request_id') if key in result},
+                        'error': 'source_changed', 'instruction': 'Источник изменился между страницами. Отбрось собранные страницы и начни с offset=0; не создавай копию по смешанным данным.'}
+            return result
         if command == 'profile_copy':
             spec = {'profile_id': mihomo_identifier(arguments.get('profile_id'), 'profile_id'),
                     'device_id': mihomo_identifier(arguments.get('device_id'), 'device_id'),
@@ -1173,9 +1185,9 @@ def serve_mcp(settings, actor, module):
 
         @server.tool()
         async def mihomo_source(section: Literal['catalog', 'devices', 'connections'] = 'catalog', profile_id: str | None = None,
-                                device_id: str | None = None, offset: int = 0, limit: int = 10) -> dict:
-            """Полное постраничное чтение исходников без генерации YAML и без credential/HWID. Начни с catalog (администратор), затем devices выбранного profile_id, затем connections с device_id. Продолжай по next_offset до null, сохраняй revision. Ошибка Relay не блокирует чтение. Не считай одну страницу полным списком."""
-            return await mihomo_manage(settings, actor, 'source', section=section, profile_id=profile_id, device_id=device_id, offset=offset, limit=limit)
+                                device_id: str | None = None, offset: int = 0, limit: int = 10, expected_revision: str | None = None) -> dict:
+            """Полное постраничное чтение исходников без генерации YAML и без credential/HWID. Начни с catalog (администратор), затем devices выбранного profile_id, затем connections с device_id. Продолжай по next_offset до null; для devices/connections передавай profile.revision первой страницы как expected_revision. При source_changed начни с offset=0. Ошибка Relay не блокирует чтение. Не считай одну страницу полным списком."""
+            return await mihomo_manage(settings, actor, 'source', section=section, profile_id=profile_id, device_id=device_id, offset=offset, limit=limit, expected_revision=expected_revision)
 
         @server.tool()
         async def mihomo_profile_copy(profile_id: str, device_id: str, expected_revision: str, name: str,

@@ -79,6 +79,22 @@ class ProfileSourceTests(unittest.TestCase):
             sources.resolve_copy(manager, payload)
         self.assertEqual(caught.exception.status_code, 409)
 
+    def test_copy_routing_preserves_profile_and_device_group_overrides(self):
+        self.item['routing']['structured_policy_selection'] = '{"media":false,"work":false}'
+        self.item['devices'][1]['routing']['structured_policy_selection'] = '{"work":true}'
+        copied = sources.resolve_copy(manager, self.payload(copy_routing=True))
+        self.assertEqual(json.loads(copied.routing['structured_policy_selection']), {'media': False, 'work': True})
+
+    def test_next_source_page_rejects_a_different_profile_revision(self):
+        with patch.dict(manager.app.dependency_overrides, {manager.auth_required: lambda: None}):
+            client = TestClient(manager.app)
+            first = client.get('/api/mihomo/profiles/source/source?device_id=phone&limit=10').json()
+            self.item['connections'].pop(0)
+            response = client.get('/api/mihomo/profiles/source/source', params={
+                'device_id': 'phone', 'offset': first['next_offset'], 'limit': 10,
+                'expected_revision': first['profile']['revision']})
+            self.assertEqual(response.status_code, 409)
+
     def test_invalid_device_foreign_connection_and_duplicate_ids_never_copy_partially(self):
         for changes, status in [({'device_id': 'missing'}, 404), ({'connection_ids': ['c56']}, 422),
                                 ({'connection_ids': ['c0', 'c0']}, 422)]:

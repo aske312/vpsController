@@ -219,6 +219,7 @@ esac
 
     def test_old_unit_commands_cannot_bypass_saved_day_off_or_origin(self):
         cases = [
+            ('reboot', 'cron.service', None),
             ('auto-safe-update', 'apt-daily-upgrade.service', None),
             ('auto-safe-update', 'vps-control-auto-update.service', {'update': {'enabled': True, 'weekday': 'Wed'}}),
             ('reboot', 'vps-control-auto-reboot.service', {'reboot': {'enabled': False}}),
