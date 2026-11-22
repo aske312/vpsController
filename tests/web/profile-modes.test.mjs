@@ -38,6 +38,23 @@ function findElement(element, predicate) {
   }
 }
 
+test("profile IPv6 is disabled for unavailable or unknown server network even with a saved true", () => {
+  for (const ipv6Available of [undefined, false, true]) {
+    const routing = { dns_ipv6: true };
+    const changed = [];
+    const component = ProfileProtection({ routing, ipv6Available, onChange: (...args) => changed.push(args) });
+    const control = findElement(component, node => node.type === "button" && node.props.children?.[0]?.props?.children === "IPv6");
+    assert.ok(control);
+    assert.equal(control.props.disabled, ipv6Available !== true);
+    assert.equal(control.props["aria-pressed"], ipv6Available === true);
+    if (ipv6Available) {
+      control.props.onClick();
+      assert.deepEqual(changed, [["dns_ipv6", false]]);
+    }
+    assert.equal(routing.dns_ipv6, true);
+  }
+});
+
 test("explicit Proxy wins over legacy forced TUN and switching back restores TUN", () => {
   const source = { tun_enabled: true, tun_force: true, vpn_services: "youtube", dns_hijack_force: true };
   assert.equal(profileConnectionMode(source), "tun");

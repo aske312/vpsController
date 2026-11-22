@@ -15,7 +15,7 @@ from unittest.mock import patch
 import yaml
 from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 from tests.api.test_mihomo_rules_runtime import profile
-from routing_presets import quic_rule, quic_domains, QUIC_DEFAULT_GROUPS, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, RU_SERVICE_CATALOG
+from routing_presets import quic_rule, quic_group_rules, quic_domains, QUIC_DEFAULT_GROUPS, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, RU_SERVICE_CATALOG
 from client_capabilities import device_capabilities
 
 
@@ -174,21 +174,16 @@ class RoutingPresetTests(unittest.TestCase):
 
 
     def test_video_groups_are_selectable_and_preserve_saved_selections(self):
-        catalog = (ROOT / 'src/features/mihomo/catalog.ts').read_text(encoding='utf-8')
-        catalog = catalog.split('  quic_compatibility: [', 1)[1].split('  direct_ru_services:', 1)[0]
-        for group, domains in QUIC_GROUPS.items():
+        for group in QUIC_GROUPS:
             with self.subTest(group=group):
-                row = next(line for line in catalog.splitlines() if f'id: "{group}"' in line)
-                for domain in domains:
-                    self.assertIn(f'"DOMAIN-SUFFIX,{domain})"', row)
-                selected = [quic_rule(domain) for domain in domains]
+                selected = quic_group_rules(group)
                 routing = {'quic_compatibility': True, 'quic_compatibility_rules': '\n'.join(selected)}
                 emitted = manager.profile_rules(routing)
                 self.assertEqual([rule for rule in emitted if rule.startswith('AND,')], selected)
         schema = next(row for row in manager.routing_rule_lists({}) if row['id'] == 'quic_compatibility')
         self.assertEqual(set(schema['available_rules'].splitlines()), set(QUIC_AVAILABLE_RULES))
-        self.assertEqual(schema['default_rules'].splitlines(), [quic_rule(d) for group in ('youtube', 'instagram', 'media_library') for d in QUIC_GROUPS[group]])
-        self.assertEqual(QUIC_DEFAULT_GROUPS, ('youtube', 'instagram', 'media_library'))
+        self.assertEqual(schema['default_rules'].splitlines(), [rule for group in QUIC_DEFAULT_GROUPS for rule in quic_group_rules(group)])
+        self.assertEqual(QUIC_DEFAULT_GROUPS, ('youtube', 'instagram', 'tiktok', 'media_library'))
         self.assertFalse({'vk_video', 'rutube', 'ok_video', 'kinopoisk', 'okko', 'wink'} & set(QUIC_GROUPS))
         legacy = quic_rule('rutube.ru')
         self.assertIn(legacy, manager.profile_rules({'quic_compatibility': True, 'quic_compatibility_rules': legacy}))
@@ -364,7 +359,13 @@ class RoutingPresetTests(unittest.TestCase):
                                    for rule in config['rules'] if not rule.startswith('MATCH,')] + ['MATCH,DIRECT']
                 config['mixed-port'] = port = free_port(udp=True)
                 config['dns']['enable'] = False
-                config['hosts'] = {domain: '127.0.0.1' for domain in ['youtube.com', 'www.youtube.com', 'unselected.audit.test', 'youtube.com.audit.test']}
+                selected_domains = ['youtube.com', 'www.youtube.com', 'yt3.ggpht.com', 'yt3.googleusercontent.com',
+                                    'scontent.cdninstagram.com', 'video.xx.fbcdn.net', 'lookaside.fbsbx.com',
+                                    'v16.tiktokcdn-us.com', 'api16.tiktokvapp.com', 'lf16.tiktokstaticb.com',
+                                    'p16-tiktok-dm-sticker-sign-sg.ibyteimg.com']
+                other_domains = ['unselected.audit.test', 'youtube.com.audit.test', 'other.googleusercontent.com',
+                                 'other.ibyteimg.com', 'child.p16-tiktok-dm-sticker-sign-sg.ibyteimg.com']
+                config['hosts'] = {domain: '127.0.0.1' for domain in selected_domains + other_domains}
                 path = root / 'config.yaml'
                 path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding='utf-8')
                 with open(root / 'core.log', 'w') as log:
@@ -374,8 +375,8 @@ class RoutingPresetTests(unittest.TestCase):
                         wait_port(port, process)
                         wait_http_proxy(port, process, readiness)
                         for domain, target_port, blocked in [
-                                ('youtube.com', destination, True), ('www.youtube.com', destination, True),
-                                ('unselected.audit.test', destination, False), ('youtube.com.audit.test', destination, False),
+                                *((domain, destination, True) for domain in selected_domains),
+                                *((domain, destination, False) for domain in other_domains),
                                 ('youtube.com', servers[1].server_address[1], False)]:
                             with self.subTest(domain=domain, port=target_port), socket.create_connection(('127.0.0.1', port), timeout=3) as control:
                                 control.sendall(b'\x05\x01\x00')

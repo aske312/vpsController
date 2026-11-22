@@ -1049,6 +1049,8 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                     raise HTTPException(status_code=422, detail=str(exc)) from None
             else:
                 result[key] = str(raw)
+    if result.get('dns_ipv6') and not server_addresses.ipv6_egress_state()['available']:
+        result['dns_ipv6'] = False
     if result.get('route_dns'):
         client_dns_settings(result)
     if result.get('structured_policy') and result['structured_policy'] != '@inherit':
@@ -1687,6 +1689,8 @@ def client_dns_settings(routing: dict[str, Any], ech_enabled: bool = False, base
     dns['route_dns'] = bool(routing.get('route_dns', dns.get('route_dns', False)))
     dns['enhanced_mode'] = 'fake-ip' if bool(routing.get('dns_fake_ip', dns.get('enhanced_mode') == 'fake-ip')) else 'redir-host'
     dns['ipv6'] = bool(routing.get('dns_ipv6', dns.get('ipv6', False)))
+    if dns['ipv6'] and not server_addresses.ipv6_egress_state()['available']:
+        dns['ipv6'] = False
     dns['prefer_h3'] = bool(routing.get('dns_prefer_h3', dns.get('prefer_h3', False)))
     if routing.get('dns_secure') and not dns.get('route_dns'):
         dns.update(nameserver='https://cloudflare-dns.com/dns-query', fallback='https://dns.google/dns-query')
@@ -1858,6 +1862,8 @@ def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
             if not value:
                 raise HTTPException(status_code=422, detail=f"{key} cannot be empty")
             result[key] = value
+    if result.get('ipv6') and not server_addresses.ipv6_egress_state()['available']:
+        result['ipv6'] = False
     try:
         route_enabled = result.get('route_dns') or any(
             device_routing(profile, device['id']).get('route_dns', result.get('route_dns', False))
@@ -1935,6 +1941,7 @@ def get_routing_schema() -> dict[str, Any]:
     values = routing_settings(stored)
     presets = profile_presets(stored_presets)
     return {"schema": routing_schema(), "values": values, "revision": module_settings_revision(ROUTING_MODULE_ID, values),
+            "server_ipv6": server_addresses.ipv6_egress_state(),
             "structured_policy_schema": routing_policy.Policy.model_json_schema(), "routing_library_supported": True,
             "last_operation_id": mutation_record(stored).get("id"),
             "presets": presets, "presets_revision": collection_revision("presets", presets),
@@ -2083,7 +2090,8 @@ def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
 def get_dns_settings() -> dict[str, Any]:
     stored = load_json(DNS_SETTINGS_FILE, {})
     values = dns_settings(stored)
-    return {"schema": dns_schema(), "values": values, "revision": module_settings_revision(DNS_MODULE_ID, values), "last_operation_id": mutation_record(stored).get("id")}
+    return {"schema": dns_schema(), "values": values, "revision": module_settings_revision(DNS_MODULE_ID, values),
+            "server_ipv6": server_addresses.ipv6_egress_state(), "last_operation_id": mutation_record(stored).get("id")}
 
 
 @app.patch("/api/mihomo/dns/settings", dependencies=[Depends(require_mihomo_mutation)])

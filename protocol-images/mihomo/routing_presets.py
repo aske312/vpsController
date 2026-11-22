@@ -3,6 +3,7 @@ import re
 import ipaddress
 import json
 from pathlib import Path
+from profile_modes import VPN_SERVICES
 
 
 # Dedicated advertising endpoints; broad shared infrastructure and tracker-only
@@ -25,34 +26,23 @@ for _group in RU_SERVICE_CATALOG['groups']:
         RU_DIRECT_RULES.setdefault(_preset, []).extend(_rules)
 
 
-def quic_rule(domain):
-    return f"AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN-SUFFIX,{domain})),REJECT"
+def quic_rule(domain, *, exact=False):
+    kind = 'DOMAIN' if exact else 'DOMAIN-SUFFIX'
+    return f"AND,((NETWORK,UDP),(DST-PORT,443),({kind},{domain})),REJECT"
 
 
 # Curated service domains from v2fly/domain-list-community/data.
 # Shared CDN parents are deliberately excluded; only service-specific names match.
 QUIC_GROUPS = {
-    'youtube': (
-        'youtube.com', 'googlevideo.com', 'youtubei.googleapis.com',
-        'ytimg.com', 'youtube-nocookie.com', 'youtube.googleapis.com',
-        'youtubeembeddedplayer.googleapis.com', 'youtu.be',
-    ),
+    'youtube': tuple(VPN_SERVICES['youtube']['domains']),
     'google': (
         'google.com', 'googleapis.com', 'gstatic.com',
     ),
-    'instagram': (
-        'instagram.com', 'cdninstagram.com',
-    ),
-    'facebook': (
-        'facebook.com', 'fbcdn.net',
-    ),
-    'tiktok': (
-        'tiktok.com', 'tiktokcdn.com', 'tiktokcdn-eu.com',
-        'tiktokcdn-us.com', 'tiktokeu-cdn.com', 'tiktokrow-cdn.com',
-        'tiktokv.com', 'tiktokv.eu', 'tiktokv.us',
-        'ttlivecdn.com', 'tiktokcdn.com.akamaized.net', 'tiktokcdn.com.edgesuite.net',
-        'tiktokcdn-us.com.edgesuite.net', 'tiktokv.com.edgekey.net', 'tiktokv.com.edgesuite.net',
-    ),
+    'instagram': tuple(VPN_SERVICES['instagram']['domains']),
+    # Shared Meta media has one owner in the rule-group UI: Instagram/Reels.
+    'facebook': tuple(domain for domain in VPN_SERVICES['facebook']['domains']
+                      if domain not in VPN_SERVICES['instagram']['domains']),
+    'tiktok': tuple(VPN_SERVICES['tiktok']['domains']),
     'twitch': (
         'twitch.tv', 'ttvnw.net', 'jtvnw.net',
         'twitchcdn.net', 'live-video.net',
@@ -83,10 +73,19 @@ QUIC_GROUPS = {
         'spankbang.party', 'sb-cd.com',
     ),
 }
-QUIC_DEFAULT_GROUPS = ('youtube', 'instagram', 'media_library')
-QUIC_DEFAULT_RULES = [quic_rule(domain) for group in QUIC_DEFAULT_GROUPS for domain in QUIC_GROUPS[group]]
-QUIC_AVAILABLE_RULES = list(dict.fromkeys(quic_rule(domain) for domains in QUIC_GROUPS.values() for domain in domains))
-QUIC_RULE_PATTERN = re.compile(r'AND,\(\(NETWORK,UDP\),\(DST-PORT,443\),\(DOMAIN-SUFFIX,([a-z0-9.-]+)\)\),REJECT')
+QUIC_HOST_GROUPS = {group: tuple(VPN_SERVICES[group].get('hosts', []))
+                    for group in ('youtube', 'instagram', 'tiktok')}
+
+
+def quic_group_rules(group):
+    return [*(quic_rule(domain) for domain in QUIC_GROUPS[group]),
+            *(quic_rule(host, exact=True) for host in QUIC_HOST_GROUPS.get(group, ()))]
+
+
+QUIC_DEFAULT_GROUPS = ('youtube', 'instagram', 'tiktok', 'media_library')
+QUIC_DEFAULT_RULES = list(dict.fromkeys(rule for group in QUIC_DEFAULT_GROUPS for rule in quic_group_rules(group)))
+QUIC_AVAILABLE_RULES = list(dict.fromkeys(rule for group in QUIC_GROUPS for rule in quic_group_rules(group)))
+QUIC_RULE_PATTERN = re.compile(r'AND,\(\(NETWORK,UDP\),\(DST-PORT,443\),\((?:DOMAIN-SUFFIX|DOMAIN),([a-z0-9.-]+)\)\),REJECT')
 
 
 def quic_domains(value):

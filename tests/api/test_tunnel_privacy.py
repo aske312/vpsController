@@ -17,6 +17,9 @@ from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_pro
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(manager.server_addresses, 'ipv6_egress_state', return_value={'available': True}))
+
     def test_profile_yaml_applies_selected_protection_flags(self):
         profile = {
             "common_device_id": "phone",

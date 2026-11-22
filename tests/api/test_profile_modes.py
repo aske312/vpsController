@@ -102,6 +102,35 @@ class ProfileModeTests(unittest.TestCase):
             kind = 'IP-CIDR6' if parsed.version == 6 else 'IP-CIDR'
             self.assertIn(f'{kind},{network},{manager.MIHOMO_PROXY_GROUP},no-resolve', config['rules'])
 
+    def test_youtube_image_cdn_follows_selected_service_and_dns_without_broad_google_route(self):
+        config = self.config({'connection_mode': 'proxy', 'routing_scope': 'selected',
+                              'vpn_services': 'youtube', 'route_dns': True})
+        for rule in ('DOMAIN-SUFFIX,ggpht.com,', 'DOMAIN,yt3.googleusercontent.com,'):
+            self.assertIn(rule + manager.MIHOMO_PROXY_GROUP, config['rules'])
+        policy = config['dns']['nameserver-policy']
+        for host in ('ggpht.com', '.ggpht.com', 'yt3.googleusercontent.com'):
+            self.assertTrue(all(resolver.endswith('#' + manager.MIHOMO_PROXY_GROUP) for resolver in policy[host]))
+        self.assertNotIn('DOMAIN-SUFFIX,googleusercontent.com,' + manager.MIHOMO_PROXY_GROUP, config['rules'])
+        unselected = self.config({'routing_scope': 'selected', 'vpn_services': 'telegram'})
+        self.assertNotIn('DOMAIN-SUFFIX,ggpht.com,' + manager.MIHOMO_PROXY_GROUP, unselected['rules'])
+
+    def test_short_video_services_keep_media_and_api_dns_inside_the_tunnel(self):
+        cases = {
+            'youtube': ('googlevideo.com', 'ggpht.com', 'yt3.googleusercontent.com'),
+            'instagram': ('cdninstagram.com', 'fbcdn.net', 'fbsbx.com'),
+            'tiktok': ('tiktokcdn-us.com', 'tiktokvapp.com', 'tiktokstaticb.com',
+                       'p16-tiktok-dm-sticker-sign-sg.ibyteimg.com'),
+        }
+        for service, names in cases.items():
+            with self.subTest(service=service):
+                config = self.config({'connection_mode': 'proxy', 'routing_scope': 'selected',
+                                      'vpn_services': service, 'route_dns': True})
+                policy = config['dns']['nameserver-policy']
+                for name in names:
+                    self.assertTrue(policy[name])
+                    self.assertTrue(all(resolver.endswith('#' + manager.MIHOMO_PROXY_GROUP) for resolver in policy[name]))
+                self.assertEqual(config['rules'][-1], 'MATCH,DIRECT')
+
     def test_expanded_catalog_routes_each_service_without_selecting_others(self):
         all_ids = ','.join(VPN_SERVICES)
         self.assertEqual(manager.validate_routing({'vpn_services': all_ids}, current={})['vpn_services'], all_ids)
@@ -210,12 +239,21 @@ class ProfileModeTests(unittest.TestCase):
                     self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
                     # Exercise generated routing through loopback; never install
                     # TUN routes or contact the real Telegram/YouTube endpoints.
-                    cases = [('youtube.com', b'via-vpn-fixture'), ('91.108.4.1', b'via-vpn-fixture'),
+                    cases = [('youtube.com', b'via-vpn-fixture'), ('i.ytimg.com', b'via-vpn-fixture'),
+                             ('yt3.ggpht.com', b'via-vpn-fixture'), ('yt3.googleusercontent.com', b'via-vpn-fixture'),
+                             ('scontent.cdninstagram.com', b'via-vpn-fixture'), ('video.xx.fbcdn.net', b'via-vpn-fixture'),
+                             ('lookaside.fbsbx.com', b'via-vpn-fixture'), ('v16.tiktokcdn-us.com', b'via-vpn-fixture'),
+                             ('api16.tiktokvapp.com', b'via-vpn-fixture'), ('lf16.tiktokstaticb.com', b'via-vpn-fixture'),
+                             ('p16-tiktok-dm-sticker-sign-sg.ibyteimg.com', b'via-vpn-fixture'),
+                             ('91.108.4.1', b'via-vpn-fixture'),
                              ('allowed.youtube.com', b'via-direct-fixture'), ('blocked.audit.test', b'502'),
                              ('other.audit.test', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture')]
                     cases += [(entry['domains'][0], b'via-vpn-fixture') for key, entry in VPN_SERVICES.items() if key not in {'youtube', 'telegram'}]
                     cases += [('discord-attachments-uploads-prd.storage.googleapis.com', b'via-vpn-fixture'),
-                              ('other.storage.googleapis.com', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture')]
+                              ('other.storage.googleapis.com', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture'),
+                              ('other.googleusercontent.com', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture'),
+                              ('other.ibyteimg.com', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture'),
+                              ('other.akamaized.net', b'via-direct-fixture' if scope == 'selected' else b'via-vpn-fixture')]
                     config['hosts'] = {name: '127.0.0.1' for name, _ in cases if name != '91.108.4.1'}
                     config['tun']['enable'] = False
                     config['dns']['enable'] = False

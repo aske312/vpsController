@@ -2603,27 +2603,17 @@ def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges:
 
 
 def network_ipv6_state() -> dict[str, bool | str]:
-    local_address = ""
-    output = run("ip", "-6", "-o", "addr", "show", "scope", "global", timeout=3)
-    for line in output.splitlines():
-        columns = line.split()
-        try:
-            address = next(columns[index + 1].split("/", 1)[0] for index, value in enumerate(columns) if value == "inet6")
-            parsed = ipaddress.ip_address(address)
-        except (StopIteration, ValueError):
-            continue
-        if parsed.version == 6 and parsed.is_global:
-            local_address = address
-            break
-    address = local_address or PUBLIC_IPV6
-    default_route = bool(run("ip", "-6", "route", "show", "default", timeout=3).strip())
+    egress = server_addresses.ipv6_egress_state()
+    address = egress['address'] or PUBLIC_IPV6
+    default_route = egress['default_route']
     web_listener = False
     for line in run("ss", "-H", "-lnt6", timeout=4).splitlines():
         columns = line.split()
         if len(columns) >= 4 and columns[3].rsplit(":", 1)[-1] in {"80", "443"}:
             web_listener = True
             break
-    return {"address": address, "default_route": default_route, "web_listener": web_listener, "ready": bool(address and default_route and web_listener)}
+    return {"address": address, "default_route": default_route, "web_listener": web_listener,
+            "ready": bool(egress['available'] and web_listener), "egress_ready": egress['available']}
 
 
 def network_capabilities(ipv6: dict[str, bool | str] | None = None) -> dict:

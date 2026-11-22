@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.api.support import api, manager
@@ -14,6 +15,36 @@ A, B, C, V6 = '45.66.163.179', '45.66.163.181', '45.66.163.183', '2606:4700::111
 
 def interface(name, values, **extra):
     return {'ifname': name, 'flags': ['UP'], 'addr_info': [{'local': value, 'scope': 'global', **extra} for value in values]}
+
+
+class Ipv6EgressTests(unittest.TestCase):
+    def test_requires_current_address_and_usable_route_on_the_same_interface(self):
+        for found, routes, available in [
+            ({A: ['ens3']}, [], False),
+            ({V6: ['ens3']}, [], False),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3'}], True),
+            ({V6: ['ens3']}, [{'dst': '::/0', 'dev': 'ens3'}], True),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'down0'}], False),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'type': 'unreachable'}], False),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'flags': ['linkdown']}], False),
+            ({V6: ['ens3']}, [{'dst': 'default', 'dev': 'ens3', 'expires': 0}], False),
+        ]:
+            with self.subTest(found=found, routes=routes), patch.object(addresses, 'detect', return_value=found), \
+                    patch.object(addresses.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=json.dumps(routes))):
+                state = addresses.ipv6_egress_state()
+                self.assertEqual(state['available'], available)
+                self.assertEqual(state['default_route'], available)
+
+    def test_unknown_interface_or_route_state_does_not_allow_ipv6(self):
+        for result in (SimpleNamespace(returncode=1, stdout=''), SimpleNamespace(returncode=0, stdout='invalid'),
+                       SimpleNamespace(returncode=0, stdout='{}')):
+            with self.subTest(result=result), patch.object(addresses, 'detect', return_value={V6: ['ens3']}), \
+                    patch.object(addresses.subprocess, 'run', return_value=result):
+                state = addresses.ipv6_egress_state()
+                self.assertFalse(state['available'])
+                self.assertEqual(state['state'], 'unknown')
+        with patch.object(addresses, 'detect', side_effect=OSError('unavailable')):
+            self.assertEqual(addresses.ipv6_egress_state()['state'], 'unknown')
 
 
 class ServerAddressesTests(unittest.TestCase):

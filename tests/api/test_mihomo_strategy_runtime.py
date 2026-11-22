@@ -165,6 +165,17 @@ class StrategyRuntimeTests(unittest.TestCase):
                 self.assertEqual(connection.recv(64), b"open\n")
                 self.assertEqual(paths.get(timeout=3), expected)
                 return connection
+            def media_segments(connection, phase):
+                for segment in range(4):
+                    payload = f'{phase}:{segment}:'.encode() + b'media-segment-' * 2048 + b'\n'
+                    connection.sendall(payload)
+                    received = bytearray()
+                    while len(received) < len(payload):
+                        chunk = connection.recv(min(65536, len(payload) - len(received)))
+                        if not chunk:
+                            self.fail('An established media stream was interrupted')
+                        received.extend(chunk)
+                    self.assertEqual(received, payload)
             if strategy != "select":
                 probe()
             original = "second" if strategy == "url-test" else "first"
@@ -172,6 +183,7 @@ class StrategyRuntimeTests(unittest.TestCase):
             held = stream(original)
             held.sendall(b"before\n")
             self.assertEqual(held.recv(64), b"before\n")
+            media_segments(held, 'before-switch')
             if strategy == "select":
                 api(data={"name": "second"})
             elif strategy == "fallback":
@@ -187,6 +199,7 @@ class StrategyRuntimeTests(unittest.TestCase):
             self.assertEqual(new.recv(64), b"new\n")
             held.sendall(b"after\n")
             self.assertEqual(held.recv(64), b"after\n")
+            media_segments(held, 'after-switch')
             if strategy == "fallback":
                 proxies[0].failed = False
                 probe()

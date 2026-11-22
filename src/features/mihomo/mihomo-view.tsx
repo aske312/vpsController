@@ -130,6 +130,10 @@ export function MihomoPage({
     (list) => [list.id, partitionRuleGroups(list, ruleIconGroups[list.id] || [])],
   )), [routingPolicy]);
   const [routingReadKnown, setRoutingReadKnown] = useState(false);
+  const serverIpv6Available = routingReadKnown
+    ? routingPolicy?.server_ipv6?.available === true
+    : dnsReadKnown && dnsPolicy?.server_ipv6?.available === true;
+  const unavailableIpv6Setting = (key: string) => (key === "ipv6" || key === "dns_ipv6") && !serverIpv6Available;
   const [routingDraft, setRoutingDraft] = useState<RoutingDraft>({});
   const [routingDirty, setRoutingDirty] = useState(false);
   const [routingDraftRevision, setRoutingDraftRevision] = useState<string | undefined>();
@@ -1612,8 +1616,9 @@ export function MihomoPage({
 
           <section className="mihomoDnsMode"><header><div><b>Режим обработки</b></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
           <section className="mihomoDnsAdvanced"><header><div><b>Дополнительная обработка</b></div></header><div>{([{ key: "ipv6", code: "IPv6", title: "IPv6", hint: "Возвращать записи AAAA" }, { key: "prefer_h3", code: "H3", title: "HTTP/3", hint: "Для совместимых DoH-серверов" }] as const).map((feature) => {
-            const enabled = Boolean(dnsDraft[feature.key]);
-            return <button type="button" key={feature.key} aria-pressed={enabled} className={enabled ? "is-selected" : ""} onClick={() => updateDnsDraft(feature.key, !enabled)}><span>{feature.code}</span><p><b>{feature.title}</b></p><i>{enabled ? "Включено" : "Выключено"}</i></button>;
+            const unavailable = unavailableIpv6Setting(feature.key);
+            const enabled = Boolean(dnsDraft[feature.key]) && !unavailable;
+            return <button type="button" key={feature.key} disabled={unavailable} aria-pressed={enabled} className={enabled ? "is-selected" : ""} onClick={() => updateDnsDraft(feature.key, !enabled)}><span>{feature.code}</span><p><b>{feature.title}</b></p><i>{unavailable ? "Недоступно на сервере" : enabled ? "Включено" : "Выключено"}</i></button>;
           })}<label><span><b>Кэш DNS</b></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
           <section className="mihomoDnsRouteResolvers"><header><b>Резолверы по маршруту</b></header><div>{([
             ["direct_nameserver", "DNS напрямую", "Для сайтов с прямым маршрутом."],
@@ -1733,7 +1738,7 @@ export function MihomoPage({
                   ) : field.type === "textarea" ? (
                     <textarea rows={6} value={String(settingsDraft[field.key] ?? field.default)} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nGEOIP,PRIVATE,DIRECT"} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.value }))} />
                   ) : field.type === "boolean" ? (
-                    <input type="checkbox" checked={Boolean(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.checked }))} />
+                    <input type="checkbox" disabled={unavailableIpv6Setting(field.key)} checked={Boolean(settingsDraft[field.key] ?? field.default) && !unavailableIpv6Setting(field.key)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.checked }))} />
                   ) : (
                     <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: field.type === "number" ? Number(event.target.value) : event.target.value }))} />
                   )}
@@ -1780,7 +1785,7 @@ export function MihomoPage({
                 setProfileStrategyTouched(Boolean(common.routing?.strategy)); setActiveDeviceId(common.id);
               } : undefined} />
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b></span></button>; })}</div></section>}
-            {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
+            {profileStep === 2 && <ProfileProtection routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} ipv6Available={serverIpv6Available} onChange={setProfileRoutingValue} />}
             {profileStep === 3 && <ProfileRoutingMode routing={{ ...effectiveProfileRouting, route_dns: profileDnsByRoute }} onChange={setProfileRoutingValue}/>}
             {activeProfileRouting.strategy === "load-balance" && <BalanceStrategy value={effectiveProfileRouting.load_balance_strategy} onChange={value => setProfileRoutingValue("load_balance_strategy", value)}/>}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <NotificationNotice id={`mihomo:encryption:${liveDialogProfile.id}:${activeDeviceId}`} title="Шифрование профиля" message="Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте." />}

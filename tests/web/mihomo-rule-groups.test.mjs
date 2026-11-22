@@ -4,6 +4,33 @@ import test from "node:test";
 import { ruleIconGroups } from "../../src/features/mihomo/catalog.ts";
 import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "../../src/features/mihomo/rule-groups.ts";
 
+test("short-video QUIC controls include media, images and API from the same service catalog", () => {
+  const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/vpn-services.json", import.meta.url), "utf8"));
+  const services = catalog.services.filter(entry => ["youtube", "instagram", "tiktok", "facebook"].includes(entry.id));
+  const defaults = services.filter(entry => entry.id !== "facebook").flatMap(entry => [
+    ...entry.domains.map(domain => `AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN-SUFFIX,${domain})),REJECT`),
+    ...(entry.hosts || []).map(host => `AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN,${host})),REJECT`),
+  ]);
+  const available = [...new Set(services.flatMap(entry => [
+    ...entry.domains.map(domain => `AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN-SUFFIX,${domain})),REJECT`),
+    ...(entry.hosts || []).map(host => `AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN,${host})),REJECT`),
+  ]))];
+  const list = { default_rules: defaults.join("\n"), available_rules: available.join("\n") };
+  const groups = ruleIconGroups.quic_compatibility;
+  const partition = partitionRuleGroups(list, groups);
+  const owned = Object.values(partition).flat();
+  assert.equal(owned.length, available.length);
+  assert.equal(new Set(owned).size, available.length);
+  for (const service of services.filter(entry => entry.id !== "facebook")) {
+    const expected = [...service.domains.map(domain => `AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN-SUFFIX,${domain})),REJECT`),
+      ...(service.hosts || []).map(host => `AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN,${host})),REJECT`)];
+    assert.deepEqual(partition[service.id], expected);
+    const disabled = toggleRuleGroup(list, groups, "@default", service.id);
+    for (const rule of expected) assert.equal(disabled.split("\n").includes(rule), false);
+    assert.equal(toggleRuleGroup(list, groups, disabled, service.id), "@default");
+  }
+});
+
 test("reviewed RU domains belong to the matching service switch", () => {
   const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/ru-service-domains.json", import.meta.url), "utf8"));
   for (const entry of catalog.groups) {

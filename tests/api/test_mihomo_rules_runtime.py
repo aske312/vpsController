@@ -36,6 +36,7 @@ class RuleExportTests(unittest.TestCase):
         self.assertLess(rules.index('DOMAIN-SUFFIX,telegram.org,GATE.312'), udp)
 
     def setUp(self):
+        self.enterContext(patch.object(manager.server_addresses, 'ipv6_egress_state', return_value={'available': True}))
         self.enterContext(patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"))
         self.enterContext(patch.object(manager, "public_endpoint", return_value="127.0.0.1"))
         self.enterContext(patch.object(manager, "module_is_installed", return_value=True))

@@ -2,6 +2,7 @@ import connectionVariants from "../../../protocol-images/mihomo/connection-varia
 import type { ProfilePreset, RuleIconGroup } from "./types";
 import ruServices from "../../../protocol-images/mihomo/ru-service-domains.json" with { type: "json" };
 import adServices from "../../../protocol-images/mihomo/ad-service-domains.json" with { type: "json" };
+import vpnServices from "../../../protocol-images/mihomo/vpn-services.json" with { type: "json" };
 
 export const presetConnectionOptions = connectionVariants as ProfilePreset["components"];
 
@@ -197,6 +198,16 @@ export const profileDirectRules = [
   { key: "direct_p2p_enabled", code: "P2P", title: "P2P и торренты", text: "Выбранные клиенты напрямую.", group: "Сеть" },
 ];
 
+function mediaQuicGroup(id: string, code: string, name: string, exclude?: string): RuleIconGroup {
+  const service = vpnServices.services.find(entry => entry.id === id);
+  if (!service) throw new Error(`Unknown media service: ${id}`);
+  const excluded = new Set(vpnServices.services.find(entry => entry.id === exclude)?.domains || []);
+  return { id, code, name, tokens: [
+    ...service.domains.filter(domain => !excluded.has(domain)).map(domain => `DOMAIN-SUFFIX,${domain})`),
+    ...(service.hosts || []).map(host => `DOMAIN,${host})`),
+  ] };
+}
+
 export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   block_advertising: [],
   block_malware: [
@@ -204,11 +215,11 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "phishing", code: "PHISH", name: "Фишинг", tokens: ["RULE-SET,security-phishing,"] },
   ],
   quic_compatibility: [
-    { id: "youtube", code: "YT", name: "YouTube", tokens: ["DOMAIN-SUFFIX,youtube.com)", "DOMAIN-SUFFIX,googlevideo.com)", "DOMAIN-SUFFIX,youtubei.googleapis.com)", "DOMAIN-SUFFIX,ytimg.com)", "DOMAIN-SUFFIX,youtube-nocookie.com)", "DOMAIN-SUFFIX,youtube.googleapis.com)", "DOMAIN-SUFFIX,youtubeembeddedplayer.googleapis.com)", "DOMAIN-SUFFIX,youtu.be)"] },
+    mediaQuicGroup("youtube", "YT", "YouTube / Shorts"),
     { id: "google", code: "GOOG", name: "Google", tokens: ["DOMAIN-SUFFIX,google.com)", "DOMAIN-SUFFIX,googleapis.com)", "DOMAIN-SUFFIX,gstatic.com)"] },
-    { id: "instagram", code: "IG", name: "Instagram", tokens: ["DOMAIN-SUFFIX,instagram.com)", "DOMAIN-SUFFIX,cdninstagram.com)"] },
-    { id: "facebook", code: "FB", name: "Facebook", tokens: ["DOMAIN-SUFFIX,facebook.com)", "DOMAIN-SUFFIX,fbcdn.net)"] },
-    { id: "tiktok", code: "TT", name: "TikTok", tokens: ["DOMAIN-SUFFIX,tiktok.com)", "DOMAIN-SUFFIX,tiktokcdn.com)", "DOMAIN-SUFFIX,tiktokcdn-eu.com)", "DOMAIN-SUFFIX,tiktokcdn-us.com)", "DOMAIN-SUFFIX,tiktokeu-cdn.com)", "DOMAIN-SUFFIX,tiktokrow-cdn.com)", "DOMAIN-SUFFIX,tiktokv.com)", "DOMAIN-SUFFIX,tiktokv.eu)", "DOMAIN-SUFFIX,tiktokv.us)", "DOMAIN-SUFFIX,ttlivecdn.com)", "DOMAIN-SUFFIX,tiktokcdn.com.akamaized.net)", "DOMAIN-SUFFIX,tiktokcdn.com.edgesuite.net)", "DOMAIN-SUFFIX,tiktokcdn-us.com.edgesuite.net)", "DOMAIN-SUFFIX,tiktokv.com.edgekey.net)", "DOMAIN-SUFFIX,tiktokv.com.edgesuite.net)"] },
+    mediaQuicGroup("instagram", "IG", "Instagram / Reels"),
+    mediaQuicGroup("facebook", "FB", "Facebook", "instagram"),
+    mediaQuicGroup("tiktok", "TT", "TikTok"),
     { id: "twitch", code: "TW", name: "Twitch", tokens: ["DOMAIN-SUFFIX,twitch.tv)", "DOMAIN-SUFFIX,ttvnw.net)", "DOMAIN-SUFFIX,jtvnw.net)", "DOMAIN-SUFFIX,twitchcdn.net)", "DOMAIN-SUFFIX,live-video.net)"] },
     { id: "netflix", code: "NFLX", name: "Netflix", tokens: ["DOMAIN-SUFFIX,netflix.com)", "DOMAIN-SUFFIX,netflix.net)", "DOMAIN-SUFFIX,nflxvideo.net)", "DOMAIN-SUFFIX,nflxso.net)", "DOMAIN-SUFFIX,nflxext.com)", "DOMAIN-SUFFIX,nflximg.com)", "DOMAIN-SUFFIX,nflximg.net)", "DOMAIN-SUFFIX,netflix.com.edgesuite.net)"] },
     { id: "vimeo", code: "VIM", name: "Vimeo", tokens: ["DOMAIN-SUFFIX,vimeo.com)", "DOMAIN-SUFFIX,vimeocdn.com)", "DOMAIN-SUFFIX,vimeoondemand.com)", "DOMAIN-SUFFIX,vhx.tv)", "DOMAIN-SUFFIX,livestream.com)"] },

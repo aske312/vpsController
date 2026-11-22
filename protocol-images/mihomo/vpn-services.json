@@ -10,12 +10,18 @@
         "googlevideo.com",
         "youtubei.googleapis.com",
         "ytimg.com",
+        "ggpht.com",
         "youtube-nocookie.com",
         "youtube.googleapis.com",
         "youtubeembeddedplayer.googleapis.com",
         "youtu.be"
       ],
+      "hosts": [
+        "yt3.googleusercontent.com"
+      ],
       "networks": [],
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/youtube",
+      "checked_at": "2026-11-22",
       "icon": "/icons/apps/youtube.svg"
     },
     {
@@ -97,10 +103,13 @@
       "id": "instagram",
       "name": "Instagram",
       "code": "INS",
-      "description": "Instagram",
+      "description": "Instagram, Reels и общие медиадомены Meta.",
       "domains": [
         "instagram.com",
         "cdninstagram.com",
+        "fbcdn.com",
+        "fbcdn.net",
+        "fbsbx.com",
         "ig.me",
         "igcdn.com",
         "igtv.com"
@@ -108,7 +117,11 @@
       "hosts": [],
       "networks": [],
       "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/instagram",
-      "checked_at": "2026-10-30",
+      "sources": [
+        "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/facebook",
+        "https://bugzilla.mozilla.org/show_bug.cgi?id=1941318"
+      ],
+      "checked_at": "2026-11-22",
       "icon": "/icons/apps/instagram.svg"
     },
     {
@@ -349,7 +362,7 @@
       "id": "tiktok",
       "name": "TikTok",
       "code": "TIK",
-      "description": "TikTok",
+      "description": "Лента, видео, изображения и API TikTok.",
       "domains": [
         "bytedapm.com",
         "muscdn.com",
@@ -367,9 +380,11 @@
         "tiktokglobalshopv.com",
         "tiktokminis.us",
         "tiktokrow-cdn.com",
+        "tiktokstaticb.com",
         "tiktokv.com",
         "tiktokv.eu",
         "tiktokv.us",
+        "tiktokvapp.com",
         "tiktokw.eu",
         "tiktokw.us",
         "ttcdn-us.com",
@@ -391,8 +406,8 @@
         "roovza.skadsdk.appsflyersdk.com"
       ],
       "networks": [],
-      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/333d8a1810d04600bcb00870155a369954ed37f5/data/tiktok",
-      "checked_at": "2026-10-30",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/810aa5258c883f5a2a6fd43cf058d01db0f06be5/data/tiktok",
+      "checked_at": "2026-11-22",
       "icon": "/icons/apps/tiktok.svg"
     },
     {

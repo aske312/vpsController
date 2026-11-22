@@ -14,6 +14,32 @@ runs:
         gzip -dc .runtime/snell-test-core/mihomo.gz > .runtime/snell-test-core/mihomo
         chmod +x .runtime/snell-test-core/mihomo
         PRIVACY_MIHOMO_BIN="$PWD/.runtime/snell-test-core/mihomo" python -m unittest -v tests.api.test_snell
+    - name: Verify short-video routing on supported Mihomo cores
+      shell: bash
+      run: |
+        for version in 1.19.31 1.19.33 1.19.34; do
+          if [[ "$version" == 1.19.34 ]]; then
+            core="$PWD/.runtime/snell-test-core/mihomo"
+          else
+            folder="$PWD/.runtime/media-test-core/$version"
+            mkdir -p "$folder"
+            case "$version" in
+              1.19.31) digest=04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc ;;
+              1.19.33) digest=386508bfb1c72c43b6a0eda73708ecdce82546581b0ebcb16366c53757c622b6 ;;
+            esac
+            curl --fail --location --retry 3 --connect-timeout 15 --max-time 120 \
+              "https://github.com/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-amd64-compatible-v$version.gz" \
+              -o "$folder/core.gz"
+            echo "$digest  $folder/core.gz" | sha256sum --check
+            gzip -dc "$folder/core.gz" > "$folder/mihomo"
+            chmod +x "$folder/mihomo"
+            core="$folder/mihomo"
+          fi
+          PRIVACY_MIHOMO_BIN="$core" python -m unittest -v \
+            tests.api.test_profile_modes.ProfileModeTests.test_real_core_selected_routes_and_direct_fallback_without_public_traffic \
+            tests.api.test_mihomo_routing_presets.RoutingPresetTests.test_real_quic_rule_blocks_selected_udp_only_and_preserves_tcp \
+            tests.api.test_mihomo_strategy_runtime.StrategyRuntimeTests
+        done
     - name: Install WireGuard and nftables
       shell: bash
       run: |

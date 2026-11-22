@@ -55,6 +55,36 @@ def parse_interfaces(interfaces):
     return {address: sorted(names) for address, names in found.items()}
 
 
+def ipv6_egress_state():
+    """Require an assigned global address and a usable default route on its interface."""
+    state = {'available': False, 'state': 'unavailable', 'address': '', 'default_route': False,
+             'reason': 'На сервере нет публичного IPv6'}
+    try:
+        found = {address: names for address, names in detect().items()
+                 if ipaddress.ip_address(address).version == 6}
+        if not found:
+            return state
+        state['address'] = next(iter(found))
+        result = subprocess.run(['ip', '-j', '-6', 'route', 'show', 'default'],
+                                capture_output=True, text=True, timeout=3)
+        if result.returncode:
+            raise ValueError('Не удалось прочитать маршруты IPv6')
+        routes = json.loads(result.stdout)
+        if not isinstance(routes, list) or any(not isinstance(route, dict) for route in routes):
+            raise ValueError('Некорректные маршруты IPv6')
+        for route in routes:
+            if (route.get('dst') not in ('default', '::/0') or route.get('type', 'unicast') != 'unicast'
+                    or 'linkdown' in route.get('flags', []) or route.get('expires') == 0):
+                continue
+            address = next((address for address, names in found.items() if route.get('dev') in names), None)
+            if address:
+                return {**state, 'available': True, 'state': 'ready', 'address': address,
+                        'default_route': True, 'reason': 'Публичный IPv6 и маршрут сервера подтверждены'}
+        return {**state, 'reason': 'На сервере нет доступного маршрута IPv6'}
+    except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        return {**state, 'state': 'unknown', 'reason': 'Не удалось проверить IPv6 сервера'}
+
+
 def policy(root):
     path = Path(root) / 'server-addresses.json'
     try:
