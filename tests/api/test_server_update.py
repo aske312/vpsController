@@ -63,7 +63,10 @@ info() { :; }
 ok() { :; }
 warn() { :; }
 die() { event BACKUP_FAILED; exit 1; }
-write_action_status() { event "STATUS:$1"; }
+write_action_status() {
+  event "STATUS:$1"
+  [[ "$TEST_FAIL:$1" != reboot-marker:rebooting ]]
+}
 create_recovery_point() { event BACKUP; [[ "$TEST_FAIL" != backup ]] || return 17; printf '%s\n' "$RECOVERY_DIR/fixture.enc"; }
 configure_os_update_policy() { event POLICY; [[ "$TEST_FAIL" != policy ]]; }
 restore_recovery_point() { event RESTORE; [[ "$TEST_FAIL" != restore ]]; }
@@ -78,7 +81,11 @@ apt-get() {
 dpkg-query() { printf 'package\t1.0\n'; }
 integrity_check() { event INTEGRITY; [[ "$TEST_FAIL" != integrity && "$TEST_FAIL" != restore ]]; }
 network_check() { event NETWORK; [[ "$TEST_FAIL" != network ]]; }
-systemctl() { event "SERVICE:$*"; [[ "$TEST_FAIL" != reboot ]]; }
+systemctl() {
+  event "SERVICE:$*"
+  if [[ "$TEST_FAIL" == reboot-term ]]; then kill -TERM "$$"; fi
+  [[ "$TEST_FAIL" != reboot ]]
+}
 # Backup-stage stubs never read host paths or run real cryptography.
 tar() { event TAR; [[ "$TEST_FAIL" != tar ]] || return 20; cat >/dev/null; }
 openssl() {
@@ -150,7 +157,22 @@ esac
     def test_reboot_is_only_requested_by_the_separate_explicit_action(self):
         result, events = self.invoke(action="reboot")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(events, ["SERVICE:--no-block --no-wall reboot", "STATUS:rebooting"])
+        self.assertEqual(events, ["STATUS:rebooting", "SERVICE:--no-block --no-wall reboot", "STATUS:rebooting"])
+
+    def test_shutdown_stopping_the_reboot_worker_keeps_the_pending_marker(self):
+        result, events = self.invoke(action="reboot", failure="reboot-term")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(events, ["STATUS:rebooting", "SERVICE:--no-block --no-wall reboot", "STATUS:rebooting"])
+
+    def test_rejected_reboot_records_failure_instead_of_waiting_for_a_new_boot(self):
+        result, events = self.invoke(action="reboot", failure="reboot")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events, ["STATUS:rebooting", "SERVICE:--no-block --no-wall reboot", "STATUS:failed"])
+
+    def test_reboot_is_not_requested_if_its_pending_marker_cannot_be_saved(self):
+        result, events = self.invoke(action="reboot", failure="reboot-marker")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events, ["STATUS:rebooting", "STATUS:failed"])
 
     def test_disabled_auto_update_never_runs_packages_or_reboot_but_manual_update_still_works(self):
         for automatic in (False, 'missing'):

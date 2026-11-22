@@ -146,8 +146,8 @@ class ApplicationOperationTests(unittest.TestCase):
         with patch.object(operations, "boot_id", return_value="current"), patch.object(operations, "process_start", observe):
             self.assertEqual(operations.reconcile(self.root, self.current, value, observe), value)
 
-    def test_system_updates_finish_only_after_expected_reboot_is_observed(self):
-        for action in ("safe-update", "auto-safe-update", "kernel-update"):
+    def test_pending_reboots_finish_only_after_a_new_boot_is_observed(self):
+        for action in ("reboot", "safe-update", "auto-safe-update", "kernel-update"):
             with self.subTest(action=action):
                 value = {"id": "b" * 32, "action": action, "state": "rebooting", "boot_id": "previous"}
                 observe = Mock(side_effect=AssertionError("Do not observe a worker from another boot"))

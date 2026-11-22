@@ -3456,7 +3456,16 @@ PY
 
 reboot_server() {
   info "Перезагрузка сервера"
-  systemctl --no-block --no-wall reboot
+  # Shutdown can stop this worker before systemctl returns or EXIT runs.
+  # Persist intent first; only a new boot confirms success in reconciliation.
+  write_action_status "rebooting" 100 "Сервер перезагружается" || return $?
+  trap 'exit 0' TERM
+  local reboot_status=0
+  systemctl --no-block --no-wall reboot || reboot_status=$?
+  if (( reboot_status != 0 )); then
+    trap 'exit 124' TERM
+    return "${reboot_status}"
+  fi
 }
 
 poweroff_server() {
