@@ -18,8 +18,8 @@ import assistant_roles as roles
 
 ID = r'[a-zA-Z0-9_-]{1,64}'
 READ_ROUTES = (
-    r'/status', r'/modules', rf'/modules/{ID}/settings', r'/profiles', r'/profiles/schema',
-    rf'/profiles/{ID}/(?:stats|subscription|config|client-verification|client-reports)',
+    r'/status', r'/modules', rf'/modules/{ID}/settings', r'/profiles', r'/profiles/schema', r'/profiles/catalog',
+    rf'/profiles/{ID}/(?:stats|subscription|config|client-verification|client-reports|source)',
     r'/stats', r'/routing/schema', r'/dns/settings', r'/reconciliation', r'/action',
 )
 WRITE_ROUTES = {
@@ -66,6 +66,11 @@ def request(method, path, body=None, operation_id=None, *, timeout=35):
         # Do not forward manager diagnostics, credentials or arbitrary response bodies.
         message = 'Mihomo отклонил запрос. Проверьте профиль, ревизию настроек и состояние операции.'
         if exc.code == 409:
+            try: detail = json.loads(exc.read(16000))
+            except (ValueError, OSError): detail = {}
+            if isinstance(detail, dict) and detail.get('code') == 'relay_not_verified':
+                raise HTTPException(409, {'code': 'relay_not_verified', 'message':
+                    'Защищённый Relay ещё не проверен. Используйте relay_read для диагностики и relay_prepare для подготовки исправления с подтверждением. Открытая пересылка не используется.'}) from None
             message = 'Настройки Mihomo изменились. Попросите ИИ перечитать их и подготовить новое подтверждение.'
         if exc.code == 422:
             message = 'Mihomo: неверные параметры. Попросите ИИ исправить запрос и подготовить новое подтверждение.'
@@ -108,7 +113,17 @@ def authorize(settings, actor, method, path, body):
     if parsed.scheme or parsed.netloc or '..' in parsed.path or len(path) > 256:
         raise HTTPException(422, 'Недопустимый путь Mihomo')
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-    if any(key not in ('device_id', 'format') or len(values) != 1 or not re.fullmatch(ID, values[0]) for key, values in query.items()):
+    source_read = parsed.path == '/profiles/catalog' or re.fullmatch(rf'/profiles/{ID}/source', parsed.path)
+    def valid_query(key, values):
+        if len(values) != 1: return False
+        if source_read:
+            if key in ('offset', 'limit'):
+                return values[0].isdigit() and len(values[0]) <= 7 and (0 <= int(values[0]) <= 1000000 if key == 'offset' else 1 <= int(values[0]) <= 20)
+            if parsed.path.endswith('/source'):
+                return (key == 'device_id' and re.fullmatch(ID, values[0])) or (key == 'section' and values[0] in ('devices', 'connections'))
+            return False
+        return key in ('device_id', 'format') and re.fullmatch(ID, values[0])
+    if any(not valid_query(key, values) for key, values in query.items()):
         raise HTTPException(422, 'Недопустимые параметры Mihomo')
     routes = READ_ROUTES if method == 'GET' else WRITE_ROUTES.get(method, ())
     if not any(re.fullmatch(pattern, parsed.path) for pattern in routes) or method != 'GET' and query:
@@ -151,7 +166,7 @@ def authorize(settings, actor, method, path, body):
         return parsed.path
     if method == 'GET' and parsed.path in ('/modules', '/routing/schema', '/profiles/schema'):
         return parsed.path
-    if method == 'GET' and re.fullmatch(re.escape(own) + r'/(stats|subscription|config|client-verification|client-reports)', parsed.path):
+    if method == 'GET' and re.fullmatch(re.escape(own) + r'/(stats|subscription|config|client-verification|client-reports|source)', parsed.path):
         return parsed.path
     if method == 'PATCH' and parsed.path == own:
         allowed = {'name', 'channels', 'connections', 'devices', 'routing', 'limits', 'expected_revision', 'operation_id'}
@@ -186,10 +201,17 @@ def capabilities(api, actor):
     linked = profile_for(settings, actor).get('mihomo_profile_id')
     return {
         'role': 'administrator' if admin else 'subscriber', 'profile_id': linked,
-        'reads': list(READ_ROUTES) if admin else ['/profiles', '/profiles/schema', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config', f'/profiles/{linked}/client-reports'],
+        'reads': list(READ_ROUTES) if admin else ['/profiles', '/profiles/schema', '/modules', '/routing/schema', f'/profiles/{linked}/stats', f'/profiles/{linked}/subscription', f'/profiles/{linked}/config', f'/profiles/{linked}/client-reports', f'/profiles/{linked}/source'],
         'writes': WRITE_ROUTES if admin else {'PATCH': [f'/profiles/{linked}'], 'DELETE': [f'/profiles/{linked}/devices/<id>'], 'POST': [f'/profiles/{linked}/subscription/rotate']},
         'confirmation_required': True,
         'profile_schema_path': '/profiles/schema',
+        'source_reads': {'catalog': '/profiles/catalog?offset=0&limit=10' if admin else None,
+                         'profile': '/profiles/<id>/source?section=devices&offset=0&limit=10',
+                         'connections': '/profiles/<id>/source?section=connections&device_id=<id>&offset=0&limit=10',
+                         'continue': 'next_offset until null; revision belongs to the whole profile; no YAML rendering'},
+        'copy_creation': {'method': 'POST', 'path': '/profiles', 'fields': ['name', 'copy_from'],
+                          'source_fields': ['profile_id', 'device_id', 'expected_revision', 'connection_ids', 'copy_routing'],
+                          'new_credentials': True, 'copy_personal_rules': False, 'confirmation_required': True} if admin else None,
         'account_assignment': {'read': '/accounts', 'assign': '/accounts/<telegram_id>/profile',
                                'permission': 'roles_manage', 'body': {'profile_id': 'existing profile ID or null to unlink'}} if roles.allows(settings, actor, 'roles_manage') else None,
         'subscription_rotation': {'method': 'POST', 'path': '/profiles/<id>/subscription/rotate', 'body': ['expected_revision'],
@@ -217,6 +239,14 @@ def capabilities(api, actor):
                         'Для устройств передавайте полный список с сохранением остальных устройств; для подключений — полный список без credential. '
                         'Квота, скорость и срок — отдельные административные разрешения, пользователь их не меняет. Изменения требуют подтверждения собеседником.'),
     }
+
+
+def require_copy_preview(body, preview):
+    if not body.get('copy_from'):
+        return
+    copy = preview.get('copy_preview') if isinstance(preview, dict) else None
+    if not isinstance(preview, dict) or preview.get('valid') is not True or not isinstance(copy, dict) or copy.get('new_credentials') is not True or type(copy.get('connection_count')) is not int or copy['connection_count'] <= 0:
+        raise HTTPException(409, 'Обновите приложение с Mihomo Manager: серверное копирование подключений не подтверждено. Изменения не отправлены.')
 
 
 def call(api, actor, method, path, body):
@@ -264,7 +294,7 @@ def call(api, actor, method, path, body):
     identity = uuid.uuid4().hex
     body = dict(body)
     if method == 'POST' and route == '/profiles':
-        if set(body) - {'name', 'channels', 'connections', 'devices', 'routing', 'limits', 'operation_id'}:
+        if set(body) - {'name', 'channels', 'connections', 'devices', 'routing', 'limits', 'operation_id', 'copy_from'}:
             raise HTTPException(422, 'Проверьте поля создания профиля по /profiles/schema')
         try: preview = request('POST', '/profiles/validate', body)
         except HTTPException as exc:
@@ -272,6 +302,7 @@ def call(api, actor, method, path, body):
             raise
         if not isinstance(preview, dict) or preview.get('valid') is not True:
             raise HTTPException(502, 'Mihomo не подтвердил проверку профиля; запрос подтверждения не создан')
+        require_copy_preview(body, preview)
     if method == 'PATCH' and route == '/routing/settings':
         try: preview = request('POST', '/routing/validate', body)
         except HTTPException as exc:
@@ -291,9 +322,12 @@ def call(api, actor, method, path, body):
     record = {'kind': 'mihomo', 'service': 'Mihomo ' + path, 'action': method,
               'method': method, 'path': path, 'body': body, 'code': secrets.token_hex(4),
               'operation_id': identity, 'expires': time.time() + 120, 'revision': settings['revision'], 'submitted': False}
+    if method == 'POST' and route == '/profiles' and body.get('copy_from'):
+        record['copy_preview'] = preview.get('copy_preview', {})
     with control.operations.locked(api.DATA_DIR):
         assistant_commands.enqueue(api, actor, record)
     return {'confirmation_required': True, 'operation_id': identity, 'method': method, 'path': path, 'changes': sanitize(body),
+            **({'copy_preview': preview['copy_preview']} if method == 'POST' and route == '/profiles' and isinstance(preview.get('copy_preview'), dict) else {}),
             'message': 'Подтвердите действие кнопкой в чате. Запрос ещё не выполнен.'}
 
 
@@ -301,6 +335,9 @@ def confirm(api, actor, record):
     settings = control.read(api)
     authorize(settings, actor, record['method'], record['path'], record['body'])
     body = dict(record['body'])
+    if record['method'] == 'POST' and record['path'] == '/profiles' and body.get('copy_from'):
+        # Revalidate after updates/downgrades and source changes while approval waited.
+        require_copy_preview(body, request('POST', '/profiles/validate', body))
     if record['method'] == 'PATCH' and re.fullmatch(rf'/profiles/{ID}', record['path']) and 'limits' in body:
         current = next((entry for entry in profiles(api, actor)['items'] if record['path'] == '/profiles/' + entry['id']), None)
         if not current or current.get('revision') != body.get('expected_revision'): raise HTTPException(409, 'Подписка изменилась; подготовьте изменение заново')

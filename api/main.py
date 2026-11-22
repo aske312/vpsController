@@ -224,7 +224,10 @@ def public_http_error(status_code: int, detail: object) -> str:
 
 @app.exception_handler(HTTPException)
 async def public_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    detail = public_http_error(exc.status_code, exc.detail)
+    if exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get('code') == 'relay_not_verified':
+        detail = {'code': 'relay_not_verified', 'message': 'Защищённый Relay ещё не проверен. Прочитайте relay_read; исправление требует штатной проверки и подтверждения. Открытая пересылка не используется.'}
+    else:
+        detail = public_http_error(exc.status_code, exc.detail)
     if detail == PUBLIC_COMMAND_ERROR:
         logger.error("Suppressed technical API error status=%s request_id=%s", exc.status_code, observability.request_id.get())
     return JSONResponse(status_code=exc.status_code, content={"detail": detail, **observability.error_fields(request, exc.status_code, 'panel')}, headers=exc.headers)

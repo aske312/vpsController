@@ -15,6 +15,17 @@ import assistant_mihomo as bridge
 
 
 class MihomoRequestErrors(unittest.TestCase):
+    def test_unverified_relay_preserves_a_typed_safe_error(self):
+        body = {'code': 'relay_not_verified', 'detail': 'PRIVATE DEBUG'}
+        error = bridge.urllib.error.HTTPError('http://127.0.0.1', 409, 'blocked', {}, io.BytesIO(json.dumps(body).encode()))
+        with patch.dict('os.environ', {'ADMIN_PASSWORD': 'fixture'}), patch.object(bridge.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(api.HTTPException) as caught:
+                bridge.request('GET', '/profiles/own/config')
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.detail['code'], 'relay_not_verified')
+        self.assertNotIn('PRIVATE', json.dumps(caught.exception.detail))
+
     def test_request_validation_identifies_revision_field_without_echoing_input_or_context(self):
         detail = {'detail': [{'loc': ['body', 'expected_revision'], 'type': 'string_pattern_mismatch', 'input': 'PRIVATE INPUT', 'msg': 'PRIVATE MESSAGE', 'ctx': {'pattern': 'PRIVATE PATTERN'}},
                              {'loc': ['body', 'values', 'PRIVATE FIELD'], 'type': 'dict_type'}]}
@@ -330,6 +341,65 @@ class MihomoOperatorTests(unittest.TestCase):
             with self.assertRaises(api.HTTPException): commands.execute(api, '11', '/confirm ' + record['code'])
             with self.assertRaises(api.HTTPException): commands.execute(api, '11', '/confirm ' + record['code'])
             transport.assert_called_once()
+
+    def test_source_pages_keep_subscription_scope_and_reject_unsafe_queries(self):
+        path = '/profiles/own/source?section=connections&device_id=phone&offset=0&limit=20'
+        self.assertEqual(self.tool(name='mihomo_api', path=path).status_code, 200)
+        for path in ('/profiles/other/source', '/profiles/catalog', '/profiles/own/source?limit=21',
+                     '/profiles/own/source?offset=-1', '/profiles/own/source?section=credentials'):
+            self.assertIn(self.tool(name='mihomo_api', path=path).status_code, (403, 422))
+        self.assertEqual(self.tool(name='mihomo_api', method='POST', path='/profiles',
+                                  body={'name': 'New', 'copy_from': {'profile_id': 'own'}}).status_code, 403)
+
+    def test_copy_only_validates_before_human_confirmation_and_submits_once(self):
+        settings = control.read(api)
+        settings['accounts'][0]['bot_access'] = True
+        control.store(api, settings)
+        body = {'name': 'New', 'copy_from': {'profile_id': 'own', 'device_id': 'phone', 'expected_revision': 'a' * 64}}
+        def transport(method, path, body=None, operation_id=None):
+            if path == '/profiles/validate':
+                self.calls.append((method, path, copy.deepcopy(body), operation_id))
+                return {'valid': True, 'copy_preview': {'connection_count': 56, 'new_credentials': True}}
+            return self.transport(method, path, body, operation_id)
+        with patch.object(bridge, 'request', side_effect=transport):
+            response = self.tool(name='mihomo_api', method='POST', path='/profiles', body=body)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['copy_preview']['connection_count'], 56)
+            self.assertFalse(any(method == 'POST' and path == '/profiles' for method, path, *_ in self.calls))
+            record = control.operations.read(commands.pending_path(api, '11'))
+            pending = commands.pending_actions(api, '11')
+            self.assertEqual(next(row for row in pending if row['operation_id'] == record['operation_id'])['changes']['copy_preview']['connection_count'], 56)
+            with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
+                first = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': record['code']})
+                self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': record['code']})
+            self.assertEqual(first.status_code, 200, first.text)
+        writes = [row for row in self.calls if row[:2] == ('POST', '/profiles')]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][2]['copy_from'], body['copy_from'])
+
+    def test_old_manager_cannot_prepare_or_execute_an_empty_copy(self):
+        settings = control.read(api)
+        settings['accounts'][0]['bot_access'] = True
+        control.store(api, settings)
+        body = {'name': 'New', 'copy_from': {'profile_id': 'own', 'device_id': 'phone', 'expected_revision': 'a' * 64}}
+        with patch.object(bridge, 'request', return_value={'valid': True}) as request:
+            response = self.tool(name='mihomo_api', method='POST', path='/profiles', body=body)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(request.call_args.args[:2], ('POST', '/profiles/validate'))
+        self.assertEqual(commands.pending_actions(api, '11'), [])
+        record = {'method': 'POST', 'path': '/profiles', 'body': body}
+        with patch.object(bridge, 'request', return_value={'valid': True}) as request:
+            with self.assertRaises(api.HTTPException) as caught:
+                bridge.confirm(api, '11', record)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(request.call_count, 1)
+
+    def test_typed_relay_error_reaches_the_agent_without_private_diagnostics(self):
+        with patch.object(bridge, 'request', side_effect=api.HTTPException(409, {'code': 'relay_not_verified', 'message': 'PRIVATE DEBUG'})):
+            response = self.tool(name='mihomo_api', path='/profiles/own/config')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['detail']['code'], 'relay_not_verified')
+        self.assertNotIn('PRIVATE DEBUG', response.text)
 
     def test_administrator_has_module_dns_routing_and_subscription_control(self):
         settings = control.read(api)

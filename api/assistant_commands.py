@@ -199,6 +199,8 @@ def pending_actions(api, actor, *, settings=None):
         if 'body' in record:
             import assistant_mihomo
             row['changes'] = assistant_mihomo.sanitize(record['body'])
+            if isinstance(record.get('copy_preview'), dict):
+                row['changes']['copy_preview'] = assistant_mihomo.sanitize(record['copy_preview'])
         if record.get('confirmation_request'):
             row['confirmation_request'] = {key: record['confirmation_request'][key] for key in ('title', 'reason')}
         row['has_changes'] = 'body' in record

@@ -154,7 +154,8 @@ def persona(settings, actor='panel'):
             'Ответ на уточнение связывай с исходной задачей и продолжай её; новый вопрос или отмена пользователя меняют цель. Уточнение не является подтверждением изменения: подготовленные операции подтверждаются только штатным механизмом. '
             'Перед сообщением о текущей ошибке, ревизии или результате операции прочитай актуальные данные профильным инструментом. Коды ошибок и ID из прежних ответов ИИ не являются результатами проверки. Не считай прежнюю операцию активной по тексту истории: проверь актуальные pending_confirmations и состояние операции, если вопрос касается именно её. '
             'При вопросах о подписке используй Mihomo MCP: mihomo_capabilities, mihomo_api, mihomo_compare; при вопросах о собеседнике — mihomo_user. '
-            'Для создания YAML-подписки есть mihomo_profile_create: прочитай mihomo_read(view="profile-schema") и modules, подготовь подключения и routing со structured_policy. '
+            'Для копирования подключений используй mihomo_source: catalog, devices, connections; дочитай next_offset до null. Затем mihomo_profile_copy с исходными profile_id/device_id/revision и новым name; новые ключи создаёт сервер. Не используй config или общий profiles как источник копии. '
+            'Для создания YAML-подписки с нуля есть mihomo_profile_create: прочитай mihomo_read(view="profile-schema") и modules, подготовь подключения и routing со structured_policy. '
             'Существующий профиль меняет mihomo_profile_update; удаление готовит mihomo_profile_delete, перевыпуск URL с сохранением настроек — mihomo_subscription_rotate. '
             'Владелец может прочитать mihomo_accounts и назначить профиль другому пользователю через mihomo_profile_assign. '
             'Для новой подписки другого пользователя сначала подготовь создание; после подтверждения и успешного завершения найди профиль в profiles по create_operation_id '
@@ -281,6 +282,12 @@ async def vps_call(settings, actor, name, **arguments):
         if response.status_code != 200:
             identity = response.headers.get('x-request-id', '')
             error_meta = {'http_status': response.status_code, **({'request_id': identity} if re.fullmatch(r'[a-f0-9]{32}', identity) else {})}
+            if response.status_code == 409 and name == 'mihomo_api':
+                try: detail = response.json().get('detail')
+                except (ValueError, AttributeError): detail = None
+                if isinstance(detail, dict) and detail.get('code') == 'relay_not_verified':
+                    return {'error': 'relay_not_verified', 'message': 'Защищённый Relay ещё не проверен; открытая пересылка не используется.',
+                            'instruction': 'Прочитай relay_read. Исходники доступны через mihomo_source без генерации YAML. Исправление Relay требует штатной проверки и подтверждения.', **error_meta}
             if response.status_code == 422:
                 try: detail = response.json().get('detail')
                 except (ValueError, AttributeError): detail = None
@@ -775,6 +782,29 @@ async def mihomo_manage(settings, actor, command, **arguments):
     async def call(method, path, body=None):
         return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
     try:
+        if command == 'source':
+            section = arguments.get('section', 'catalog')
+            offset, limit = arguments.get('offset', 0), arguments.get('limit', 10)
+            if type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 20:
+                raise ToolValidationError([{'field': 'limit', 'issue': 'offset: 0..1000000, limit: 1..20'}])
+            if section == 'catalog':
+                path = '/profiles/catalog?offset=' + str(offset) + '&limit=' + str(limit)
+            elif section in ('devices', 'connections'):
+                path = '/profiles/' + mihomo_identifier(arguments.get('profile_id'), 'profile_id') + '/source?section=' + section + '&offset=' + str(offset) + '&limit=' + str(limit)
+                if arguments.get('device_id'): path += '&device_id=' + mihomo_identifier(arguments['device_id'], 'device_id')
+            else:
+                raise ToolValidationError([{'field': 'section', 'issue': 'catalog, devices или connections'}])
+            return await call('GET', path)
+        if command == 'profile_copy':
+            spec = {'profile_id': mihomo_identifier(arguments.get('profile_id'), 'profile_id'),
+                    'device_id': mihomo_identifier(arguments.get('device_id'), 'device_id'),
+                    'expected_revision': arguments.get('expected_revision'), 'copy_routing': arguments.get('copy_routing', False)}
+            if not isinstance(spec['expected_revision'], str) or not re.fullmatch(r'[a-f0-9]{64}', spec['expected_revision']):
+                raise ToolValidationError([{'field': 'expected_revision', 'issue': 'Возьми revision из mihomo_source'}])
+            if type(spec['copy_routing']) is not bool:
+                raise ToolValidationError([{'field': 'copy_routing', 'issue': 'Нужно true или false'}])
+            if arguments.get('connection_ids') is not None: spec['connection_ids'] = arguments['connection_ids']
+            return await call('POST', '/profiles', {'name': arguments['name'], 'copy_from': spec})
         if command == 'accounts':
             return await call('GET', '/accounts')
         if command == 'profile_assign':
@@ -1142,6 +1172,19 @@ def serve_mcp(settings, actor, module):
             return await vps_call(settings, actor, 'mihomo_api', method=method, path=path, body=body or {})
 
         @server.tool()
+        async def mihomo_source(section: Literal['catalog', 'devices', 'connections'] = 'catalog', profile_id: str | None = None,
+                                device_id: str | None = None, offset: int = 0, limit: int = 10) -> dict:
+            """Полное постраничное чтение исходников без генерации YAML и без credential/HWID. Начни с catalog (администратор), затем devices выбранного profile_id, затем connections с device_id. Продолжай по next_offset до null, сохраняй revision. Ошибка Relay не блокирует чтение. Не считай одну страницу полным списком."""
+            return await mihomo_manage(settings, actor, 'source', section=section, profile_id=profile_id, device_id=device_id, offset=offset, limit=limit)
+
+        @server.tool()
+        async def mihomo_profile_copy(profile_id: str, device_id: str, expected_revision: str, name: str,
+                                      connection_ids: list[str] | None = None, copy_routing: bool = False) -> dict:
+            """Подготовить новый профиль из подключений устройства. Возьми ID и revision из mihomo_source. connection_ids=null копирует все подключения устройства, список выбирает часть. Сервер создаёт новые ключи и ссылку; HWID, личные правила, лимиты и история источника не копируются. copy_routing=true переносит маршрутизацию профиля/устройства, по умолчанию false. Relay проверяется штатно; relay_not_verified требует диагностики relay_read, защиту не обходить. Изменения только после подтверждения человека. Для двух новых профилей подготовь два запроса с разными name. Источник сохраняется."""
+            return await mihomo_manage(settings, actor, 'profile_copy', profile_id=profile_id, device_id=device_id,
+                                       expected_revision=expected_revision, name=name, connection_ids=connection_ids, copy_routing=copy_routing)
+
+        @server.tool()
         async def mihomo_read(view: Literal['status', 'profiles', 'profile-schema', 'modules', 'stats', 'reconciliation', 'action', 'config', 'subscription', 'client-verification', 'client-reports'], profile_id: str | None = None, device_id: str | None = None) -> dict:
             """Чтение Mihomo без ручного пути API. Для config/subscription/client-verification/client-reports нужен profile_id из profiles; device_id необязателен. client-reports — наблюдения NoderaClient PRO: состояние, режим, проверки HTTPS, ошибки и счётчики. Для помощи с клиентским подключением прочитай эти отчёты и сопоставь с серверными данными. no_reports/stale не означают исправность; null — неизвестно. Не суммируй снимки разных сессий и не выдавай совпадение по времени за причину. Видны только разрешённые профили. Конфиг/ссылка могут содержать секреты подписки — не публикуй их посторонним. Ничего не меняет."""
             return await mihomo_manage(settings, actor, 'read', view=view, profile_id=profile_id, device_id=device_id)
@@ -1303,7 +1346,7 @@ def changing_tool(name, arguments):
     if name.startswith('tg_'):
         return not name.startswith(('tg_get_', 'tg_search_', 'tg_list_', 'tg_resolve_', 'tg_download_', 'tg_auth_status'))
     return name in {'request_confirmation', 'context_remember', 'context_forget', 'vps_service_action',
-                    'relay_prepare', 'telegram_prepare', 'mihomo_profile_create', 'mihomo_profile_update',
+                    'relay_prepare', 'telegram_prepare', 'mihomo_profile_create', 'mihomo_profile_copy', 'mihomo_profile_update',
                     'mihomo_profile_delete', 'mihomo_subscription_rotate', 'mihomo_profile_assign',
                     'mihomo_group_update', 'mihomo_group_delete', 'mihomo_group_select'}
 
@@ -1563,7 +1606,7 @@ async def mcp_connections(settings, actor):
                 for tool in (await session.list_tools()).tools:
                     if module == 'mihomo-mcp' and not privileged(settings, actor):
                         if tool.name not in {'mihomo_user', 'mihomo_capabilities', 'mihomo_api', 'mihomo_operation',
-                                             'mihomo_read', 'mihomo_profile_update', 'mihomo_subscription_rotate',
+                                             'mihomo_read', 'mihomo_source', 'mihomo_profile_update', 'mihomo_subscription_rotate',
                                              'mihomo_groups', 'mihomo_group_select'}: continue
                         # Do not teach non-admin models the administrative runbook
                         # embedded in shared MCP tool descriptions.
@@ -1572,6 +1615,7 @@ async def mcp_connections(settings, actor):
                             'mihomo_capabilities': 'Прочитать доступные действия со своей подпиской.',
                             'mihomo_api': 'Выполнить разрешённый запрос своей подписки. Пути и поля сначала прочитай через capabilities.',
                             'mihomo_read': 'Прочитать свою подписку: profiles, profile-schema, modules, config, subscription, client-reports.',
+                            'mihomo_source': 'Прочитать исходники только своей подписки без YAML. Возьми profile_id из mihomo_user, выбери section=devices или connections; читай next_offset до null. Каталог других подписок недоступен.',
                             'mihomo_operation': 'Проверить состояние своей операции по operation_id.',
                             'mihomo_profile_update': 'Подготовить изменение своей подписки по свежей revision. changes: name/connections/devices/routing. Требует подтверждения.',
                             'mihomo_subscription_rotate': 'Подготовить замену ссылки своей подписки по свежей revision. Требует подтверждения.',

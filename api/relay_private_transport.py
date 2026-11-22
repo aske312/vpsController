@@ -5,6 +5,7 @@ becomes exportable only after an authenticated TCP and UDP round trip over both 
 """
 from __future__ import annotations
 
+
 from contextlib import contextmanager
 import json
 import os
@@ -25,6 +26,10 @@ import re
 
 
 MARKER = '# Managed by vps-control: encrypted Relay transport\n'
+
+
+class RelayNotVerified(ValueError):
+    """A protected relay is present but cannot yet be used for client exports."""
 
 
 def root(control):
@@ -66,7 +71,7 @@ def active(control, host_id):
     value = record(control, host_id)
     if not value or value['state'] == 'disabled': return None
     if value['state'] != 'ready':
-        raise ValueError('Защищённый Relay ещё не проверен; открытая пересылка не подставляется')
+        raise RelayNotVerified('Защищённый Relay ещё не проверен; открытая пересылка не подставляется')
     return privacy.validate(json.loads((root(control)/value['generation']/'request.json').read_text()))
 
 

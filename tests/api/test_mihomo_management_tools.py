@@ -2,13 +2,16 @@
 import copy
 import json
 import unittest
-from unittest.mock import patch
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from tests.api import test_assistant_control as fixtures
 from tests.api.support import manager
 import routing_policy
 
 runner = fixtures.runner
+real_vps_call = runner.vps_call
 
 
 class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
@@ -39,6 +42,34 @@ class ManagementToolsTests(unittest.IsolatedAsyncioTestCase):
         return await runner.mihomo_manage({}, '11', command, **arguments)
 
     def writes(self): return [call for call in self.calls if call['method'] != 'GET']
+
+    async def test_relay_block_is_explained_to_the_model_instead_of_becoming_generic_rejection(self):
+        response = runner.httpx.Response(409, json={'detail': {'code': 'relay_not_verified', 'message': 'PRIVATE DEBUG'}})
+        @asynccontextmanager
+        async def client(**kwargs):
+            yield SimpleNamespace(post=AsyncMock(return_value=response))
+        settings = {'control_token': 'fixture', 'control_token_scope': {'module': 'mihomo-mcp', 'actor': '11'}}
+        with patch.object(runner, 'allowed', return_value=True), patch.object(runner.httpx, 'AsyncClient', client):
+            result = await real_vps_call(settings, '11', 'mihomo_api', method='GET', path='/profiles/own/config', body={})
+        self.assertEqual(result['error'], 'relay_not_verified')
+        self.assertIn('relay_read', result['instruction'])
+        self.assertIn('mihomo_source', result['instruction'])
+        self.assertNotIn('PRIVATE', json.dumps(result))
+
+    async def test_source_pages_and_copy_use_bounded_reads_and_a_server_reference(self):
+        self.assertTrue(runner.changing_tool('mihomo_profile_copy', {}))
+        self.assertFalse(runner.changing_tool('mihomo_source', {}))
+        await self.call('source', section='connections', profile_id='own', device_id='phone', offset=20, limit=20)
+        self.assertEqual(self.calls[0]['path'], '/profiles/own/source?section=connections&offset=20&limit=20&device_id=phone')
+        result = await self.call('profile_copy', profile_id='own', device_id='phone', expected_revision='b' * 64, name='New')
+        self.assertTrue(result['confirmation_required'])
+        self.assertEqual(self.writes()[0]['body'], {'name': 'New', 'copy_from': {
+            'profile_id': 'own', 'device_id': 'phone', 'expected_revision': 'b' * 64, 'copy_routing': False}})
+        self.assertNotIn('connections', self.writes()[0]['body'])
+        self.calls.clear()
+        self.assertEqual((await self.call('source', limit=True))['error'], 'tool_validation_error')
+        self.assertEqual((await self.call('profile_copy', profile_id='own', device_id='phone', expected_revision='stale', name='New'))['error'], 'tool_validation_error')
+        self.assertEqual(self.writes(), [])
 
     async def test_create_prepares_connections_and_rules_together_with_explicit_default_device(self):
         result = await self.call('profile_create', name='For user', connections=[{'component': 'transport-wg', 'settings': {'mtu': 1400}}],

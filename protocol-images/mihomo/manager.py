@@ -28,7 +28,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
@@ -391,6 +391,16 @@ async def public_http_exception_handler(request, exc: HTTPException) -> JSONResp
                         **observability.error_fields(request, exc.status_code, 'mihomo')}, headers=exc.headers)
 
 
+from relay_private_transport import RelayNotVerified
+
+
+@app.exception_handler(RelayNotVerified)
+async def relay_not_verified_handler(request: Request, exc: RelayNotVerified) -> JSONResponse:
+    return JSONResponse(status_code=409, content={'code': 'relay_not_verified',
+        'detail': 'Защищённый Relay ещё не проверен. Проверьте его состояние через relay_read; открытая пересылка не используется.'},
+        headers={'Cache-Control': 'no-store'})
+
+
 @app.exception_handler(Exception)
 async def unexpected_http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500, content={'detail': PUBLIC_COMMAND_ERROR, **observability.error_fields(request, 500, 'mihomo')},
@@ -452,6 +462,9 @@ class ProfileDeviceInput(BaseModel):
 ProfileName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 
 
+from mihomo_sources import CopySource
+
+
 class ProfileCreate(BaseModel):
     name: ProfileName
     channels: list[str] = Field(default_factory=list)
@@ -459,6 +472,7 @@ class ProfileCreate(BaseModel):
     devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="profile-common", name="Общие настройки профиля")], min_length=1)
     routing: dict[str, Any] = Field(default_factory=dict)
     limits: subscription_limits.SubscriptionLimits | None = None
+    copy_from: CopySource | None = None
     operation_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
 
@@ -4420,6 +4434,20 @@ def list_profiles() -> dict[str, Any]:
     return {"items": [profile_response(item, relay_registry=relay_registry) for item in items]}
 
 
+@app.get('/api/mihomo/profiles/catalog', dependencies=[Depends(auth_required)])
+def profile_catalog(offset: int = Query(0, ge=0, le=1000000), limit: int = Query(10, ge=1, le=20)):
+    import mihomo_sources
+    return mihomo_sources.catalog(sys.modules[__name__], offset, limit)
+
+
+@app.get('/api/mihomo/profiles/{profile_id}/source', dependencies=[Depends(auth_required)])
+def profile_source(profile_id: str, device_id: str | None = None,
+                   section: Literal['devices', 'connections'] = 'connections',
+                   offset: int = Query(0, ge=0, le=1000000), limit: int = Query(10, ge=1, le=20)):
+    import mihomo_sources
+    return mihomo_sources.source(sys.modules[__name__], profile_id, device_id, section, offset, limit)
+
+
 @app.get("/api/mihomo/profiles/schema", dependencies=[Depends(auth_required)])
 def profile_schema() -> dict[str, Any]:
     return {"create": ProfileCreate.model_json_schema(), "update": ProfileUpdate.model_json_schema(),
@@ -4623,6 +4651,8 @@ def validate_profile_devices(devices: list[dict[str, Any]], common_id: str, exis
 
 
 def validate_profile_inputs(payload: ProfileCreate):
+    from mihomo_sources import resolve_copy
+    payload = resolve_copy(sys.modules[__name__], payload)
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     validate_cdn_delivery(definitions)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
@@ -4641,8 +4671,12 @@ def validate_profile_inputs(payload: ProfileCreate):
 
 @app.post("/api/mihomo/profiles/validate", dependencies=[Depends(auth_required)])
 def preview_profile(payload: ProfileCreate) -> dict[str, Any]:
-    validate_profile_inputs(payload)
-    return {"valid": True}
+    definitions, _, _ = validate_profile_inputs(payload)
+    return {"valid": True, **({'copy_preview': {'source_profile_id': payload.copy_from.profile_id,
+            'source_device_id': payload.copy_from.device_id, 'target_name': payload.name,
+            'connection_count': len(definitions), 'new_credentials': True,
+            'copy_routing': payload.copy_from.copy_routing, 'copy_personal_rules': False,
+            'copy_hwid': False, 'copy_source_limits': False}} if payload.copy_from else {})}
 
 
 @serialized_profile_mutation
