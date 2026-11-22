@@ -69,6 +69,7 @@ class AutomationScheduleTests(unittest.TestCase):
         self.assertEqual(self.check(), 'allow')
         self.assertEqual(self.check(now='2026-11-18T05:22:59+02:00'), 'duplicate')
         self.assertEqual(self.check(now='2026-11-25T05:22:00+02:00'), 'allow')
+        self.assertEqual(self.check(now='2026-11-18T05:22:00+02:00'), 'duplicate')
 
     def test_missed_or_late_schedule_never_catches_up_after_boot(self):
         for now in ('2026-11-18T05:20:59+02:00', '2026-11-18T05:24:00+02:00',
@@ -97,9 +98,11 @@ class AutomationScheduleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.check()
         self.save()
-        (self.root / 'automation-runs.json').write_text('{')
-        with self.assertRaises(ValueError):
-            self.check()
+        for value in ('{', '{"update":{}}', '{"update":{"slot":12,"started_at":"now"}}'):
+            with self.subTest(history=value):
+                (self.root / 'automation-runs.json').write_text(value)
+                with self.assertRaises(ValueError):
+                    self.check()
 
     def test_missing_settings_are_disabled_and_render_does_not_rewrite_user_values(self):
         path = self.root / 'automation.json'
@@ -109,4 +112,5 @@ class AutomationScheduleTests(unittest.TestCase):
         path.unlink()
         self.assertEqual(self.check(), 'disabled')
         self.assertEqual(read_settings(path), api.default_automation())
+        self.assertTrue(all(item['enabled'] is False for item in api.default_automation().values()))
         self.assertFalse(path.exists())

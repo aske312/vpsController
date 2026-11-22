@@ -81,7 +81,7 @@ test("service settings are staged, saved explicitly and survive background refre
   const [api, page, manager] = await Promise.all([
     readApiSources(), readUiSources(), read("scripts/vps-control.sh"),
   ]);
-  assert.match(api, /"cleanup": \{"enabled": False/);
+  // Disabled defaults are exercised through the API in test_automation_schedule.py.
   assert.match(api, /LOG_RETENTION_DAYS", "30"/);
   assert.match(api, /INSTALL_DIR \/ "scripts" \/ "vps-control\.sh"/);
   assert.match(page, /automationDraft/);

@@ -89,9 +89,13 @@ def admit(data_dir: Path, kind: str, *, origin: str, now: datetime, manual=False
         if not isinstance(runs, dict):
             raise ValueError('Invalid maintenance history')
         previous = runs.get(kind, {})
-        if not isinstance(previous, dict):
+        if not isinstance(previous, dict) or (kind in runs and (
+                not isinstance(previous.get('slot'), str) or len(previous['slot']) != 16
+                or not isinstance(previous.get('started_at'), str))):
             raise ValueError('Invalid maintenance history')
-        if previous.get('slot') == slot:
+        if kind in runs:
+            datetime.fromisoformat(previous['slot'])
+        if previous.get('slot', '') >= slot:
             return 'duplicate'
         runs[kind] = {'slot': slot, 'started_at': now.isoformat()}
         # Claim before packages/reboot. An interrupted attempt requires a manual retry.
