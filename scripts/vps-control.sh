@@ -116,6 +116,7 @@ RECOVERY_DIR="${DATA_DIR}/recovery"
 SAFE_UPDATE_REPORT="${RECOVERY_DIR}/safe-update-report.txt"
 SECURITY_RECOVERY_MARKER="${RECOVERY_DIR}/security-recovery.txt"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
+AUTOMATION_RENDERER_SOURCE=""
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
 CURRENT_ACTION=""
 RESERVED_PROTOCOL_IMAGE=""
@@ -281,6 +282,10 @@ begin_operation() {
 finish_operation() {
   local exit_code="$1"
   [[ -n "${CURRENT_ACTION}" ]] || return 0
+  if (( exit_code == 0 )) && [[ -n "${AUTOMATION_SKIPPED_REASON:-}" ]]; then
+    write_action_status "succeeded" 100 "Плановая задача пропущена: ${AUTOMATION_SKIPPED_REASON}"
+    return 0
+  fi
   case "${CURRENT_ACTION}" in
     safe-update|auto-safe-update|kernel-update)
       # A simulation captured before/during apt must not survive the operation.
@@ -292,10 +297,6 @@ finish_operation() {
       reboot) write_action_status "rebooting" 100 "Сервер перезагружается" ;;
       poweroff) write_action_status "powering-off" 100 "Сервер выключается" ;;
       safe-update|auto-safe-update|kernel-update)
-        if [[ "${CURRENT_ACTION}" == "auto-safe-update" && "${AUTO_UPDATE_SKIPPED:-no}" == "yes" ]]; then
-          write_action_status "succeeded" 100 "Автообновление отключено; запуск пропущен без обновления и перезагрузки"
-          return 0
-        fi
         write_action_status "succeeded" 100 "Системные обновления установлены и проверены; точка восстановления сохранена. Перезагрузка выполняется отдельно"
         ;;
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
@@ -365,32 +366,26 @@ restore_recovery_point() {
 }
 
 auto_safe_update_server() {
-  local enabled
-  AUTO_UPDATE_SKIPPED=no
-  enabled="$(automatic_update_enabled)" || die "Не удалось прочитать настройку автообновления; автоматический запуск запрещён."
-  if [[ "${enabled}" != "yes" ]]; then
-    AUTO_UPDATE_SKIPPED=yes
-    info "Автообновление отключено в расписании; запуск пропущен"
-    return 0
-  fi
+  scheduled_action_check update || return 0
   safe_update_server
 }
 
-automatic_update_enabled() {
-  python3 - "${AUTOMATION_FILE}" <<'PY'
-import json, os, sys
-path = sys.argv[1]
-try:
-    if not os.path.exists(path):
-        print('no')
-    else:
-        with open(path, encoding='utf-8') as stream: data = json.load(stream)
-        value = data.get('update', {}).get('enabled', False)
-        if type(value) is not bool: raise ValueError('Invalid update policy')
-        print('yes' if value else 'no')
-except (OSError, ValueError, TypeError, AttributeError):
-    raise SystemExit(2)
-PY
+scheduled_action_check() {
+  local decision
+  AUTOMATION_SKIPPED_REASON=""
+  decision="$(python3 "${INSTALL_DIR}/api/automation_schedule.py" check "${DATA_DIR}" "$@")" \
+    || die "Не удалось проверить расписание; выполнение запрещено."
+  case "${decision}" in
+    allow) return 0 ;;
+    disabled) AUTOMATION_SKIPPED_REASON="отключена в настройках" ;;
+    foreign-scheduler) AUTOMATION_SKIPPED_REASON="запуск вне планировщика приложения запрещён" ;;
+    outside-schedule) AUTOMATION_SKIPPED_REASON="не соответствует сохранённым дню и времени" ;;
+    paused) AUTOMATION_SKIPPED_REASON="обслуживание или восстановление настроек" ;;
+    duplicate) AUTOMATION_SKIPPED_REASON="это время расписания уже обработано" ;;
+    *) die "Результат проверки расписания неизвестен; выполнение запрещено." ;;
+  esac
+  info "Плановая задача пропущена: ${AUTOMATION_SKIPPED_REASON}"
+  return 1
 }
 
 disable_native_update_timer() {
@@ -402,23 +397,8 @@ disable_native_update_timer() {
 
 apply_update_schedule() {
   local unit_dir="${1:-/etc/systemd/system}" values enabled cadence weekday hour minute calendar
-  values="$(python3 - "${AUTOMATION_FILE}" <<'PY'
-import json, os, sys
-path = sys.argv[1]
-try:
-    with open(path, encoding='utf-8') as stream: data = json.load(stream)
-except FileNotFoundError:
-    data = {}
-item = data.get('update', {})
-enabled = item.get('enabled', False)
-cadence, weekday = item.get('cadence', 'weekly'), item.get('weekday', 'Sun')
-hour, minute = item.get('hour', 2), item.get('minute', 30)
-if type(enabled) is not bool or cadence not in ('daily', 'weekly', 'monthly') or weekday not in ('Mon','Tue','Wed','Thu','Fri','Sat','Sun') or type(hour) is not int or not 0 <= hour <= 23 or type(minute) is not int or not 0 <= minute <= 59:
-    raise SystemExit('Invalid automatic update schedule')
-print('yes' if enabled else 'no', cadence, weekday, hour, minute)
-PY
-)" || return 1
-  read -r enabled cadence weekday hour minute <<<"${values}"
+  values="$(render_automation_settings "${AUTOMATION_FILE}")" || return 1
+  read -r enabled cadence weekday hour minute <<<"$(sed -n '3p' <<<"${values}")"
   calendar="$(automation_calendar "${cadence}" "${weekday}" "${hour}" "${minute}")" || return 1
   install_automation_timer "update" "Scheduled OS update without reboot by 312node.net" "auto-safe-update" "${enabled}" "${calendar}" "${unit_dir}"
 }
@@ -426,8 +406,7 @@ PY
 configure_os_update_policy() {
   local unit_dir="${1:-/etc/systemd/system}"
   install -d -m 0755 "${unit_dir}/apt-daily-upgrade.service.d" || return 1
-  # Retain the guarded worker for compatibility with explicit systemd starts.
-  # Only the application schedule is allowed to launch automatic updates.
+  # Even a stale/re-enabled distro timer is rejected by worker admission.
   cat >"${unit_dir}/apt-daily-upgrade.service.d/vps-control.conf" <<EOF || return 1
 [Service]
 ExecStart=
@@ -3290,7 +3269,7 @@ PY
     ssh_socket_active="${saved[2]:-yes}"
     ssh_public="${saved[3]:-yes}"
     IFS=',' read -ra timers <<<"${saved[4]:-}"
-    for timer in "${timers[@]}"; do [[ -z "${timer}" ]] || systemctl start "${timer}" || true; done
+    restore_maintenance_timers "${timers[@]}"
     rm -f "${DATA_DIR}/application-version.json"
     change_access_mode "$1" "${previous_access}"
     # Keep the marker until the final access configuration succeeds. A failed
@@ -3380,8 +3359,29 @@ automation_calendar() {
   esac
 }
 
+render_automation_settings() {
+  if [[ -f "${INSTALL_DIR}/api/automation_schedule.py" ]]; then
+    python3 "${INSTALL_DIR}/api/automation_schedule.py" render "$1"
+  else
+    # A rollback may replace the payload with a release predating this helper.
+    [[ -n "${AUTOMATION_RENDERER_SOURCE:-}" ]] || return 1
+    python3 -c "${AUTOMATION_RENDERER_SOURCE}" render "$1"
+  fi
+}
+
+restore_maintenance_timers() {
+  # Saved active timers can predate a user's OFF or a distro-policy migration.
+  for timer in "$@"; do
+    case "${timer}" in
+      vpn-monitor.timer|apt-daily.timer) systemctl start "${timer}" || return 1 ;;
+    esac
+  done
+  apply_automation
+}
+
 install_automation_timer() {
-  local id="$1" description="$2" command="$3" enabled="$4" calendar="$5" unit_dir="${6:-/etc/systemd/system}"
+  local id="$1" description="$2" command="$3" enabled="$4" calendar="$5" unit_dir="${6:-/etc/systemd/system}" persistent=true
+  [[ "${id}" != reboot && "${id}" != update ]] || persistent=false
   [[ ! -L "${unit_dir}/vps-control-auto-${id}.service" && ! -L "${unit_dir}/vps-control-auto-${id}.timer" ]] || return 1
   install -d -m 0755 "${unit_dir}" || return 1
   cat >"${unit_dir}/vps-control-auto-${id}.service" <<EOF || return 1
@@ -3400,7 +3400,8 @@ Description=${description}
 
 [Timer]
 OnCalendar=${calendar}
-Persistent=true
+Persistent=${persistent}
+AccuracySec=1s
 RandomizedDelaySec=120
 Unit=vps-control-auto-${id}.service
 
@@ -3417,29 +3418,11 @@ EOF
 
 apply_automation() {
   info "Применение расписаний обслуживания"
-  local settings_file="${1:-${AUTOMATION_FILE}}"
-  [[ -r "${settings_file}" ]] || die "не найден файл расписаний."
+  local settings_file="${1:-${AUTOMATION_FILE}}" unit_dir="${2:-/etc/systemd/system}"
   local values reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute
   local cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute
   local update_enabled update_cadence update_weekday update_hour update_minute
-  values="$(python3 - "${settings_file}" <<'PY'
-import json
-import shlex
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-for section in ("reboot", "cleanup", "update"):
-    item = data.get(section, {})
-    values = (
-        "yes" if item.get("enabled") else "no",
-        str(item.get("cadence", "weekly")),
-        str(item.get("weekday", "Sun")),
-        str(int(item.get("hour", 4))),
-        str(int(item.get("minute", 0))),
-    )
-    print(" ".join(shlex.quote(value) for value in values))
-PY
-)"
+  values="$(render_automation_settings "${settings_file}")" || return 1
   read -r reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute <<<"$(sed -n '1p' <<<"${values}")"
   read -r cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute <<<"$(sed -n '2p' <<<"${values}")"
   read -r update_enabled update_cadence update_weekday update_hour update_minute <<<"$(sed -n '3p' <<<"${values}")"
@@ -3447,14 +3430,16 @@ PY
   reboot_calendar="$(automation_calendar "${reboot_cadence}" "${reboot_weekday}" "${reboot_hour}" "${reboot_minute}")"
   cleanup_calendar="$(automation_calendar "${cleanup_cadence}" "${cleanup_weekday}" "${cleanup_hour}" "${cleanup_minute}")"
   update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
-  install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" || return 1
-  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" || return 1
-  install_automation_timer "update" "Scheduled OS update without reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}" || return 1
+  install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" "${unit_dir}" || return 1
+  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" "${unit_dir}" || return 1
+  install_automation_timer "update" "Scheduled OS update without reboot by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}" "${unit_dir}" || return 1
   disable_native_update_timer || return 1
   ok "расписания обслуживания применены."
 }
 
 reboot_server() {
+  # Old installed timers call the same reboot command as manual API requests.
+  scheduled_action_check reboot --manual || return 0
   info "Перезагрузка сервера"
   # Shutdown can stop this worker before systemctl returns or EXIT runs.
   # Persist intent first; only a new boot confirms success in reconciliation.
@@ -3785,6 +3770,9 @@ main() {
   require_root
   load_manager_config
   load_install_config
+  if [[ -f "${INSTALL_DIR}/api/automation_schedule.py" ]]; then
+    AUTOMATION_RENDERER_SOURCE="$(cat "${INSTALL_DIR}/api/automation_schedule.py")"
+  fi
   case "${1:-help}" in
     install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|security-recover|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|direct-cleanup|protocol-install|protocol-remove|protocol-purge|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
       case "${1}" in

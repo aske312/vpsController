@@ -5158,11 +5158,8 @@ def service_details(service_id: str, definition: dict) -> dict:
 
 
 def default_automation() -> dict:
-    return {
-        "reboot": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 4, "minute": 0},
-        "cleanup": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 3, "minute": 0},
-        "update": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 2, "minute": 30},
-    }
+    from automation_schedule import default_settings
+    return default_settings()
 
 
 def read_automation() -> dict:
