@@ -10,8 +10,8 @@
     "dev": "WRANGLER_LOG_PATH=.runtime/wrangler/wrangler.log vinext dev",
     "build": "vinext build",
     "start": "WRANGLER_LOG_PATH=.runtime/wrangler/wrangler.log vinext start",
-    "test": "node --experimental-strip-types --test tests/web/*.test.mjs tests/contracts/*.test.mjs",
-    "test:ui": "node --experimental-strip-types --test tests/web/*.test.mjs",
+    "test": "node --experimental-strip-types --test --test-concurrency=4 tests/web/*.test.mjs tests/contracts/*.test.mjs",
+    "test:ui": "node --experimental-strip-types --test --test-concurrency=4 tests/web/*.test.mjs",
     "lint:ui": "eslint app src --cache --cache-strategy content --cache-location .runtime/eslint-ui-cache",
     "check:preview": "npm run lint:ui && npm run typecheck && npm run test:ui",
     "check": "npm run lint && npm run typecheck && npm test",
@@ -20,10 +20,10 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --cache --cache-strategy content --cache-location .runtime/eslint-cache"
   },
   "dependencies": {
-    "next": "16.4.2",
+    "next": "16.4.6",
     "react": "19.2.9",
     "react-dom": "19.2.9",
-    "vinext": "0.0.50",
+    "vinext": "0.0.53",
     "vite": "8.3.4",
     "@cloudflare/vite-plugin": "1.62.2",
     "@vitejs/plugin-react": "6.0.2",
