@@ -3541,8 +3541,10 @@ network_check() {
   fi
   ping -n -c 1 -W 2 -M do -s 1200 1.1.1.1 >/dev/null 2>&1 \
     || warn "не прошёл пакет 1200 байт с DF; возможна проблема Path MTU."
-  systemctl is-active --quiet vpn-monitor.timer \
-    || warn "таймер расширенного мониторинга vpn-monitor.timer не активен."
+  if [[ "$(systemctl show vpn-monitor.timer --property=LoadState --value 2>/dev/null)" == "loaded" ]] \
+    && ! systemctl is-active --quiet vpn-monitor.timer; then
+    warn "таймер расширенного мониторинга vpn-monitor.timer не активен."
+  fi
   conntrack_count="$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo 0)"
   conntrack_max="$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo 0)"
   if [[ "${conntrack_max}" =~ ^[0-9]+$ && "${conntrack_max}" -gt 0 ]]; then

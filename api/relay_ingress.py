@@ -93,6 +93,10 @@ def protect_subscription(control, text, selections):
     config = yaml.safe_load(text)
     helpers = {}
     for index, node in enumerate(config.get('proxies', [])):
+        # TCP and UDP listeners have independent port namespaces. A UDP-only
+        # proxy must not inherit a TLS CONNECT carrier at the same port.
+        if node.get('type') in {'wireguard', 'hysteria2', 'tuic'}:
+            continue
         connection = selections.get(node.get('name'), {})
         settings = connection.get('settings', {})
         selected = host_id(settings)

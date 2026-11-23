@@ -32,6 +32,22 @@ class RelayNotVerified(ValueError):
     """A protected relay is present but cannot yet be used for client exports."""
 
 
+class PrivateTransportError(ValueError):
+    """Only fixed stage descriptions may reach the operation card."""
+    MESSAGES = {
+        'origin_runtime': 'Не удалось подготовить защищённый транспорт на основном VPS. Проверьте его службу и установленный sing-box.',
+        'local_configuration': 'Локальная конфигурация защищённого Relay недоступна. Проверьте сохранённое состояние перед повторной настройкой.',
+        'agent_request': 'Agent не подтвердил настройку защищённого транспорта. Проверьте доступность Agent и состояние операции; повторная отправка не выполнялась.',
+        'agent_observation': 'Не удалось прочитать состояние защищённого транспорта на Agent. Проверьте подключение к Relay.',
+        'agent_runtime': 'Защищённый транспорт на Relay не запущен. Обновите Relay Agent и повторите проверку защищённого транспорта.',
+        'traffic_probe': 'Защищённый Relay не прошёл сквозную проверку TCP/UDP. Проверьте доступность UDP между Relay и основным VPS и повторите проверку.',
+    }
+
+    def __init__(self, stage):
+        self.stage = stage
+        super().__init__(self.MESSAGES[stage] + ' Открытая пересылка не включена.')
+
+
 def root(control):
     return control.root/'private'
 
@@ -298,15 +314,19 @@ def perform(api, payload, identity):
         generation = previous['generation'];folder = root(control)/generation
         previous['state'] = 'preparing';save(control, host_id, previous)
         control.write(registry)
+        stage = 'local_configuration'
         try:
             profile = privacy.validate(json.loads((folder/'request.json').read_text()))
             # Recheck is read-only on the Agent: never resend an unknown PUT.
+            stage = 'agent_observation'
             observed = observation(client, generation, profile)
+            stage = 'agent_runtime'
             if observed.get('state') != 'listening': raise ValueError('Protected transport unavailable')
+            stage = 'traffic_probe'
             probe(folder, profile, runtime(), previous['peer_port'])
         except Exception:
             previous['state'] = 'unknown';save(control, host_id, previous)
-            raise ValueError('Проверка защищённого Relay не завершена; открытая пересылка не подставляется') from None
+            raise PrivateTransportError(stage) from None
         previous.update(state='ready', verified_at=int(time.time()));save(control, host_id, previous)
         return
     status = status_snapshot(client.request('GET', '/v1/status'))
@@ -324,6 +344,7 @@ def perform(api, payload, identity):
     intent = {'state': 'preparing', 'generation': generation}
     save(control, host_id, intent)
     control.write(registry)
+    stage = 'origin_runtime'
     try:
         backhaul = port_allocation.allocate('relay-private:'+generation+':backhaul', 19000, {'udp'}, count=1000)
         peer = port_allocation.allocate('relay-private:'+generation+':probe', 34000, {'tcp', 'udp'}, count=1000)
@@ -338,20 +359,24 @@ def perform(api, payload, identity):
         intent['peer_port'] = peer;save(control, host_id, intent)
         install_origin(folder, profile, binary)
         intent['state'] = 'sending';save(control, host_id, intent)
+        stage = 'agent_request'
         try: client.request('PUT', '/v1/private-transports/'+generation, profile, revision=snapshot['revision'])
         except Exception:
             # Only exact-ID observation; no second mutating request.
             observation(client, generation, profile)
         intent['state'] = 'preparing';save(control, host_id, intent)
+        stage = 'agent_observation'
         deadline = time.monotonic()+150
         while True:
             observed = observation(client, generation, profile)
             if observed.get('state') == 'listening': break
             if observed.get('state') != 'preparing' or time.monotonic() >= deadline:
+                stage = 'agent_runtime'
                 raise ValueError('Защищённый транспорт Agent не готов; проверьте состояние перед повтором')
             time.sleep(1)
+        stage = 'traffic_probe'
         probe(folder, profile, binary, peer)
         intent.update(state='ready', verified_at=int(time.time()));save(control, host_id, intent)
     except Exception:
         intent['state'] = 'unknown';save(control, host_id, intent)
-        raise ValueError('Защищённый Relay не подтверждён. Открытая пересылка не включена; используйте проверку или отключение режима') from None
+        raise PrivateTransportError(stage) from None
