@@ -369,5 +369,6 @@ def confirm(api, actor, record):
         current = control.operations.read(path)
         if current.get('operation_id') == record['operation_id']:
             control.operations.atomic_json(path, {**current, 'completed_text': text,
+                                                   'completion_operation_id': result.get('id') if isinstance(result, dict) else None,
                                                    'completion_state': 'operation' if isinstance(result, dict) and result.get('id') else 'saved'})
     return text

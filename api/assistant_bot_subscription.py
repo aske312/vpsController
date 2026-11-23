@@ -8,12 +8,61 @@ import assistant_control as control
 import assistant_roles as roles
 import assistant_mihomo as mihomo
 import assistant_contacts as contacts
+import assistant_commands as commands
 from assistant_bot_views import button, result, profile_item, prepared_record
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = {'block_malware', 'block_advertising', 'block_privacy', 'quic_compatibility'}
 DESKTOP = {'windows', 'macos', 'linux'}
 PLATFORM_RULES = {'windows_geolocation', 'direct_games_enabled', 'direct_p2p_enabled'}
+
+
+def change_result(text):
+    return result('⚙️ **Настройки подписки**\n' + text,
+                  [[button('Настройки подписки', '/manage')], [button('Моя подписка', '/subscription')]])
+
+
+def remember_change(api, settings, actor, request_id, fingerprint, output, *, claim=False):
+    if not request_id: return None
+    with control.operations.locked(api.DATA_DIR):
+        current = contacts.profile(api, settings, actor)
+        receipts = current.get('subscription_receipts', {})
+        prior = receipts.get(request_id)
+        if prior and prior['fingerprint'] != fingerprint:
+            raise HTTPException(409, 'ID сообщения уже использован')
+        if claim and prior: return prior['result']
+        receipts[request_id] = {'fingerprint': fingerprint, 'result': output}
+        current['subscription_receipts'] = dict(list(receipts.items())[-32:])
+        contacts.save_profile(api, settings, actor, current)
+    return None
+
+
+def apply_change(api, actor, method, path, body):
+    prepared = mihomo.call(api, actor, method, path, body)
+    record = prepared_record(api, actor, prepared['operation_id'])
+    with control.operations.locked(api.DATA_DIR):
+        saved = commands.pending_path(api, actor, operation_id=record['operation_id'])
+        record['automatic'] = True
+        control.operations.atomic_json(saved, record)
+    # The human's settings button is the instruction. Reuse the single-send
+    # executor and its live authorization without exposing its confirmation UI.
+    commands.execute(api, actor, '/confirm ' + record['code'])
+    completed = control.operations.read(saved)
+    def applied(text, *, pending=False):
+        if path.endswith('/subscription/rotate'):
+            return change_result(text + (' После применения получите' if pending else ' Получите') + ' новую ссылку в «Моя подписка» и замените в приложениях.')
+        return change_result(text + (' После применения обновите' if pending else ' Обновите') + ' подписку в приложении.')
+    if completed.get('completion_state') == 'saved':
+        return applied('Изменения сохранены.')
+    identity = completed.get('completion_operation_id')
+    if identity:
+        try: state = api.get_application_operation(identity, None).get('state')
+        except (HTTPException, OSError): state = None
+        if state == 'succeeded':
+            return applied('Изменения применены.')
+        if state in ('failed', 'cancelled'):
+            return change_result('Не удалось применить изменения. Откройте настройки и попробуйте позже.')
+    return applied('Изменения приняты и применятся позже.', pending=True)
 
 
 def catalog(name):
@@ -38,10 +87,18 @@ def view(api, settings, actor, args, request_id):
     # Even an administrator uses only the profile linked to their Telegram account.
     linked = mihomo.profile_for(settings, actor).get('mihomo_profile_id')
     if not linked: raise HTTPException(403, 'Подписка не привязана к вашей учётной записи')
-    item = profile_item(api, settings, actor, linked)
-    if not item: raise HTTPException(404, 'Подписка недоступна')
     action = args[0] if args else 'show'
     can_route = all(roles.allows(settings, actor, p) for p in ('subscription_routing', 'subscription_devices'))
+    if action not in ('show', 'rotate') and not can_route:
+        raise HTTPException(403, 'Нет права изменять маршрутизацию и настройки устройств')
+    fingerprint = hashlib.sha256(json.dumps([linked, args]).encode()).hexdigest()
+    if action in ('set', 'service', 'rotate') and request_id:
+        cached = contacts.profile(api, settings, actor).get('subscription_receipts', {}).get(request_id)
+        if cached:
+            if cached['fingerprint'] != fingerprint: raise HTTPException(409, 'ID сообщения уже использован')
+            return cached['result']
+    item = profile_item(api, settings, actor, linked)
+    if not item: raise HTTPException(404, 'Подписка недоступна')
     if action == 'show' and len(args) <= 1:
         rows = [[button('Маршрутизация, Proxy / TUN и правила', '/manage targets')]] if can_route else []
         rows += [[button('Перевыпустить ссылку', '/manage rotate ' + item['revision'])], [button('← Подписка', '/subscription')]]
@@ -64,7 +121,6 @@ def view(api, settings, actor, args, request_id):
         revision = args[1]
         method, path = 'POST', '/profiles/' + linked + '/subscription/rotate'
         body = {'expected_revision': revision}
-        preview = 'Перевыпуск ссылки.\nСтарая ссылка перестанет работать. Новую нужно добавить в приложения.\nПолучить новую ссылку после выполнения: /subscription'
     else:
         if len(args) < 2: raise HTTPException(422, 'Выберите устройство')
         device = next((d for d in devices if d['id'] == args[1]), None)
@@ -119,18 +175,12 @@ def view(api, settings, actor, args, request_id):
             if raw == '1': selected.add(key)
             else: selected.discard(key)
             change['vpn_services'] = ','.join(s['id'] for s in services if s['id'] in selected)
-            preview = services_by_id[key]['name'] + ': ' + ('через Proxy / VPN' if raw == '1' else 'напрямую')
-            if effective.get('routing_scope') != 'selected': preview += '\nВыбор начнёт действовать в режиме «Только выбранное».'
         elif action == 'set' and key == 'connection_mode' and raw in ('proxy','tun'):
             change = {'connection_mode':raw, 'tun_enabled':raw == 'tun', 'tun_force':False}
-            preview = 'Режим подключения: ' + raw.upper()
         elif action == 'set' and key == 'routing_scope' and raw in ('all','selected'):
             change = {'routing_scope':raw, 'mode':'rule'}
-            preview = 'Маршрутизация: ' + ('По правилам' if raw == 'all' else 'Только выбранное')
         elif action == 'set' and raw in ('0','1') and key in {'route_dns', *(r['key'] for r in rules)}:
             change[key] = raw == '1'
-            label = 'DNS по маршруту' if key == 'route_dns' else next(r['title'] for r in rules if r['key'] == key)
-            preview = label + ': ' + ('включено' if raw == '1' else 'выключено')
         else: raise HTTPException(403, 'Эта настройка недоступна для выбранного устройства')
         # Full device collection is revision guarded; identities and metadata stay server-owned.
         safe = [{key:d[key] for key in ('id','name','routing','manual','personal_rule_ids') if key in d} for d in devices]
@@ -145,24 +195,19 @@ def view(api, settings, actor, args, request_id):
             target['routing'] = {**base, **change}
             body['routing'] = dict(target['routing'])
         method, path = 'PATCH', '/profiles/' + linked
-        preview = str(device.get('name') or device['id'])[:80] + '\n' + preview + '\nПосле выполнения обновите подписку в приложении.'
 
     if revision != item.get('revision'): raise HTTPException(409, 'Подписка изменилась. Откройте настройки заново.')
-    fingerprint = hashlib.sha256(json.dumps([linked, args]).encode()).hexdigest()
-    value = contacts.profile(api, settings, actor)
-    cached = value.get('subscription_receipts', {}).get(request_id)
-    if cached:
-        if cached['fingerprint'] != fingerprint: raise HTTPException(409, 'ID сообщения уже использован')
-        return cached['result']
-    prepared = mihomo.call(api, actor, method, path, body)
-    record = prepared_record(api, actor, prepared['operation_id'])
-    output = result('Подтвердите изменение\n' + preview + '\n/confirm ' + record['code'] + '\n/cancel ' + record['code'],
-                    [[button('Подтвердить', '/confirm ' + record['code']), button('Отмена', '/cancel ' + record['code'])], [button('← Настройки подписки', '/manage')]])
-    if request_id:
-        with control.operations.locked(api.DATA_DIR):
-            current = contacts.profile(api, settings, actor)
-            receipts = current.get('subscription_receipts', {})
-            receipts[request_id] = {'fingerprint':fingerprint, 'result':output}
-            current['subscription_receipts'] = dict(list(receipts.items())[-32:])
-            contacts.save_profile(api, settings, actor, current)
+    pending = change_result('Изменение обрабатывается. Проверьте настройки позже.')
+    cached = remember_change(api, settings, actor, request_id, fingerprint, pending, claim=True)
+    if cached: return cached
+    try:
+        output = apply_change(api, actor, method, path, body)
+    except HTTPException as exc:
+        if exc.status_code in (401, 403):
+            output = change_result('Изменение недоступно. Проверьте выданные права у владельца подписки.')
+        elif exc.status_code in (404, 409, 422):
+            output = change_result('Не удалось применить изменение. Откройте настройки заново и повторите выбор.')
+        else:
+            output = change_result('Пока не удалось подтвердить применение изменений. Проверьте настройки позже.')
+    remember_change(api, settings, actor, request_id, fingerprint, output)
     return output

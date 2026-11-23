@@ -1,6 +1,8 @@
 import json
 from copy import deepcopy
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import threading
 from unittest.mock import AsyncMock
 import yaml
 from unittest.mock import patch
@@ -51,17 +53,17 @@ class SubscriptionManagementTests(unittest.TestCase):
             self.assertNotIn('secret.example',json.dumps(safe))
             self.assertNotIn('structured_policy',safe['profile_defaults'])
 
-    def test_edit_requires_confirmation_preserves_identity_and_is_idempotent(self):
+    def test_edit_runs_automatically_preserves_identity_and_replays_after_revision_changes(self):
         with patch.object(mihomo,'request',side_effect=self.request) as transport:
             command = '/manage set laptop connection_mode tun ' + self.item['revision']
             first = self.submit(command,'e'*32)
             self.assertEqual(first.status_code,200,first.text)
+            self.item['revision']='c'*64
             self.assertEqual(self.submit(command,'e'*32).json(), first.json())
-            self.assertFalse(any(call.args[0] == 'PATCH' for call in transport.call_args_list))
-            pending = commands.pending_actions(api,'11')
-            self.assertEqual(len(pending),1)
-            response = self.submit('/confirm '+pending[0]['code'])
-            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(commands.pending_actions(api,'11'),[])
+            self.assertIn('применятся позже',first.json()['text'])
+            for technical in ('/confirm','/cancel','/operation','Подтвердить','d'*32):
+                self.assertNotIn(technical,str(first.json()))
             writes = [call for call in transport.call_args_list if call.args[0] == 'PATCH']
             self.assertEqual(len(writes),1)
             body = writes[0].args[2]
@@ -72,7 +74,7 @@ class SubscriptionManagementTests(unittest.TestCase):
             self.assertEqual(body['devices'][0]['routing'],self.item['devices'][0]['routing'])
             self.assertNotIn('connections',body); self.assertNotIn('limits',body)
 
-    def test_scope_and_revision_and_permissions_are_checked_on_prepare_and_confirmation(self):
+    def test_scope_revision_and_live_permissions_are_checked_before_automatic_execution(self):
         with patch.object(mihomo,'request',side_effect=self.request) as transport:
             for command, status in [('/manage device foreign',404),
                                     ('/manage set laptop connection_mode tun '+'c'*64,409),
@@ -81,12 +83,9 @@ class SubscriptionManagementTests(unittest.TestCase):
                                     ('/manage set laptop windows_geolocation 1 '+'a'*64,403)]:
                 response = self.submit(command)
                 self.assertEqual(response.status_code,status,response.text)
-            response = self.submit('/manage set laptop connection_mode tun '+'a'*64)
-            self.assertEqual(response.status_code,200,response.text)
-            code = commands.pending_actions(api,'11')[0]['code']
             settings=control.read(api)
             settings['accounts'][0]['permission_overrides']={'subscription_routing':False}
-            self.assertEqual(self.submit('/confirm '+code).status_code,403)
+            self.assertEqual(self.submit('/manage set laptop connection_mode tun '+'a'*64).status_code,403)
             self.assertEqual(self.submit('/manage targets').status_code,403)
             self.assertEqual(self.submit('/manage').status_code,200)
             self.assertNotIn('/manage targets',str(self.submit('/manage').json()))
@@ -97,12 +96,12 @@ class SubscriptionManagementTests(unittest.TestCase):
             self.assertFalse(any(call.args[0]=='PATCH' for call in transport.call_args_list))
 
     def test_service_selection_and_mode_match_panel_fields(self):
-        with patch.object(mihomo,'request',side_effect=self.request):
+        with patch.object(mihomo,'request',side_effect=self.request) as transport:
             self.submit('/manage service laptop telegram 1 '+'a'*64)
-            pending=commands.pending_actions(api,'11')[0]
-            self.assertEqual(set(pending['changes']['devices'][1]['routing']['vpn_services'].split(',')),{'youtube','telegram'})
+            body=next(c.args[2] for c in transport.call_args_list if c.args[0]=='PATCH')
+            self.assertEqual(set(body['devices'][1]['routing']['vpn_services'].split(',')),{'youtube','telegram'})
             self.assertEqual(self.submit('/manage set common routing_scope all '+'a'*64).status_code,200)
-            bodies=[p['changes'] for p in commands.pending_actions(api,'11')]
+            bodies=[c.args[2] for c in transport.call_args_list if c.args[0]=='PATCH']
             self.assertTrue(any(b['devices'][0]['routing'].get('mode')=='rule' for b in bodies))
             changed = next(b for b in bodies if b.get('routing'))
             self.assertEqual(changed['routing'],changed['devices'][0]['routing'])
@@ -111,10 +110,10 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.item['routing']={'routing_scope':'selected','vpn_services':'youtube','connection_mode':'proxy'}
         self.item['devices'][0]['routing']=dict(self.item['routing'])
         self.item['devices'][1]['personal_rule_ids']=[]
-        with patch.object(mihomo,'request',side_effect=self.request):
+        with patch.object(mihomo,'request',side_effect=self.request) as transport:
             response=self.submit('/manage set common connection_mode tun '+'a'*64)
             self.assertEqual(response.status_code,200,response.text)
-            body=commands.pending_actions(api,'11')[0]['changes']
+            body=next(c.args[2] for c in transport.call_args_list if c.args[0]=='PATCH')
         item=export_profile()
         item.update(id='own',name='Family',devices=deepcopy(body['devices']),routing=body['routing'])
         item['connections'][0]['device_id']='laptop'
@@ -146,15 +145,60 @@ class SubscriptionManagementTests(unittest.TestCase):
         finally:
             bot.access_details.reset(detail); bot.command_view.reset(view)
 
-    def test_rotation_is_scoped_and_does_not_write_until_confirmation(self):
+    def test_rotation_runs_once_without_technical_commands(self):
         with patch.object(mihomo,'request',side_effect=self.request) as transport:
-            response=self.submit('/manage rotate '+'a'*64)
+            response=self.submit('/manage rotate '+'a'*64,'f'*32)
             self.assertEqual(response.status_code,200,response.text)
-            self.assertIn('Старая ссылка перестанет работать',response.json()['text'])
-            pending=commands.pending_actions(api,'11')[0]
-            self.assertEqual(pending['changes']['expected_revision'],'a'*64)
-            self.assertFalse(any(call.args[0]=='POST' for call in transport.call_args_list))
-            self.assertEqual(self.submit('/confirm '+pending['code']).status_code,200)
+            self.assertEqual(self.submit('/manage rotate '+'a'*64,'f'*32).json(),response.json())
+            self.assertEqual(commands.pending_actions(api,'11'),[])
+            self.assertNotIn('/confirm',response.text)
             writes=[call for call in transport.call_args_list if call.args[0]=='POST']
             self.assertEqual(len(writes),1)
             self.assertEqual(writes[0].args[1],'/profiles/own/subscription/rotate')
+
+    def test_completed_failed_and_pending_operations_have_plain_status(self):
+        for state, text in [('succeeded','Изменения применены'),('failed','Не удалось применить'),('running','применятся позже')]:
+            with self.subTest(state=state), patch.object(mihomo,'request',side_effect=self.request), \
+                 patch.object(api,'get_application_operation',return_value={'state':state}):
+                response=self.submit('/manage set laptop route_dns 1 '+'a'*64)
+                self.assertEqual(response.status_code,200,response.text)
+                self.assertIn(text,response.json()['text'])
+                self.assertNotIn('/operation',response.text)
+
+    def test_lost_mutation_response_is_not_retried_or_reported_as_applied(self):
+        def lost(method,path,body=None,*args,**kwargs):
+            if method=='PATCH': raise api.HTTPException(503,'PRIVATE DEBUG /operation '+'d'*32)
+            return self.request(method,path,body,*args,**kwargs)
+        with patch.object(mihomo,'request',side_effect=lost) as transport:
+            command='/manage set laptop route_dns 1 '+'a'*64
+            first=self.submit(command,'e'*32)
+            self.assertIn('не удалось подтвердить',first.json()['text'])
+            self.assertNotIn('PRIVATE',first.text)
+            self.assertEqual(self.submit(command,'e'*32).json(),first.json())
+            self.assertEqual(sum(c.args[0]=='PATCH' for c in transport.call_args_list),1)
+            self.assertEqual(commands.pending_actions(api,'11'),[])
+
+    def test_request_identity_cannot_be_reused_for_another_change(self):
+        with patch.object(mihomo,'request',side_effect=self.request) as transport:
+            self.assertEqual(self.submit('/manage set laptop route_dns 1 '+'a'*64,'e'*32).status_code,200)
+            self.assertEqual(self.submit('/manage set laptop route_dns 0 '+'a'*64,'e'*32).status_code,409)
+            self.assertEqual(sum(c.args[0]=='PATCH' for c in transport.call_args_list),1)
+
+    def test_duplicate_delivery_during_execution_does_not_send_a_second_change(self):
+        started, release = threading.Event(), threading.Event()
+        def blocking(method,path,body=None,*args,**kwargs):
+            if method=='PATCH':
+                started.set()
+                self.assertTrue(release.wait(5))
+            return self.request(method,path,body,*args,**kwargs)
+        command='/manage set laptop route_dns 1 '+'a'*64
+        with patch.object(mihomo,'request',side_effect=blocking) as transport, ThreadPoolExecutor(max_workers=1) as pool:
+            first=pool.submit(self.submit,command,'e'*32)
+            try:
+                self.assertTrue(started.wait(5))
+                second=self.submit(command,'e'*32)
+                self.assertEqual(second.status_code,200,second.text)
+                self.assertIn('обрабатывается',second.json()['text'])
+            finally: release.set()
+            self.assertEqual(first.result(timeout=5).status_code,200)
+            self.assertEqual(sum(c.args[0]=='PATCH' for c in transport.call_args_list),1)

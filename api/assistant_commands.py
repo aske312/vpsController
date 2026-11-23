@@ -190,7 +190,7 @@ def pending_actions(api, actor, *, settings=None):
     settings = control.read(api) if settings is None else settings
     result = []
     for _, record in pending_records(api, actor):
-        if record.get('submitted') or record.get('expires', 0) <= time.time() or record.get('revision') != settings['revision']: continue
+        if record.get('automatic') or record.get('submitted') or record.get('expires', 0) <= time.time() or record.get('revision') != settings['revision']: continue
         row = {key: record[key] for key in ('service', 'action', 'code', 'expires', 'operation_id')}
         row.update(actor=actor, actor_name='Администратор' if actor == 'panel' else next((a.get('name') or actor for a in settings.get('accounts', []) if str(a['telegram_id']) == actor), actor))
         if record.get('source_request_id'):
