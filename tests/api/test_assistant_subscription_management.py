@@ -30,6 +30,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         settings = control.read(api)
         settings['accounts'][0].update(role='user', products=['mihomo'], mihomo_profile_id='own', permission_overrides={})
         self.enterContext(patch.object(control, "read", return_value=settings))
+        self.enterContext(patch.object(api, 'get_application_operation', return_value={'state':'queued'}))
 
     def request(self, method, path, body=None, *args, **kwargs):
         if path == '/routing/schema':
@@ -157,7 +158,7 @@ class SubscriptionManagementTests(unittest.TestCase):
             self.assertEqual(writes[0].args[1],'/profiles/own/subscription/rotate')
 
     def test_completed_failed_and_pending_operations_have_plain_status(self):
-        for state, text in [('succeeded','Изменения применены'),('failed','Не удалось применить'),('running','применятся позже')]:
+        for state, text in [('succeeded','Изменения применены'),('failed','Не удалось применить'),('running','применятся позже'),('unknown','Результат пока уточняется')]:
             with self.subTest(state=state), patch.object(mihomo,'request',side_effect=self.request), \
                  patch.object(api,'get_application_operation',return_value={'state':state}):
                 response=self.submit('/manage set laptop route_dns 1 '+'a'*64)

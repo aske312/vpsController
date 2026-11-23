@@ -62,7 +62,9 @@ def apply_change(api, actor, method, path, body):
             return applied('Изменения применены.')
         if state in ('failed', 'cancelled'):
             return change_result('Не удалось применить изменения. Откройте настройки и попробуйте позже.')
-    return applied('Изменения приняты и применятся позже.', pending=True)
+        if state in ('queued', 'running'):
+            return applied('Изменения приняты и применятся позже.', pending=True)
+    return change_result('Изменения отправлены. Результат пока уточняется. Проверьте настройки позже.')
 
 
 def catalog(name):
