@@ -156,7 +156,7 @@ async def connect_request(reader, writer, config):
         raise SecurityError('TCP ingress authentication or destination rejected') from None
 
 
-VERSION = '1.6.2'
+VERSION = '1.6.3'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -238,6 +238,88 @@ def resource_limits(value=None, *, memory=None, descriptors=None):
                 ('tcp_drain_seconds', 30), ('statistics_reset_seconds', 86400))}}
 
 
+def memory_headroom(proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
+    """Live host/cgroup room, including other services and retained native heaps."""
+    candidates = []
+    try:
+        values = {line.split(':', 1)[0]: int(line.split()[1]) * 1024
+                  for line in (proc/'meminfo').read_text().splitlines()
+                  if line.startswith(('MemTotal:', 'MemAvailable:'))}
+        reserve = max(64*1048576, min(512*1048576, values['MemTotal']//8))
+        candidates.append(max(0, values['MemAvailable']-reserve))
+    except (OSError, ValueError, KeyError): pass
+    try:
+        group = next(line.split(':', 2)[2] for line in (proc/'self/cgroup').read_text().splitlines() if line.startswith('0::'))
+        base = cgroups.resolve(); folder = (base/group.lstrip('/')).resolve()
+        while folder.is_relative_to(base):
+            try:
+                limit = (folder/'memory.max').read_text().strip()
+                if limit != 'max':
+                    limit = int(limit); used = int((folder/'memory.current').read_text())
+                    candidates.append(max(0, limit-used-max(16*1048576, min(64*1048576, limit//8))))
+            except (OSError, ValueError): pass
+            if folder == base: break
+            folder = folder.parent
+    except (OSError, ValueError, StopIteration): pass
+    try:
+        group = next(line.split(':', 2)[2] for line in (proc/'self/cgroup').read_text().splitlines() if 'memory' in line.split(':', 2)[1].split(','))
+        base = (cgroups/'memory').resolve(); folder = (base/group.lstrip('/')).resolve()
+        while folder.is_relative_to(base):
+            try:
+                limit = int((folder/'memory.limit_in_bytes').read_text()); used = int((folder/'memory.usage_in_bytes').read_text())
+                candidates.append(max(0, limit-used-max(16*1048576, min(64*1048576, limit//8))))
+            except (OSError, ValueError): pass
+            if folder == base: break
+            folder = folder.parent
+    except (OSError, ValueError, StopIteration): pass
+    return min(candidates) if candidates else None
+
+
+_NATIVE_TRIM = None
+
+
+def reclaim_idle_memory():
+    """Return unreachable TLS/native buffers without closing live streams."""
+    import gc
+    gc.collect()
+    if platform.system() != 'Linux': return
+    global _NATIVE_TRIM
+    if _NATIVE_TRIM is None:
+        try:
+            import ctypes
+            _NATIVE_TRIM = ctypes.CDLL(None).malloc_trim
+            _NATIVE_TRIM.argtypes = [ctypes.c_size_t]
+            _NATIVE_TRIM.restype = ctypes.c_int
+        except (OSError, AttributeError): _NATIVE_TRIM = False
+    if _NATIVE_TRIM: _NATIVE_TRIM(0)
+
+
+class MemoryPressure:
+    """Charge admissions between live samples; closing is not RSS release."""
+    def __init__(self, sample=memory_headroom, clock=time.monotonic, reclaim=reclaim_idle_memory):
+        self.sample, self.clock, self.reclaim = sample, clock, reclaim
+        self.sampled_at, self.remaining = None, None
+        self.reclaimed_at = None
+
+    def available(self):
+        now = self.clock()
+        if self.sampled_at is None or now-self.sampled_at >= .1:
+            self.remaining = self.sample()
+            self.sampled_at = now
+            if self.remaining is not None and self.remaining < 8*1048576 and (self.reclaimed_at is None or now-self.reclaimed_at >= 1):
+                self.reclaimed_at = now
+                self.reclaim()
+                self.remaining = self.sample()
+        return self.remaining
+
+    def fits(self, cost):
+        available = self.available()
+        return available is None or cost <= available
+
+    def charge(self, cost):
+        if self.remaining is not None: self.remaining = max(0, self.remaining-cost)
+
+
 class RecentCounters:
     """Sixty one-second aggregate buckets. No peer addresses or flow identities."""
     def __init__(self):
@@ -263,13 +345,15 @@ class RecentCounters:
 
 
 class SessionBudget:
-    def __init__(self, limit, memory_limit=None, udp_buffers=None):
+    def __init__(self, limit, memory_limit=None, udp_buffers=None, pressure=None):
         self.limit, self.used = limit, 0
         self.memory_limit, self.memory_used = memory_limit, 0
         self.udp_buffers = udp_buffers
+        self.pressure = pressure or MemoryPressure()
 
     def fits(self, cost):
         if self.used >= self.limit: return False
+        if not self.pressure.fits(cost): return False
         if self.memory_limit is None: return True
         if self.memory_used + cost + self.udp_buffers.used > self.memory_limit:
             self.udp_buffers.rebalance()
@@ -281,7 +365,8 @@ class SessionSlot:
         self.route = route
         # Kernel UDP receives are accounted separately, by their actual size.
         # TCP must leave room for both directions' readers, pumps and writers.
-        self.cost = 65536 if route.config.get('transport') == 'udp' else 512*1024
+        self.cost = route.session_cost()
+        route.session_budget.pressure.charge(self.cost)
         route.session_budget.used += 1
         route.session_budget.memory_used += self.cost
         route.slots.add(self)
@@ -292,6 +377,11 @@ class SessionSlot:
             self.route.session_budget.used -= 1
             self.route.session_budget.memory_used -= self.cost
 
+    def authenticated(self):
+        if self in self.route.slots and self.cost > 512*1024:
+            self.route.session_budget.memory_used -= self.cost-512*1024
+            self.cost = 512*1024
+
 
 class UDPReceiveBudget:
     """Bound aggregate kernel receive allocations, including Linux's doubling."""
@@ -300,6 +390,7 @@ class UDPReceiveBudget:
         self.allocations = {}
         self.session_buffer = UDP_RECEIVE_BUFFER
         self.headroom = lambda: self.limit
+        self.pressure = None
 
     def reserve(self, sock, desired=UDP_RECEIVE_BUFFER, *, shared=False):
         if sock in self.allocations:
@@ -312,12 +403,15 @@ class UDPReceiveBudget:
             raise OSError('UDP receive buffer budget exhausted')
         if not shared:
             desired = min(desired, self.session_buffer)
+        if self.pressure and not self.pressure.fits(min(2*desired, remaining)):
+            raise OSError('UDP receive buffer live memory reserve exhausted')
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, min(desired, remaining // 2))
         actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
         if actual > remaining:
             raise OSError('UDP receive buffer budget exhausted')
         self.used += actual
         self.allocations[sock] = (actual, shared)
+        if self.pressure: self.pressure.charge(actual)
         return actual
 
     def rebalance(self):
@@ -501,8 +595,14 @@ class RelayRoute(asyncio.DatagramProtocol):
             self.last_reset = time.monotonic()
             self.statistics_since = int(time.time())
 
+    def session_cost(self):
+        if self.config.get('transport') == 'udp': return 65536
+        # Reserve native SSL buffers while the peer remains unauthenticated.
+        # Established streams return to the shared TCP budget after admission.
+        return 2*1048576 if self.config.get('auth') else 512*1024
+
     def admit(self):
-        cost = 65536 if self.config.get('transport') == 'udp' else 512*1024
+        cost = self.session_cost()
         if self.closed or len(self.slots) >= self.limits.get('max_sessions_per_route', MAX_SESSIONS) or not self.session_budget.fits(cost):
             return None
         self.recent.add('new_sessions')
@@ -579,6 +679,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                 try:
                     await writer.start_tls(self.tls_context, ssl_handshake_timeout=5)
                     await connect_request(reader, writer, self.config)
+                    slot.authenticated()
                 except (SecurityError, OSError, asyncio.TimeoutError, ConnectionError):
                     self.authentication_rejections += 1
                     return
@@ -1119,6 +1220,7 @@ class Agent:
         self.limits = resource_limits(settings.get('limits'))
         self.buffer_budget = UDPReceiveBudget(self.limits['udp_budget_mib'] * 1048576)
         self.session_budget = SessionBudget(self.limits['max_sessions'], self.limits['memory_budget_bytes'], self.buffer_budget)
+        self.buffer_budget.pressure = self.session_budget.pressure
         self.buffer_budget.headroom = lambda: self.limits['memory_budget_bytes'] - self.session_budget.memory_used
         self.routes, self.failed = {}, {}
         self.revision = 0

@@ -303,7 +303,111 @@ class ValidationTests(unittest.TestCase):
             connection.close.assert_called_once()
 
 
+class LiveMemoryTests(unittest.TestCase):
+    def test_host_and_parent_cgroup_memory_leave_real_room_for_other_services(self):
+        mib=1048576
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);proc=root/'proc';groups=root/'groups'
+            (proc/'self').mkdir(parents=True);(groups/'parent/agent').mkdir(parents=True)
+            (proc/'meminfo').write_text('MemTotal: 4194304 kB\nMemAvailable: 1048576 kB\n')
+            (proc/'self/cgroup').write_text('0::/parent/agent\n')
+            (groups/'parent/agent/memory.max').write_text(str(512*mib))
+            (groups/'parent/agent/memory.current').write_text(str(480*mib))
+            self.assertEqual(relay.memory_headroom(proc,groups),0)
+            (groups/'parent/agent/memory.current').write_text(str(128*mib))
+            self.assertEqual(relay.memory_headroom(proc,groups),320*mib)
+            (groups/'parent/memory.max').write_text(str(256*mib))
+            (groups/'parent/memory.current').write_text(str(128*mib))
+            self.assertEqual(relay.memory_headroom(proc,groups),96*mib)
+            (proc/'meminfo').write_text('MemTotal: 4194304 kB\nMemAvailable: 32768 kB\n')
+            self.assertEqual(relay.memory_headroom(proc,groups),0)
+            (proc/'meminfo').write_text('MemTotal: 4194304 kB\nMemAvailable: 1048576 kB\n')
+            (proc/'self/cgroup').write_text('2:memory:/parent/agent\n')
+            folder=groups/'memory/parent/agent';folder.mkdir(parents=True)
+            (folder/'memory.limit_in_bytes').write_text(str(256*mib))
+            (folder/'memory.usage_in_bytes').write_text(str(128*mib))
+            self.assertEqual(relay.memory_headroom(proc,groups),96*mib)
+
+    def test_new_admissions_wait_for_actual_memory_recovery_without_evicting_streams(self):
+        now=[0.0];room=[256*1024]
+        pressure=relay.MemoryPressure(lambda:room[0],lambda:now[0],reclaim=lambda:None)
+        pool=relay.SessionBudget(100,pressure=pressure)
+        route=relay.RelayRoute({'transport':'udp'},session_budget=pool)
+        slots=[route.admit() for _ in range(4)]
+        self.assertTrue(all(slots));self.assertIsNone(route.admit())
+        slots[0].release()
+        self.assertIsNone(route.admit(),'Closing a slot does not prove that native memory was returned')
+        room[0]=0;now[0]=.2
+        self.assertIsNone(route.admit());self.assertEqual(pool.used,3)
+        room[0]=65536;now[0]=.4
+        recovered=route.admit();self.assertIsNotNone(recovered)
+        for slot in [*slots,recovered]:slot.release()
+        self.assertEqual(pool.used,0)
+
+    def test_tls_reserves_pre_authentication_memory_without_a_fixed_active_session_cap(self):
+        mib=1048576
+        pool=relay.SessionBudget(500,16*mib,relay.UDPReceiveBudget(mib))
+        route=relay.RelayRoute({'transport':'tcp','auth':{'type':'tls-connect'}},session_budget=pool)
+        pending=[route.admit() for _ in range(8)]
+        self.assertTrue(all(pending));self.assertIsNone(route.admit())
+        for slot in pending:slot.authenticated()
+        self.assertEqual(pool.memory_used,4*mib)
+        extra=route.admit();self.assertIsNotNone(extra)
+        for slot in [*pending,extra]:slot.release()
+        pool=relay.SessionBudget(500,512*mib,relay.UDPReceiveBudget(mib),pressure=relay.MemoryPressure(lambda:None))
+        route=relay.RelayRoute({'transport':'tcp','auth':{'type':'tls-connect'}},session_budget=pool)
+        streams=[]
+        for _ in range(300):
+            slot=route.admit();self.assertIsNotNone(slot);slot.authenticated();streams.append(slot)
+        self.assertEqual(pool.used,300)
+        for slot in streams:slot.release()
+
+    def test_udp_kernel_reservations_observe_the_same_live_memory_guard(self):
+        pressure=relay.MemoryPressure(lambda:128*1024,reclaim=lambda:None)
+        budget=relay.UDPReceiveBudget(4*1048576);budget.pressure=pressure
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+            with self.assertRaisesRegex(OSError,'live memory reserve'):
+                budget.reserve(sock)
+        self.assertEqual(budget.used,0);self.assertEqual(budget.allocations,{})
+
+    def test_pressure_reclaims_retained_memory_and_throttles_collection_without_restart(self):
+        now=[0.0];room=[0];collected=[]
+        def reclaim():
+            collected.append(now[0]);room[0]=64*1048576
+        pressure=relay.MemoryPressure(lambda:room[0],lambda:now[0],reclaim=reclaim)
+        self.assertTrue(pressure.fits(1048576));self.assertEqual(collected,[0.0])
+        room[0]=0;now[0]=.2
+        self.assertFalse(pressure.fits(1048576));self.assertEqual(collected,[0.0])
+        now[0]=1.2
+        self.assertTrue(pressure.fits(1048576));self.assertEqual(collected,[0.0,1.2])
+
+
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_memory_reclamation_preserves_an_existing_tcp_stream(self):
+        async def echo(reader,writer):
+            try:
+                while data:=await reader.read(65536):writer.write(data);await writer.drain()
+            finally:writer.close()
+        origin=await asyncio.start_server(echo,'127.0.0.1',0)
+        room=[64*1048576];now=[0.0]
+        pressure=relay.MemoryPressure(lambda:room[0],lambda:now[0])
+        pool=relay.SessionBudget(100,pressure=pressure)
+        route=relay.RelayRoute({**self.body,'listen_port':0,'target_ip':'127.0.0.1','target_port':origin.sockets[0].getsockname()[1]},
+                               '127.0.0.1',session_budget=pool)
+        await route.start();writer=None
+        try:
+            reader,writer=await asyncio.open_connection('127.0.0.1',route.server.sockets[0].getsockname()[1])
+            writer.write(b'before');await writer.drain()
+            self.assertEqual(await asyncio.wait_for(reader.readexactly(6),3),b'before')
+            room[0]=0;now[0]=1.0
+            self.assertIsNone(route.admit());self.assertEqual(pool.used,1)
+            writer.write(b'after');await writer.drain()
+            self.assertEqual(await asyncio.wait_for(reader.readexactly(5),3),b'after')
+            self.assertEqual(pool.used,1)
+        finally:
+            if writer:writer.close()
+            await route.close();origin.close();await origin.wait_closed()
+
     async def test_over_128_udp_clients_share_real_pool_and_close_frees_every_slot(self):
         class Echo(asyncio.DatagramProtocol):
             def connection_made(self, transport): self.transport = transport
