@@ -133,7 +133,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /setProfileStrategy/);
   assert.match(page, /if \(!profileStrategyTouched\) setProfileDevices/);
   assert.match(page, /activeProfileRouting/);
-  assert.match(page, /title: "UDP"/);
+  assert.match(page, /profile-routing-rules\.json/);
+  const sharedRules = JSON.parse(await read('api/resources/profile-routing-rules.json'));
+  assert.equal(sharedRules.find(rule => rule.key === 'direct_games_udp_enabled').title, 'UDP');
   assert.match(page, /udpExclusionCatalog/);
   assert.match(page, /udp_tunnel_exclusions_rules/);
   assert.match(page, /EA Sports FC 26/);
