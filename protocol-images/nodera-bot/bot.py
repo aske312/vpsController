@@ -17,6 +17,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -37,11 +38,22 @@ def telegram_html(text):
         elif part.startswith('`') and part.endswith('`'):
             output.append('<code>' + html.escape(part[1:-1]) + '</code>')
         else:
-            escaped = html.escape(part)
-            escaped = re.sub(r'\*\*([^*\n]+)\*\*', r'<b>\1</b>', escaped)
-            escaped = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'<i>\1</i>', escaped)
-            escaped = re.sub(r'(?m)^#{1,6}\s+(.+)$', r'<b>\1</b>', escaped)
-            output.append(re.sub(r'(?m)^[-*+]\s+', '• ', escaped))
+            for fragment in re.split(r'(\[[^\]\n]+\]\(https://[^\s<>]+\))', part):
+                link = re.fullmatch(r'\[([^\]\n]+)\]\((https://[^\s<>]+)\)', fragment)
+                if link:
+                    try:
+                        parsed = urlsplit(link[2])
+                        safe = bool(parsed.hostname) and not parsed.username and not parsed.password
+                    except ValueError:
+                        safe = False
+                    if safe:
+                        output.append('<a href="' + html.escape(link[2], quote=True) + '">' + html.escape(link[1]) + '</a>')
+                        continue
+                escaped = html.escape(fragment)
+                escaped = re.sub(r'\*\*([^*\n]+)\*\*', r'<b>\1</b>', escaped)
+                escaped = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'<i>\1</i>', escaped)
+                escaped = re.sub(r'(?m)^#{1,6}\s+(.+)$', r'<b>\1</b>', escaped)
+                output.append(re.sub(r'(?m)^[-*+]\s+', '• ', escaped))
     return ''.join(output)
 
 
@@ -52,21 +64,21 @@ def telegram_chunks(text):
         tag = token.startswith('<')
         size = 0 if tag else len(html.unescape(token).encode('utf-16-le')) // 2
         if units + size > 3500:
-            chunks.append(current + ''.join('</' + name + '>' for name in reversed(stack)))
-            current = ''.join('<' + name + '>' for name in stack); units = 0
+            chunks.append(current + ''.join('</' + name + '>' for name, _ in reversed(stack)))
+            current = ''.join(opening for _, opening in stack); units = 0
         current += token; units += size
         if tag:
             if token.startswith('</'):
                 if stack: stack.pop()
-            else: stack.append(token[1:-1])
+            else: stack.append((token[1:-1].split()[0], token))
     if units:
-        chunks.append(current + ''.join('</' + name + '>' for name in reversed(stack)))
+        chunks.append(current + ''.join('</' + name + '>' for name, _ in reversed(stack)))
     return chunks
 
 PUBLIC_COMMANDS = [('start', 'Начать знакомство'), ('myprofile', 'Мой профиль Nodera'), ('setup', 'Заполнить профиль'), ('id', 'Мой Telegram ID')]
 MEMBER_COMMANDS = [('menu', 'Открыть меню'), ('help', 'Справка')] + PUBLIC_COMMANDS
-SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка'), ('profile', 'Статус подписки'),
-    ('devices', 'Устройства подписки'), ('connect', 'Как подключиться'), ('apps', 'Приложения для подключения')]
+SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка'),
+    ('devices', 'Устройства подписки'), ('connect', 'Как подключиться')]
 CHAT_COMMANDS = MEMBER_COMMANDS + [('models', 'Каталог моделей AI'), ('model', 'Текущая модель AI'), ('ai', 'Вопрос AI-ассистенту')]
 ADMIN_COMMANDS = SUBSCRIPTION_COMMANDS + [('models', 'Доступные модели AI'), ('model', 'Текущая модель AI')] + [
     ('status', 'Состояние сервера'), ('resources', 'CPU, память, диск и трафик'),
@@ -661,9 +673,6 @@ async def scoped_reply(settings, sender, prompt, access):
     if command=='/traffic': command='/subscription'; prompt='/subscription'
     permission=COMMAND_GRANTS.get(command.removeprefix('/'))
     if permission and permission not in grants: return 'Это действие недоступно для вашей учётной записи.'
-    if command=='/connect':
-        command_view.set({'buttons':[[{'text':'Моя подписка','command':'/subscription'},{'text':'Приложения','command':'/apps'}]]})
-        return '1. Выберите и установите приложение: /apps.\n2. Скопируйте ссылку своей подписки и добавьте её в приложение по URL.\n3. Обновите подписку, выберите сервер и включите подключение.'
     if command.startswith('/') and command!='/ai':
         if command not in ('/confirm','/cancel','/operation') and permission is None: return 'Откройте /help — доступные команды.'
         return await server_command(settings,sender['id'],prompt)
@@ -710,6 +719,7 @@ def informational_reply(command, answer):
 async def reply(settings, sender, prompt, access):
     prompt = direct_prompt(prompt)
     if not prompt: return ''
+    if prompt.strip() == '/menu subscription': prompt = '/subscription'
     command = prompt.split()[0].split('@')[0].lower()
     if access_details.get() is not None: return await scoped_reply(settings,sender,prompt,access)
     if not access: return public_reply(sender, command)
@@ -727,11 +737,6 @@ async def reply(settings, sender, prompt, access):
         return assistant_help(access is True, access in (True, 'chat-subscription'))
     if command == '/hello': return 'Здравствуйте! /help — возможности и команды. Типовые запросы выполняются без AI.'
     if command == '/thanks': return 'Пожалуйста!'
-    if command == '/connect':
-        return ('Подключение:\n/apps — приложения для подключения. Наш Nodera для Windows: https://github.com/aske312/NoderaClient.\n1. Получите свою ссылку: /subscription.\n'
-                '2. В совместимом клиенте выберите импорт подписки по URL и вставьте ссылку.\n'
-                '3. Обновите подписку, выберите профиль и включите подключение.\n'
-                'После изменения настроек в панели обновите подписку в клиенте. Не передавайте ссылку другим людям.')
     if command == '/ai':
         prompt = prompt.split(maxsplit=1)[1].strip() if len(prompt.split(maxsplit=1)) > 1 else ''
         if not prompt: return 'Формат: /ai <вопрос>. Типовые запросы и кнопки работают без AI.'
@@ -808,7 +813,7 @@ def inline_keyboard_content(answer, prompt, access, actions):
     if access_details.get() is not None and command in ('/menu','/start','/help','/_refresh_menu'):
         detail=access_details.get(); sections=detail.get('sections',{}); grants=set(detail['permissions'])
         section=prompt.split(maxsplit=1)[1] if command=='/menu' and len(prompt.split(maxsplit=1))>1 else ''
-        groups={'subscription':[(('Моя подписка','/subscription'),('Статус','/profile')),(('Устройства','/devices'),('Приложения','/apps')),(('Как подключиться','/connect'),)],
+        groups={'subscription':[(('Устройства','/devices'),),(('Как подключиться','/connect'),)],
                 'server':[(('Состояние','/status'),('Службы','/services')),(('Сеть','/network'),('Безопасность','/security')),(('Логи','/logs'),('Диагностика','/diagnostics'))],
                 'ai':[(('Выбрать модель','/models'),('Текущая модель','/model'))]}
         if section in groups and sections.get(section):
@@ -818,7 +823,7 @@ def inline_keyboard_content(answer, prompt, access, actions):
         elif section=='admin' and sections.get('admin'): rows.append([button('Подписки','/admin list'),button('Создать','/admin create')] if 'subscriptions_create' in grants else [button('Подписки','/admin list')])
         elif not section:
             for key,label in [('subscription','Подписка'),('ai','ИИ-ассистент'),('telegram','Telegram API'),('server','Контроль VPS'),('admin','Админ')]:
-                if sections.get(key): rows.append([button(label,'/telegram' if key=='telegram' else '/menu '+key)])
+                if sections.get(key): rows.append([button(label, '/subscription' if key=='subscription' else '/telegram' if key=='telegram' else '/menu '+key)])
             if sections.get('subscription_setup'): rows.append([button('Оформить подписку','/subscription')])
             if not any(sections.values()): rows.append([button('Мой профиль','/myprofile')] + ([button('Мой ID','/id')] if detail.get('role','guest')=='guest' else []))
         if section: rows.append([button('← Главное меню','/menu')])
@@ -830,7 +835,7 @@ def inline_keyboard_content(answer, prompt, access, actions):
     if access and command in ('/menu', '/start', '/help', '/_refresh_menu'):
         section = prompt.split(maxsplit=1)[1] if command == '/menu' and len(prompt.split(maxsplit=1)) > 1 else ''
         if section == 'subscription' and access in (True, 'subscription', 'chat-subscription'):
-            for labels in [(('Ссылка подписки','/subscription'),('Профиль','/profile')), (('Устройства','/devices'),('Трафик','/traffic')), (('Приложения','/apps'),('Как подключиться','/connect'))]:
+            for labels in [(('Устройства','/devices'),), (('Как подключиться','/connect'),)]:
                 rows.append([button(label, action) for label, action in labels])
         elif section == 'server' and access is True:
             for labels in [(('Состояние','/status'),('Ресурсы','/resources')), (('Службы','/services'),('Компоненты','/components')), (('Сеть','/network'),('Безопасность','/security')), (('Логи','/logs'),('Диагностика','/diagnostics'))]:
@@ -838,7 +843,7 @@ def inline_keyboard_content(answer, prompt, access, actions):
         elif section == 'ai' and access in (True, 'chat', 'chat-subscription'):
             rows.append([button('Выбрать модель','/models'),button('Текущая модель','/model')])
         else:
-            if access in (True, 'subscription', 'chat-subscription'): rows.append([button('Подписка и подключение','/menu subscription')])
+            if access in (True, 'subscription', 'chat-subscription'): rows.append([button('Подписка','/subscription')])
             if access in (True, 'chat', 'chat-subscription'): rows.append([button('AI-ассистент','/menu ai')])
             if access is True: rows.append([button('Сервер','/menu server')])
             rows.append([button('Мой ID','/id')])
@@ -883,9 +888,13 @@ def inline_keyboard(answer, prompt, access, actions):
         if target in targets: return
         key = secrets.token_hex(8); actions[key] = target
         navigation.append({'text':label, 'callback_data':'nd:' + key})
-    if command == '/apps' and len(prompt.split()) > 1: add('← Платформы','/apps')
+    if command == '/apps':
+        add('← Операционные системы' if len(prompt.split()) > 1 else '← Устройства', '/apps' if len(prompt.split()) > 1 else '/devices')
+    elif command == '/connect' and len(prompt.split()) > 1:
+        add('← Приложения' if len(prompt.split()) > 2 else '← Операционные системы', '/connect ' + prompt.split()[1] if len(prompt.split()) > 2 else '/connect')
     elif command == '/logfile': add('← Журналы','/logs')
-    elif section and detail.get('sections',{}).get(section) and command != '/menu': add('← Назад','/menu ' + section)
+    elif section and detail.get('sections',{}).get(section) and command not in ('/menu', '/subscription'):
+        add('← Назад', '/subscription' if section=='subscription' else '/menu ' + section)
     if command not in ('/menu','/start','/help','/_refresh_menu'):
         add('Главное меню','/menu')
     if navigation: rows.append(navigation)
@@ -1083,7 +1092,8 @@ async def run_bot(settings):
             else:
                 keyboard = markup if index == 0 and markup else reply_keyboard(access)
                 try:
-                    sent = await send_reply_part(inbox, cached, settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=keyboard)
+                    sent = await send_reply_part(inbox, cached, settings, 'sendMessage', chat_id=actor, text=chunk, parse_mode='HTML', reply_markup=keyboard,
+                        **({'link_preview_options': {'is_disabled': True}} if '<a href=' in chunk else {}))
                 except TelegramAPIError as error:
                     if error.status != 400 or index != 0:
                         raise

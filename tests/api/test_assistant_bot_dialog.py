@@ -111,7 +111,8 @@ class BotDialogTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot, 'agent_request', new=AsyncMock()) as agent, patch.object(bot, 'server_command', new=AsyncMock(return_value='Своя подписка')) as server:
             for phrase in ('мой профиль', 'мои устройства', 'мой трафик', 'моя подписка'):
                 self.assertEqual(await bot.reply({}, {'id': 11}, phrase, 'subscription'), 'Своя подписка')
-            self.assertIn('импорт', await bot.reply({}, {'id': 11}, 'как подключиться', 'subscription'))
+            self.assertEqual(await bot.reply({}, {'id': 11}, 'как подключиться', 'subscription'), 'Своя подписка')
+            server.assert_awaited_with({}, 11, '/connect')
             server.reset_mock()
             for role in ('subscription', 'chat', False):
                 for phrase in ('ресурсы', 'перезапусти mihomo', 'логи mihomo', 'безопасность'):

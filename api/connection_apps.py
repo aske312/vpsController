@@ -7,6 +7,15 @@ from fastapi import HTTPException
 PLATFORMS = {'windows': 'Windows', 'android': 'Android', 'ios': 'iPhone / iPad', 'macos': 'macOS', 'linux': 'Linux'}
 
 
+def bot_apps(platform):
+    """Curated HWID-capable apps, separate from full configuration verification."""
+    if platform not in PLATFORMS:
+        raise HTTPException(422, 'Выберите операционную систему')
+    catalog = json.loads((Path(__file__).with_name('resources') / 'bot-connection-apps.json').read_text(encoding='utf-8'))
+    apps = {row['id']: row for row in catalog['apps']}
+    return [apps[identity] for identity in catalog['platforms'][platform]]
+
+
 def guide(platform=None):
     if platform is None:
         return ('Приложения для подключения\nВыберите вашу платформу:\n' +

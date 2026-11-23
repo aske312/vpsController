@@ -6,6 +6,7 @@ import re
 import time
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 import assistant_control as control
@@ -58,6 +59,58 @@ def profile_item(api, settings, actor, identity=None):
     return next((row for row in assistant_mihomo.profiles(api, actor)['items'] if row['id'] == identity), None)
 
 
+def subscription_link(api, settings, actor, identity=None):
+    import assistant_mihomo
+    if identity is None:
+        account = next((row for row in settings.get('accounts', []) if str(row['telegram_id']) == actor), {})
+        identity = account.get('mihomo_profile_id')
+    if not identity:
+        return None
+    if not re.fullmatch(assistant_mihomo.ID, identity):
+        raise HTTPException(422, 'Некорректный профиль подписки')
+    return assistant_mihomo.call(api, actor, 'GET', '/profiles/' + identity + '/subscription', {}).get('url')
+
+
+def subscription_anchor(link):
+    if not isinstance(link, str):
+        return 'Ссылка на подписку пока недоступна.'
+    try:
+        parsed = urlsplit(link)
+        valid = parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password
+    except ValueError:
+        valid = False
+    if not valid or any(character.isspace() for character in link):
+        return 'Ссылка на подписку пока недоступна.'
+    return '[Ссылка на подписку](' + link.replace('(', '%28').replace(')', '%29') + ')'
+
+
+def connection_view(api, settings, actor, command, args):
+    import connection_apps
+    title = '＋ Добавить устройство' if command == '/apps' else '❓ Как подключиться'
+    if not args:
+        return result(title + '\nВыберите операционную систему устройства.',
+                      [[button(label, command + ' ' + key)] for key, label in connection_apps.PLATFORMS.items()])
+    if len(args) > (2 if command == '/connect' else 1):
+        raise HTTPException(422, 'Выберите приложение из списка')
+    platform = args[0]
+    apps = connection_apps.bot_apps(platform)
+    link = subscription_anchor(subscription_link(api, settings, actor))
+    if command == '/apps':
+        text = title + ' · ' + connection_apps.PLATFORMS[platform] + '\n\n' + link
+        text += '\n\nВыберите приложение с поддержкой HWID. После импорта и обновления подписки устройство появится в списке автоматически. Включите отправку HWID в настройках приложения.'
+        return result(text, [[button(app['name'], url=app['url'])] for app in apps])
+    if len(args) == 1:
+        return result(title + ' · ' + connection_apps.PLATFORMS[platform] + '\n\nВыберите уже установленное приложение.\n\n' + link,
+                      [[button(app['name'], '/connect ' + platform + ' ' + app['id'])] for app in apps])
+    app = next((row for row in apps if row['id'] == args[1]), None)
+    if not app:
+        raise HTTPException(422, 'Выберите приложение для этой операционной системы')
+    steps = '\n'.join(str(index) + '. ' + step for index, step in enumerate(app['instructions'], 1))
+    text = title + ' · ' + app['name'] + '\n\n' + link + '\n\n' + steps
+    text += '\n\n**Устройство не появилось?**\nПроверьте, что отправка HWID включена, и ещё раз обновите подписку.\n\n**Изменились настройки подписки?**\nОбновите её в приложении — добавлять новую ссылку не нужно.'
+    return result(text)
+
+
 def subscription(api, settings, actor, command, args):
     import assistant_mihomo
     identity=args[0] if args else assistant_mihomo.profile_for(settings,actor).get('mihomo_profile_id')
@@ -65,12 +118,14 @@ def subscription(api, settings, actor, command, args):
     if command=='/subscription':
         if not identity or not re.fullmatch(assistant_mihomo.ID,identity):
             return result('Подписка\nПодписка ещё не оформлена. Передайте ваш Telegram ID владельцу продукта, чтобы он создал и привязал подписку.\n\nВаш ID: `' + actor + '`\n\nА пока — молите Императора.')
-        link=assistant_mihomo.call(api,actor,'GET','/profiles/'+identity+'/subscription',{}).get('url')
+        link=subscription_link(api,settings,actor,identity)
     try: item = profile_item(api, settings, actor, identity)
     except HTTPException:
         if command!='/subscription': raise
         item=None
-    if not item and command=='/subscription' and link: return result('🔗 **Моя подписка**\n'+link+'\n\nСтатистика временно недоступна.')
+    navigation = [[button('Устройства', '/devices')], [button('Как подключиться', '/connect')]]
+    if not item and command=='/subscription' and link:
+        return result('🔗 **Моя подписка**\n'+subscription_anchor(link)+'\n\nСтатистика временно недоступна.', navigation)
     if not item: return result('Подписка не привязана или недоступна. Обратитесь к администратору.')
     if command == '/devices':
         try: stats = assistant_mihomo.call(api, actor, 'GET', '/profiles/' + item['id'] + '/stats', {})
@@ -84,7 +139,8 @@ def subscription(api, settings, actor, command, args):
             rows.append(icon + ' ' + str(device.get('name') or device['id'])[:80] + '\n' + str(device.get('client_name') or device.get('os') or 'ОС не определена')[:60] + ' · ' + data_size(total))
         if not devices: rows.append('Отдельные устройства пока не зарегистрированы.')
         if len(devices) > 12: rows.append(f'Ещё устройств: {len(devices)-12}')
-        return result('\n\n'.join(rows))
+        rows.append('Новое устройство появится после импорта подписки в приложение с включённым HWID.')
+        return result('\n\n'.join(rows), [[button('＋ Добавить устройство', '/apps')]])
     status,limits=item.get('limits_status') or {},item.get('limits') or {}
     used=status.get('used_bytes')
     traffic=f'{used/1000000000:.2f} GB' if type(used) in (int,float) else 'нет данных'
@@ -97,7 +153,8 @@ def subscription(api, settings, actor, command, args):
                    'Скорость: '+(str(limits['speed_mbps'])+' Мбит/с' if limits.get('speed_mbps') is not None else 'без ограничения'),
                    'Подключений: '+str(len(item.get('connections',[])))])
     if command == '/subscription':
-        text = '🔗 **Моя подписка**\n' + (link or 'Публичная ссылка ещё не настроена.') + '\n\n' + '\n'.join(text.splitlines()[:4])
+        text = '🔗 **Моя подписка**\n' + subscription_anchor(link) + '\n\n' + text
+        return result(text, navigation)
     return result(text)
 
 
@@ -281,7 +338,7 @@ def admin(api, settings, actor, args, request_id):
 def view(api, actor, prompt, request_id=None):
     parts = prompt.strip().split(); command = parts[0].split('@')[0].lower() if parts else ''; args=parts[1:]
     permissions = {'/status':'server_read','/services':'server_read','/network':'network_read','/security':'security_read','/diagnostics':'diagnostics',
-                   '/apps':'subscription_read','/subscription':'subscription_read','/profile':'subscription_read','/devices':'subscription_read','/logs':'logs_read','/logfile':'logs_read','/admin':'subscriptions_admin','/telegram':'telegram_read'}
+                   '/apps':'subscription_read','/connect':'subscription_read','/subscription':'subscription_read','/profile':'subscription_read','/devices':'subscription_read','/logs':'logs_read','/logfile':'logs_read','/admin':'subscriptions_admin','/telegram':'telegram_read'}
     if command not in permissions: return None
     settings = control.read(api); roles.require(settings,actor,permissions[command])
     if command=='/telegram':
@@ -289,12 +346,8 @@ def view(api, actor, prompt, request_id=None):
         return assistant_bot_telegram.view(api, actor, prompt, request_id)
     if command=='/admin': return admin(api,settings,actor,args,request_id)
     if command in ('/subscription','/profile','/devices'): return subscription(api,settings,actor,command,args)
-    if command=='/apps':
-        import connection_apps
-        if not args: return result('Выберите платформу.',[[button(label,'/apps '+key)] for key,label in connection_apps.PLATFORMS.items()])
-        if len(args)!=1 or args[0] not in connection_apps.PLATFORMS: raise HTTPException(422,'Выберите платформу')
-        catalog=json.loads((Path(__file__).resolve().parents[1]/'protocol-images/mihomo/client-apps.json').read_text(encoding='utf-8'))
-        return result('Приложения · '+connection_apps.PLATFORMS[args[0]],[[button(row['name']+' · '+row['label'],url=row['url'])] for row in catalog if args[0] in row['platforms']])
+    if command in ('/apps', '/connect'):
+        return connection_view(api, settings, actor, command, args)
     if command=='/logs' and (not args or len(args)==1 and args[0].isdigit()):
         services = {'application':'Приложение','system':'Система','ssh':'SSH', **{key:row.get('name',key) for key,row in api.managed_services().items()}}
         items=list(services.items()); pages=max(1,(len(items)+5)//6)

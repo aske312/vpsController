@@ -51,6 +51,27 @@ class AssistantFormatTests(unittest.TestCase):
             text += parser.text
         self.assertEqual(text, raw + '\n')
 
+    def test_subscription_links_are_escaped_and_code_is_not_linkified(self):
+        value=bot.telegram_html('[Моя <подписка>](https://example.org/s/token?a=1&b=2)')
+        self.assertEqual(value,'<a href="https://example.org/s/token?a=1&amp;b=2">Моя &lt;подписка&gt;</a>')
+        for unsafe in ('[link](javascript:alert(1))','[link](https://user:password@example.org/)'):
+            self.assertNotIn('<a ',bot.telegram_html(unsafe))
+        self.assertIn('<code>[link](https://example.org/)</code>',bot.telegram_html('`[link](https://example.org/)`'))
+
+    def test_long_hyperlinks_reopen_with_valid_anchor_attributes(self):
+        label='🙂' * 2400
+        chunks=bot.telegram_chunks('['+label+'](https://example.org/s/token?a=1&b=2)')
+        self.assertGreater(len(chunks),1)
+        visible=''
+        for chunk in chunks:
+            self.assertIn('<a href="https://example.org/s/token?a=1&amp;b=2">',chunk)
+            self.assertNotIn('</a href',chunk)
+            parser=Visible(); parser.feed(chunk)
+            self.assertEqual(parser.stack,[])
+            self.assertLessEqual(len(parser.text.encode('utf-16-le'))//2,3500)
+            visible+=parser.text
+        self.assertEqual(visible,label)
+
     def test_nodera_persona_tone_and_permissions_are_in_every_request(self):
         value = runner.persona({'server_name': 'test-host', 'assistant_style': 'technical', 'assistant_instructions': 'Use exact units', 'api_key': 'secret-key'})
         self.assertIn('девушка', value)

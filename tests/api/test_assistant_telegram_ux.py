@@ -119,6 +119,48 @@ class TelegramViewsTests(unittest.TestCase):
             self.assertNotIn('common',devices); self.assertNotIn('Private foreign',devices)
             with self.assertRaises(mihomo.HTTPException): views.view(api,'11','/subscription foreign')
 
+    def test_subscription_devices_apps_and_faq_form_one_scoped_flow(self):
+        import connection_apps
+        settings=control.read(api); settings['accounts'][0].update(role='user',products=['mihomo'],mihomo_profile_id='own')
+        with patch.object(control,'read',return_value=settings), patch.object(mihomo,'request',side_effect=self.request) as requests:
+            screen=views.view(api,'11','/subscription')
+            self.assertIn('[Ссылка на подписку](https://example.org/s/own-only)',screen['text'])
+            for field in ('Состояние: активна','Трафик: 1.00 GB','Скорость: 50 Мбит/с','Срок:'):
+                self.assertIn(field,screen['text'])
+            self.assertEqual([item['command'] for row in screen['buttons'] for item in row],['/devices','/connect'])
+            devices=views.view(api,'11','/devices')
+            self.assertEqual(devices['buttons'],[[{'text':'＋ Добавить устройство','command':'/apps'}]])
+            for platform in connection_apps.PLATFORMS:
+                apps=views.view(api,'11','/apps '+platform)
+                self.assertEqual(len(apps['buttons']),3)
+                self.assertEqual(len({item['url'] for row in apps['buttons'] for item in row}),3)
+                self.assertIn('[Ссылка на подписку](https://example.org/s/own-only)',apps['text'])
+                self.assertNotIn('Hiddify',str(apps)); self.assertNotIn('Clash Verge',str(apps))
+                faq=views.view(api,'11','/connect '+platform)
+                self.assertEqual(len(faq['buttons']),3)
+                for row in faq['buttons']:
+                    instructions=views.view(api,'11',row[0]['command'])
+                    self.assertIn('HWID',instructions['text'])
+                    self.assertIn('[Ссылка на подписку](https://example.org/s/own-only)',instructions['text'])
+                    self.assertNotIn('Установите',instructions['text'])
+            self.assertTrue(all(call.args[0]=='GET' for call in requests.call_args_list))
+            with self.assertRaises(mihomo.HTTPException): views.view(api,'11','/apps windows foreign')
+            with self.assertRaises(mihomo.HTTPException): views.view(api,'11','/connect ios nodera')
+
+    def test_subscription_entry_opens_summary_and_menu_has_no_separate_apps_or_status(self):
+        token=bot.access_details.set({'permissions':['subscription_read'],'sections':{'subscription':True}})
+        view=bot.command_view.set(None)
+        try:
+            actions={}; bot.inline_keyboard('','/menu','subscription',actions)
+            self.assertIn('/subscription',actions.values())
+            self.assertNotIn('/menu subscription',actions.values())
+            published=dict(bot.available_commands())
+            self.assertNotIn('profile',published); self.assertNotIn('apps',published)
+            with patch.object(bot,'server_command',new=AsyncMock(return_value='summary')) as call:
+                answer=asyncio.run(bot.reply({}, {'id':11}, '/menu subscription', 'subscription'))
+            self.assertEqual(answer,'summary'); self.assertEqual(call.call_args.args[-1],'/subscription')
+        finally: bot.access_details.reset(token); bot.command_view.reset(view)
+
     def test_summaries_are_short_unknowns_stay_unknown_and_logs_are_files(self):
         value={'findings':[{'id':'ssh','state':'risk','risk':'SSH password enabled'}],
                'server':{'public_ip':'192.0.2.1'},'route':{'label':'Direct'},'resolvers':['1.1.1.1'], 'listeners':[],
@@ -221,6 +263,50 @@ class TelegramViewsTests(unittest.TestCase):
         self.assertTrue({101,102} <= {row['message_id'] for row in deleted})
         self.assertTrue(all(row['chat_id']==11 for row in deleted))
         self.assertTrue(all(item['command'] not in ('models','ai','subscription','status') for row in published for item in row))
+
+    def test_subscription_navigation_delivers_single_messages_with_real_hyperlinks(self):
+        settings=control.read(api); settings['accounts'][0].update(role='user',products=['mihomo'],mihomo_profile_id='own')
+        actual=httpx.AsyncClient; sent=[]
+        async def run():
+            polls=0
+            async def identify(*args):
+                bot.access_details.set({'role':'user','permissions':['subscription_read'],'products':['mihomo'],
+                                        'linked_profile':'own','sections':{'subscription':True}})
+                return 'subscription'
+            async def telegram(settings,method,**payload):
+                nonlocal polls
+                if method=='getWebhookInfo': return {}
+                if method=='getUpdates':
+                    if polls:
+                        async with asyncio.timeout(6):
+                            while len(sent)<polls: await asyncio.sleep(.01)
+                    polls+=1
+                    if polls>3: raise asyncio.CancelledError()
+                    return [{'update_id':polls,'message':{'message_id':polls,'from':{'id':11},'chat':{'id':11,'type':'private'},
+                             'text':('/menu subscription','/devices','/apps ios')[polls-1]}}]
+                if method=='sendMessage':
+                    sent.append(payload); return {'message_id':100+len(sent),'chat':{'id':11,'type':'private'}}
+                return True
+            def transport(request):
+                response=self.client.post(request.url.path,headers=dict(request.headers),json=json.loads(request.content))
+                return httpx.Response(response.status_code,json=response.json())
+            with patch.object(control,'read',return_value=settings), patch.object(mihomo,'request',side_effect=self.request), \
+                 patch.dict(bot.os.environ,{'STATE_DIRECTORY':str(self.root/'subscription-navigation')}), \
+                 patch.object(bot,'identify',side_effect=identify),patch.object(bot,'bot_api',side_effect=telegram), \
+                 patch.object(bot,'remember_incoming',new=AsyncMock()), \
+                 patch.object(bot.httpx,'AsyncClient',side_effect=lambda **kw:actual(transport=httpx.MockTransport(transport),**kw)), \
+                 patch.object(bot,'agent_request',new=AsyncMock(side_effect=AssertionError('Subscription called AI'))):
+                with self.assertRaises(asyncio.CancelledError): await asyncio.wait_for(bot.bot(settings),15)
+        asyncio.run(run())
+        self.assertEqual(len(sent),3)
+        for index in (0,2):
+            self.assertIn('<a href="https://example.org/s/own-only">Ссылка на подписку</a>',sent[index]['text'])
+            self.assertEqual(sent[index]['link_preview_options'],{'is_disabled':True})
+            self.assertEqual(sent[index]['parse_mode'],'HTML')
+        self.assertIn('Состояние: активна',sent[0]['text'])
+        self.assertNotIn('Приложения',[b['text']for row in sent[0]['reply_markup']['inline_keyboard']for b in row])
+        self.assertIn('＋ Добавить устройство',[b['text']for row in sent[1]['reply_markup']['inline_keyboard']for b in row])
+        self.assertEqual(sum('url'in b for row in sent[2]['reply_markup']['inline_keyboard']for b in row),3)
 
     def test_log_export_uses_telegram_multipart_with_bounded_utf8_bytes(self):
         actual=httpx.AsyncClient; requests=[]

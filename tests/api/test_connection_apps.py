@@ -1,4 +1,5 @@
 import unittest
+from urllib.parse import urlsplit
 from unittest.mock import patch
 
 from tests.api.support import api
@@ -8,6 +9,18 @@ import connection_apps
 
 
 class ConnectionAppsTests(unittest.TestCase):
+    def test_bot_catalog_has_three_distinct_hwid_apps_with_evidence_per_os(self):
+        for platform in connection_apps.PLATFORMS:
+            apps=connection_apps.bot_apps(platform)
+            self.assertEqual(len(apps),3,platform)
+            self.assertEqual(len({app['id']for app in apps}),3)
+            for app in apps:
+                self.assertIn(platform,app['platforms'])
+                self.assertIn(app['hwid_header'],{'X-HWID','X-Device-ID'})
+                self.assertEqual(urlsplit(app['hwid_evidence']).scheme,'https')
+                self.assertEqual(urlsplit(app['url']).scheme,'https')
+                self.assertTrue(app['instructions'])
+
     def test_windows_apps_include_our_client_and_platform_selection_is_bounded(self):
         windows = connection_apps.guide('windows')
         self.assertIn('Nodera', windows)

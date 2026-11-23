@@ -1,0 +1,60 @@
+{
+  "platforms": {
+    "windows": ["nodera", "flclashx", "koala"],
+    "android": ["flclashx", "prizrak", "clashmi"],
+    "ios": ["clashmi", "karing", "rabbithole"],
+    "macos": ["flclashx", "prizrak", "koala"],
+    "linux": ["flclashx", "prizrak", "koala"]
+  },
+  "apps": [
+    {
+      "id": "nodera", "name": "Nodera", "platforms": ["windows"],
+      "url": "https://github.com/aske312/NoderaClient",
+      "hwid_header": "X-Device-ID",
+      "hwid_evidence": "https://github.com/aske312/NoderaClient/blob/ac994a5fbe057b763ce768c8f7e7252c0e9f8bf3/nodera/subscription.py",
+      "instructions": ["Откройте добавление подписки по URL и вставьте ссылку из этого сообщения.", "Обновите подписку, выберите профиль и включите подключение. Идентификатор устройства Nodera отправляет автоматически."]
+    },
+    {
+      "id": "flclashx", "name": "FlClashX", "platforms": ["windows", "android", "macos", "linux"],
+      "url": "https://github.com/pluralplay/FlClashX/releases",
+      "hwid_header": "X-HWID",
+      "hwid_evidence": "https://github.com/pluralplay/FlClashX/blob/main/lib/models/profile.dart",
+      "instructions": ["В разделе профилей нажмите «＋» и добавьте подписку по URL из этого сообщения.", "Оставьте включённой настройку «Отправлять HWID» и обновите подписку.", "Выберите добавленный профиль и включите подключение."]
+    },
+    {
+      "id": "prizrak", "name": "Prizrak-Box", "platforms": ["windows", "android", "macos", "linux"],
+      "url": "https://github.com/legiz-ru/Prizrak-Box/releases",
+      "hwid_header": "X-HWID",
+      "hwid_evidence": "https://github.com/legiz-ru/Prizrak-Box/releases",
+      "instructions": ["Добавьте новый профиль по URL, используя ссылку из этого сообщения.", "В параметрах профиля оставьте включённой отправку HWID и обновите подписку.", "Выберите профиль и включите подключение."]
+    },
+    {
+      "id": "koala", "name": "Koala Clash", "platforms": ["windows", "macos", "linux"],
+      "url": "https://github.com/coolcoala/koala-clash/releases",
+      "hwid_header": "X-HWID",
+      "hwid_evidence": "https://github.com/coolcoala/koala-clash/releases",
+      "instructions": ["Откройте раздел профилей и добавьте подписку по URL из этого сообщения.", "Разрешите отправку HWID, если она отключена, и обновите подписку.", "Выберите профиль и включите подключение."]
+    },
+    {
+      "id": "clashmi", "name": "Clash Mi", "platforms": ["android", "ios"],
+      "url": "https://clashmi.app/download",
+      "hwid_header": "X-HWID",
+      "hwid_evidence": "https://clashmi.app/guide/faq#x-hwid-是什么-有什么作用",
+      "instructions": ["Добавьте подписку по URL из этого сообщения.", "В параметрах подписки включите «X-HWID»: без этой настройки отдельное устройство не зарегистрируется.", "Обновите подписку, выберите конфигурацию и включите подключение."]
+    },
+    {
+      "id": "karing", "name": "Karing", "platforms": ["ios"],
+      "url": "https://apps.apple.com/us/app/karing/id6472431552",
+      "hwid_header": "X-HWID",
+      "hwid_evidence": "https://github.com/KaringX/karing/blob/main/lib/screens/add_profile_by_link_or_content_screen.dart",
+      "instructions": ["Добавьте профиль по ссылке из этого сообщения.", "При добавлении или редактировании подписки включите «X-HWID» и сохраните настройки.", "Обновите подписку, выберите сервер и включите подключение."]
+    },
+    {
+      "id": "rabbithole", "name": "RabbitHole", "platforms": ["ios"],
+      "url": "https://apps.apple.com/us/app/rabbithole-vpn-client/id6683309629",
+      "hwid_header": "X-HWID",
+      "hwid_evidence": "https://github.com/remnawave/panel/blob/main/src/data/clients.ts",
+      "instructions": ["Добавьте конфигурацию по URL из этого сообщения.", "Обновите конфигурацию: приложение передаёт идентификатор устройства при получении подписки.", "Выберите конфигурацию и включите VPN."]
+    }
+  ]
+}
