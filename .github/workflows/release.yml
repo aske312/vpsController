@@ -154,6 +154,9 @@ jobs:
             --notes "$release_notes" \
             "${release_flags[@]}" \
             --latest=false
+          gh release edit "$release_tag" --draft=false
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" \
+            | python3 scripts/verify-published-release.py "$release_tag" "$GITHUB_SHA"
           [[ "$GITHUB_REF_NAME" == "pro" ]] || exit 0
           version_tag="pro-${VERSION}"
           if ! git rev-parse "$version_tag" >/dev/null 2>&1; then
