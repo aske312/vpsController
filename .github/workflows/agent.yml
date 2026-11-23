@@ -34,6 +34,8 @@ jobs:
           sudo python3 tests/relay_standalone_smoke.py . --api-port 19443
       - name: Verify authenticated manual update through systemd
         run: sudo python3 tests/relay_update_smoke.py
+      - name: Verify native runtime networking inside the Agent sandbox
+        run: sudo python3 tests/relay_systemd_smoke.py
   release:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/agent' || github.ref == 'refs/heads/test-agent')
     needs: verify

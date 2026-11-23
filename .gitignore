@@ -17,6 +17,7 @@
 !/tests/relay_security_test.py
 !/tests/relay_update_test.py
 !/tests/relay_update_smoke.py
+!/tests/relay_systemd_smoke.py
 !/tests/installer_routing_test.py
 __pycache__/
 *.pyc
