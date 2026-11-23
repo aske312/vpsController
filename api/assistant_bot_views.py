@@ -124,6 +124,8 @@ def subscription(api, settings, actor, command, args):
         if command!='/subscription': raise
         item=None
     navigation = [[button('Устройства', '/devices')], [button('Как подключиться', '/connect')]]
+    if roles.allows(settings, actor, 'subscription_manage'):
+        navigation.insert(1, [button('Настройки подписки', '/manage')])
     if not item and command=='/subscription' and link:
         return result('🔗 **Моя подписка**\n'+subscription_anchor(link)+'\n\nСтатистика временно недоступна.', navigation)
     if not item: return result('Подписка не привязана или недоступна. Обратитесь к администратору.')
@@ -337,9 +339,12 @@ def admin(api, settings, actor, args, request_id):
 def view(api, actor, prompt, request_id=None):
     parts = prompt.strip().split(); command = parts[0].split('@')[0].lower() if parts else ''; args=parts[1:]
     permissions = {'/status':'server_read','/services':'server_read','/network':'network_read','/security':'security_read','/diagnostics':'diagnostics',
-                   '/apps':'subscription_read','/connect':'subscription_read','/subscription':'subscription_read','/profile':'subscription_read','/devices':'subscription_read','/logs':'logs_read','/logfile':'logs_read','/admin':'subscriptions_admin','/telegram':'telegram_read'}
+                   '/apps':'subscription_read','/connect':'subscription_read','/subscription':'subscription_read','/profile':'subscription_read','/devices':'subscription_read','/manage':'subscription_manage','/logs':'logs_read','/logfile':'logs_read','/admin':'subscriptions_admin','/telegram':'telegram_read'}
     if command not in permissions: return None
     settings = control.read(api); roles.require(settings,actor,permissions[command])
+    if command == '/manage':
+        import assistant_bot_subscription
+        return assistant_bot_subscription.view(api, settings, actor, args, request_id)
     if command=='/telegram':
         import assistant_bot_telegram
         return assistant_bot_telegram.view(api, actor, prompt, request_id)

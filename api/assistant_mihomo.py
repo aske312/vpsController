@@ -285,7 +285,11 @@ def call(api, actor, method, path, body):
             except (TypeError, ValueError): policy = {}
             if not isinstance(policy, dict): policy = {}
             names = {group.get('name') for group in policy.get('groups', [])}
+            # Safe effective defaults for the subscriber UI; no global policy contents.
+            keys = {row['key'] for row in value.get('schema', []) if row.get('type') == 'boolean'}
+            keys |= {'connection_mode', 'routing_scope', 'vpn_services', 'mode'}
             return {'schema': value.get('schema', []), 'presets': value.get('presets', []),
+                    'profile_defaults': {key: setting for key, setting in value.get('values', {}).items() if key in keys},
                     'structured_policy_schema': value.get('structured_policy_schema'),
                     'policy_groups': [{'id': group.get('id') or group['name'], 'name': group['name'], 'type': group.get('type', 'fallback'),
                                        'rule_count': sum(rule.get('target') == group['name'] for rule in policy.get('rules', []))} for group in policy.get('groups', [])],

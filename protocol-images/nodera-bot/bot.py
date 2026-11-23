@@ -614,7 +614,7 @@ async def profile_reply(settings, actor, prompt):
         return value.get('text')
 
 
-COMMAND_GRANTS = {'subscription':'subscription_read','profile':'subscription_read','devices':'subscription_read','apps':'subscription_read','connect':'subscription_read',
+COMMAND_GRANTS = {'subscription':'subscription_read','profile':'subscription_read','devices':'subscription_read','apps':'subscription_read','connect':'subscription_read','manage':'subscription_manage',
     'models':'model_select','model':'model_select','ai':'chat','status':'server_read','resources':'server_read','services':'server_read','components':'server_read',
     'network':'network_read','security':'security_read','diagnostics':'diagnostics','logs':'logs_read','logfile':'logs_read','admin':'subscriptions_admin','service':'server_manage','telegram':'telegram_read'}
 
@@ -879,7 +879,7 @@ def inline_keyboard(answer, prompt, access, actions):
     if profile_state.get() in ('new', 'name', 'birthdate') and (command_view.get() or {}).get('buttons'): return markup
     rows = (markup or {}).get('inline_keyboard', [])
     targets = set(actions.values())
-    section = ('subscription' if command in ('/subscription','/profile','/devices','/apps','/connect') else
+    section = ('subscription' if command in ('/subscription','/profile','/devices','/apps','/connect','/manage') else
                'server' if command in ('/status','/resources','/services','/components','/network','/security','/logs','/logfile','/diagnostics') else
                'admin' if command in ('/admin','/confirm','/cancel','/operation') else
                'ai' if command in ('/model','/models') else None)
@@ -890,6 +890,8 @@ def inline_keyboard(answer, prompt, access, actions):
         navigation.append({'text':label, 'callback_data':'nd:' + key})
     if command == '/apps':
         add('← Операционные системы' if len(prompt.split()) > 1 else '← Устройства', '/apps' if len(prompt.split()) > 1 else '/devices')
+    elif command == '/manage':
+        add('← Подписка', '/subscription')
     elif command == '/connect' and len(prompt.split()) > 1:
         add('← Приложения' if len(prompt.split()) > 2 else '← Операционные системы', '/connect ' + prompt.split()[1] if len(prompt.split()) > 2 else '/connect')
     elif command == '/logfile': add('← Журналы','/logs')

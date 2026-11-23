@@ -1,3 +1,4 @@
+import profileRoutingRules from "../../../api/resources/profile-routing-rules.json" with { type: "json" };
 import connectionVariants from "../../../protocol-images/mihomo/connection-variants.json" with { type: "json" };
 import type { ProfilePreset, RuleIconGroup } from "./types";
 import ruServices from "../../../protocol-images/mihomo/ru-service-domains.json" with { type: "json" };
@@ -181,22 +182,7 @@ export const p2pClientCatalog = [
   { id: "frostwire", code: "FW", name: "FrostWire" },
 ];
 
-export const profileDirectRules = [
-  { key: "block_malware", code: "SAFE", title: "Фишинг и вредоносные сайты", text: "Опасные домены и фишинг.", group: "Функции" },
-  { key: "block_advertising", code: "ADS", title: "Реклама", text: "Домены рекламных сетей.", group: "Функции" },
-  { key: "quic_compatibility", code: "QUIC", title: "Совместимость QUIC", text: "TCP вместо QUIC для выбранных сайтов.", group: "Функции" },
-  { key: "direct_ru_services", code: "GOS", title: "Госуслуги и операторы", text: "Госуслуги и связь напрямую.", group: "Напрямую" },
-  { key: "block_privacy", code: "PRIV", title: "Трекеры", text: "Аналитика и профилирование.", group: "Функции" },
-  { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
-  { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
-  { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы.", group: "Напрямую" },
-  { key: "direct_downloads", code: "DL", title: "Загрузки", text: "Крупные файлы без VPN.", group: "Напрямую" },
-  { key: "windows_geolocation", code: "GEO", title: "Геолокация Windows", text: "Службы геолокации через провайдера.", group: "Windows" },
-  { key: "direct_local_network", code: "LAN", title: "Локальная сеть", text: "Домашние устройства напрямую.", group: "Сеть" },
-  { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN.", group: "Сеть" },
-  { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN.", group: "Сеть" },
-  { key: "direct_p2p_enabled", code: "P2P", title: "P2P и торренты", text: "Выбранные клиенты напрямую.", group: "Сеть" },
-];
+export const profileDirectRules = profileRoutingRules;
 
 function mediaQuicGroup(id: string, code: string, name: string, exclude?: string): RuleIconGroup {
   const service = vpnServices.services.find(entry => entry.id === id);

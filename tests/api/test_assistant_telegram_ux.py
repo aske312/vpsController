@@ -127,7 +127,7 @@ class TelegramViewsTests(unittest.TestCase):
             self.assertIn('[Ссылка на подписку](https://example.org/s/own-only)',screen['text'])
             for field in ('Состояние: активна','Трафик: 1.00 GB','Скорость: 50 Мбит/с','Срок:'):
                 self.assertIn(field,screen['text'])
-            self.assertEqual([item['command'] for row in screen['buttons'] for item in row],['/devices','/connect'])
+            self.assertEqual([item['command'] for row in screen['buttons'] for item in row],['/devices','/manage','/connect'])
             devices=views.view(api,'11','/devices')
             self.assertEqual(devices['buttons'],[[{'text':'＋ Добавить устройство','command':'/apps'}]])
             for platform in connection_apps.PLATFORMS:
