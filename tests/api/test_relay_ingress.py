@@ -58,6 +58,17 @@ class SecurityTests(unittest.TestCase):
         saved['auth']['credential_id'] = 'f'*32
         with self.assertRaises(OperationConflict): relay_ingress.credential(self.control, saved)
 
+    def test_udp_proxies_do_not_use_tcp_carrier_with_the_same_listen_port(self):
+        with patch('relay_cdn.resolve', return_value='104.16.1.2'):
+            self.control.ensure_cdn(self.host_id, 'cdn.example', 'd'*32)
+        route = self.control.read()['routes'][0]
+        nodes = [{'name': kind, 'type': kind, 'server': fixtures.AGENT,
+                  'port': route['listen_port']} for kind in ('wireguard', 'hysteria2', 'tuic')]
+        config = {'proxies': nodes}
+        selections = {node['name']: {'settings': {'relay_host_id': self.host_id}} for node in nodes}
+        result = yaml.safe_load(relay_ingress.protect_subscription(self.control, yaml.safe_dump(config), selections))
+        self.assertEqual(result, config)
+
     def test_legacy_cdn_migration_adds_a_secure_entry_and_keeps_delivered_ports_alive(self):
         with patch('relay_cdn.resolve', return_value='104.16.1.2'):
             self.control.ensure_cdn(self.host_id, 'cdn.example', 'c'*32)
