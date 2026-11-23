@@ -17,6 +17,12 @@ spec.loader.exec_module(credentials)
 
 
 class StandaloneTests(unittest.TestCase):
+    def test_running_version_matches_the_published_update_manifest(self):
+        image = ROOT / 'protocol-images/relay-agent'
+        manifest = json.loads((image / 'manifest.json').read_text())
+        reported = subprocess.check_output([sys.executable, str(image / 'agent.py'), '--version'], text=True).strip()
+        self.assertEqual(reported, manifest['version'])
+
     @unittest.skipUnless(__import__('os').name == 'posix', 'Installer config uses Unix ownership')
     def test_installer_preserves_valid_limits_and_rejects_invalid_before_replacing_config(self):
         import grp
