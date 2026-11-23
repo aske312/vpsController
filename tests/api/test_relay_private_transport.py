@@ -81,12 +81,41 @@ class PrivateOperationsTests(unittest.TestCase):
 
     def test_failed_proof_blocks_export_until_explicit_recheck(self):
         self.probe.side_effect = OSError('synthetic failure')
-        with self.assertRaises(ValueError): self.enable()
+        with self.assertRaises(private.PrivateTransportError) as error: self.enable()
+        self.assertEqual(error.exception.stage, 'traffic_probe')
+        self.assertIn('TCP/UDP', str(error.exception))
+        self.assertNotIn('synthetic failure', str(error.exception))
         with self.assertRaises(ValueError): private.active(self.control, self.host)
         self.assertEqual(private.record(self.control, self.host)['state'], 'unknown')
         self.probe.side_effect = None;self.enable()
         self.assertEqual(private.active(self.control, self.host)['generation'], 'a'*32)
         self.assertEqual(len([row for row in self.agent.calls if row[0] == 'PUT']), 1)
+
+    def test_failed_agent_runtime_has_an_actionable_reason_without_remote_secrets(self):
+        request = self.agent.request
+        def failed_runtime(method, path, body=None, revision=None):
+            result = request(method, path, body, revision)
+            if method == 'GET' and '/private-transports/' in path:
+                return {**result, 'state': 'failed', 'error': 'password=remote-secret'}
+            return result
+        with patch.object(self.agent, 'request', side_effect=failed_runtime):
+            for _ in range(2):
+                with self.assertRaises(private.PrivateTransportError) as error: self.enable()
+                self.assertEqual(error.exception.stage, 'agent_runtime')
+                self.assertIn('Обновите Relay Agent', str(error.exception))
+                self.assertNotIn('remote-secret', str(error.exception))
+        self.assertEqual(private.record(self.control, self.host)['state'], 'unknown')
+        self.probe.assert_not_called()
+        self.assertEqual(len([row for row in self.agent.calls if row[0] == 'PUT']), 1)
+
+    def test_origin_start_failure_is_distinct_from_remote_or_traffic_failure(self):
+        with patch.object(private, 'install_origin', side_effect=RuntimeError('token=local-secret')):
+            with self.assertRaises(private.PrivateTransportError) as error: self.enable()
+        self.assertEqual(error.exception.stage, 'origin_runtime')
+        self.assertIn('основном VPS', str(error.exception))
+        self.assertNotIn('local-secret', str(error.exception))
+        self.assertFalse(any(row[0] == 'PUT' for row in self.agent.calls))
+        self.assertEqual(private.record(self.control, self.host)['state'], 'unknown')
 
     def test_subscription_preserves_keys_adds_one_helper_and_no_group_fallback(self):
         self.enable()

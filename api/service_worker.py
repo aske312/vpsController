@@ -132,9 +132,12 @@ def apply_relay_request(api, name, path, digest, identity):
         api.RelayAgentUpdate.model_validate({key: payload[key] for key in ('version', 'digest', 'expected_revision')})
         api.relay_update.perform(api, payload, identity)
     elif name == 'relay-private-transport':
-        from relay_private_transport import perform
+        from relay_private_transport import PrivateTransportError, perform
         api.RelayPrivateTransport.model_validate({key: payload[key] for key in ('enabled', 'expected_revision')})
-        perform(api, payload, identity)
+        try:
+            perform(api, payload, identity)
+        except PrivateTransportError as exc:
+            raise HTTPException(409, str(exc)) from None
     elif name == 'relay-device-test-start':
         api.relay_device_test.start(api, payload, identity)
     elif name == 'relay-device-test-report':

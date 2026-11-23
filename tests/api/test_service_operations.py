@@ -192,3 +192,23 @@ class ServiceOperationTests(unittest.TestCase):
                 else:
                     self.assertNotIn('private', saved['message'])
                     self.assertNotIn('secret', saved['message'])
+
+    def test_private_relay_failure_stage_reaches_the_durable_operation_card(self):
+        import relay_private_transport as private
+        identity = 'a' * 32
+        name = 'relay-private-transport'
+        started = operations.start(self.root, api.ACTION_FILE, name, ['true'], self.launch, request_id=identity)
+        payload = {'host_id': 'b' * 32, 'enabled': True, 'expected_revision': 'c' * 32}
+        failure = private.PrivateTransportError('agent_runtime')
+        with patch.object(operations, 'load_payload', return_value=payload), \
+             patch.object(operations, 'require_recovery_clear'), \
+             patch.object(private, 'perform', side_effect=failure), \
+             patch.object(api.logger, 'warning'):
+            success = service_worker.execute_operation(api, name,
+                lambda: service_worker.apply_relay_request(api, name, self.root / 'input', 'digest', identity),
+                identity, started['unit'])
+        self.assertFalse(success)
+        saved = operations.read(api.ACTION_FILE)
+        self.assertEqual(saved['state'], 'failed')
+        self.assertEqual(saved['message'], str(failure))
+        self.assertIn('Обновите Relay Agent', saved['message'])

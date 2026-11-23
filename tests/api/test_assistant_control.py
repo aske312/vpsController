@@ -15,6 +15,21 @@ runner = load_module('assistant_image_runner', 'protocol-images/ai-agent/runner.
 
 
 class AssistantTests(unittest.TestCase):
+    def test_bundle_update_is_discoverable_for_the_previously_installed_runtime(self):
+        images = ROOT / 'protocol-images'
+        bundled = json.loads((images / 'nodera/manifest.json').read_text(encoding='utf-8'))['version']
+        def version(value):
+            return tuple(map(int, value.split('.')))
+        for component in control.MODULES:
+            child = json.loads((images / component / 'manifest.json').read_text(encoding='utf-8'))['version']
+            self.assertGreaterEqual(version(bundled), version(child), component)
+        (control.runtime_directory() / 'nodera-version').write_text('1.51.0')
+        with patch.object(control, 'runtime_ready', return_value=False):
+            snapshot = control.status(api)
+        self.assertEqual(snapshot['nodera_version'], '1.51.0')
+        self.assertEqual(snapshot['nodera_available_version'], bundled)
+        self.assertGreater(version(snapshot['nodera_available_version']), version(snapshot['nodera_version']))
+
     def test_default_android_character_replaces_only_the_retired_default(self):
         self.assertEqual(control.DEFAULT_CHARACTER, runner.DEFAULT_CHARACTER)
         self.assertIn(control.DEFAULT_CHARACTER, runner.persona({'accounts': []}, 'panel'))
