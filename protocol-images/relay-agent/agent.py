@@ -1488,6 +1488,13 @@ class Agent:
             writer.close()
             self.http_connections -= 1
 
+    async def watch_memory(self):
+        # Connections can become idle while their native heaps remain resident.
+        # Recovery must not depend on another client arriving first.
+        while True:
+            self.session_budget.pressure.available()
+            await asyncio.sleep(1)
+
     async def serve(self):
         await self.restore()
         await self.private_transport.restore()
@@ -1509,11 +1516,16 @@ class Agent:
         sock.listen(128)
         sock.setblocking(False)
         server = await asyncio.start_server(self.http_client, sock=sock, limit=8192)
-        async with server:
-            await stop.wait()
-        for item in self.measurements.values(): item.close()
-        for route in self.routes.values(): await route.close()
-        await self.private_transport.close()
+        memory_task = asyncio.create_task(self.watch_memory())
+        try:
+            async with server:
+                await stop.wait()
+        finally:
+            memory_task.cancel()
+            await asyncio.gather(memory_task, return_exceptions=True)
+            for item in self.measurements.values(): item.close()
+            for route in self.routes.values(): await route.close()
+            await self.private_transport.close()
 
 
 if __name__ == '__main__':

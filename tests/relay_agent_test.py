@@ -383,6 +383,18 @@ class LiveMemoryTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_idle_agent_reclaims_memory_without_waiting_for_a_new_connection(self):
+        calls=[]
+        pressure=relay.MemoryPressure(lambda:0,reclaim=lambda:calls.append('reclaimed'))
+        self.agent.session_budget.pressure=pressure
+        task=asyncio.create_task(self.agent.watch_memory())
+        try:
+            await asyncio.sleep(.02)
+            self.assertEqual(calls,['reclaimed'])
+            self.assertEqual(self.agent.routes,{})
+        finally:
+            task.cancel();await asyncio.gather(task,return_exceptions=True)
+
     async def test_live_memory_reclamation_preserves_an_existing_tcp_stream(self):
         async def echo(reader,writer):
             try:
