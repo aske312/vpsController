@@ -97,7 +97,7 @@ def connection_view(api, settings, actor, command, args):
     link = subscription_anchor(subscription_link(api, settings, actor))
     if command == '/apps':
         text = title + ' · ' + connection_apps.PLATFORMS[platform] + '\n\n' + link
-        text += '\n\nВыберите приложение с поддержкой HWID. После импорта и обновления подписки устройство появится в списке автоматически. Включите отправку HWID в настройках приложения.'
+        text += '\n\nВыберите приложение для подключения и добавьте в него подписку по ссылке выше.'
         return result(text, [[button(app['name'], url=app['url'])] for app in apps])
     if len(args) == 1:
         return result(title + ' · ' + connection_apps.PLATFORMS[platform] + '\n\nВыберите уже установленное приложение.\n\n' + link,
@@ -107,7 +107,7 @@ def connection_view(api, settings, actor, command, args):
         raise HTTPException(422, 'Выберите приложение для этой операционной системы')
     steps = '\n'.join(str(index) + '. ' + step for index, step in enumerate(app['instructions'], 1))
     text = title + ' · ' + app['name'] + '\n\n' + link + '\n\n' + steps
-    text += '\n\n**Устройство не появилось?**\nПроверьте, что отправка HWID включена, и ещё раз обновите подписку.\n\n**Изменились настройки подписки?**\nОбновите её в приложении — добавлять новую ссылку не нужно.'
+    text += '\n\n**Как обновить подписку?**\nНажмите «Обновить» в приложении — повторно добавлять ссылку не нужно.'
     return result(text)
 
 
@@ -139,7 +139,6 @@ def subscription(api, settings, actor, command, args):
             rows.append(icon + ' ' + str(device.get('name') or device['id'])[:80] + '\n' + str(device.get('client_name') or device.get('os') or 'ОС не определена')[:60] + ' · ' + data_size(total))
         if not devices: rows.append('Отдельные устройства пока не зарегистрированы.')
         if len(devices) > 12: rows.append(f'Ещё устройств: {len(devices)-12}')
-        rows.append('Новое устройство появится после импорта подписки в приложение с включённым HWID.')
         return result('\n\n'.join(rows), [[button('＋ Добавить устройство', '/apps')]])
     status,limits=item.get('limits_status') or {},item.get('limits') or {}
     used=status.get('used_bytes')

@@ -140,7 +140,8 @@ class TelegramViewsTests(unittest.TestCase):
                 self.assertEqual(len(faq['buttons']),3)
                 for row in faq['buttons']:
                     instructions=views.view(api,'11',row[0]['command'])
-                    self.assertIn('HWID',instructions['text'])
+                    self.assertNotIn('Устройство не появилось',instructions['text'])
+                    self.assertNotIn('зарегистрируется',instructions['text'])
                     self.assertIn('[Ссылка на подписку](https://example.org/s/own-only)',instructions['text'])
                     self.assertNotIn('Установите',instructions['text'])
             self.assertTrue(all(call.args[0]=='GET' for call in requests.call_args_list))

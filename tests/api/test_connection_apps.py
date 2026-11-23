@@ -19,6 +19,9 @@ class ConnectionAppsTests(unittest.TestCase):
                 self.assertIn(app['hwid_header'],{'X-HWID','X-Device-ID'})
                 self.assertEqual(urlsplit(app['hwid_evidence']).scheme,'https')
                 self.assertEqual(urlsplit(app['url']).scheme,'https')
+                download=urlsplit(app['url'])
+                self.assertTrue(download.hostname=='apps.apple.com' or
+                                download.hostname=='github.com' and download.path.endswith('/releases'))
                 self.assertTrue(app['instructions'])
 
     def test_windows_apps_include_our_client_and_platform_selection_is_bounded(self):

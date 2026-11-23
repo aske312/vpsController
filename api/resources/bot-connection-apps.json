@@ -9,10 +9,10 @@
   "apps": [
     {
       "id": "nodera", "name": "Nodera", "platforms": ["windows"],
-      "url": "https://github.com/aske312/NoderaClient",
+      "url": "https://github.com/aske312/NoderaClient/releases",
       "hwid_header": "X-Device-ID",
       "hwid_evidence": "https://github.com/aske312/NoderaClient/blob/ac994a5fbe057b763ce768c8f7e7252c0e9f8bf3/nodera/subscription.py",
-      "instructions": ["Откройте добавление подписки по URL и вставьте ссылку из этого сообщения.", "Обновите подписку, выберите профиль и включите подключение. Идентификатор устройства Nodera отправляет автоматически."]
+      "instructions": ["Откройте добавление подписки по URL и вставьте ссылку из этого сообщения.", "Обновите подписку, выберите профиль и включите подключение."]
     },
     {
       "id": "flclashx", "name": "FlClashX", "platforms": ["windows", "android", "macos", "linux"],
@@ -37,24 +37,25 @@
     },
     {
       "id": "clashmi", "name": "Clash Mi", "platforms": ["android", "ios"],
-      "url": "https://clashmi.app/download",
+      "url": "https://github.com/KaringX/clashmi/releases",
+      "platform_urls": {"ios": "https://apps.apple.com/us/app/clash-mi/id6744321968"},
       "hwid_header": "X-HWID",
       "hwid_evidence": "https://clashmi.app/guide/faq#x-hwid-是什么-有什么作用",
-      "instructions": ["Добавьте подписку по URL из этого сообщения.", "В параметрах подписки включите «X-HWID»: без этой настройки отдельное устройство не зарегистрируется.", "Обновите подписку, выберите конфигурацию и включите подключение."]
+      "instructions": ["Добавьте подписку по URL из этого сообщения.", "Для удобства рекомендуется включить «X-HWID» в параметрах подписки.", "Обновите подписку, выберите конфигурацию и включите подключение."]
     },
     {
       "id": "karing", "name": "Karing", "platforms": ["ios"],
       "url": "https://apps.apple.com/us/app/karing/id6472431552",
       "hwid_header": "X-HWID",
       "hwid_evidence": "https://github.com/KaringX/karing/blob/main/lib/screens/add_profile_by_link_or_content_screen.dart",
-      "instructions": ["Добавьте профиль по ссылке из этого сообщения.", "При добавлении или редактировании подписки включите «X-HWID» и сохраните настройки.", "Обновите подписку, выберите сервер и включите подключение."]
+      "instructions": ["Добавьте профиль по ссылке из этого сообщения.", "Для удобства рекомендуется включить «X-HWID» при добавлении или редактировании подписки и сохранить настройки.", "Обновите подписку, выберите сервер и включите подключение."]
     },
     {
       "id": "rabbithole", "name": "RabbitHole", "platforms": ["ios"],
       "url": "https://apps.apple.com/us/app/rabbithole-vpn-client/id6683309629",
       "hwid_header": "X-HWID",
       "hwid_evidence": "https://github.com/remnawave/panel/blob/main/src/data/clients.ts",
-      "instructions": ["Добавьте конфигурацию по URL из этого сообщения.", "Обновите конфигурацию: приложение передаёт идентификатор устройства при получении подписки.", "Выберите конфигурацию и включите VPN."]
+      "instructions": ["Добавьте конфигурацию по URL из этого сообщения.", "Обновите конфигурацию.", "Выберите конфигурацию и включите VPN."]
     }
   ]
 }
