@@ -14,6 +14,8 @@ import socket
 import ssl
 import tempfile
 import time
+import stat
+from datetime import datetime, timedelta, timezone
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
 import platform
@@ -156,7 +158,7 @@ async def connect_request(reader, writer, config):
         raise SecurityError('TCP ingress authentication or destination rejected') from None
 
 
-VERSION = '1.6.3'
+VERSION = '1.6.4'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -168,6 +170,182 @@ TCP_IDLE_TIMEOUT = 300
 UDP_RECEIVE_BUFFER = 256 * 1024
 UDP_MIN_RECEIVE_BUFFER = 64 * 1024
 UDP_SESSION_IDLE_TIMEOUT = 60
+
+
+class DiagnosticLog:
+    """Private daily JSONL: two 512 KiB segments/day, at most seven UTC dates."""
+    MAX_BYTES = 512 * 1024
+    EVENTS = {'snapshot', 'memory_growth', 'memory_recovery', 'memory_pressure', 'memory_reclaimed', 'admission_rejected'}
+    REASONS = {'route_sessions', 'shared_sessions', 'live_memory', 'memory_budget', 'udp_memory_budget', 'udp_live_memory'}
+    METRICS = {'pid', 'rss_bytes', 'rss_peak_bytes', 'threads', 'fd_count', 'child_count', 'child_rss_bytes',
+               'child_rss_peak_bytes', 'host_total_bytes', 'host_available_bytes', 'cgroup_current_bytes',
+               'cgroup_peak_bytes', 'cgroup_limit_bytes', 'tasks', 'tcp_sessions', 'udp_sessions', 'pending_udp',
+               'pending_tls', 'routes', 'http_connections', 'session_budget_used', 'session_budget_limit',
+               'session_memory_bytes', 'udp_buffer_bytes', 'udp_buffer_limit_bytes', 'headroom_bytes',
+               'reclaims', 'reclaim_before_bytes', 'reclaim_after_bytes', 'reclaim_rss_before_bytes',
+               'reclaim_rss_after_bytes', 'host_udp_receive_errors', 'host_udp_send_errors',
+               'host_udp_in_errors', 'log_write_failures'}
+
+    def __init__(self, state_dir, *, clock=time.time, max_bytes=None):
+        self.folder = Path(state_dir) / 'diagnostics'
+        self.clock = clock
+        self.max_bytes = self.MAX_BYTES if max_bytes is None else min(max_bytes, self.MAX_BYTES)
+        self.last_cleanup = None
+        self.failures = 0
+
+    def prune(self):
+        if self.folder.is_symlink(): raise OSError('Unsafe diagnostics directory')
+        if not self.folder.exists(): return
+        today = datetime.fromtimestamp(self.clock(), timezone.utc).date()
+        cutoff = today - timedelta(days=6)
+        for path in self.folder.iterdir():
+            match = re.fullmatch(r'relay-(\d{4}-\d\d-\d\d)\.jsonl(?:\.1)?', path.name)
+            if not match: continue
+            try: day = datetime.strptime(match[1], '%Y-%m-%d').date()
+            except ValueError: continue
+            try:
+                info = path.lstat()
+                if stat.S_ISREG(info.st_mode) and (day < cutoff or day > today or info.st_size > self.max_bytes):
+                    path.unlink()
+            except FileNotFoundError: pass
+        self.last_cleanup = self.clock()
+
+    def write(self, event, metrics, rejections=None):
+        if event not in self.EVENTS: return False
+        now = self.clock()
+        day = datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d')
+        values = {key: value for key, value in metrics.items() if key in self.METRICS and (type(value) is int or value is None)}
+        counts = {key: value for key, value in (rejections or {}).items() if key in self.REASONS and type(value) is int and value > 0}
+        record = {'schema': 1, 'time': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'version': VERSION, 'event': event,
+                  **values, **({'rejections': counts} if counts else {})}
+        data = (json.dumps(record, separators=(',', ':'), allow_nan=False) + '\n').encode()
+        if len(data) > self.max_bytes: return False
+        try:
+            if self.folder.is_symlink(): raise OSError('Unsafe diagnostics directory')
+            self.folder.mkdir(parents=True, mode=0o700, exist_ok=True)
+            if self.last_cleanup is None or now-self.last_cleanup >= 60 or datetime.fromtimestamp(self.last_cleanup, timezone.utc).strftime('%Y-%m-%d') != day:
+                self.prune()
+            path = self.folder / ('relay-' + day + '.jsonl')
+            if path.is_symlink(): raise OSError('Unsafe diagnostics file')
+            if path.exists() and path.stat().st_size + len(data) > self.max_bytes:
+                path.replace(path.with_name(path.name + '.1'))
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+            fd = os.open(path, flags, 0o600)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode): raise OSError('Unsafe diagnostics file')
+                with os.fdopen(fd, 'ab') as stream:
+                    fd = None
+                    stream.write(data)
+            finally:
+                if fd is not None: os.close(fd)
+            return True
+        except (OSError, ValueError):
+            self.failures += 1
+            return False
+
+
+def diagnostic_memory(child_pids=(), proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
+    """Numeric process/cgroup metrics only; no argv, environment or traffic."""
+    def status(path):
+        result = {}
+        try:
+            for line in path.read_text().splitlines():
+                key, _, value = line.partition(':')
+                if key in ('VmRSS', 'VmHWM', 'Threads'):
+                    result[key] = int(value.split()[0]) * (1 if key == 'Threads' else 1024)
+        except (OSError, ValueError): pass
+        return result
+    own = status(proc/'self/status')
+    result = {'pid': os.getpid(), 'rss_bytes': own.get('VmRSS'), 'rss_peak_bytes': own.get('VmHWM'), 'threads': own.get('Threads')}
+    try: result['fd_count'] = sum(1 for _ in (proc/'self/fd').iterdir())
+    except OSError: pass
+    children = [status(proc/str(pid)/'status') for pid in child_pids if type(pid) is int and pid > 0]
+    result.update(child_count=len(children), child_rss_bytes=sum(p.get('VmRSS', 0) for p in children),
+                  child_rss_peak_bytes=sum(p.get('VmHWM', 0) for p in children))
+    try:
+        for line in (proc/'meminfo').read_text().splitlines():
+            key, _, value = line.partition(':')
+            if key in ('MemTotal', 'MemAvailable'):
+                result['host_total_bytes' if key == 'MemTotal' else 'host_available_bytes'] = int(value.split()[0])*1024
+    except (OSError, ValueError): pass
+    try:
+        rows = [line.split()[1:] for line in (proc/'net/snmp').read_text().splitlines() if line.startswith('Udp:')]
+        udp = dict(zip(rows[0], map(int, rows[1])))
+        for source, key in (('RcvbufErrors', 'host_udp_receive_errors'), ('SndbufErrors', 'host_udp_send_errors'), ('InErrors', 'host_udp_in_errors')):
+            if source in udp: result[key] = udp[source]
+    except (OSError, ValueError, IndexError): pass
+    try:
+        groups = (proc/'self/cgroup').read_text().splitlines()
+        unified = next((line.split(':', 2)[2] for line in groups if line.startswith('0::')), None)
+        group = unified if unified is not None else next(line.split(':', 2)[2] for line in groups if 'memory' in line.split(':', 2)[1].split(','))
+        base = cgroups.resolve() if unified is not None else (cgroups/'memory').resolve()
+        folder = (base/group.lstrip('/')).resolve()
+        if folder.is_relative_to(base):
+            files = ('memory.current', 'memory.peak', 'memory.max') if unified is not None else ('memory.usage_in_bytes', 'memory.max_usage_in_bytes', 'memory.limit_in_bytes')
+            for name, key in zip(files, ('cgroup_current_bytes', 'cgroup_peak_bytes', 'cgroup_limit_bytes')):
+                try:
+                    value = (folder/name).read_text().strip()
+                    result[key] = int(value) if value.isdigit() else None
+                except (OSError, ValueError): pass
+    except (OSError, ValueError, StopIteration): pass
+    return result
+
+
+class RelayDiagnostics:
+    """Sample every five seconds; aggregate failures and rate-limit event writes."""
+    def __init__(self, state_dir, *, clock=time.monotonic, sample=diagnostic_memory, log=None):
+        self.clock, self.sample = clock, sample
+        self.log = log if log is not None else DiagnosticLog(state_dir)
+        self.sampled_at = self.snapshot_at = None
+        self.last_events, self.rejections = {}, {}
+        self.previous_memory = {}
+        self.previous_reclaims = 0
+        self.metrics = {}
+        self.pressured = False
+
+    def tick(self, agent):
+        now = self.clock()
+        if self.sampled_at is not None and now-self.sampled_at < 5: return
+        self.sampled_at = now
+        budget = agent.session_budget
+        for key, count in budget.rejections.items():
+            self.rejections[key] = self.rejections.get(key, 0) + count
+        budget.rejections.clear()
+        children = [p.pid for p in agent.private_transport.processes.values() if p.returncode is None]
+        self.metrics = self.sample(children)
+        routes = list(agent.routes.values())
+        self.metrics.update(routes=len(routes), http_connections=agent.http_connections,
+                            tasks=len(asyncio.all_tasks()), tcp_sessions=sum(len(r.slots) for r in routes if r.config['transport']=='tcp'),
+                            udp_sessions=sum(len(r.slots) for r in routes if r.config['transport']=='udp'),
+                            pending_udp=sum(len(r.pending) for r in routes),
+                            pending_tls=sum(slot.cost > 512*1024 for r in routes for slot in r.slots),
+                            session_budget_used=budget.used, session_budget_limit=budget.limit,
+                            session_memory_bytes=budget.memory_used, udp_buffer_bytes=agent.buffer_budget.used,
+                            udp_buffer_limit_bytes=agent.buffer_budget.limit, headroom_bytes=budget.pressure.remaining,
+                            reclaims=budget.pressure.reclaims, reclaim_before_bytes=budget.pressure.reclaim_before,
+                            reclaim_after_bytes=budget.pressure.reclaim_after,
+                            reclaim_rss_before_bytes=budget.pressure.reclaim_rss_before,
+                            reclaim_rss_after_bytes=budget.pressure.reclaim_rss_after, log_write_failures=self.log.failures)
+        events = []
+        if self.snapshot_at is None or now-self.snapshot_at >= 60:
+            events.append('snapshot'); self.snapshot_at = now
+        memory = {k:self.metrics[k] for k in ('rss_bytes', 'cgroup_current_bytes', 'child_rss_bytes') if type(self.metrics.get(k)) is int}
+        if any(value-self.previous_memory.get(key, value) >= 64*1048576 for key, value in memory.items()):
+            events.append('memory_growth'); self.previous_memory = memory
+        elif any(self.previous_memory.get(key, value)-value >= 64*1048576 for key, value in memory.items()):
+            events.append('memory_recovery'); self.previous_memory = memory
+        elif not self.previous_memory: self.previous_memory = memory
+        pressured = budget.pressure.remaining is not None and budget.pressure.remaining < 8*1048576
+        if pressured and not self.pressured: events.append('memory_pressure')
+        self.pressured = pressured
+        if budget.pressure.reclaims != self.previous_reclaims:
+            events.append('memory_reclaimed'); self.previous_reclaims = budget.pressure.reclaims
+        if self.rejections: events.append('admission_rejected')
+        for event in events:
+            if now-self.last_events.get(event, -float('inf')) < (60 if event=='memory_reclaimed' else 15): continue
+            if self.log.write(event, self.metrics, self.rejections if event=='admission_rejected' else None):
+                self.last_events[event] = now
+                if event=='admission_rejected': self.rejections.clear()
 
 
 def available_memory(proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
@@ -280,9 +458,13 @@ _NATIVE_TRIM = None
 
 def reclaim_idle_memory():
     """Return unreachable TLS/native buffers without closing live streams."""
+    def rss():
+        try: return int(Path('/proc/self/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
+        except (OSError, ValueError, IndexError, AttributeError): return None
+    before = rss()
     import gc
     gc.collect()
-    if platform.system() != 'Linux': return
+    if platform.system() != 'Linux': return {'before':before, 'after':rss()}
     global _NATIVE_TRIM
     if _NATIVE_TRIM is None:
         try:
@@ -292,6 +474,7 @@ def reclaim_idle_memory():
             _NATIVE_TRIM.restype = ctypes.c_int
         except (OSError, AttributeError): _NATIVE_TRIM = False
     if _NATIVE_TRIM: _NATIVE_TRIM(0)
+    return {'before':before, 'after':rss()}
 
 
 class MemoryPressure:
@@ -300,6 +483,9 @@ class MemoryPressure:
         self.sample, self.clock, self.reclaim = sample, clock, reclaim
         self.sampled_at, self.remaining = None, None
         self.reclaimed_at = None
+        self.reclaims = 0
+        self.reclaim_before = self.reclaim_after = None
+        self.reclaim_rss_before = self.reclaim_rss_after = None
 
     def available(self):
         now = self.clock()
@@ -308,8 +494,14 @@ class MemoryPressure:
             self.sampled_at = now
             if self.remaining is not None and self.remaining < 8*1048576 and (self.reclaimed_at is None or now-self.reclaimed_at >= 1):
                 self.reclaimed_at = now
-                self.reclaim()
+                self.reclaim_before = self.remaining
+                released = self.reclaim()
+                if isinstance(released, dict):
+                    self.reclaim_rss_before = released.get('before')
+                    self.reclaim_rss_after = released.get('after')
                 self.remaining = self.sample()
+                self.reclaim_after = self.remaining
+                self.reclaims += 1
         return self.remaining
 
     def fits(self, cost):
@@ -350,14 +542,21 @@ class SessionBudget:
         self.memory_limit, self.memory_used = memory_limit, 0
         self.udp_buffers = udp_buffers
         self.pressure = pressure or MemoryPressure()
+        self.rejections = {}
+
+    def reject(self, reason):
+        self.rejections[reason] = self.rejections.get(reason, 0) + 1
+        return False
 
     def fits(self, cost):
-        if self.used >= self.limit: return False
-        if not self.pressure.fits(cost): return False
+        if self.used >= self.limit: return self.reject('shared_sessions')
+        if not self.pressure.fits(cost): return self.reject('live_memory')
         if self.memory_limit is None: return True
         if self.memory_used + cost + self.udp_buffers.used > self.memory_limit:
             self.udp_buffers.rebalance()
-        return self.memory_used + cost + self.udp_buffers.used <= self.memory_limit
+        if self.memory_used + cost + self.udp_buffers.used > self.memory_limit:
+            return self.reject('memory_budget')
+        return True
 
 
 class SessionSlot:
@@ -391,6 +590,7 @@ class UDPReceiveBudget:
         self.session_buffer = UDP_RECEIVE_BUFFER
         self.headroom = lambda: self.limit
         self.pressure = None
+        self.record_rejection = lambda reason: None
 
     def reserve(self, sock, desired=UDP_RECEIVE_BUFFER, *, shared=False):
         if sock in self.allocations:
@@ -400,14 +600,17 @@ class UDPReceiveBudget:
             self.rebalance()
             remaining = min(self.limit, self.headroom()) - self.used
         if remaining < 128 * 1024:
+            self.record_rejection('udp_memory_budget')
             raise OSError('UDP receive buffer budget exhausted')
         if not shared:
             desired = min(desired, self.session_buffer)
         if self.pressure and not self.pressure.fits(min(2*desired, remaining)):
+            self.record_rejection('udp_live_memory')
             raise OSError('UDP receive buffer live memory reserve exhausted')
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, min(desired, remaining // 2))
         actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
         if actual > remaining:
+            self.record_rejection('udp_memory_budget')
             raise OSError('UDP receive buffer budget exhausted')
         self.used += actual
         self.allocations[sock] = (actual, shared)
@@ -603,8 +806,11 @@ class RelayRoute(asyncio.DatagramProtocol):
 
     def admit(self):
         cost = self.session_cost()
-        if self.closed or len(self.slots) >= self.limits.get('max_sessions_per_route', MAX_SESSIONS) or not self.session_budget.fits(cost):
+        if self.closed: return None
+        if len(self.slots) >= self.limits.get('max_sessions_per_route', MAX_SESSIONS):
+            self.session_budget.reject('route_sessions')
             return None
+        if not self.session_budget.fits(cost): return None
         self.recent.add('new_sessions')
         return SessionSlot(self)
 
@@ -1221,6 +1427,7 @@ class Agent:
         self.buffer_budget = UDPReceiveBudget(self.limits['udp_budget_mib'] * 1048576)
         self.session_budget = SessionBudget(self.limits['max_sessions'], self.limits['memory_budget_bytes'], self.buffer_budget)
         self.buffer_budget.pressure = self.session_budget.pressure
+        self.buffer_budget.record_rejection = self.session_budget.reject
         self.buffer_budget.headroom = lambda: self.limits['memory_budget_bytes'] - self.session_budget.memory_used
         self.routes, self.failed = {}, {}
         self.revision = 0
@@ -1230,6 +1437,7 @@ class Agent:
         self.private_transport = PrivateTransport(self)
         self.security = ControllerPolicy(self.state_dir, atomic_json)
         self.api_context = None
+        self.diagnostics = RelayDiagnostics(self.state_dir)
 
     def make_route(self, config):
         route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
@@ -1493,6 +1701,10 @@ class Agent:
         # Recovery must not depend on another client arriving first.
         while True:
             self.session_budget.pressure.available()
+            try: self.diagnostics.tick(self)
+            except Exception:
+                # Diagnostics must never interrupt memory recovery or live traffic.
+                self.diagnostics.log.failures += 1
             await asyncio.sleep(1)
 
     async def serve(self):
@@ -1531,4 +1743,5 @@ class Agent:
 if __name__ == '__main__':
     import sys
     if '--version' in sys.argv: print(VERSION)
+    elif '--prune-diagnostics' in sys.argv: DiagnosticLog(STATE_DIR).prune()
     else: asyncio.run(Agent().serve())

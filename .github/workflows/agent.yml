@@ -25,6 +25,7 @@ jobs:
           bash -n install.sh scripts/install-agent.sh protocol-images/relay-agent/install.sh protocol-images/relay-agent/uninstall.sh
           python3 tests/relay_standalone_test.py
           python3 tests/relay_agent_test.py
+          python3 tests/relay_diagnostics_test.py
           python3 tests/relay_security_test.py
           python3 tests/relay_update_test.py
       - name: Install twice in isolated namespaces without a panel

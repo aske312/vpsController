@@ -176,8 +176,27 @@ for name in ('server.crt', 'server.key'):
 PY
 backup="$(mktemp -d)"
 install_complete=0
+diagnostics_units_changed=0
+diagnostics_timer_enabled=0
+diagnostics_timer_active=0
+for name in vps-control-relay-diagnostics.service vps-control-relay-diagnostics.timer; do
+  [[ ! -f "/etc/systemd/system/${name}" ]] || cp -p "/etc/systemd/system/${name}" "${backup}/${name}"
+done
+if [[ -f /etc/systemd/system/vps-control-relay-diagnostics.timer ]]; then
+  [[ "$(systemctl is-enabled vps-control-relay-diagnostics.timer 2>/dev/null || true)" != enabled ]] || diagnostics_timer_enabled=1
+  if systemctl is-active --quiet vps-control-relay-diagnostics.timer; then diagnostics_timer_active=1; fi
+fi
 rollback() {
   result=$?
+  if [[ "${install_complete}" != 1 && "${diagnostics_units_changed}" == 1 ]]; then
+    systemctl disable --now vps-control-relay-diagnostics.timer || true
+    for name in vps-control-relay-diagnostics.service vps-control-relay-diagnostics.timer; do
+      if [[ -f "${backup}/${name}" ]]; then cp -p "${backup}/${name}" "/etc/systemd/system/${name}"; else rm -f "/etc/systemd/system/${name}"; fi
+    done
+    systemctl daemon-reload || true
+    if [[ "${diagnostics_timer_enabled}" == 1 ]]; then systemctl enable vps-control-relay-diagnostics.timer || true; fi
+    if [[ "${diagnostics_timer_active}" == 1 ]]; then systemctl start vps-control-relay-diagnostics.timer || true; fi
+  fi
   if [[ "${install_complete}" != 1 && -f "${backup}/agent.py" ]]; then
     for name in agent.py addresses.py credentials.py manifest.json update.py; do
       if [[ -f "${backup}/${name}" ]]; then cp -p "${backup}/${name}" "${LIB}/${name}"; else rm -f "${LIB}/${name}"; fi
@@ -310,6 +329,35 @@ Unit=vps-control-relay-update.service
 [Install]
 WantedBy=multi-user.target
 EOF
+diagnostics_units_changed=1
+cat >/etc/systemd/system/vps-control-relay-diagnostics.service <<'EOF'
+[Unit]
+Description=Prune bounded Relay diagnostic history
+ConditionPathIsDirectory=/var/lib/vps-control-relay-agent/diagnostics
+[Service]
+Type=oneshot
+User=vps-relay
+Group=vps-relay
+ExecStart=/usr/bin/python3 /usr/local/lib/vps-control-relay-agent/agent.py --prune-diagnostics
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vps-control-relay-agent
+UMask=0077
+TimeoutStartSec=30
+EOF
+cat >/etc/systemd/system/vps-control-relay-diagnostics.timer <<'EOF'
+[Unit]
+Description=Expire Relay diagnostics within seven days
+[Timer]
+OnCalendar=*-*-* 00:00:00 UTC
+AccuracySec=1s
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
 systemctl daemon-reload
 systemctl enable --now vps-control-relay-addresses.timer
 systemctl enable vps-control-relay-agent.service
@@ -326,6 +374,7 @@ for attempt in {1..20}; do
     echo 'Relay Agent установлен и готов к подключению.'
     systemctl enable --now vps-control-relay-update.timer
     systemctl enable --now vps-control-relay-update.path
+    systemctl enable --now vps-control-relay-diagnostics.timer
     install_complete=1
     exit 0
   fi

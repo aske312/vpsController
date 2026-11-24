@@ -214,10 +214,11 @@ if sys.argv[1] in ('restart', 'disable'):
         with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
         Path('/etc/vps-control.env').unlink()
     assert not Path('/opt/vps-control').exists()
-    assert {path.name for path in Path('/etc/systemd/system').glob('*.service')} == {'vps-control-relay-agent.service', 'vps-control-relay-addresses.service', 'vps-control-relay-update.service'}
+    assert {path.name for path in Path('/etc/systemd/system').glob('*.service')} == {'vps-control-relay-agent.service', 'vps-control-relay-addresses.service', 'vps-control-relay-update.service', 'vps-control-relay-diagnostics.service'}
     assert json.loads((config_root/'updates.json').read_text()) == {'enabled': False}
     assert Path('/etc/systemd/system/vps-control-relay-update.timer').is_file()
     assert Path('/etc/systemd/system/vps-control-relay-addresses.timer').is_file()
+    assert Path('/etc/systemd/system/vps-control-relay-diagnostics.timer').is_file()
     import pwd
     user = pwd.getpwnam('vps-relay')
     denied = subprocess.run(['python3', '/usr/local/lib/vps-control-relay-agent/credentials.py'],
@@ -239,6 +240,12 @@ if sys.argv[1] in ('restart', 'disable'):
         restored = json.load(response)
         assert restored['routes'] == 1 and restored['failed_routes'] == 0
     run('systemctl', 'disable', 'vps-control-relay-agent.service')
+    diagnostics = Path('/var/lib/vps-control-relay-agent/diagnostics')
+    diagnostics.mkdir(exist_ok=True)
+    expired = diagnostics/'relay-2000-01-01.jsonl'
+    expired.write_text('{"event":"snapshot"}\n')
+    run('python3', '/usr/local/lib/vps-control-relay-agent/agent.py', '--prune-diagnostics')
+    assert not expired.exists() and not Path('/run/relay-test.pid').exists()
     print(json.dumps({'standalone_bootstrap': True, 'no_panel': True, 'tls_authenticated': True,
         'anonymous_rejected': True, 'root_only_credentials': True, 'reinstall_preserves_identity_and_routes': True,
         'invalid_and_changed_ip_rejected': True, 'secrets_printed_only_on_success': True}))
