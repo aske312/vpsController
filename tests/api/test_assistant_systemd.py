@@ -91,7 +91,7 @@ class DurableChatSystemdTests(unittest.TestCase):
                     try: process_state = process.read_text().split()[2]
                     except FileNotFoundError: process_state = None
                     self.assertIn(process_state, (None, 'Z'))
-                    self.assertNotIn('output', json.loads(jobs.path(isolated, identity).read_text()))
+                    self.assertNotIn('output', control.operations.read(jobs.path(isolated, identity)))
             finally:
                 subprocess.run(['systemctl','stop',unit],capture_output=True)
                 subprocess.run(['systemctl','reset-failed',unit],capture_output=True)
@@ -137,15 +137,18 @@ else:
                 while not (root/'started').exists() and time.monotonic() < deadline: time.sleep(.05)
                 self.assertTrue((root/'started').exists())
                 # The API caller has exited; the independent worker still owns the task.
-                record = json.loads((root/'data/assistant/requests'/f'{identity}.json').read_text())
+                record = control.operations.read(root/'data/assistant/requests'/f'{identity}.json')
                 self.assertEqual(record['state'], 'running')
                 (root/'release').touch()
                 while time.monotonic() < deadline:
-                    record = json.loads((root/'data/assistant/requests'/f'{identity}.json').read_text())
+                    record = control.operations.read(root/'data/assistant/requests'/f'{identity}.json')
                     if record['state'] == 'done': break
                     time.sleep(.05)
                 self.assertEqual(record['state'], 'done')
                 self.assertEqual(record['output']['result']['answer'], 'once')
+                stored = (root/'data/assistant/requests'/f'{identity}.json').read_text()
+                self.assertNotIn('once', stored)
+                self.assertEqual(json.loads(stored)['private_storage'], 'nodera-private-v1')
                 self.assertNotIn('payload', record)
                 self.assertEqual((root/'data/assistant/requests'/f'{identity}.json').stat().st_mode & 0o777, 0o600)
             finally:
