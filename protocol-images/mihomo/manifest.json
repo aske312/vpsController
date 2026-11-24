@@ -1,7 +1,7 @@
 {
   "id": "mihomo",
   "name": "Mihomo",
-  "version": "1.19.34",
+  "version": "1.19.35",
   "installable": true,
   "description": "Mihomo Manager: профили, собственные каналы, DNS и маршрутизация.",
   "category": "connection-manager",
@@ -31,6 +31,7 @@
       }
     ],
     "backup_paths": [
+      {"path": "{data_dir}/mihomo/subscription-deliveries"},
       {
         "path": "/etc/vps-control/mihomo"
       },

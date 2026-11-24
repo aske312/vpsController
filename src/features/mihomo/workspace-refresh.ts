@@ -101,6 +101,7 @@ export function profileSnapshots(value: unknown): Profile[] {
   const items = namedCollection(value);
   for (const item of items) {
     if (!optionalStrings(item, ["export_filename", "created_at", "updated_at", "common_device_id", "revision", "create_revision", "create_operation_id", "last_operation_id"])
+      || !subscriptionDeliveryTimestamp(item.last_subscription_fetched_at)
       || (item.subscription_status !== undefined && !["active", "obsolete", "missing"].includes(String(item.subscription_status)))
       || (item.protection_status !== undefined && !protectionStatus(item.protection_status))
       || !subscriptionLimits(item.limits) || !subscriptionLimitStatus(item.limits_status)
@@ -173,10 +174,15 @@ function protectionStatus(value: unknown) {
   });
 }
 
+function subscriptionDeliveryTimestamp(value: unknown) {
+  return value === undefined || typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value) && Number.isFinite(Date.parse(value));
+}
+
 const deviceMetadata = ["hwid_hash", "created_at", "last_seen_at", "os", "os_version", "client_name", "client_version", "core_name", "core_version", "user_agent"];
 
 function deviceRow(value: unknown) {
   if (!record(value) || typeof value.name !== "string"
+    || !subscriptionDeliveryTimestamp(value.last_subscription_fetched_at)
     || !deviceMetadata.every((key) => value[key] == null || typeof value[key] === "string")
     || (value.scope !== undefined && !["common", "hwid", "manual", "legacy"].includes(String(value.scope)))
     || (value.manual !== undefined && typeof value.manual !== "boolean")

@@ -82,6 +82,7 @@ export type Profile = {
   subscription_status?: "active" | "obsolete" | "missing";
   created_at: string;
   updated_at: string;
+  last_subscription_fetched_at?: string;
 };
 
 export type ProfileConnection = {
@@ -97,7 +98,7 @@ export type ProfileConnection = {
 export type PersonalRule = { id: string; revision?: string; last_operation_id?: string; code: string; title: string; description: string; kind: "domain" | "process"; entries: string[]; target: "GATE.312" | "DIRECT" | "REJECT" };
 
 export type VerifiedClient = { id: string; client_name: string; client_version: string; core_name: string; core_version: string; os: string; os_version: string; format: "mihomo"; app_url: string };
-export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; subscription_format?: "mihomo"; verified_clients?: VerifiedClient[]; supported_formats?: ("mihomo")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; core_name?: string; core_version?: string; user_agent?: string; personal_rule_ids?: string[]; routing?: Record<string, string | number | boolean> };
+export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; subscription_format?: "mihomo"; verified_clients?: VerifiedClient[]; supported_formats?: ("mihomo")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; last_subscription_fetched_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; core_name?: string; core_version?: string; user_agent?: string; personal_rule_ids?: string[]; routing?: Record<string, string | number | boolean> };
 
 export type PolicySettings = {
   server_ipv6?: { available: boolean; state: "ready" | "unavailable" | "unknown"; reason: string };

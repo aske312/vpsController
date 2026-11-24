@@ -31,7 +31,7 @@ from typing import Annotated, Any, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
-from starlette.background import BackgroundTask
+from starlette.background import BackgroundTasks
 from pydantic import BaseModel, Field, StringConstraints
 
 import sys
@@ -804,11 +804,16 @@ def profile_response(item: dict[str, Any], *, relay_registry=None) -> dict[str, 
         relay_registry = profile_relay_registry([item])
     result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "device_identity_secret", "retiring_connections", "last_operation_revision"}}
     result["revision"] = profile_revision(item)
+    delivery = subscription_delivery(item['id'])
+    if delivery.get('last_subscription_fetched_at'):
+        result['last_subscription_fetched_at'] = delivery['last_subscription_fetched_at']
     result["limits_status"] = subscription_limits.status(item, DATA_ROOT / "subscription-limits")
     if item.get("last_operation_revision") and item["last_operation_revision"] != result["revision"]:
         result["last_operation_id"] = ""
     for device in result["devices"]:
         device_id = str(device["id"])
+        if delivery.get('devices', {}).get(device_id):
+            device['last_subscription_fetched_at'] = delivery['devices'][device_id]
         device["subscription_format"] = "mihomo"
         device["verified_clients"] = [client_compatibility.public_record(record) for record in verified_profile_clients(item, device_id)]
     try:
@@ -5789,6 +5794,51 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
     return normalize_profile(profile), device_id
 
 
+def subscription_delivery_path(profile_id: str) -> Path:
+    return DATA_ROOT / 'subscription-deliveries' / (hashlib.sha256(str(profile_id).encode()).hexdigest() + '.json')
+
+
+def subscription_delivery_record(file: Path) -> dict:
+    record = application_operation.read(file)
+    if not record:
+        return {}
+    if record.get('schema') != 1 or not isinstance(record.get('devices'), dict):
+        raise ValueError('Invalid subscription delivery metadata')
+    timestamps = [record.get('last_subscription_fetched_at'), *record['devices'].values()]
+    if any(not isinstance(at, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', at)
+           or datetime.fromisoformat(at.replace('Z', '+00:00')).tzinfo is None for at in timestamps):
+        raise ValueError('Invalid subscription delivery timestamp')
+    return record
+
+
+def subscription_delivery(profile_id: str) -> dict:
+    try:
+        return subscription_delivery_record(subscription_delivery_path(profile_id))
+    except (OSError, ValueError, TypeError, AttributeError):
+        logger.error('Could not read subscription delivery metadata')
+        return {}
+
+
+def record_subscription_delivery(profile_id: str, device_id: str) -> None:
+    """Persist successful ASGI YAML delivery, independently of profile edits."""
+    if not component_is_managed():
+        return
+    file = subscription_delivery_path(profile_id)
+    try:
+        with application_operation.locked(file.parent):
+            # Use the strict reader when writing: preserve a damaged file for recovery.
+            record = subscription_delivery_record(file)
+            at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+            devices = dict(record.get('devices', {}))
+            devices[device_id] = at
+            # Keep concurrent deliveries even if their profile snapshots differ.
+            devices = dict(sorted(devices.items(), key=lambda item: item[1])[-256:])
+            application_operation.atomic_json(file, {'schema': 1, 'last_subscription_fetched_at': at, 'devices': devices})
+    except (OSError, ValueError, TypeError, AttributeError):
+        # The response is already sent; telemetry failure must not retry delivery.
+        logger.error('Could not record subscription delivery metadata')
+
+
 @serialized_profile_mutation
 def record_transition_delivery(profile_id: str, device_id: str, revision: str) -> None:
     if not component_is_managed():
@@ -5920,10 +5970,11 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
     except Exception:
         request.state.evidence_reason = 'subscription_render_failed'
         raise
-    delivery = None
+    delivery = BackgroundTasks()
+    delivery.add_task(record_subscription_delivery, selected_profile['id'], selected_device)
     if allow_changes is not False and any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
-        delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,
-                                  transition_delivery_revision(selected_profile, selected_device))
+        delivery.add_task(record_transition_delivery, selected_profile["id"], selected_device,
+                          transition_delivery_revision(selected_profile, selected_device))
     return PlainTextResponse(
         config,
         media_type="text/yaml; charset=utf-8",

@@ -1,6 +1,13 @@
 import type { Profile, ProfileDevice } from "./types";
 import { devicePlatform } from "./catalog";
 
+export const subscriptionDeliveryTitle = "Сервер отправил YAML подписки. Применение конфигурации клиентом не подтверждено. Для общей подписки учитывается последний запрос любого клиента без отдельной привязки.";
+
+export function subscriptionDeliveryLabel(at?: string) {
+  if (!at || !Number.isFinite(Date.parse(at))) return "Подписка: нет данных о выдаче";
+  return `Подписка выдана: ${new Date(at).toLocaleString("ru-RU")}`;
+}
+
 export function clientUuid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
