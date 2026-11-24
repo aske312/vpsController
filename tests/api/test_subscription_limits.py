@@ -25,6 +25,34 @@ def profile(identity="first"):
 
 
 class SubscriptionLimitsTests(unittest.TestCase):
+    def test_policy_sync_keeps_panel_override_stable_without_a_second_maintenance_restart(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name)
+            for module in ('hysteria2','tuic'):
+                manager.atomic_json(root/f'quic/{module}/config.json',{'inbounds':[{'tag':module+'-in'}],'outbounds':[{'type':'direct'}]})
+            with patch.object(manager,'CONFIG_ROOT',root), patch.object(manager,'DATA_ROOT',root/'data'), \
+                    patch.object(manager.shutil,'which',return_value='nft'), \
+                    patch.object(manager,'systemctl_active',return_value=True), \
+                    patch.object(manager,'service_stably_active',return_value=True), \
+                    patch.object(limits,'current_policy',return_value={'schema':1,'profiles':[]}), \
+                    patch.object(limits,'resolve_profiles',side_effect=lambda api,items:items), \
+                    patch.object(limits,'update'), \
+                    patch.object(manager,'run',return_value=subprocess.CompletedProcess([],0,'','')) as run:
+                limits.sync(manager,[profile()])
+                run.reset_mock()
+                limits.sync(manager,[profile()])
+                run.assert_not_called()
+                for module in ('hysteria2','tuic'):
+                    config=json.loads((root/f'quic/{module}/config.json').read_text())
+                    self.assertFalse(manager.configure_quic_panel_route(config))
+                    self.assertTrue(any(rule.get('auth_user') for rule in config['route']['rules']))
+                    with patch.object(manager,'component_is_managed',return_value=True), \
+                            patch.object(manager,'singbox_installed_version',return_value='1.13.0'), \
+                            patch.object(manager,'write_quic_runtime') as apply:
+                        manager.ensure_quic_telemetry('transport-'+module)
+                        apply.assert_not_called()
+
     def test_snell_carrier_internal_hop_is_not_charged_twice_and_other_traffic_stays_metered(self):
         item = profile()
         item['connections'].append({'id': 'snell', 'component': 'transport-snell', 'device_id': 'common',

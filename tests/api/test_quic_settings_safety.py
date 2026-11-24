@@ -127,3 +127,23 @@ class QuicSettingsSafetyTests(unittest.TestCase):
                             self.assertEqual(path.read_bytes(), original)
                     self.assertTrue(any(args[0] == "systemctl" for args in events))
                     self.assertFalse(any(args[0] == "ufw" for args in events))
+
+    def test_identical_active_runtime_keeps_connections_but_stopped_service_is_restarted(self):
+        for module in ("transport-hysteria2", "transport-tuic"):
+            with self.subTest(module=module), \
+                    patch.object(manager, "quic_telemetry_service", return_value=None), \
+                    patch.object(manager, "start_quic_telemetry"), \
+                    patch.object(manager.subscription_limits, "current_policy", return_value={"schema":1,"profiles":[]}), \
+                    patch.object(manager, "service_stably_active", return_value=True), \
+                    patch.object(manager, "systemctl_active", return_value=True), \
+                    patch.object(manager, "run", return_value=subprocess.CompletedProcess([],0,"","")) as run:
+                manager.write_quic_runtime(module)
+                path = manager.quic_root(module)/"config.json"
+                before = path.read_bytes()
+                run.reset_mock()
+                manager.write_quic_runtime(module)
+                self.assertEqual(path.read_bytes(), before)
+                run.assert_not_called()
+                with patch.object(manager, "systemctl_active", return_value=False):
+                    manager.write_quic_runtime(module)
+                self.assertTrue(any(call.args[:2]==("systemctl","restart") for call in run.call_args_list))

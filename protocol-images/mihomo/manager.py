@@ -3744,17 +3744,21 @@ def write_quic_runtime(module_id: str) -> None:
     telemetry_service = quic_telemetry_service(module_id, load_json(config_path, {}))
     if telemetry_service:
         runtime["services"] = [telemetry_service]
+    previous_config = load_json(config_path, {})
+    service = SERVICE_BY_MODULE[module_id]
+    if previous_config == runtime and systemctl_active(service):
+        start_quic_telemetry(module_id, runtime)
+        port_allocation.release(f"mihomo:telemetry:{module_id}")
+        return
     atomic_json(candidate, runtime)
     result = run(str(SINGBOX_BIN), "check", "-c", str(candidate))
     if result.returncode:
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or f"sing-box rejected {module} configuration")
-    previous_config = load_json(config_path, {})
     old_inbounds = previous_config.get("inbounds", []) if isinstance(previous_config, dict) else []
     old_port = int(old_inbounds[0].get("listen_port", 0)) if old_inbounds and isinstance(old_inbounds[0], dict) else 0
     previous = config_path.read_bytes() if config_path.exists() else None
     os.replace(candidate, config_path)
-    service = SERVICE_BY_MODULE[module_id]
     try:
         run("systemctl", "reset-failed", service)
         run("systemctl", "restart", service, check=True)

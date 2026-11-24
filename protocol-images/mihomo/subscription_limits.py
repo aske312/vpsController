@@ -545,6 +545,10 @@ def sync(api, profiles):
                 continue
             config = json.loads(path.read_text(encoding="utf-8"))
             next_config = decorate_xray(config, candidate) if module == "transport-reality" else decorate_quic(config, candidate, module.removeprefix("transport-"))
+            if module != "transport-reality":
+                # Keep the manager's non-final panel override ahead of quota
+                # routing so background telemetry does not reapply the listener.
+                api.configure_quic_panel_route(next_config)
             if next_config == config:
                 continue
             active = api.systemctl_active(api.SERVICE_BY_MODULE[module])
