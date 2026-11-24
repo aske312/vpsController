@@ -49,6 +49,7 @@ import operation_policy
 import assistant_control
 import component_checks
 import assistant_jobs
+import assistant_privacy
 import assistant_personalization
 import assistant_contacts
 import assistant_commands
@@ -138,6 +139,7 @@ async def lifespan(_: FastAPI):
     chat_queue_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
+        await asyncio.to_thread(assistant_privacy.migrate, DATA_DIR)
         migration_task = asyncio.create_task(migrate_legacy_components())
         relay_recovery_task = asyncio.create_task(recover_relay_tests())
         metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
@@ -503,47 +505,45 @@ def assistant_check(module: Literal['telegram-mcp', 'vps-controller-mcp', 'mihom
 
 @app.post('/api/assistant/chat')
 def assistant_chat(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
-    return assistant_control.chat_request(sys.modules[__name__], payload, str(payload.telegram_id) if payload.telegram_id else 'panel')
+    return assistant_control.chat_request(sys.modules[__name__], payload, assistant_privacy.panel_actor(payload.telegram_id))
 
 
 @app.get('/api/assistant/queue')
 def assistant_queue(request_id: str | None = None, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     import assistant_broker
-    import assistant_roles
-    actor = str(telegram_id) if telegram_id else 'panel'
-    if actor != 'panel': assistant_roles.require(assistant_control.read(sys.modules[__name__]), actor, 'chat')
+    actor = assistant_privacy.panel_actor(telegram_id)
     return assistant_broker.broker.status(actor, request_id)
 
 
 @app.post('/api/assistant/requests', status_code=202)
 def assistant_submit(payload: assistant_control.Chat, _: None = Depends(require_token)) -> dict:
     import assistant_jobs
+    assistant_privacy.panel_actor(payload.telegram_id)
     return assistant_jobs.submit(sys.modules[__name__], payload)
 
 
 @app.get('/api/assistant/requests/{identity}')
 def assistant_result(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     import assistant_jobs
-    return assistant_jobs.get(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+    return assistant_jobs.get(sys.modules[__name__], identity, assistant_privacy.panel_actor(telegram_id))
 
 
 @app.delete('/api/assistant/requests/{identity}', dependencies=[Depends(require_token)])
 def assistant_request_cancel(identity: str, telegram_id: int | None = None) -> dict:
-    return assistant_jobs.cancel(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+    return assistant_jobs.cancel(sys.modules[__name__], identity, assistant_privacy.panel_actor(telegram_id))
 
 
 @app.get('/api/assistant/requests/{identity}/trace')
 def assistant_request_trace(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     import assistant_trace
-    actor = str(telegram_id) if telegram_id else 'panel'
-    if actor != 'panel': assistant_control.roles.require(assistant_control.read(sys.modules[__name__]), actor, 'chat')
+    actor = assistant_privacy.panel_actor(telegram_id)
     return assistant_trace.read(sys.modules[__name__], identity, actor)
 
 
 @app.get('/api/assistant/requests/{identity}/stream')
 def assistant_stream(identity: str, request: Request, telegram_id: int | None = None, _: None = Depends(require_token)):
     import assistant_jobs
-    actor = str(telegram_id) if telegram_id else 'panel'
+    actor = assistant_privacy.panel_actor(telegram_id)
     assistant_jobs.get(sys.modules[__name__], identity, actor)
     return StreamingResponse(assistant_jobs.events(sys.modules[__name__], identity, actor, request),
                              media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
@@ -553,14 +553,14 @@ def assistant_stream(identity: str, request: Request, telegram_id: int | None = 
 def assistant_context(telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     import assistant_personalization as context
     api = sys.modules[__name__]
-    return context.snapshot(api, assistant_control.read(api), str(telegram_id) if telegram_id else 'panel')
+    return context.snapshot(api, assistant_control.read(api), assistant_privacy.panel_actor(telegram_id))
 
 
 @app.post('/api/assistant/context')
 def assistant_context_update(payload: assistant_personalization.MemoryAction, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     import assistant_personalization as context
     api = sys.modules[__name__]
-    return context.update(api, assistant_control.read(api), str(telegram_id) if telegram_id else 'panel', payload)
+    return context.update(api, assistant_control.read(api), assistant_privacy.panel_actor(telegram_id), payload)
 
 
 def require_context_token(authorization: str | None = Header(default=None)):
@@ -582,18 +582,18 @@ def assistant_context_tool(payload: assistant_personalization.MemoryAction, auth
 
 @app.get('/api/assistant/conversations')
 def assistant_conversations(telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
-    return assistant_control.assistant_memory.listing(sys.modules[__name__], assistant_control.read(sys.modules[__name__]), str(telegram_id) if telegram_id else 'panel')
+    return assistant_control.assistant_memory.listing(sys.modules[__name__], assistant_control.read(sys.modules[__name__]), assistant_privacy.panel_actor(telegram_id))
 
 
 @app.get('/api/assistant/conversations/{identity}')
 def assistant_conversation(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
     api = sys.modules[__name__]
-    return assistant_control.assistant_memory.get(api, identity, str(telegram_id) if telegram_id else 'panel', settings=assistant_control.read(api))
+    return assistant_control.assistant_memory.get(api, identity, assistant_privacy.panel_actor(telegram_id), settings=assistant_control.read(api))
 
 
 @app.delete('/api/assistant/conversations/{identity}')
 def assistant_conversation_delete(identity: str, telegram_id: int | None = None, _: None = Depends(require_token)) -> dict:
-    return assistant_control.assistant_memory.remove(sys.modules[__name__], identity, str(telegram_id) if telegram_id else 'panel')
+    return assistant_control.assistant_memory.remove(sys.modules[__name__], identity, assistant_privacy.panel_actor(telegram_id))
 
 
 @app.post('/api/assistant/models')
@@ -781,8 +781,8 @@ def assistant_control_tool(payload: assistant_control.ToolCall,
 def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0, le=2**52), all_actors: bool = False, _: None = Depends(require_token)) -> dict:
     api = sys.modules[__name__]
     settings = assistant_control.read(api)
-    actor = str(telegram_id) if telegram_id else 'panel'
-    actors = ['panel', *[str(row['telegram_id']) for row in settings.get('accounts', [])]] if all_actors else [actor]
+    actor = assistant_privacy.panel_actor(telegram_id)
+    actors = [actor]  # Panel administration does not include private client confirmations.
     pending = [item for identity in actors for item in assistant_commands.pending_actions(api, identity, settings=settings)]
     operations = [{'id': record['operation_id'], 'service': record['service'], 'action': record['action'], 'actor': identity,
                    'created_at': record.get('created_at', record.get('expires', 0) - 600)}
@@ -796,11 +796,12 @@ def assistant_pending_action(telegram_id: int | None = Query(default=None, gt=0,
 @app.get('/api/assistant/commands', dependencies=[Depends(require_token)])
 def assistant_command_catalog(telegram_id: int | None = Query(default=None, gt=0, le=2**52)) -> dict:
     import assistant_chat_commands
-    return {'items': assistant_chat_commands.catalog(sys.modules[__name__], str(telegram_id) if telegram_id else 'panel')}
+    return {'items': assistant_chat_commands.catalog(sys.modules[__name__], assistant_privacy.panel_actor(telegram_id))}
 
 
 @app.post('/api/assistant/commands', dependencies=[Depends(require_token)])
 def assistant_chat_command(payload: 'assistant_chat_commands.Request') -> dict:
+    assistant_privacy.panel_actor(payload.telegram_id)
     return assistant_chat_commands.execute(sys.modules[__name__], payload)
 
 
@@ -808,7 +809,7 @@ def assistant_chat_command(payload: 'assistant_chat_commands.Request') -> dict:
 @app.post('/api/assistant/service-confirm')
 def assistant_service_confirm(payload: assistant_control.ServiceConfirmation, _: None = Depends(require_token)) -> dict:
     api = sys.modules[__name__]
-    actor = str(payload.telegram_id) if payload.telegram_id else 'panel'
+    actor = assistant_privacy.panel_actor(payload.telegram_id)
     value = assistant_control.read(api)
     record = assistant_control.operations.read(assistant_commands.pending_path(api, actor, code=payload.code))
     if not record:

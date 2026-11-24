@@ -1,11 +1,24 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createApiClient} from '../../src/shared/lib/api-request.ts';
-import {saveChatSession,readChatSession,savedActor,rememberActor,clearChatSessions,createChatSessionWriter} from '../../src/features/assistant/chat-session.ts';
+import {saveChatSession,readChatSession,savedActor,rememberActor,clearChatSessions,clearClientChatSessions,createChatSessionWriter} from '../../src/features/assistant/chat-session.ts';
 import {commandMessageOwner,closedCommandMessages,rememberClosedCommand} from '../../src/features/assistant/command-message-state.ts';
 
 function storage(){const entries=new Map();return {get length(){return entries.size;},key:i=>[...entries.keys()][i]??null,getItem:k=>entries.get(k)??null,setItem:(k,v)=>entries.set(k,v),removeItem:k=>entries.delete(k),entries};}
 const snapshot={provider:'provider-one',model:'selected-model',streaming:true,conversation_id:'a'.repeat(32),prompt:'Unsent draft',turns:[{id:1,question:'Question',answer:'Answer',model:'selected-model',context_safe:true,files:[]}]};
+
+test('panel privacy migration removes old client transcripts and preserves its own chat',()=>{
+ const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();
+ try {
+  const client={sessionKey:'privacy'};
+  saveChatSession(client,'11',snapshot);saveChatSession(client,'22',snapshot);saveChatSession(client,'',snapshot);
+  saveChatSession({sessionKey:'other'},'11',snapshot);
+  clearClientChatSessions(client);
+  assert.equal(readChatSession(client,'11'),undefined);assert.equal(readChatSession(client,'22'),undefined);
+  assert.equal(readChatSession(client,'').prompt,snapshot.prompt);
+  assert.equal(readChatSession({sessionKey:'other'},'11').prompt,snapshot.prompt);
+ } finally {globalThis.sessionStorage=previous;}
+});
 
 test('finished response duration survives a local chat reload',()=>{
  const previous=globalThis.sessionStorage;globalThis.sessionStorage=storage();

@@ -162,7 +162,7 @@ class RelayToolsTests(unittest.TestCase):
     def test_cancel_is_actor_bound_and_cannot_start_a_worker(self):
         self.tool(body=self.change())
         record = self.pending()
-        self.assertEqual(self.confirm(record['code'], telegram_id=11, decision='reject').status_code, 409)
+        self.assertEqual(self.confirm(record['code'], telegram_id=11, decision='reject').status_code, 403)
         self.assertTrue(self.pending())
         self.assertEqual(self.confirm(record['code'], decision='reject').status_code, 200)
         self.assertFalse(self.pending())

@@ -53,7 +53,7 @@ def path(api, settings, actor):
 
 
 def load(file):
-    if file.exists() and file.stat().st_size > MAX_BYTES:
+    if file.exists() and file.stat().st_size > MAX_BYTES * 4 // 3 + 4096:
         raise HTTPException(409, 'История NoderaBot превышает лимит')
     value = operations.read(file)
     if value and (value.get('schema') != 1 or not isinstance(value.get('messages'), list)
@@ -130,14 +130,11 @@ def authorize(api, authorization, actor):
 
 def read(api, settings, actor, request, *, cached=True):
     if not settings.get('memory_enabled', True): raise HTTPException(403, 'Память диалогов выключена')
-    if actor != 'panel' and request.telegram_id is not None and str(request.telegram_id) != actor:
+    if actor == 'panel':
+        raise HTTPException(403, 'Панель не имеет доступа к личной переписке NoderaBot')
+    if request.telegram_id is not None and str(request.telegram_id) != actor:
         raise HTTPException(403, 'Доступна только собственная переписка с NoderaBot')
-    selected = str(request.telegram_id) if request.telegram_id is not None else actor
-    if selected == 'panel':
-        # The panel owner can explicitly select an account; never guess its identity.
-        return {'dialogs': [{'telegram_id': row['telegram_id'], 'name': row.get('name', '')}
-                            for row in settings.get('accounts', []) if enabled(settings, str(row['telegram_id']))][:50],
-                'instruction': 'Выбери telegram_id собеседника и вызови nodera_dialog_read. Истории разных пользователей не смешиваются.'}
+    selected = actor
     if not enabled(settings, selected): raise HTTPException(403, 'История собеседника недоступна')
     with operations.locked(api.DATA_DIR):
         settings = control._read(api)  # The application lock is already held.

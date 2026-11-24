@@ -105,6 +105,8 @@ def install(api, component, *, start_bot=True):
     if component == 'nodera-bot':
         shutil.copyfile(api.INSTALL_DIR / 'api/assistant_messages.py', root / 'assistant_messages.py')
         (root / 'assistant_messages.py').chmod(0o644)
+        shutil.copyfile(api.INSTALL_DIR / 'api/assistant_privacy.py', root / 'assistant_privacy.py')
+        (root / 'assistant_privacy.py').chmod(0o644)
     (root / script_name).chmod(0o644)
     checked([str(python), str(root / script_name), '--self-check'])
     for folder, _, files in os.walk(root / 'venv', followlinks=False):

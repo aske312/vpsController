@@ -61,7 +61,7 @@ class AssistantTraceTests(unittest.TestCase):
         self.assertEqual(trace.read(self.env, self.identity)['events'][0]['tool'], 'mihomo_api')
 
     def test_provider_failure_evidence_reaches_the_model_trace_tool(self):
-        with trace.capture(self.env, self.identity, '11', 'panel'):
+        with trace.capture(self.env, self.identity, 'panel', 'panel'):
             trace.record({'stage': 'provider_error', 'error_code': 'provider_read_timeout', 'transport_phase': 'response_body',
                           'transport_reason': 'timeout', 'exception_types': ['ReadTimeout', 'SSLWantReadError'],
                           'http_status': 200, 'duration_ms': 180000, 'message': 'PRIVATE KEY'})
@@ -85,6 +85,6 @@ class AssistantTraceTests(unittest.TestCase):
         with patch.object(api, 'DATA_DIR', self.root), TestClient(api.app) as client:
             self.assertEqual(client.get('/api/assistant/requests/' + self.identity + '/trace').status_code, 401)
             with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
-                self.assertEqual(client.get('/api/assistant/requests/' + self.identity + '/trace').status_code, 200)
+                self.assertEqual(client.get('/api/assistant/requests/' + self.identity + '/trace').status_code, 404)
                 with patch.object(control, 'read', return_value={'accounts': [{'telegram_id': 22, 'role': 'user', 'products': ['assistant']}]}):
-                    self.assertEqual(client.get('/api/assistant/requests/' + self.identity + '/trace?telegram_id=22').status_code, 404)
+                    self.assertEqual(client.get('/api/assistant/requests/' + self.identity + '/trace?telegram_id=22').status_code, 403)

@@ -105,16 +105,16 @@ class BrokerTests(unittest.TestCase):
             if actor == '11': entered.set(); release.wait(3)
             return {'ok': True, 'result': {'answer': actor, 'tools_used': []}}
         def post(actor):
-            responses[actor] = client.post('/api/assistant/chat', json={'prompt': 'fixture', 'telegram_id': actor, 'request_id': str(actor) * 16})
-        previous = api.app.dependency_overrides.get(api.require_token)
-        api.app.dependency_overrides[api.require_token] = lambda: None
+            responses[actor] = client.post('/api/assistant/bot-chat', headers={'X-MCP-Actor': str(actor)}, json={'prompt': 'fixture', 'telegram_id': actor, 'request_id': str(actor) * 16})
+        previous = api.app.dependency_overrides.get(api.require_nodera_bot_transport)
+        api.app.dependency_overrides[api.require_nodera_bot_transport] = lambda: settings
         try:
             with patch.object(assistant_broker, 'broker', broker), patch.object(control, 'read', return_value=settings), patch.object(control, '_chat_request', side_effect=work):
                 first = threading.Thread(target=post, args=(11,)); first.start(); threads.append(first)
                 self.assertTrue(entered.wait(2))
                 second = threading.Thread(target=post, args=(22,)); second.start(); threads.append(second)
                 self.wait_for(lambda: broker.status('22', '22' * 16)['state'] == 'queued')
-                queue = client.get('/api/assistant/queue', params={'telegram_id': 22, 'request_id': '22' * 16})
+                queue = client.get('/api/assistant/bot-queue', headers={'X-MCP-Actor': '22'}, params={'request_id': '22' * 16})
                 self.assertEqual(queue.json()['state'], 'queued')
                 release.set()
                 for thread in threads: thread.join(4)
@@ -124,5 +124,5 @@ class BrokerTests(unittest.TestCase):
         finally:
             release.set()
             for thread in threads: thread.join(4)
-            if previous is None: api.app.dependency_overrides.pop(api.require_token, None)
-            else: api.app.dependency_overrides[api.require_token] = previous
+            if previous is None: api.app.dependency_overrides.pop(api.require_nodera_bot_transport, None)
+            else: api.app.dependency_overrides[api.require_nodera_bot_transport] = previous

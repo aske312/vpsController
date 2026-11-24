@@ -61,7 +61,7 @@ class BotHistoryTests(unittest.TestCase):
         self.assertEqual(self.read(query='ALERT')['messages'][0]['kind'], 'alert')
         self.assertFalse(page['history_complete'])
 
-    def test_read_token_and_actor_are_scoped_and_panel_can_explicitly_select(self):
+    def test_read_token_and_actor_are_scoped_and_panel_cannot_select(self):
         self.save(1, 'private first')
         self.save(1, 'private second', actor='22')
         url = '/api/assistant/bot-history/read'
@@ -74,10 +74,8 @@ class BotHistoryTests(unittest.TestCase):
         own = self.client.post(url, headers=self.token(), json={})
         self.assertEqual(own.status_code, 200, own.text)
         self.assertNotIn('private second', own.text)
-        panel = self.client.post(url, headers=self.token('panel'), json={}).json()
-        self.assertEqual([row['telegram_id'] for row in panel['dialogs']], [11, 22])
-        self.assertNotIn('private first', json.dumps(panel))
-        self.assertEqual(self.client.post(url, headers=self.token('panel'), json={'telegram_id': 22}).json()['messages'][0]['text'], 'private second')
+        self.assertEqual(self.client.post(url, headers=self.token('panel'), json={}).status_code, 403)
+        self.assertEqual(self.client.post(url, headers=self.token('panel'), json={'telegram_id': 22}).status_code, 403)
         self.settings['memory_enabled'] = False
         self.assertEqual(self.client.post(url, headers=self.token(), json={}).status_code, 403)
         self.assertFalse(self.save(2)['stored'])

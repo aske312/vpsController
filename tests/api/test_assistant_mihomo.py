@@ -291,9 +291,9 @@ class MihomoOperatorTests(unittest.TestCase):
         # Prepare the device change once more after checking the tool response shape.
         self.prepare({'devices': [{'id': 'phone', 'name': 'My phone'}], 'expected_revision': 'a' * 64})
         record = control.operations.read(commands.pending_path(api, '11'))
-        with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
-            first = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': record['code']})
-            second = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': record['code']})
+        with patch.dict(api.app.dependency_overrides, {api.require_nodera_bot_transport: lambda: control.read(api)}):
+            first = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/confirm ' + record['code']})
+            second = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/confirm ' + record['code']})
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(second.json(), first.json())
         writes = [entry for entry in self.calls if entry[0] != 'GET']
@@ -376,9 +376,9 @@ class MihomoOperatorTests(unittest.TestCase):
             record = control.operations.read(commands.pending_path(api, '11'))
             pending = commands.pending_actions(api, '11')
             self.assertEqual(next(row for row in pending if row['operation_id'] == record['operation_id'])['changes']['copy_preview']['connection_count'], 56)
-            with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
-                first = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': record['code']})
-                self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': record['code']})
+            with patch.dict(api.app.dependency_overrides, {api.require_nodera_bot_transport: lambda: control.read(api)}):
+                first = self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/confirm ' + record['code']})
+                self.client.post('/api/assistant/bot-command', headers=self.headers, json={'command': '/confirm ' + record['code']})
             self.assertEqual(first.status_code, 200, first.text)
         writes = [row for row in self.calls if row[:2] == ('POST', '/profiles')]
         self.assertEqual(len(writes), 1)

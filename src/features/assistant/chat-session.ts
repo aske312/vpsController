@@ -86,3 +86,14 @@ export function clearChatSessions(client: Client) {
     }
   } catch { /* Browser storage may be unavailable. */ }
 }
+
+export function clearClientChatSessions(client: Client) {
+  if (!client.sessionKey) return;
+  const prefix = `nodera-session:${client.sessionKey}:`;
+  try {
+    for (let index = sessionStorage.length - 1; index >= 0; index--) {
+      const identity = sessionStorage.key(index);
+      if (identity?.startsWith(prefix) && /^[1-9][0-9]{0,15}$/.test(identity.slice(prefix.length))) sessionStorage.removeItem(identity);
+    }
+  } catch { /* Browser storage may be unavailable. */ }
+}

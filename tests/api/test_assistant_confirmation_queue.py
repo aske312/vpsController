@@ -38,7 +38,7 @@ class ConfirmationQueueTests(unittest.TestCase):
         self.assertEqual(self.call('/confirm ' + second, 22).status_code, 403)
         self.assertEqual(self.call('/cancel ' + second).status_code, 200)
 
-    def test_global_panel_listing_includes_separate_actor_requests_and_exact_decisions(self):
+    def test_panel_listing_excludes_client_requests_and_cannot_decide_for_them(self):
         first, second = self.prepare(), self.prepare()
         record = control.operations.read(commands.pending_path(api, '11', code=first))
         with control.operations.locked(api.DATA_DIR):
@@ -46,11 +46,12 @@ class ConfirmationQueueTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/assistant/pending-action?all_actors=true').status_code, 401)
         with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}), patch.object(api, 'manage_service') as action:
             rows = self.client.get('/api/assistant/pending-action?all_actors=true').json()['pending_actions']
-            self.assertEqual({(row['actor'], row['code']) for row in rows}, {('panel', 'aabbccdd'), ('11', first), ('11', second)})
+            self.assertEqual({(row['actor'], row['code']) for row in rows}, {('panel', 'aabbccdd')})
             result = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': first, 'decision': 'reject'})
-            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.status_code, 403, result.text)
             rows = self.client.get('/api/assistant/pending-action?all_actors=true').json()['pending_actions']
-            self.assertEqual({(row['actor'], row['code']) for row in rows}, {('panel', 'aabbccdd'), ('11', second)})
+            self.assertEqual({(row['actor'], row['code']) for row in rows}, {('panel', 'aabbccdd')})
+            self.assertEqual({row['code'] for row in commands.pending_actions(api, '11')}, {first, second})
             action.assert_not_called()
 
     def test_old_requests_remain_available_without_attaching_to_a_new_chat_reply(self):
@@ -120,9 +121,10 @@ class ConfirmationQueueTests(unittest.TestCase):
         with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
             result = self.client.get('/api/assistant/pending-action?all_actors=true').json()
         self.assertFalse(result['pending_actions'])
-        self.assertEqual({row['id'] for row in result['operations']}, expected)
+        self.assertTrue(expected)
+        self.assertEqual(result['operations'], [])
 
-    def test_panel_can_confirm_a_bot_only_service_command_without_installing_ai(self):
+    def test_panel_cannot_confirm_client_service_command_even_without_ai(self):
         settings = control.read(api)
         settings['modules']['ai-agent'] = False
         settings['mcp']['vps-controller-mcp'] = False
@@ -130,5 +132,5 @@ class ConfirmationQueueTests(unittest.TestCase):
         code = self.prepare()
         with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}), patch.object(api, 'manage_service', return_value={'id': 'a' * 32, 'state': 'queued'}) as action:
             response = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': code})
-        self.assertEqual(response.status_code, 200, response.text)
-        action.assert_called_once()
+        self.assertEqual(response.status_code, 403, response.text)
+        action.assert_not_called()

@@ -24,6 +24,7 @@ import httpx
 if not Path(__file__).with_name('assistant_messages.py').is_file():
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'api'))
 from assistant_messages import notice
+from assistant_privacy import seal_record, unseal_record
 
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
@@ -478,15 +479,21 @@ class DurableInbox:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
         self.inflight, self.retry_at, self.offset = set(), {}, 0
+        for file in self.root.glob("*.json"):
+            value = json.loads(file.read_text(encoding="utf-8"))
+            if "private_storage" not in value: self.save(file.stem, value)
 
     def read(self, key):
-        return json.loads((self.root / (key + '.json')).read_text(encoding='utf-8'))
+        value = json.loads((self.root / (key + '.json')).read_text(encoding='utf-8'))
+        return unseal_record(self.root, key.encode(), value)
 
     def save(self, key, row):
         if not re.fullmatch(r'[a-z0-9-]{1,100}', key): raise ValueError('Invalid inbox key')
         path = self.root / (key + '.json')
         temporary = path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(row, ensure_ascii=False), encoding='utf-8')
+        with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w', encoding='utf-8') as stream:
+            json.dump(seal_record(self.root, key.encode(), row), stream)
+            stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(0o600); temporary.replace(path)
 
     def put(self, key, row):
@@ -510,7 +517,7 @@ class DurableInbox:
                    for row in (self.read(path.stem) for path in self.root.glob('*.json')))
 
     def pump(self, dispatcher, deliver):
-        rows = [(path.stem, json.loads(path.read_text(encoding='utf-8'))) for path in self.root.glob('*.json')]
+        rows = [(path.stem, self.read(path.stem)) for path in self.root.glob('*.json')]
         seen = set()
         for key, row in sorted(rows, key=lambda item: item[1]['order']):
             if row.get('delivered'): continue
@@ -928,9 +935,10 @@ def bot_state_directory(base, token):
     # The previous offset and menu message IDs have no owner marker. Recover
     # only inbox entries whose request IDs identify the current token.
     inbox = DurableInbox(directory)
+    legacy_inbox = DurableInbox(base)
     for path in (base / 'inbox').glob('*.json'):
         try:
-            row = json.loads(path.read_text(encoding='utf-8'))
+            row = legacy_inbox.read(path.stem)
             actor = row['sender']['id']
             if row['request_id'] == bot_request_id(token, actor, path.stem) and inbox.put(path.stem, row):
                 path.unlink()

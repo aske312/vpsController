@@ -357,23 +357,23 @@ function fixture() {
     mcp_modules: [], tools: {}, bot: { active: true }, legacy_bot: {} };
 }
 
-test('a browser reload restores actor, model, draft, streaming and transcript even with server history disabled',async()=>{
+test('a browser reload restores the panel chat without adopting a remembered client identity',async()=>{
   const previous=globalThis.sessionStorage,entries=new Map();
   globalThis.sessionStorage={getItem:key=>entries.get(key)??null,setItem:(key,value)=>entries.set(key,value),removeItem:key=>entries.delete(key)};
   try{
     const status=fixture();Object.assign(status.settings,{memory_enabled:false,model_mode:'catalog',model:'default-model',modules:{'ai-agent':true,'nodera-bot':true}});Object.assign(status.modules[0],{enabled:true,configured:true});
     status.settings.accounts=[{telegram_id:11,name:'Selected actor',excluded_dialogs:[],bot_access:false,telegram_access:false,vps_access:false,session_configured:false}];
     const client={sessionKey:'reload-fixture'};
-    chatSession.rememberActor(client,'11');chatSession.saveChatSession(client,'11',{provider:chatSession.chatProvider(status.settings),model:'chosen-model',streaming:true,conversation_id:null,prompt:'Draft before reload',turns:[{id:4,question:'Earlier question',answer:'Earlier answer',model:'chosen-model',files:[]}]});
+    chatSession.rememberActor(client,'11');chatSession.saveChatSession(client,'',{provider:chatSession.chatProvider(status.settings),model:'chosen-model',streaming:true,conversation_id:null,prompt:'Draft before reload',turns:[{id:4,question:'Earlier question',answer:'Earlier answer',model:'chosen-model',files:[]}]});
     async function restored(){const view=mount(status,[],{sessionKey:client.sessionKey});for(let index=0;index<4;index++){view.render();await new Promise(setImmediate);}return view;}
     const first=await restored();let tree=first.render();
-    assert.match(JSON.stringify(tree),/Earlier answer/);assert.match(JSON.stringify(nodes(tree,n=>n.props.className==='noderaChatScope')[0].node),/Selected actor/);
+    assert.match(JSON.stringify(tree),/Earlier answer/);assert.doesNotMatch(JSON.stringify(nodes(tree,n=>n.props.className==='noderaChatScope')[0].node),/Selected actor/);
     assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Draft before reload');
     assert.match(JSON.stringify(nodes(tree,n=>n.props['aria-label']==='Модель для запроса')[0].node),/chosen-model/);
     nodes(tree,n=>n.type==='textarea')[0].node.props.onChange({target:{value:'Draft edited before next reload',style:{},scrollHeight:48}});first.render();first.flushSession();
     const second=await restored();tree=second.render();assert.equal(nodes(tree,n=>n.type==='textarea')[0].node.props.value,'Draft edited before next reload');assert.equal(second.writes.length,0);
     nodes(tree,n=>n.props['aria-label']==='Отправить сообщение')[0].node.props.onClick();await new Promise(setImmediate);second.render();
-    assert.equal(second.writes[0].telegram_id,11);assert.equal(second.writes[0].model,'chosen-model');assert.equal(second.writes[0].stream,true);
+    assert.equal(second.writes[0].telegram_id,null);assert.equal(second.writes[0].model,'chosen-model');assert.equal(second.writes[0].stream,true);
   }finally{globalThis.sessionStorage=previous;}
 });
 
@@ -808,7 +808,7 @@ test('background panel work does not block role or user editing while active bot
   assert.equal(view.writes[0].modules['nodera-bot'],true);
 });
 
-test('chat scope lives in settings and subscription binding is saved with address preferences', async () => {
+test('client chat impersonation is absent and subscription binding is saved with address preferences', async () => {
   const status = fixture();
   status.settings.accounts = [{ telegram_id: 11, name: 'User', bot_chat_access: true, bot_access: false,
     telegram_access: false, vps_access: false, excluded_dialogs: [], session_configured: false }];
@@ -820,7 +820,7 @@ test('chat scope lives in settings and subscription binding is saved with addres
   assert.equal(gear.props.children.includes('Настройки'), false);
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Настройки чата')[0].node.props.onClick();
   tree = view.render();
-  assert.equal(nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Контур').length, 1);
+  assert.equal(nodes(tree, n => n.type === 'select' && n.props['aria-label'] === 'Контур').length, 0);
   nodes(tree, n => n.type === 'button' && n.props.children?.[1] === 'Доступ')[0].node.props.onClick();
   view.render(); await Promise.resolve();
   tree = view.render();

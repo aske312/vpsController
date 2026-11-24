@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 import diagnostic_context as tracing
+from cryptography.exceptions import InvalidTag
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,9 +68,12 @@ def operation_id(value: str | None = None) -> str:
 def read(path: Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and 'private_storage' in value:
+            from assistant_privacy import unseal
+            value = unseal(path, value)
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, KeyError, InvalidTag) as exc:
         raise OperationConflict("Состояние предыдущей операции недоступно; сначала проверьте её результат") from exc
     if not isinstance(value, dict):
         raise OperationConflict("Состояние предыдущей операции повреждено")
@@ -77,6 +81,8 @@ def read(path: Path) -> dict:
 
 
 def atomic_json(path: Path, value: dict, *, canonical: bool = False) -> None:
+    from assistant_privacy import seal
+    value = seal(path, value)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:

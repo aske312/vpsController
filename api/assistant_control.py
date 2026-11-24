@@ -1318,7 +1318,7 @@ def control_tool(api, name, arguments=None, actor='panel'):
         settings = read(api)
         for permission in ('server_read', 'diagnostics'): roles.require(settings, actor, permission)
         identity = arguments.get('body', {}).get('request_id')
-        return assistant_trace.read(api, identity) if identity else assistant_trace.listing(api)
+        return assistant_trace.read(api, identity, actor) if identity else assistant_trace.listing(api, actor)
     if name == 'mihomo_operation':
         identity = arguments.get('operation_id', '')
         if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity): raise HTTPException(422, 'Укажите ID операции Mihomo')

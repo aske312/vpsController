@@ -115,15 +115,14 @@ class ServerCommandTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/assistant/pending-action?telegram_id=11').status_code, 401)
         with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}), patch.object(api, 'manage_service') as action:
             self.assertIsNone(self.client.get('/api/assistant/pending-action').json()['pending_action'])
-            pending = self.client.get('/api/assistant/pending-action?telegram_id=11').json()['pending_action']
-            self.assertEqual(pending['code'], code)
-            self.assertNotIn('revision', pending)
+            self.assertEqual(self.client.get('/api/assistant/pending-action?telegram_id=11').status_code, 403)
             rejected = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': '0' * 8, 'decision': 'reject'})
-            self.assertEqual(rejected.status_code, 409)
-            self.assertEqual(self.client.get('/api/assistant/pending-action?telegram_id=11').json()['pending_action']['code'], code)
+            self.assertEqual(rejected.status_code, 403)
+            self.assertEqual(commands.pending_action(api, '11')['code'], code)
             rejected = self.client.post('/api/assistant/service-confirm', json={'telegram_id': 11, 'code': code, 'decision': 'reject'})
-            self.assertEqual(rejected.status_code, 200, rejected.text)
-            self.assertIsNone(self.client.get('/api/assistant/pending-action?telegram_id=11').json()['pending_action'])
+            self.assertEqual(rejected.status_code, 403, rejected.text)
+            self.assertEqual(commands.pending_action(api, '11')['code'], code)
+            self.assertEqual(self.call('/cancel ' + code).status_code, 200)
             self.assertEqual(self.call('/confirm ' + code).status_code, 409)
             action.assert_not_called()
 

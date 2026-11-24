@@ -1,6 +1,6 @@
 # Уведомление о приватности vpsController / Privacy Notice
 
-Редакция / Effective date: 20.11.2026
+Редакция / Effective date: 24.11.2026
 
 [Русский](#ru) · [English](#en)
 
@@ -23,6 +23,8 @@ vpsController — свободное self-hosted программное обес
 - команды, результаты диагностики и настройки автоматизации.
 
 Статистика AI локально связывает идентификатор пользователя с количеством запросов, моделями, результатами и сообщённым провайдером расходом токенов. Счётчики хранятся до 90 дней отдельно от истории диалогов, без текстов сообщений и ключей API.
+
+Личная переписка с NoderaBot и персональная память недоступны владельцу и администратору через панель. Сохранённые диалоги, вложения, персональная память и очереди запросов шифруются на диске. Это не сквозное шифрование от оператора VPS: сервер расшифровывает данные для обработки, а оператор с доступом к процессу и ключам технически может их прочитать. Telegram обрабатывает сообщения бота; выбранный провайдер AI получает переданный ему контекст. Копии в Telegram, старые резервные копии и ранее выгруженные данные не удаляются этим механизмом.
 
 Эти данные хранятся на VPS и в браузере администратора. Учётные данные панели сохраняются в `sessionStorage` вкладки. Закрытые ключи и пароли не следует публиковать или передавать в открытых обращениях.
 
@@ -59,6 +61,8 @@ Depending on configuration, the application may locally process:
 - commands, diagnostic results and automation settings.
 
 Local AI usage statistics associate a user identifier with request counts, models, outcomes and provider-reported token consumption. Counters are retained for up to 90 days separately from conversation history, without message text or API keys.
+
+Private NoderaBot conversations and personal memory are unavailable to panel owners and administrators through the panel. Stored conversations, attachments, personal memory and request queues are encrypted at rest. This is not end-to-end encryption against the VPS operator: the server decrypts data for processing, and an operator with process and key access can technically read it. Telegram processes bot messages; the selected AI provider receives the context sent to it. Telegram copies, old backups and previously exported data are not removed by this mechanism.
 
 This data remains on the VPS and in the administrator’s browser. Panel credentials are stored in the tab’s `sessionStorage`. Private keys and passwords should never be included in public requests.
 

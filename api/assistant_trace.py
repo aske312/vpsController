@@ -148,7 +148,7 @@ def read(api, identity, actor='panel'):
         with file.open(encoding='utf-8') as stream: raw = stream.read(MAX_BYTES + 4096)
         lines = raw.splitlines()
         meta = json.loads(lines[0])
-        if actor != 'panel' and str(meta.get('actor')) != str(actor): raise OSError('scope')
+        if str(meta.get('actor')) != str(actor): raise OSError('scope')
     except (OSError, ValueError, IndexError): raise HTTPException(404, 'Журнал запроса недоступен или срок хранения истёк') from None
     events = []
     for line in lines[1:]:

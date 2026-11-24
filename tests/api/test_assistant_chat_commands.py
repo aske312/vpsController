@@ -1,12 +1,15 @@
 """Web shortcuts reuse the bot executor without an AI request or weakened ACLs."""
 import unittest
 from unittest.mock import patch
+import httpx
+from fastapi import HTTPException
 
 from tests.api import test_assistant_commands as fixtures
 from tests.api.support import api
 import assistant_commands as commands
 import assistant_control as control
 import assistant_mihomo as mihomo
+import assistant_chat_commands as shortcuts
 
 
 class ChatCommandTests(unittest.TestCase):
@@ -17,10 +20,20 @@ class ChatCommandTests(unittest.TestCase):
     setUp = fixtures.ServerCommandTests.setUp
 
     def command(self, text, actor=None, **fields):
+        if actor is not None:
+            # Exercise the scoped executor independently of the panel route,
+            # which no longer authenticates arbitrary Telegram identities.
+            try:
+                result = shortcuts.execute(api, shortcuts.Request(command=text, telegram_id=actor, **fields))
+                return httpx.Response(200, json=result)
+            except HTTPException as error:
+                return httpx.Response(error.status_code, json={'detail': error.detail})
         with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
             return self.client.post('/api/assistant/commands', json={'command': text, 'telegram_id': actor, **fields})
 
     def catalog(self, actor=None):
+        if actor is not None:
+            return httpx.Response(200, json={'items': shortcuts.catalog(api, str(actor))})
         with patch.dict(api.app.dependency_overrides, {api.require_token: lambda: None}):
             return self.client.get('/api/assistant/commands' + (f'?telegram_id={actor}' if actor else ''))
 

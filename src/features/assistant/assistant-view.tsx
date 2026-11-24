@@ -14,7 +14,7 @@ import { ChatIcon } from "./chat-icon";
 import { ChatTurnRow, type ChatTurn as Turn } from "./chat-turn";
 import { conversationMarkdown } from "./answer-format";
 import { chatHistory, fileAccept, readChatFiles, type ChatFile } from "./chat-files";
-import { readChatSession, createChatSessionWriter, savedActor, rememberActor, chatProvider } from "./chat-session";
+import { readChatSession, createChatSessionWriter, clearClientChatSessions, rememberActor, chatProvider } from "./chat-session";
 import type { ConfirmationRequest } from "../../shared/types/control-plane";
 import { systemActionSnapshot, type SystemAction } from "../../control-panel/system-operation";
 import { ChatCommandMenu } from "./chat-command-menu";
@@ -153,8 +153,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const agentInstalled = status?.modules.some(item => item.id === 'ai-agent' && item.installed) === true;
   useEffect(() => {
     if (!status || sessionReady) return;
-    const previousActor = savedActor(request);
-    const identity = status.settings.accounts.some(item => String(item.telegram_id) === previousActor) ? previousActor : "";
+    clearClientChatSessions(request);
+    const identity = "";
     const saved = readChatSession(request, identity);
     activeActor.current = identity; setActor(identity);
     if (saved) {
@@ -570,9 +570,8 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
   const matchingCommands = commandMatches(commands, prompt);
   const activeCommandIndex = Math.min(commandIndex, Math.max(0, matchingCommands.length - 1));
   const conflict = status.settings.revision !== draft.expected_revision;
-  const chooseActor = (value: string) => { const saved = readChatSession(request, value); setCommandMenu(false); setCommandIndex(0); setCommands([]); memoryGeneration.current++; activeActor.current = value; interacted.current = false; setActor(value); setModel(saved?.provider === chatProvider(status.settings) ? saved.model : ""); setTurns(saved?.turns ?? []); nextTurn.current = Math.max(0, ...(saved?.turns ?? []).map(turn => turn.id)); setFiles([]); setPrompt(saved?.prompt ?? ""); setStreaming(saved?.streaming ?? streaming); setConversationId(saved?.conversation_id ?? null); selectedConversation.current = saved ? saved.conversation_id : undefined; setMemoryBusy(false); setMemoryError(''); };
-  const actorName = status.settings.accounts.find(item => String(item.telegram_id) === actor)?.name || actor || "Администратор";
-  const actorSelect = <label className="mcpActor">Контур<select aria-label="Контур" title={actorName} value={actor} disabled={blocked} onChange={event => chooseActor(event.target.value)}><option value="">Администратор</option>{status.settings.accounts.map(item => <option key={item.telegram_id} value={item.telegram_id}>{item.name || item.telegram_id}</option>)}</select></label>;
+  const actorName = "Администратор";
+  const actorSelect = <p className="mcpActor">Личный чат панели. Переписка клиентов доступна только им в NoderaBot.</p>;
   const newChat = () => { admissionQueue.current = null; memoryGeneration.current++; interacted.current = true; selectedConversation.current = null; setModel(""); setConversationId(null); setTurns([]); setFiles([]); setPrompt(''); setMemoryError(''); };
   async function removeConversation() {
     if (!conversationId || !await confirmAction({ title: 'Удалить диалог?', message: 'Диалог и его вложения будут удалены из кеша на сервере.', confirmLabel: 'Удалить', danger: true })) return;
