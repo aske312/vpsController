@@ -871,7 +871,7 @@ def inline_keyboard_content(answer, prompt, access, actions):
     confirmations = list(dict.fromkeys(re.findall(r'/confirm ([0-9a-f]{8})', answer)))
     if access:
         for index, code in enumerate(confirmations[:32], 1):
-            rows.append([button(f'Подтвердить {index}' if len(confirmations) > 1 else 'Подтвердить действие', '/confirm ' + code), button(f'Отказать {index}' if len(confirmations) > 1 else 'Отказать', '/cancel ' + code)])
+            rows.append([button(f'Продолжить {index}' if len(confirmations) > 1 else 'Продолжить', '/confirm ' + code), button(f'Отменить {index}' if len(confirmations) > 1 else 'Отменить', '/cancel ' + code)])
     operation = re.search(r'/operation ([0-9a-f]{32})', answer)
     if access and operation:
         rows.append([button('Проверить результат', '/operation ' + operation[1])])
