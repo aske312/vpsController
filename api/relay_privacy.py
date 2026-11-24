@@ -181,30 +181,31 @@ def protect_subscription(control, text, selections):
     from relay_private_transport import active
     from relay_connections import host_id
     from relay_cdn import after
-    profiles = {}
-    for connection in selections.values():
-        selected = host_id(connection.get('settings', {}))
-        if selected and selected not in profiles:
-            profiles[selected] = active(control, selected)
-    if not any(profiles.values()): return text
+    if not any(host_id(connection.get('settings', {})) for connection in selections.values()): return text
     registry = control.read()
     config = yaml.safe_load(text)
+    profiles = {}
     helpers = {}
     for index, node in enumerate(config.get('proxies', [])):
         connection = selections.get(node['name'], {})
         selected = host_id(connection.get('settings', {}))
-        profile = profiles.get(selected)
-        if not profile: continue
-        if after(connection.get('settings', {})):
-            raise ValueError('Защищённый Relay требует клиентский вход на Relay перед CDN')
+        if not selected: continue
         network = 'udp' if node['type'] in {'wireguard', 'hysteria2', 'tuic'} else 'tcp'
         route = next((row for row in registry['routes'] if row['host_id'] == selected
                       and row['transport'] == network and row['listen_port'] == node['port']), None)
+        # Authenticated TCP uses its own pinned transport, independent of UDP readiness.
+        if network == 'tcp' and route and route.get('auth'): continue
+        if selected not in profiles:
+            profiles[selected] = active(control, selected)
+        profile = profiles[selected]
+        if not profile: continue
+        if after(connection.get('settings', {})):
+            raise ValueError('Защищённый Relay требует клиентский вход на Relay перед CDN')
         if not route: raise ValueError('Не найден защищённый маршрут подключения')
-        if route.get('auth'): continue  # TCP authentication remains independent of UDP availability.
         destination = {'ip': route['target_ip'], 'port': route['target_port'], 'network': network}
         config['proxies'][index] = protect_node(node, profile, destination)
         helper = mihomo_transport(profile);helpers[helper['name']] = helper
+    if not helpers: return text
     if any(node['name'] in helpers for node in config['proxies'] + config.get('proxy-groups', [])):
         raise ValueError('Имя транспортного узла занято')
     config['proxies'].extend(helpers.values())

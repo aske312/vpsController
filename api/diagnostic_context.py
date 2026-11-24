@@ -23,6 +23,7 @@ ERRORS = {
     'subscription_unsupported_format': ('client_compatibility', False),
     'subscription_client_mismatch': ('device_binding', False), 'subscription_invalid_device': ('device_binding', False),
     'subscription_render_failed': ('config_generation', None), 'request_rejected': ('handling', False),
+    'relay_not_verified': ('relay_transport', False), 'subscription_relay_unverified': ('relay_transport', False),
 }
 
 

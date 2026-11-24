@@ -116,6 +116,36 @@ class ObservabilityTests(unittest.TestCase):
         with patch.object(obs.Store, 'append', side_effect=sqlite3.OperationalError('full')), TestClient(app) as client:
             self.assertEqual(client.get('/ping').json(), {'ok': True})
 
+    def test_both_subscription_aliases_count_yaml_and_relay_failures_but_exclude_html_and_reports(self):
+        from relay_private_transport import RelayNotVerified
+        app = FastAPI()
+        app.add_middleware(obs.RequestEvidence, root=lambda: self.root, service='mihomo')
+        app.add_exception_handler(RelayNotVerified, manager.relay_not_verified_handler)
+        @app.get('/s/{token}')
+        @app.get('/api/mihomo/subscriptions/{token}')
+        def subscription(token: str, request: Request, page: bool = False, failed: bool = False):
+            request.state.observed_profile = 'profile-one'
+            if failed: raise RelayNotVerified('private failure detail')
+            return PlainTextResponse('private payload', media_type='text/html' if page else 'text/yaml')
+        @app.post('/s/{token}/reports')
+        def report(token: str): return {'ok': True}
+        with TestClient(app) as client:
+            for prefix in ('/s/', '/api/mihomo/subscriptions/'):
+                self.assertEqual(client.get(prefix+'private-token').status_code, 200)
+                self.assertEqual(client.get(prefix+'private-token?page=true').status_code, 200)
+                response = client.get(prefix+'private-token?failed=true')
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['code'], 'relay_not_verified')
+                self.assertEqual(response.json()['error_code'], 'subscription_relay_unverified')
+            self.assertEqual(client.post('/s/private-token/reports').status_code, 200)
+        result = self.store.read()
+        self.assertEqual(result['subscriptions'], {'attempts': 4, 'succeeded': 2, 'failed': 2})
+        failed = [event for event in result['events'] if event['status'] == 409]
+        self.assertTrue(all(event['reason'] == 'subscription_relay_unverified' for event in failed))
+        self.assertTrue(all(event['stage'] == 'relay_transport' for event in failed))
+        for secret in ('private-token', 'private payload', 'private failure detail'):
+            self.assertNotIn(secret, json.dumps(result))
+
     def test_real_mihomo_subscription_expiry_records_profile_without_token(self):
         with patch.object(manager, 'DATA_ROOT', self.root / 'mihomo'), \
              patch.object(manager, 'subscription_mutation_access', return_value=False), \

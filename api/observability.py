@@ -22,9 +22,10 @@ import diagnostic_context as tracing
 request_id = ContextVar('observability_request_id', default='')
 MAX_EVENTS = 100_000
 DEFAULTS = {'enabled': True, 'retention_days': 14, 'max_events': 20_000, 'errors_only': False, 'revision': 0}
+SUBSCRIPTION_ROUTES = {'/s/{token}', '/api/mihomo/subscriptions/{token}'}
 SUBSCRIPTION_REASONS = {'subscription_expired', 'subscription_exhausted', 'subscription_signer_unavailable',
                         'subscription_invalid_nonce', 'subscription_unsupported_format', 'subscription_client_mismatch',
-                        'subscription_invalid_device', 'subscription_render_failed'}
+                        'subscription_invalid_device', 'subscription_render_failed', 'subscription_relay_unverified'}
 
 
 class Settings(BaseModel):
@@ -264,8 +265,7 @@ class RequestEvidence:
             route = getattr(scope.get('route'), 'path', '<unmatched>')
             # Instrumentation reads do not create their own evidence.
             if not route.startswith('/api/observability') or is_change(route, scope.get('method')):
-                kind = 'subscription' if route == '/api/mihomo/subscriptions/{token}' and 'yaml' in content_type else 'request'
-                if route == '/api/mihomo/subscriptions/{token}' and status >= 400: kind = 'subscription'
+                kind = 'subscription' if route in SUBSCRIPTION_ROUTES and ('yaml' in content_type or status >= 400) else 'request'
                 if is_change(route, scope.get('method')): kind = 'change'
                 profile = scope['state'].get('observed_profile')
                 if not isinstance(profile, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', profile): profile = None

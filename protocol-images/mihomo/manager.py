@@ -396,8 +396,12 @@ from relay_private_transport import RelayNotVerified
 
 @app.exception_handler(RelayNotVerified)
 async def relay_not_verified_handler(request: Request, exc: RelayNotVerified) -> JSONResponse:
+    observability.tracing.failure('relay_not_verified')
+    if getattr(request.scope.get('route'), 'path', '') in observability.SUBSCRIPTION_ROUTES:
+        request.state.evidence_reason = 'subscription_relay_unverified'
     return JSONResponse(status_code=409, content={'code': 'relay_not_verified',
-        'detail': 'Защищённый Relay ещё не проверен. Проверьте его состояние через relay_read; открытая пересылка не используется.'},
+        'detail': 'Защищённый Relay ещё не проверен. Проверьте его состояние через relay_read; открытая пересылка не используется.',
+        **observability.error_fields(request, 409, 'mihomo')},
         headers={'Cache-Control': 'no-store'})
 
 

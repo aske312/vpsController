@@ -137,6 +137,36 @@ class PrivateOperationsTests(unittest.TestCase):
         with self.assertRaises(ValueError): private.active(self.control, self.host)
         self.assertEqual(private.record(self.control, self.host)['state'], 'unknown')
 
+    def test_unverified_udp_does_not_block_independently_authenticated_tcp_export(self):
+        import relay_ingress
+        registry = self.control.read()
+        route = registry['routes'][0]
+        route['auth'] = relay_ingress.provision(self.control, route)
+        self.control.write(registry)
+        private.save(self.control, self.host, {'state': 'unknown', 'generation': 'a'*32})
+        node = {'name': 'TLS', 'type': 'trojan', 'server': AGENT, 'port': route['listen_port'], 'password': 'inner-secret'}
+        selections = {'TLS': {'settings': {'relay_host_id': self.host}}}
+        config = {'proxies': [node], 'proxy-groups': [{'name': 'VPN', 'type': 'select', 'proxies': ['TLS']}]}
+        text = relay_privacy.protect_subscription(self.control, yaml.safe_dump(config), selections)
+        result = yaml.safe_load(relay_ingress.protect_subscription(self.control, text, selections))
+        inner, helper = result['proxies']
+        self.assertEqual(inner['dialer-proxy'], helper['name'])
+        self.assertEqual((helper['type'], helper['tls']), ('http', True))
+        self.assertEqual(helper['fingerprint'], PIN)
+        self.assertFalse(helper['skip-cert-verify'])
+        self.assertEqual((helper['server'], helper['port']), (AGENT, route['listen_port']))
+        self.assertIn('password', helper)
+        self.assertEqual(inner['password'], 'inner-secret')
+        self.assertEqual(result['proxy-groups'], config['proxy-groups'])
+        for transport, kind in (('tcp', 'trojan'), ('udp', 'tuic')):
+            with self.subTest(transport=transport):
+                registry['routes'][0].pop('auth', None)
+                registry['routes'][0]['transport'] = transport
+                self.control.write(registry)
+                blocked = {'proxies': [dict(node, type=kind)]}
+                with self.assertRaises(private.RelayNotVerified):
+                    relay_privacy.protect_subscription(self.control, yaml.safe_dump(blocked), selections)
+
     def test_disable_fences_remote_and_erases_keys_before_raw_export_is_allowed(self):
         self.enable()
         self.payload.update(enabled=False, expected_revision=self.control.read()['revision'])
