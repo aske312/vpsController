@@ -11,7 +11,6 @@ import threading
 import time
 import uuid
 import diagnostic_context as tracing
-from cryptography.exceptions import InvalidTag
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,7 +72,7 @@ def read(path: Path) -> dict:
             value = unseal(path, value)
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError, KeyError, InvalidTag) as exc:
+    except (OSError, ValueError, KeyError, ImportError) as exc:
         raise OperationConflict("Состояние предыдущей операции недоступно; сначала проверьте её результат") from exc
     if not isinstance(value, dict):
         raise OperationConflict("Состояние предыдущей операции повреждено")

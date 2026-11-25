@@ -9,9 +9,6 @@ import os
 from pathlib import Path
 import uuid
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.exceptions import InvalidTag
-
 FORMAT = 'nodera-private-v1'
 CONTENT = {'conversations', 'personalization', 'bot-history', 'requests', 'nodera-bot/commands'}
 
@@ -30,6 +27,7 @@ def scope(path):
 def key(root, *, create=False):
     file = root / '.privacy-key'
     if create and not file.exists():
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         for existing in root.rglob('*.json'):
             if scope(existing) is None and existing.parent != root:
                 continue
@@ -69,6 +67,9 @@ def seal(path, value):
 
 
 def seal_record(root, associated, value):
+    # Shell workers also write ordinary operation metadata with system Python.
+    # Only private content needs the API's crypto dependency; never fall back to plaintext.
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     nonce = os.urandom(12)
     encrypted = AESGCM(key(root, create=True)).encrypt(
         nonce, json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode(), associated)
@@ -90,6 +91,8 @@ def unseal_record(root, associated, value):
         return value
     if value.get('private_storage') != FORMAT:
         raise ValueError('Unsupported private storage format')
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.exceptions import InvalidTag
     encoded = base64.b64decode(value['ciphertext'], validate=True)
     try:
         decoded = AESGCM(key(root)).decrypt(encoded[:12], encoded[12:], associated)
