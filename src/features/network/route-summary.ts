@@ -3,7 +3,7 @@ import { endpointCheckReady } from "../../shared/lib/network-readiness";
 import type { RelayHost } from "./relay-state";
 import type { ServerAddress } from "./server-address-state";
 
-export type RouteState = "present" | "verified" | "connected" | "listening" | "dns" | "unchecked" | "unknown" | "pending" | "warning" | "error" | "stale";
+export type RouteState = "present" | "verified" | "connected" | "listening" | "dns" | "unchecked" | "unknown" | "pending" | "warning" | "error" | "stale" | "disabled";
 export type RouteSummary = { state: RouteState; label: string; detail: string; type: string; connection: string };
 type Domain = NetworkStatus["domains"][number];
 const kindLabels = { cdn: "CDN-домен", tls_relay: "TLS-домен", udp_relay: "UDP-домен" };
@@ -47,6 +47,7 @@ export function relayRouteSummary(host: RelayHost, failed = false, pending = fal
   const transports = (["tcp", "udp"] as const).map(transport => ({ transport, count: host.routes.filter(route => route.transport === transport).length })).filter(item => item.count);
   const base = { type: "Relay Agent", connection: transports.map(item => `${item.transport.toUpperCase()}: ${item.count}`).join(" · ") || (failed || pending || host.state !== "connected" ? "Порты неизвестны" : "Нет перенаправлений") };
   if (pending) return { ...base, state: "pending", label: "Проверяем", detail: "Результат изменения Relay ещё не подтверждён." };
+  if (host.enabled === false) return { ...base, state: "disabled", label: "Отключён", detail: "Адрес и маршруты сохранены. Передача данных отключена." };
   if (reading && host.state !== "connected") return { ...base, state: "pending", label: "Проверяем", detail: "Проверяем соединение с агентом и состояние его портов." };
   if (host.error) return { ...base, state: "error", label: "Ошибка Relay", detail: `${host.name}: ${host.error}` };
   if (host.profile_failures) return { ...base, state: "error", label: "Ошибка пересылки", detail: `Не удалось настроить Relay для профилей: ${host.profile_failures}. Раскройте адрес, чтобы повторить настройку.` };

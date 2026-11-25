@@ -15,6 +15,24 @@ const { MihomoConnectionAddress } = await loader.ssrLoadModule("/src/features/mi
 const { ConnectionRouteMap, profileConnectionRoute } = await loader.ssrLoadModule("/src/features/mihomo/connection-route-map.tsx");
 const host = { id: "b".repeat(32), name: "Amsterdam", client_address: "relay.example", agent_url: "https://85.209.155.229:9443", state: "unknown", routes: [] };
 
+test('disabled Relay stays in Network while no address is offered for a new profile binding', () => {
+  const disabled = {...host,enabled:false,addresses:{ipv4:['85.209.155.229'],ipv6:[],domains:['relay.example']}};
+  const inventory = {status:{hosts:[disabled]},failed:false};
+  const network = routeEntries(null,[disabled],false,false,false,false);
+  assert.equal(network.length,1);assert.equal(network[0].host.id,host.id);
+  assert.equal(network[0].summary.state,'disabled');
+  const html = renderToStaticMarkup(createElement(MihomoConnectionAddress,{
+    connection:{id:'fixture',component:'transport-tuic',settings:{}}, inventory,
+    tlsDomains:[],udpDomains:[],cdnDomains:[],webTransports:[],supported:true,disabled:false,onChange:()=>{},
+  }));
+  assert.doesNotMatch(html,/relay\.example|85\.209\.155\.229/);
+  const saved=renderToStaticMarkup(createElement(MihomoConnectionAddress,{
+    connection:{id:'fixture',component:'transport-tuic',settings:{relay_host_id:host.id,relay_address:'relay.example'}}, inventory,
+    tlsDomains:[],udpDomains:[],cdnDomains:[],webTransports:[],supported:true,disabled:false,onChange:()=>{},
+  }));
+  assert.match(saved,/<option[^>]*disabled=""[^>]*>Relay отключён · привязка сохранена<\/option>/);
+});
+
 const mihomoAddress = (component, settings = {}, props = {}) => {
   const addressProps = {
   connection: { id: 'fixture', name: 'fixture', device_id: 'phone', component, settings },

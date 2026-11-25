@@ -40,7 +40,7 @@ export function clientSnapshot(value: unknown): Client[] {
       || (row.channel_mode !== undefined && !["direct", "tls_relay", "udp_relay"].includes(String(row.channel_mode)))
       || (row.latency_source !== undefined && !["server_icmp_tunnel_ip", "not_supported"].includes(String(row.latency_source)))
       || (row.active_sources !== undefined && !strings(row.active_sources))) throw new Error("Некорректное состояние подключения");
-    if (row.route_state !== undefined && (!record(row.route_state) || !["current", "stale", "unknown"].includes(String(row.route_state.state))
+    if (row.route_state !== undefined && (!record(row.route_state) || !["current", "stale", "unknown", "disabled"].includes(String(row.route_state.state))
       || typeof row.route_state.reason !== "string" || !strings(row.route_state.addresses) || !strings(row.route_state.bindings))) throw new Error("Некорректное состояние маршрута подключения");
     const identity = `${row.protocol}:${row.id}`;
     if (identities.has(identity)) throw new Error("Повторяющийся идентификатор подключения");

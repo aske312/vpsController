@@ -797,7 +797,11 @@ def profile_relay_registry(items):
                for item in items for connection in item.get('connections', [])):
         return {'hosts': []}
     try:
-        return relay_connection_control().read()
+        control = relay_connection_control();registry = control.read()
+        if getattr(control, 'pending', None) is not None and control.pending.exists():
+            intent = json.loads(control.pending.read_text())
+            if intent.get('action') == 'activation':registry['activation_pending'] = intent.get('host_id')
+        return registry
     except (OSError, ValueError, KeyError, TypeError):
         # consumer_state maps an unreadable registry to the existing unknown state.
         return {'hosts': None}
@@ -828,8 +832,12 @@ def profile_response(item: dict[str, Any], *, relay_registry=None) -> dict[str, 
         for connection in result.get("connections", []):
             connection["route_state"] = {"state": "unknown", "reason": "Реестр маршрутов недоступен", "addresses": [], "bindings": []}
     for connection in result.get('connections', []):
+        settings = connection.get('settings', {})
+        if settings.get('carrier_connection_id'):
+            carrier = next((row for row in result.get('connections', []) if row.get('id') == settings['carrier_connection_id']), None)
+            if carrier: settings = carrier.get('settings', {})
         connection['route_state'] = relay_connections.consumer_state(
-            None, connection.get('settings', {}), connection['route_state'], registry=relay_registry)
+            None, settings, connection['route_state'], registry=relay_registry)
     result["export_filename"] = profile_export_filename(item)
     result["protection_status"] = {}
     for device in result["devices"]:
@@ -3225,7 +3233,7 @@ def mihomo_route_endpoint_selectable(kind: str, domain: str) -> bool:
         return False
 
 
-def validate_connection(component: str, values: dict[str, Any], *, allow_unverified_network_route: bool = False) -> dict[str, Any]:
+def validate_connection(component: str, values: dict[str, Any], *, allow_unverified_network_route: bool = False, allow_disabled_relay: bool = False) -> dict[str, Any]:
     if component not in TRANSPORTS:
         raise HTTPException(status_code=422, detail=f"{component} is not a Mihomo component")
     if not module_is_installed(component):
@@ -3236,7 +3244,9 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
     try:
         selected_relay = relay_connections.host_id(result)
         if selected_relay:
-            relay_connection_control().host(relay_connection_control().read(), selected_relay)
+            host = relay_connection_control().host(relay_connection_control().read(), selected_relay)
+            if host.get('enabled', True) is False and not allow_disabled_relay:
+                raise HTTPException(409, 'Relay отключён; выберите включённый узел. Существующие привязки сохранены.')
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail='Подключите выбранный Relay на странице Сеть → ROUTES') from exc
     relay_cdn = result.get('relay_cdn', False)
@@ -4156,7 +4166,10 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
             str(candidate_settings.get(key, "")).strip().lower() == str(saved_settings.get(key, "")).strip().lower()
             for key in route_keys
         )
-        settings = validate_connection(component, settings_input, allow_unverified_network_route=preserves_network_route)
+        preserves_relay = bool(saved_settings) and all(
+            candidate_settings.get(key, '') == saved_settings.get(key, '') for key in ('relay_host_id', 'relay_address'))
+        settings = validate_connection(component, settings_input, allow_unverified_network_route=preserves_network_route,
+                                       allow_disabled_relay=preserves_relay)
         result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "device_id": value.device_id, "settings": settings})
     import snell_delivery
     try:
@@ -6022,7 +6035,7 @@ def client_route_definitions(profile, device_id, core_version=None):
     try:
         settings = load_json(NETWORK_ENDPOINTS_FILE, {})
         bindings = [row for row in network_routes.migrate(settings)['bindings'] if row['state'] == 'active']
-        hosts = relay_connection_control().read()['hosts']
+        hosts = [host for host in relay_connection_control().read()['hosts'] if host.get('enabled', True)]
     except (OSError, ValueError, KeyError, TypeError):
         raise ValueError('Invalid route inventory') from None
     existing = [row for row in profile['connections'] if row['device_id'] == device_id]

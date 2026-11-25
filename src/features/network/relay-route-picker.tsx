@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { RelayHost, RelayProfile, RelayStatus } from "./relay-state";
 import { routeNeedsAttention } from "./route-library-state";
 
-const routeStates = { listening: "Порт слушает", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" };
+const routeStates = { listening: "Порт слушает", disabled: "Отключён", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" };
 const PAGE_SIZE = 5;
 
 export function compactPorts(values: number[]) {

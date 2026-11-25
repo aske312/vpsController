@@ -60,6 +60,12 @@ class RelayPrivateTransport(BaseModel):
     expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
+class RelayActivation(BaseModel):
+    model_config = {'extra': 'forbid'}
+    enabled: bool = Field(strict=True)
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
+
+
 class RelayRecoverySettings(BaseModel):
     pending_operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 

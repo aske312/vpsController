@@ -9,6 +9,17 @@ const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', t
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
 const status = { revision: 'c'.repeat(32), hosts: [host], pending: false, origin_ip: '195.14.118.112', origin_hosts: ['195.14.118.112'], targets: [{ transport: 'tcp', port: 443 }] };
 
+test('disabled data plane and exact activation recovery preserve the host contract', () => {
+  const route = {id:'pro-'+'d'.repeat(32),host_id:host.id,transport:'tcp',listen_port:20001,target_ip:status.origin_ip,target_port:443,state:'disabled',sessions:0,target_verified:false};
+  const disabled = {...status,hosts:[{...host,enabled:false,routes:[route]}]};
+  assert.equal(relaySnapshot(disabled).hosts[0].routes[0].state,'disabled');
+  assert.equal(relaySnapshot(disabled).hosts[0].enabled,false);
+  const pending = {...disabled,pending:true,recovery:{action:'activation',enabled:false,host_id:host.id,operation_id:'e'.repeat(32),error:'response_unknown'}};
+  assert.equal(relaySnapshot(pending).recovery.action,'activation');
+  assert.throws(()=>relaySnapshot({...pending,recovery:{...pending.recovery,enabled:'false'}}));
+  assert.throws(()=>relaySnapshot({...disabled,hosts:[{...host,enabled:'false'}]}));
+});
+
 test('Relay security keeps legacy exposure explicit and rejects credential leaks', () => {
   const security = {state:'legacy_exposed',controller_ip:status.origin_ip,api_source_restricted:true,unauthenticated_external_routes:['legacy']};
   const route = {id:'pro-'+'d'.repeat(32),host_id:host.id,transport:'tcp',listen_port:20001,target_ip:'104.16.1.2',target_port:443,state:'listening',target_verified:false,auth:{type:'tls-connect',username:'fixture_username',credential_id:'e'.repeat(32)}};

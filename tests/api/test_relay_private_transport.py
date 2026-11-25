@@ -52,7 +52,7 @@ class PrivateOperationsTests(unittest.TestCase):
         self.api = SimpleNamespace(relay_control=lambda: self.control)
         self.payload = {'host_id': self.host, 'expected_revision': self.control.read()['revision'], 'enabled': True}
         self.enterContext(patch.object(private, 'runtime', return_value=Path('/synthetic/sing-box')))
-        self.enterContext(patch.object(private, 'install_origin'))
+        self.install = self.enterContext(patch.object(private, 'install_origin'))
         self.probe = self.enterContext(patch.object(private, 'probe'))
         self.enterContext(patch.object(private.port_allocation, 'allocate', side_effect=[19443, 34000]))
         def cert(folder, name, address):
@@ -90,6 +90,35 @@ class PrivateOperationsTests(unittest.TestCase):
         self.probe.side_effect = None;self.enable()
         self.assertEqual(private.active(self.control, self.host)['generation'], 'a'*32)
         self.assertEqual(len([row for row in self.agent.calls if row[0] == 'PUT']), 1)
+
+    def test_failed_probe_persists_actionable_reason_and_successful_recheck_clears_it(self):
+        self.probe.side_effect = TimeoutError('secret=do-not-publish')
+        with self.assertRaises(private.PrivateTransportError): self.enable()
+        value = private.record(self.control, self.host)
+        self.assertEqual(value.get('failure_stage'), 'traffic_probe')
+        public = [{'id': self.host}]
+        private.annotate(self.control, public)
+        self.assertNotIn('failure_stage', public[0]['private_transport'])
+        with self.assertRaises(private.RelayNotVerified) as failure: private.active(self.control, self.host)
+        self.assertIn('TCP/UDP', str(failure.exception))
+        self.assertNotIn('secret', str(failure.exception))
+        self.probe.side_effect = None; self.enable()
+        self.assertNotIn('failure_stage', private.record(self.control, self.host))
+
+    def test_empty_route_set_is_rejected_before_intent_with_an_actionable_message(self):
+        registry = self.control.read(); registry['routes'] = []; self.control.write(registry)
+        self.payload['expected_revision'] = registry['revision']
+        with self.assertRaisesRegex(ValueError, 'маршрут'):
+            self.enable()
+        self.assertIsNone(private.record(self.control, self.host))
+        self.assertFalse(any(method == 'PUT' for method, _ in self.agent.calls))
+        self.install.assert_not_called()
+
+    def test_malformed_failure_stage_cannot_escape_the_export_readiness_guard(self):
+        private.save(self.control, self.host, {'state': 'unknown', 'generation': 'a'*32, 'failure_stage': {'secret': 'hidden'}})
+        with self.assertRaises(private.RelayNotVerified) as failure:
+            private.active(self.control, self.host)
+        self.assertNotIn('hidden', str(failure.exception))
 
     def test_failed_agent_runtime_has_an_actionable_reason_without_remote_secrets(self):
         request = self.agent.request
@@ -129,6 +158,9 @@ class PrivateOperationsTests(unittest.TestCase):
         self.assertEqual((result['proxies'][0]['server'], result['proxies'][0]['port']), (ORIGIN, 443))
         self.assertEqual(result['proxies'][0]['dialer-proxy'], result['proxies'][2]['name'])
         self.assertEqual(result['proxies'][2]['fingerprint'], relay_privacy.fingerprint(pure.PrivateTransportTests.certificate))
+        registry = self.control.read();registry['hosts'][0]['enabled'] = False;self.control.write(registry)
+        disabled = yaml.safe_load(relay_privacy.protect_subscription(self.control, yaml.safe_dump(config), selections))
+        self.assertEqual(disabled, result)
 
     def test_failed_recheck_revokes_previous_readiness(self):
         self.enable()

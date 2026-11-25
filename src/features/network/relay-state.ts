@@ -8,7 +8,7 @@ export type RelayRoute = {
   auth?: { type: "tls-connect"; username: string; credential_id: string };
   cdn_domain?: string;
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
-  state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
+  state: "listening" | "failed" | "missing" | "drift" | "unknown" | "disabled"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;
   diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number>; return_state?: "no_return" | "waiting" | "flowing" | "idle"; no_return_sessions?: number;
     interval?: { seconds: number; errors: number; dropped_packets: number; new_sessions: number; error_counts: Record<string, number> };
@@ -21,6 +21,7 @@ export type RelayHost = {
   country_code_override?: string;
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
+  enabled?: boolean;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
   profile_failures?: number;
   capabilities?: string[];
@@ -39,7 +40,7 @@ export type RelayStatus = {
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
   targets: { transport: "tcp" | "udp"; port: number }[];
   consumers?: { id: string; label: string; host_id?: string }[];
-  recovery?: { operation_id: string; host_id: string; action: "put" | "delete"; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number; error: string };
+  recovery?: { operation_id: string; host_id: string; error: string } & ({ action: "put" | "delete"; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number } | { action: "activation"; enabled: boolean });
 };
 export type RelayClientResult = ClientExport;
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -73,9 +74,10 @@ export function relaySnapshot(value: unknown): RelayStatus {
   if (value.recovery !== undefined) {
     const recovery = value.recovery;
     if (!value.pending || !object(recovery) || typeof recovery.operation_id !== "string" || !/^[0-9a-f]{32}$/.test(recovery.operation_id)
-      || typeof recovery.host_id !== "string" || !/^[0-9a-f]{32}$/.test(recovery.host_id) || !["put", "delete"].includes(String(recovery.action))
-      || !["tcp", "udp"].includes(String(recovery.transport)) || !integer(recovery.listen_port, 20000, 20999)
-      || typeof recovery.target_ip !== "string" || !integer(recovery.target_port, 1, 65535)
+      || typeof recovery.host_id !== "string" || !/^[0-9a-f]{32}$/.test(recovery.host_id) || !["put", "delete", "activation"].includes(String(recovery.action))
+      || (recovery.action === "activation" ? typeof recovery.enabled !== "boolean" :
+        !["tcp", "udp"].includes(String(recovery.transport)) || !integer(recovery.listen_port, 20000, 20999)
+        || typeof recovery.target_ip !== "string" || !integer(recovery.target_port, 1, 65535))
       || typeof recovery.error !== "string" || !/^(response_unknown|agent_http_\d{3})$/.test(recovery.error)) return invalid();
   }
   for (const host of value.hosts) {
@@ -86,6 +88,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     if (host.profile_failures !== undefined && !integer(host.profile_failures)) return invalid();
+    if (host.enabled !== undefined && typeof host.enabled !== "boolean") return invalid();
     if (host.country_code_override !== undefined && (typeof host.country_code_override !== "string" || host.country_code_override !== "" && !countryCodes.includes(host.country_code_override))) return invalid();
     if (host.private_transport !== undefined && (!object(host.private_transport) || !["preparing", "sending", "ready", "unknown", "disabling", "disabled"].includes(String(host.private_transport.state)) || Object.keys(host.private_transport).some(key => !["state", "generation", "verified_at"].includes(key)) || host.private_transport.generation !== undefined && (typeof host.private_transport.generation !== "string" || !/^[0-9a-f]{32}$/.test(host.private_transport.generation)) || host.private_transport.verified_at !== undefined && !integer(host.private_transport.verified_at))) return invalid();
     ids.add(host.id);
@@ -115,7 +118,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
     for (const route of host.routes) {
       if (!object(route) || typeof route.id !== "string" || !/^pro-[0-9a-f]{32}$/.test(route.id) || routeIds.has(route.id) || route.host_id !== host.id
         || !["tcp", "udp"].includes(String(route.transport)) || !integer(route.listen_port, 20000, 20999) || !integer(route.target_port, 1, 65535) || typeof route.target_ip !== "string"
-        || !["listening", "failed", "missing", "drift", "unknown"].includes(String(route.state)) || route.target_verified !== false
+        || !["listening", "failed", "missing", "drift", "unknown", "disabled"].includes(String(route.state)) || route.target_verified !== false
         || host.state === "unknown" && route.state !== "unknown") return invalid();
       for (const key of ["sent_bytes", "received_bytes", "sessions", "errors"]) if (route[key] !== undefined && !integer(route[key])) return invalid();
       if (route.auth !== undefined && (!object(route.auth) || Object.keys(route.auth).some(key => !["type", "username", "credential_id"].includes(key)) || route.auth.type !== "tls-connect"

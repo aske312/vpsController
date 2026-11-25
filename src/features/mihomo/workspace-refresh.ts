@@ -157,7 +157,7 @@ function settingRows(value: unknown) {
 }
 
 function routeState(value: unknown) {
-  return value === undefined || (record(value) && ["current", "stale", "unknown"].includes(String(value.state))
+  return value === undefined || (record(value) && ["current", "stale", "unknown", "disabled"].includes(String(value.state))
     && typeof value.reason === "string" && stringList(value.addresses) && stringList(value.bindings));
 }
 

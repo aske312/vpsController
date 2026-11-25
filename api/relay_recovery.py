@@ -27,6 +27,9 @@ def resume_intent(control, operation_id):
     intent = json.loads(control.pending.read_text(encoding='utf-8'))
     if intent.get('operation_id') != operation_id:
         raise OperationConflict('Неподтверждённая операция изменилась; обновите ROUTES')
+    if intent.get('action') == 'activation':
+        from relay_activation import reconcile
+        return reconcile(control, intent, resume=True)
     route = intent.get('route', {})
     validate_config(route)
     if (intent.get('schema') != 1 or intent.get('action') not in ('put', 'delete')
@@ -93,12 +96,16 @@ if __name__ == '__main__':
         intent = json.loads(control.pending.read_text(encoding='utf-8'))
         if intent.get('operation_id') != identity:
             parser.error('The pending operation changed; nothing was sent')
-        route = intent['route']
-        validate_config(route)
-        host = control.host(control.read(), route['host_id'])
+        route = intent.get('route', {})
+        if intent.get('action') == 'activation':
+            from relay_activation import validate_intent
+            validate_intent(intent)
+        else:
+            validate_config(route)
+        host = control.host(control.read(), intent['host_id'] if intent.get('action') == 'activation' else route['host_id'])
         print(json.dumps({'operation_id': identity, 'host': host['name'], 'agent_url': host['agent_url'],
-                          'action': intent['action'], 'transport': route['transport'], 'listen_port': route['listen_port'],
-                          'target_ip': route['target_ip'], 'target_port': route['target_port'], 'apply': args.apply}), flush=True)
+                          'action': intent['action'], **({'enabled': intent['enabled']} if intent.get('action') == 'activation' else
+                          {key: route[key] for key in ('transport', 'listen_port', 'target_ip', 'target_port')}), 'apply': args.apply}), flush=True)
         if args.apply:
             try:
                 resume_intent(control, identity)
@@ -106,5 +113,6 @@ if __name__ == '__main__':
                 # Never print arbitrary remote text, tokens, or environment values.
                 print(json.dumps({'result': 'not_confirmed', 'pending': control.pending.exists(), 'error_type': type(exc).__name__}))
                 raise SystemExit(1)
-            print(json.dumps({'result': 'route_confirmed', 'pending': control.pending.exists(), 'profile_save_required': True}))
+            print(json.dumps({'result': 'activation_confirmed' if intent.get('action') == 'activation' else 'route_confirmed',
+                              'pending': control.pending.exists(), 'profile_save_required': intent.get('action') != 'activation'}))
 

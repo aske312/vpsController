@@ -17,7 +17,7 @@ export function connectionAddressModes(component: string) {
 
 export function snellCarriers(connection: ProfileConnection, connections: ProfileConnection[]) {
   return connections.filter(item => item.id !== connection.id && item.device_id === connection.device_id
-    && item.component === "transport-reality" && ["cdn", "tls"].includes(String(item.settings.route_mode)) && clientConnectionSupported(item));
+    && item.component === "transport-reality" && item.route_state?.state !== "disabled" && ["cdn", "tls"].includes(String(item.settings.route_mode)) && clientConnectionSupported(item));
 }
 
 export function xrayProtocolSettings(settings: ProfileConnection["settings"], protocol: string, tlsDomains: string[], cdnDomains: string[]): ProfileConnection["settings"] {

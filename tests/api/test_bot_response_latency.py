@@ -23,6 +23,7 @@ class RelayResponseTests(unittest.TestCase):
               patch.object(manager, 'verified_profile_clients', return_value=[]),
               patch.object(manager, 'relay_connection_control') as factory):
             registry = factory.return_value.read
+            factory.return_value.pending = None
             registry.return_value = {'hosts': [{'id': 'a' * 32}]}
             before = manager.list_profiles()
             registry.assert_called_once()

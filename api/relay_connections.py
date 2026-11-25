@@ -82,11 +82,19 @@ def consumer_state(control, settings, fallback, *, registry=None):
         return fallback
     try:
         snapshot = control.read() if registry is None else registry
-        exists = any(host['id'] == selected for host in snapshot['hosts'])
+        host = next((host for host in snapshot['hosts'] if host['id'] == selected), None)
+        pending_host = snapshot.get('activation_pending')
+        if control is not None and getattr(control, 'pending', None) is not None and control.pending.exists():
+            intent = json.loads(control.pending.read_text())
+            if intent.get('action') == 'activation':pending_host = intent.get('host_id')
     except (OSError, ValueError, KeyError, TypeError):
         return {'state': 'unknown', 'reason': 'Реестр Relay недоступен', 'addresses': [], 'bindings': []}
-    if not exists:
+    if host is None:
         return {'state': 'stale', 'reason': 'Требует внимания: Relay отключён; обновите конфигурацию подключения', 'addresses': [], 'bindings': []}
+    if host.get('enabled', True) is False:
+        if pending_host == selected:
+            return {**fallback, 'state': 'unknown', 'reason': 'Переключение Relay ещё не подтверждено. Привязка сохранена.'}
+        return {**fallback, 'state': 'disabled', 'reason': 'Relay отключён. Маршруты сохранены, передача недоступна.'}
     return fallback
 
 
@@ -129,6 +137,17 @@ def prepare_mihomo(control, connections, identity, direct_settings=None, previou
                     or old.get('settings', {}).get('relay_address', '') != connection.get('settings', {}).get('relay_address', '')):
                 control.validate_client_address(selected, connection.get('settings', {}).get('relay_address'))
             groups = connection_groups(connection, direct_settings)
+            host = control.host(control.read(), selected)
+            if host.get('enabled', True) is False:
+                if (old.get('component') != connection['component']
+                        or host_id(old.get('settings', {})) != selected
+                        or connection_groups(old, direct_settings) != groups
+                        or any(old.get('settings', {}).get(key, default) != connection.get('settings', {}).get(key, default)
+                               for key, default in (('relay_address', ''), ('relay_cdn', False),
+                                                    ('relay_cdn_mode', 'after_cdn'), ('cdn_domain', '')))):
+                    raise ValueError('Relay отключён; новые привязки к нему недоступны')
+                # Existing profile settings stay intact; do not republish a listener.
+                continue
             if relay_cdn.before(connection.get('settings', {})):
                 control.ensure_cdn(selected, connection['settings']['cdn_domain'], identity)
                 continue

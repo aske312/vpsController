@@ -29,7 +29,7 @@ export function MihomoConnectionAddress({ connection, connections = [], inventor
   const domain = String(mode === "tls" ? tlsDomain : mode === "cdn" || mode === "both" ? settings.cdn_domain || "" : mode === "udp" ? settings.udp_domain || "" : "");
   const domains = [...new Set([...(domain ? [domain] : []), ...(mode === "tls" ? tlsDomains : mode === "cdn" || mode === "both" ? cdnDomains : mode === "udp" ? udpDomains : [])])];
   const tlsServices = [...new Set([...(tlsDomain ? [tlsDomain] : []), ...tlsDomains])];
-  const choices = inventory.status?.hosts.flatMap(host => relayAddresses(host)
+  const choices = inventory.status?.hosts.filter(host => host.enabled !== false).flatMap(host => relayAddresses(host)
     .filter(address => !host.addresses?.cdn_domains?.includes(address))
     .map(address => ({ host, address, key: JSON.stringify(["relay", host.id, address]) }))) || [];
   const savedHost = inventory.status?.hosts.find(host => host.id === relay);
@@ -44,7 +44,7 @@ export function MihomoConnectionAddress({ connection, connections = [], inventor
   const delivery = snell && <label className="mihomoConnectionEndpoint"><span>Доставка Snell</span><select aria-label="Доставка Snell" value={carrierId} disabled={locked} onChange={event => onChange({ ...settings,
     carrier_connection_id: event.target.value, relay_host_id: "", relay_address: "", route_mode: "direct", cdn_enabled: false, relay_cdn: false, cdn_domain: "", tls_domain: "" })}>
     <option value="">Напрямую или через Relay</option>
-    {carrierId && !carriers.some(item => item.id === carrierId) && <option value={carrierId}>Внешний канал недоступен · выберите другой</option>}
+    {carrierId && !carriers.some(item => item.id === carrierId) && <option value={carrierId} disabled>Внешний канал недоступен · привязка сохранена</option>}
     {carriers.map(item => <option key={item.id} value={item.id}>{item.name} · Xray {String(item.settings.route_mode).toUpperCase()}</option>)}
   </select></label>;
   if (carrierId) return <div className="mihomoConnectionAddress">{delivery}<small>Snell проходит внутри выбранного Xray-канала. Домен, CDN, транспорт и Relay настраиваются в этом Xray-подключении. Обновите подписку клиента после сохранения.</small></div>;
@@ -89,7 +89,7 @@ export function MihomoConnectionAddress({ connection, connections = [], inventor
       }
     }}>
       {(mode === "direct" || mode === "udp") && <option value="">IP этого VPS · напрямую</option>}
-      {savedOnly && <option value={selected}>{relayAddress || "Сохранённый Relay"} · через Relay · сохранённый адрес</option>}
+      {savedOnly && <option value={selected} disabled={savedHost?.enabled === false}>{savedHost?.enabled === false ? "Relay отключён · привязка сохранена" : `${relayAddress || "Сохранённый Relay"} · через Relay · сохранённый адрес`}</option>}
       {!originTls && domains.filter(item => selected === JSON.stringify(["direct", item]) || matches(item)).map(item => <option key={item} value={JSON.stringify(["direct", item])}>{item} · {cdnRelay ? `CDN через Relay · ${savedHost?.name || "сохранённый узел"}` : mode === "cdn" ? "CDN" : "напрямую"}</option>)}
       {canRelay && choices.filter(choice => choice.key === selected || matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.key} value={choice.key}>{choice.address} · через Relay · {choice.host.name}</option>)}
     </select></label>
@@ -101,7 +101,7 @@ export function MihomoConnectionAddress({ connection, connections = [], inventor
       change({ relay_host_id: choice?.host.id || "", relay_address: choice?.address || "", relay_cdn: Boolean(choice), relay_cdn_mode: "before_cdn" });
     }}>
       <option value="">Напрямую к CDN</option>
-      {relay && !choices.some(choice => choice.key === JSON.stringify(["relay", relay, relayAddress])) && <option value={JSON.stringify(["relay", relay, relayAddress])}>{relayAddress || "Сохранённый Relay"} · {savedHost?.name || "сохранённый узел"}</option>}
+      {relay && !choices.some(choice => choice.key === JSON.stringify(["relay", relay, relayAddress])) && <option value={JSON.stringify(["relay", relay, relayAddress])} disabled={savedHost?.enabled === false}>{savedHost?.enabled === false ? "Relay отключён · привязка сохранена" : `${relayAddress || "Сохранённый Relay"} · ${savedHost?.name || "сохранённый узел"}`}</option>}
       {choices.map(choice => <option key={choice.key} value={choice.key}>{choice.address} · Relay · {choice.host.name}</option>)}
     </select></label>
     {legacyCdnRelay && <>

@@ -92,6 +92,8 @@ class SnellDeliveryTests(unittest.TestCase):
         item = self.connections()[0]
         item['settings'] = {'relay_host_id': 'a' * 32}
         control = SimpleNamespace(ensure=Mock(), validate_client_address=Mock(),
+                                  read=Mock(return_value={'hosts': [{'id': 'a' * 32}]}),
+                                  host=Mock(return_value={'id': 'a' * 32}),
                                   endpoint=Mock(return_value=('relay.example', 20010)))
         self.assertEqual(manager.relay_connections.connection_groups(item), [[('tcp', 33000)]])
         manager.relay_connections.prepare_mihomo(control, [item], 'b' * 32)

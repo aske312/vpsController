@@ -121,6 +121,7 @@ from schemas import (
     ProtocolSettingsUpdate,
     RelayHostSettings,
     RelayPrivateTransport,
+    RelayActivation,
     RelayRouteSettings,
     RelayRecoverySettings,
     RelayExportRequest,
@@ -3181,6 +3182,11 @@ def update_relay_agent(host_id: str, payload: RelayAgentUpdate, _: None = Depend
 @app.put('/api/network/relays/{host_id}/private-transport', status_code=202, dependencies=[Depends(require_mutation_admission)])
 def configure_relay_private_transport(host_id: str, payload: RelayPrivateTransport, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     return start_relay_mutation('relay-private-transport', {**payload.model_dump(), 'host_id': host_id}, operation_id)
+
+
+@app.put('/api/network/relays/{host_id}/activation', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def configure_relay_activation(host_id: str, payload: RelayActivation, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    return start_relay_mutation('relay-host-activation', {**payload.model_dump(), 'host_id': host_id}, operation_id)
 
 
 @app.put('/api/network/relays/reconnect', status_code=202)

@@ -66,7 +66,7 @@ def save(control, host_id, value):
 
 def observation(client, generation, profile=None):
     value = client.request('GET', '/v1/private-transports/'+generation)
-    if value.get('generation') != generation or value.get('state') not in ('preparing', 'listening', 'failed', 'absent'):
+    if value.get('generation') != generation or value.get('state') not in ('preparing', 'listening', 'failed', 'absent', 'disabled'):
         raise ValueError('Protected transport observation is not confirmed')
     if profile and value['state'] != 'absent' and (value.get('transport') != 'hysteria2' or value.get('listen_port') != profile['listen_port']):
         raise ValueError('Protected transport listener is not confirmed')
@@ -87,6 +87,9 @@ def active(control, host_id):
     value = record(control, host_id)
     if not value or value['state'] == 'disabled': return None
     if value['state'] != 'ready':
+        stage = value.get('failure_stage')
+        if isinstance(stage, str) and stage in PrivateTransportError.MESSAGES:
+            raise RelayNotVerified(str(PrivateTransportError(stage)))
         raise RelayNotVerified('Защищённый Relay ещё не проверен; открытая пересылка не подставляется')
     return privacy.validate(json.loads((root(control)/value['generation']/'request.json').read_text()))
 
@@ -277,6 +280,8 @@ def perform(api, payload, identity):
     control = api.relay_control()
     registry = control.checked(payload['expected_revision']);control.require_clear()
     host_id = payload['host_id'];host = control.host(registry, host_id);client = control.client(host)
+    if payload['enabled'] and host.get('enabled', True) is False:
+        raise ValueError('Relay отключён; сначала включите передачу данных узла')
     previous = record(control, host_id)
     if not payload['enabled']:
         if not previous or previous['state'] == 'disabled': return
@@ -325,14 +330,18 @@ def perform(api, payload, identity):
             stage = 'traffic_probe'
             probe(folder, profile, runtime(), previous['peer_port'])
         except Exception:
-            previous['state'] = 'unknown';save(control, host_id, previous)
+            previous.update(state='unknown', failure_stage=stage);save(control, host_id, previous)
             raise PrivateTransportError(stage) from None
+        previous.pop('failure_stage', None)
         previous.update(state='ready', verified_at=int(time.time()));save(control, host_id, previous)
         return
+    destinations = [{'ip': row['target_ip'], 'port': row['target_port'], 'network': row['transport']}
+                    for row in registry['routes'] if row['host_id'] == host_id]
+    if not destinations:
+        raise ValueError('Сначала добавьте хотя бы один маршрут Relay, затем включите защищённый транспорт')
+    approved = privacy.targets(destinations)
     status = status_snapshot(client.request('GET', '/v1/status'))
     if 'private-transport-v1' not in status.get('capabilities', []): raise ValueError('Обновите Agent для защищённого транспорта')
-    approved = privacy.targets([{'ip': row['target_ip'], 'port': row['target_port'], 'network': row['transport']}
-                               for row in registry['routes'] if row['host_id'] == host_id])
     binary = runtime();snapshot = route_snapshot(client.request('GET', '/v1/routes'))
     busy = set(snapshot.get('private_ingress_ports', [])) | set(snapshot.get('reserved_udp_ports', [])) | {
         row['listen_port'] for row in snapshot['items'] if row['transport'] == 'udp'}
@@ -378,5 +387,5 @@ def perform(api, payload, identity):
         probe(folder, profile, binary, peer)
         intent.update(state='ready', verified_at=int(time.time()));save(control, host_id, intent)
     except Exception:
-        intent['state'] = 'unknown';save(control, host_id, intent)
+        intent.update(state='unknown', failure_stage=stage);save(control, host_id, intent)
         raise PrivateTransportError(stage) from None

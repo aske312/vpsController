@@ -165,9 +165,9 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
   return <>
     {relay.status?.pending && <NotificationNotice id="relay:recovery" title="Изменение Relay" state="unknown"
       message={`Результат изменения Relay не подтверждён${host ? ` · ${host.name} (${host.client_address || new URL(host.agent_url).hostname})` : ""}.`}
-      details={recovery ? `${recovery.action === "put" ? "Создание" : "Удаление"} ${recovery.transport.toUpperCase()} ${recovery.listen_port} → ${recovery.target_ip}:${recovery.target_port}. ${recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}` : undefined}
+      details={recovery ? `${recovery.action === "activation" ? recovery.enabled ? "Включение Relay" : "Отключение Relay" : `${recovery.action === "put" ? "Создание" : "Удаление"} ${recovery.transport.toUpperCase()} ${recovery.listen_port} → ${recovery.target_ip}:${recovery.target_port}`}. ${recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}` : undefined}
       action={{ label: "Проверить результат операции", disabled: relay.locked, run: async () => { await relay.submit("/network/relays/reconcile", { method: "POST" }); } }}
-      secondaryAction={recovery ? { label: "Восстановить пересылку", disabled: relay.locked, run: () => relay.setRecoveryConfirmation(true) } : undefined}
+      secondaryAction={recovery ? { label: recovery.action === "activation" ? "Завершить переключение" : "Восстановить пересылку", disabled: relay.locked, run: () => relay.setRecoveryConfirmation(true) } : undefined}
     />}
   </>;
 }
@@ -188,7 +188,7 @@ export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
       relay.setAddressConfirmation(null);
       if (confirmed && selected && !relay.locked && relay.status && !relay.status.pending) void relay.submit(`/network/relays/${selected.host.id}/address?address=${encodeURIComponent(selected.address)}`, { method: "DELETE", headers: { "If-Match": relay.status.revision } });
     }} />}
-    {relay.recoveryConfirmation && relay.status?.recovery && <ConfirmationDialog request={{ title: "Восстановить пересылку Relay?", message: "Сначала будет прочитан точный маршрут. При необходимости повторится только сохранённая команда с прежними ID, параметрами и ревизией. Дубликат маршрута не создаётся; при изменении агента операция остановится. Настройки профиля затем нужно сохранить повторно.", confirmLabel: "Восстановить пересылку" }} onClose={confirmed => {
+    {relay.recoveryConfirmation && relay.status?.recovery && <ConfirmationDialog request={{ title: relay.status.recovery.action === "activation" ? "Завершить переключение Relay?" : "Восстановить пересылку Relay?", message: relay.status.recovery.action === "activation" ? "Сначала будет прочитан результат переключения. При необходимости повторится только сохранённая команда с прежними ID и ревизией. Адреса, маршруты и привязки профилей сохраняются." : "Сначала будет прочитан точный маршрут. При необходимости повторится только сохранённая команда с прежними ID, параметрами и ревизией. Дубликат маршрута не создаётся; при изменении агента операция остановится. Настройки профиля затем нужно сохранить повторно.", confirmLabel: relay.status.recovery.action === "activation" ? "Завершить переключение" : "Восстановить пересылку" }} onClose={confirmed => {
       relay.setRecoveryConfirmation(false);
       if (confirmed && !relay.locked && relay.status?.recovery) void relay.submit("/network/relays/resume", { method: "POST", body: JSON.stringify({ pending_operation_id: relay.status.recovery.operation_id }) });
     }} />}

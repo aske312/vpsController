@@ -2,14 +2,15 @@ import { endpointCheckReady } from "../../shared/lib/network-readiness";
 import type { NetworkEndpointCheck, NetworkStatus } from "../../shared/types/control-plane";
 import type { ConnectionStats, Module, Profile, ProfileConnection } from "./types";
 
-export type ConnectionAppearance = { state: "unchecked" | "verified" | "warning" | "error"; label: string; reason: string };
+export type ConnectionAppearance = { state: "unchecked" | "verified" | "warning" | "error" | "disabled"; label: string; reason: string };
 const appearance = (state: ConnectionAppearance["state"], reason: string): ConnectionAppearance => ({
-  state, reason, label: { unchecked: "Не проверено", verified: "Проверено", warning: "Требует внимания", error: "Ошибка" }[state],
+  state, reason, label: { unchecked: "Не проверено", verified: "Проверено", warning: "Требует внимания", error: "Ошибка", disabled: "Отключён" }[state],
 });
 const signature = (connection: ProfileConnection) => JSON.stringify([connection.component, Object.entries(connection.settings).sort(([a], [b]) => a.localeCompare(b))]);
 
 /** Accept measured transfer for this connection, never raw sessions or old totals. */
 export function connectionAppearance(connection: ProfileConnection, context: { profile?: Profile; modules?: Module[]; network?: NetworkStatus | null; stats?: ConnectionStats; draft?: boolean } = {}): ConnectionAppearance {
+  if (connection.route_state?.state === "disabled") return appearance("disabled", connection.route_state.reason || "Relay отключён, передача недоступна.");
   const componentModule = context.modules?.find(item => item.id === connection.component);
   if (componentModule?.installed === false) return appearance("error", `Компонент ${componentModule.name} не установлен.`);
   if (componentModule?.active === false) return appearance("error", `Служба компонента ${componentModule.name} остановлена.`);

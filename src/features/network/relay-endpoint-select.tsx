@@ -53,7 +53,7 @@ export function RelayEndpointSelect({ request, inventory, value, address = "", o
   const ownInventory = useRelayInventory(request, inventory === undefined);
   const { status, failed } = inventory || ownInventory;
   const known = status?.hosts.some(host => host.id === value);
-  const choices = status?.hosts.flatMap(host => relayAddresses(host).map((address, index) => ({ host, address, value: index ? JSON.stringify([host.id, address]) : host.id }))) || [];
+  const choices = status?.hosts.filter(host => host.enabled !== false).flatMap(host => relayAddresses(host).map((address, index) => ({ host, address, value: index ? JSON.stringify([host.id, address]) : host.id }))) || [];
   const selected = value ? address ? choices.find(choice => choice.host.id === value && choice.address === address)?.value || JSON.stringify([value, address]) : value : cdn?.value ? JSON.stringify(["cdn", cdn.value]) : tls?.value ? JSON.stringify(["tls", tls.value]) : udp?.value ? JSON.stringify(["udp", udp.value]) : "";
   const cdnDomains = [...new Set([...(cdn?.value ? [cdn.value] : []), ...(cdn?.domains || [])])];
   const remoteCdn = choices.filter(choice => choice.host.addresses?.cdn_domains?.includes(choice.address));
@@ -82,7 +82,7 @@ export function RelayEndpointSelect({ request, inventory, value, address = "", o
       else if (!event.target.value) onChange("", "");
     }}>
       {!modeControls && <option value="">Напрямую к этому VPS</option>}
-      {value && (!known || !choices.some(choice => choice.value === selected)) && <option value={selected}>{address || "Сохранённый Relay"} · сохранённый адрес</option>}
+      {value && (!known || !choices.some(choice => choice.value === selected)) && <option value={selected} disabled={status?.hosts.find(host => host.id === value)?.enabled === false}>{status?.hosts.find(host => host.id === value)?.enabled === false ? "Relay отключён · привязка сохранена" : `${address || "Сохранённый Relay"} · сохранённый адрес`}</option>}
       {(!modeControls || mode === "cdn") && !cdn?.disabled && (cdnDomains.length > 0 || remoteCdn.length > 0) && <optgroup label="CDN">
         {cdnDomains.filter(domain => domain === cdn?.value || matches(domain)).map(domain => <option key={domain} value={JSON.stringify(["cdn", domain])} disabled={cdn?.disabled} title={cdn?.disabled ? "CDN-домен используется с VLESS CDN" : undefined}>{domain} · этот VPS</option>)}
         {remoteCdn.filter(choice => matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.value} value={choice.value} disabled title="Для этого PRO ещё не настроен CDN-вход на Relay">{choice.address} · {choice.host.name} · требуется настройка CDN-входа</option>)}

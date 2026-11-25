@@ -62,7 +62,7 @@ def route_snapshot(value):
         if not isinstance(identity, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', identity) or identity in seen:
             raise ValueError('Некорректный ID маршрута агента')
         port = (item['transport'], item['listen_port'])
-        if port in ports or item.get('state') not in ('listening', 'failed') or item.get('target_verified') is not False:
+        if port in ports or item.get('state') not in ('listening', 'failed', 'disabled') or item.get('target_verified') is not False:
             raise ValueError('Неизвестное состояние маршрута агента')
         for key in ('sent_bytes', 'received_bytes', 'errors', 'sessions'):
             if key in item and (type(item[key]) is not int or item[key] < 0):
@@ -84,6 +84,7 @@ def status_snapshot(value):
     if value['max_routes'] != 64 or value['routes'] + value['failed_routes'] > 64:
         raise ValueError('Несовместимые лимиты агента')
     if 'addresses' in value:normalize_addresses(value['addresses'], None)
+    if 'enabled' in value and type(value['enabled']) is not bool: raise ValueError('Некорректное состояние Relay')
     if 'updates' in value: value['updates'] = relay_diagnostics.updates(value['updates'])
     if 'security' in value: value['security'] = relay_ingress.security(value['security'])
     if 'capabilities' in value and (not isinstance(value['capabilities'], list) or len(value['capabilities']) > 16 or any(not isinstance(item, str) or not re.fullmatch(r'[a-z0-9-]{1,64}', item) for item in value['capabilities'])):
@@ -114,6 +115,7 @@ class RelayManager:
             raise ValueError('Повреждён реестр relay')
         ids, origins = set(), set()
         for host in value['hosts']:
+            if 'enabled' in host and type(host['enabled']) is not bool: raise ValueError('Повреждено состояние узла relay')
             self.client(host)
             if not re.fullmatch(r'[0-9a-f]{32}', str(host.get('id', ''))) or host['id'] in ids or host['agent_url'] in origins or not isinstance(host.get('name'), str):
                 raise ValueError('Повреждён узел relay')
@@ -179,7 +181,7 @@ class RelayManager:
         intent = None
         if reconnect and self.pending.exists():
             intent = json.loads(self.pending.read_text(encoding='utf-8'))
-            if intent.get('route', {}).get('host_id') != payload.get('id'):
+            if (intent.get('host_id') if intent.get('action') == 'activation' else intent.get('route', {}).get('host_id')) != payload.get('id'):
                 raise OperationConflict('Восстанавливать подключение можно только к узлу незавершённой операции')
         else:
             self.require_clear()
@@ -188,6 +190,7 @@ class RelayManager:
         previous = next((item for item in registry['hosts'] if item['id'] == host_id), {})
         host = {key: payload.get(key) for key in ('name', 'agent_url', 'certificate_sha256')}
         host.update(id=host_id, token=payload.get('token') or previous.get('token'), api_version=1)
+        host['enabled'] = previous.get('enabled', True)
         host['excluded_addresses'] = previous.get('excluded_addresses', [])
         # Older clients omit the override; an explicit empty string restores auto lookup.
         override = payload.get('country_code_override')
@@ -198,6 +201,7 @@ class RelayManager:
         if client.host == public_ipv4(self.origin):
             raise ValueError('Узел relay должен отличаться от текущего VPS')
         status = status_snapshot(client.request('GET', '/v1/status'))
+        host['enabled'] = host['enabled'] and status.get('enabled', True)
         host['addresses'] = normalize_addresses(status.get('addresses'), client.host)
         if 'ipv6' not in status.get('client_address_families', []):host['addresses']['ipv6'] = []
         if self.origin in all_addresses(host['addresses']):
@@ -248,6 +252,7 @@ class RelayManager:
     def validate_client_address(self, host_id, address=None):
         """Validate a newly selected endpoint, never a recurring subscription read."""
         host = self.host(self.read(), host_id)
+        if host.get('enabled', True) is False: raise ValueError('Relay отключён; выберите включённый узел')
         value = normalize_address(address or host.get('client_address') or self.client(host).host)
         if value == self.origin or value in host.get('excluded_addresses', []):
             raise RelayAddressError('Выберите доступный адрес Relay; адрес текущего VPS использовать нельзя')
@@ -275,8 +280,10 @@ class RelayManager:
         target_ip = target_ip or self.origin
         registry = self.read()
         host = self.host(registry, host_id)
+        if host.get('enabled', True) is False: raise ValueError('Relay отключён; маршруты сохранены без изменений')
         client = self.client(host)
         status = status_snapshot(client.request('GET', '/v1/status'))
+        if status.get('enabled', True) is False: raise ValueError('Agent отключил передачу данных Relay')
         relay_ingress.bind_controller(client, status, public_ipv4(self.origin))
         for group in groups:
             sockets = list(dict.fromkeys((transport, port) for transport, port in group))
@@ -394,6 +401,7 @@ class RelayManager:
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
         host = self.host(registry, payload['host_id'])
+        if not delete and host.get('enabled', True) is False: raise ValueError('Relay отключён; включите его перед созданием маршрутов')
         client = self.client(host)
         remote = route_snapshot(client.request('GET', '/v1/routes'))
         if remote['revision'] != payload['agent_revision']:
@@ -446,6 +454,9 @@ class RelayManager:
         if not self.pending.exists():
             return
         intent = json.loads(self.pending.read_text(encoding='utf-8'))
+        if intent.get('action') == 'activation':
+            from relay_activation import reconcile
+            return reconcile(self, intent)
         if intent.get('schema') != 1 or intent.get('action') not in ('put', 'delete'):
             raise ValueError('Повреждена запись восстановления relay')
         route = intent['route']
@@ -482,8 +493,11 @@ class RelayManager:
         result = {'revision': registry['revision'], 'hosts': [], 'pending': self.pending.exists(), 'origin_ip': self.origin}
         if result['pending']:
             intent = json.loads(self.pending.read_text(encoding='utf-8'))
-            route = intent['route']
-            result['recovery'] = {key: route[key] for key in ('host_id', 'transport', 'listen_port', 'target_ip', 'target_port')}
+            if intent.get('action') == 'activation':
+                result['recovery'] = {'host_id': intent['host_id'], 'enabled': intent['enabled']}
+            else:
+                route = intent['route']
+                result['recovery'] = {key: route[key] for key in ('host_id', 'transport', 'listen_port', 'target_ip', 'target_port')}
             result['recovery'].update(operation_id=intent['operation_id'], action=intent['action'],
                                       error=intent.get('last_error', 'response_unknown'))
 
@@ -494,6 +508,7 @@ class RelayManager:
             public['excluded_addresses'] = host.get('excluded_addresses', [])
             public['country_code_override'] = host.get('country_code_override', '')
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
+            public['enabled'] = host.get('enabled', True)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
             if not probe or addresses_only:
                 # Registry addresses are useful before agent I/O completes, but
@@ -507,6 +522,7 @@ class RelayManager:
             try:
                 client = self.client(host)
                 status = status_snapshot(client.request('GET', '/v1/status'))
+                public['enabled'] = public['enabled'] and status.get('enabled', True)
                 public['addresses'] = self.observed_addresses(host, status)
                 if addresses_only:
                     return public
