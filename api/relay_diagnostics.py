@@ -8,6 +8,19 @@ def diagnostics(value):
     if not isinstance(value, dict):
         raise ValueError('Invalid Agent diagnostics')
     result = {}
+    if 'route_ref' in value:
+        import re
+        if not isinstance(value['route_ref'], str) or not re.fullmatch(r'[0-9a-f]{32}', value['route_ref']):
+            raise ValueError('Invalid Relay diagnostic reference')
+        result['route_ref'] = value['route_ref']
+    if 'session_refs' in value:
+        import re
+        refs = value['session_refs']
+        if (not isinstance(refs, list) or len(refs) > 16
+                or any(not isinstance(ref, str) or not re.fullmatch(r'[0-9a-f]{32}', ref) for ref in refs)
+                or len(set(refs)) != len(refs) or 'route_ref' not in result):
+            raise ValueError('Invalid Relay session references')
+        result['session_refs'] = list(refs)
     for key in ('sent_packets', 'received_packets', 'dropped_packets', 'last_error_at', 'last_sent_at', 'last_received_at'):
         item = value.get(key)
         maximum = 253402300799 if key.endswith('_at') else 2**53 - 1

@@ -3143,9 +3143,29 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
                 if not valid:
                     route['check']['state'] = 'unknown'
         relay_device_test.attach(sys.modules[__name__], result)
+        import relay_correlation
+        try:
+            relay_correlation.remember(control, profiles)
+            result['diagnostic_mapping_state'] = 'recorded'
+        except (OSError, ValueError):
+            result['diagnostic_mapping_state'] = 'unavailable'
         return JSONResponse(result, headers={'Cache-Control': 'no-store'})
     except (OSError, ValueError):
         raise HTTPException(status_code=503, detail='Реестр relay недоступен') from None
+
+
+@app.get('/api/network/relays/{host_id}/diagnostics/{route_ref}')
+def resolve_relay_diagnostic(host_id: str, route_ref: str, _: None = Depends(require_token)):
+    import relay_correlation
+    try:
+        path = DATA_DIR / 'mihomo' / 'profiles.json'
+        profiles = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else []
+        result = relay_correlation.resolve(relay_control(), host_id, route_ref, profiles)
+    except (OSError, ValueError):
+        raise HTTPException(503, 'Relay diagnostic mapping unavailable') from None
+    if result is None:
+        raise HTTPException(404, 'Relay diagnostic reference not found in current configuration')
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
 def start_relay_mutation(name, payload, identity):
