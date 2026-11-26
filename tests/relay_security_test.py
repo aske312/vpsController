@@ -96,12 +96,24 @@ class IngressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.route.errors, 0)
 
     async def test_valid_tls_connect_transfers_large_binary_payload_and_redacts_hash(self):
+        closed=[]
+        self.route.diagnostic_closed=closed.append
         reader, writer, response = await self.request(self.password)
         self.assertIn(b' 200 ', response)
+        reference=self.route.status()['diagnostics']['session_refs'][0]
         payload = bytes(range(256))*2048
         writer.write(payload); await writer.drain()
         self.assertEqual(await asyncio.wait_for(reader.readexactly(len(payload)), 5), payload)
         writer.close(); await writer.wait_closed()
+        for _ in range(100):
+            if closed: break
+            await asyncio.sleep(.02)
+        self.assertEqual(len(closed),1)
+        self.assertEqual(closed[0]['session_ref'],reference)
+        self.assertEqual(closed[0]['sent_bytes'],len(payload))
+        self.assertEqual(closed[0]['received_bytes'],len(payload))
+        self.assertEqual(closed[0]['phase'],'closed')
+        self.assertNotIn('127.0.0.1',json.dumps(closed))
         self.assertEqual(self.hits, 1)
         self.assertNotIn(self.config['auth']['password_sha256'], json.dumps(self.route.status()))
         self.assertEqual(public_route(self.config)['auth']['credential_id'], 'a'*32)

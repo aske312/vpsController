@@ -21,6 +21,36 @@ spec.loader.exec_module(relay)
 
 
 class LogTests(unittest.TestCase):
+    def test_opaque_route_reference_is_keyed_generation_specific_and_stable(self):
+        config = {'id':'pro-'+'a'*32, 'transport':'tcp', 'listen_port':20001,
+                  'target_ip':'8.8.8.8', 'target_port':443}
+        key = bytes.fromhex('11'*32)
+        ref = relay.route_reference(key, config)
+        self.assertEqual(ref, relay.route_reference(key, dict(config)))
+        self.assertRegex(ref, r'^[0-9a-f]{32}$')
+        self.assertNotEqual(ref, relay.route_reference(bytes.fromhex('22'*32), config))
+        self.assertNotEqual(ref, relay.route_reference(key, {**config, 'target_port':8443}))
+        self.assertNotEqual(ref, relay.route_reference(key, {**config, 'auth':{'credential_id':'f'*32}}))
+        token_key=relay.hashlib.sha256(('s'*48).encode()).digest()
+        self.assertEqual(relay.route_reference(token_key, config),'52d37c98e7fec7a5e3a81478794ac7f1')
+
+    def test_session_diagnostics_never_copy_network_identities_or_payload_and_are_bounded(self):
+        row = {'route_ref':'a'*32, 'session_ref':'b'*32, 'transport':'tcp', 'phase':'transferring',
+               'sent_bytes':123, 'client_write_buffer_bytes':456,
+               'peer':'8.8.8.8', 'route_id':'pro-sensitive', 'profile':'customer', 'password':'secret',
+               'payload':'private content', 'upstream_read_buffer_bytes':True}
+        with tempfile.TemporaryDirectory() as folder:
+            log = relay.DiagnosticLog(folder)
+            self.assertTrue(log.write('memory_growth', {'rss_bytes':999}, sessions=[row]*100))
+            raw = next(log.folder.iterdir()).read_text()
+            for sentinel in ('8.8.8.8','pro-sensitive','customer','secret','private content'):
+                self.assertNotIn(sentinel, raw)
+            sessions = json.loads(raw)['sessions']
+            self.assertEqual(len(sessions),16)
+            self.assertEqual(sessions[0]['client_write_buffer_bytes'],456)
+            self.assertNotIn('upstream_read_buffer_bytes',sessions[0])
+            self.assertEqual(relay.private_sessions([{**row,'session_ref':'ip=8.8.8.8'}]),[])
+
     def test_daily_rotation_and_expiry_bound_all_history_and_preserve_other_files(self):
         now = [datetime(2026, 11, 15, 12, tzinfo=timezone.utc).timestamp()]
         with tempfile.TemporaryDirectory() as folder:
@@ -129,6 +159,31 @@ class AdmissionTests(unittest.TestCase):
 
 
 class ReportingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_session_reference_survives_samples_and_close_without_retaining_streams(self):
+        route=relay.RelayRoute({'transport':'tcp','id':'private-route'})
+        route.diagnostic_ref='a'*32
+        with tempfile.TemporaryDirectory() as folder:
+            reporter=relay.RelayDiagnostics(folder)
+            route.diagnostic_closed=reporter.closed
+            first=route.admit();second=route.admit()
+            self.assertNotEqual(first.reference,second.reference)
+            writer=SimpleNamespace(transport=SimpleNamespace(get_write_buffer_size=lambda:12345))
+            first.streams=(SimpleNamespace(_buffer=bytearray(b'secret')),writer,None,None)
+            first.phase='transferring';first.sent=900
+            before=first.diagnostic()
+            self.assertEqual(before['client_read_buffer_bytes'],6)
+            self.assertEqual(before['client_write_buffer_bytes'],12345)
+            first.release();first.release()
+            self.assertIsNone(first.streams)
+            self.assertEqual(len(reporter.closed_sessions),1)
+            after=reporter.closed_sessions[0]
+            self.assertEqual(before['session_ref'],after['session_ref'])
+            self.assertEqual(after['phase'],'closed')
+            self.assertEqual(after['sent_bytes'],900)
+            self.assertEqual(after['route_ref'],route.status()['diagnostics']['route_ref'])
+            self.assertEqual(route.status()['diagnostics']['session_refs'],[second.reference])
+            second.release()
+
     async def test_diagnostic_failure_keeps_memory_guard_and_existing_admissions_alive(self):
         room=[64*1048576];collected=[]
         pressure=relay.MemoryPressure(lambda:room[0],reclaim=lambda:collected.append(True))

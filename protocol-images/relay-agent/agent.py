@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import secrets
 import ipaddress
 import json
 import os
@@ -158,7 +159,7 @@ async def connect_request(reader, writer, config):
         raise SecurityError('TCP ingress authentication or destination rejected') from None
 
 
-VERSION = '1.6.4'
+VERSION = '1.6.5'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -172,9 +173,36 @@ UDP_MIN_RECEIVE_BUFFER = 64 * 1024
 UDP_SESSION_IDLE_TIMEOUT = 60
 
 
+def route_reference(key, config):
+    """Keyed opaque generation ID; never hash low-entropy addresses on their own."""
+    generation = [config.get(k) for k in ('id', 'transport', 'listen_port', 'target_ip', 'target_port')]
+    generation.append(config.get('auth', {}).get('credential_id'))
+    body = b'relay-diagnostic-route-v1\0' + json.dumps(generation, separators=(',', ':')).encode()
+    return hmac.new(key, body, hashlib.sha256).hexdigest()[:32]
+
+
+SESSION_NUMBERS = {'age_seconds', 'sent_bytes', 'received_bytes', 'reserved_bytes',
+                   'client_read_buffer_bytes', 'upstream_read_buffer_bytes',
+                   'client_write_buffer_bytes', 'upstream_write_buffer_bytes'}
+SESSION_PHASES = {'admitted', 'authenticating', 'connecting', 'transferring', 'closed'}
+
+
+def private_sessions(rows):
+    """Strict allowlist at the disk boundary; drop free text and network identities."""
+    result = []
+    for row in rows[:16]:
+        if not isinstance(row, dict): continue
+        if any(not isinstance(row.get(k), str) or not re.fullmatch(r'[0-9a-f]{32}', row[k])
+               for k in ('route_ref', 'session_ref')): continue
+        if row.get('transport') not in ('tcp', 'udp') or row.get('phase') not in SESSION_PHASES: continue
+        result.append({**{k: row[k] for k in ('route_ref', 'session_ref', 'transport', 'phase')},
+                       **{k: v for k, v in row.items() if k in SESSION_NUMBERS and type(v) is int and 0 <= v <= 2**53-1}})
+    return result
+
+
 class DiagnosticLog:
-    """Private daily JSONL: two 512 KiB segments/day, at most seven UTC dates."""
-    MAX_BYTES = 512 * 1024
+    """Private daily JSONL: two 4 MiB segments/day, at most seven UTC dates."""
+    MAX_BYTES = 4 * 1024 * 1024
     EVENTS = {'snapshot', 'memory_growth', 'memory_recovery', 'memory_pressure', 'memory_reclaimed', 'admission_rejected'}
     REASONS = {'route_sessions', 'shared_sessions', 'live_memory', 'memory_budget', 'udp_memory_budget', 'udp_live_memory'}
     METRICS = {'pid', 'rss_bytes', 'rss_peak_bytes', 'threads', 'fd_count', 'child_count', 'child_rss_bytes',
@@ -210,7 +238,7 @@ class DiagnosticLog:
             except FileNotFoundError: pass
         self.last_cleanup = self.clock()
 
-    def write(self, event, metrics, rejections=None):
+    def write(self, event, metrics, rejections=None, sessions=None):
         if event not in self.EVENTS: return False
         now = self.clock()
         day = datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d')
@@ -218,6 +246,8 @@ class DiagnosticLog:
         counts = {key: value for key, value in (rejections or {}).items() if key in self.REASONS and type(value) is int and value > 0}
         record = {'schema': 1, 'time': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'version': VERSION, 'event': event,
                   **values, **({'rejections': counts} if counts else {})}
+        if sessions is not None:
+            record.update(sessions=private_sessions(sessions), session_sample_limit=16)
         data = (json.dumps(record, separators=(',', ':'), allow_nan=False) + '\n').encode()
         if len(data) > self.max_bytes: return False
         try:
@@ -302,6 +332,10 @@ class RelayDiagnostics:
         self.previous_reclaims = 0
         self.metrics = {}
         self.pressured = False
+        self.closed_sessions = deque(maxlen=16)
+
+    def closed(self, row):
+        self.closed_sessions.append(row)
 
     def tick(self, agent):
         now = self.clock()
@@ -341,11 +375,23 @@ class RelayDiagnostics:
         if budget.pressure.reclaims != self.previous_reclaims:
             events.append('memory_reclaimed'); self.previous_reclaims = budget.pressure.reclaims
         if self.rejections: events.append('admission_rejected')
+        if not events: return
+        # Keep the largest observed buffers, bounded independently of connection count.
+        import heapq
+        active = heapq.nlargest(16, (slot.diagnostic() for route in routes for slot in route.slots),
+                               key=lambda row: sum(row.get(k, 0) for k in SESSION_NUMBERS if 'buffer' in k))
+        closed = list(self.closed_sessions)
+        sampled = (active + closed)[:16] if len(active) < 16 else active
+        wrote = False
         for event in events:
             if now-self.last_events.get(event, -float('inf')) < (60 if event=='memory_reclaimed' else 15): continue
-            if self.log.write(event, self.metrics, self.rejections if event=='admission_rejected' else None):
+            if self.log.write(event, self.metrics, self.rejections if event=='admission_rejected' else None, sessions=sampled):
+                wrote = True
                 self.last_events[event] = now
                 if event=='admission_rejected': self.rejections.clear()
+        if wrote:
+            logged_closed = {r['session_ref'] for r in sampled if r['phase'] == 'closed'}
+            self.closed_sessions = deque((r for r in self.closed_sessions if r['session_ref'] not in logged_closed), maxlen=16)
 
 
 def available_memory(proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
@@ -562,6 +608,11 @@ class SessionBudget:
 class SessionSlot:
     def __init__(self, route):
         self.route = route
+        self.reference = secrets.token_hex(16)
+        self.started = time.monotonic()
+        self.phase = 'admitted'
+        self.sent = self.received = 0
+        self.streams = None
         # Kernel UDP receives are accounted separately, by their actual size.
         # TCP must leave room for both directions' readers, pumps and writers.
         self.cost = route.session_cost()
@@ -570,8 +621,31 @@ class SessionSlot:
         route.session_budget.memory_used += self.cost
         route.slots.add(self)
 
+    def diagnostic(self):
+        result = {'route_ref': self.route.diagnostic_ref, 'session_ref': self.reference,
+                  'transport': self.route.config['transport'], 'phase': self.phase,
+                  'age_seconds': max(0, int(time.monotonic()-self.started)),
+                  'sent_bytes': self.sent, 'received_bytes': self.received, 'reserved_bytes': self.cost}
+        if self.streams:
+            reader, writer, incoming, upstream = self.streams
+            for name, stream in (('client', reader), ('upstream', incoming)):
+                if stream is not None:
+                    result[name+'_read_buffer_bytes'] = len(getattr(stream, '_buffer', b''))
+            for name, stream in (('client', writer), ('upstream', upstream)):
+                if stream is not None:
+                    transport = getattr(stream, 'transport', None)
+                    if transport is not None:
+                        try: result[name+'_write_buffer_bytes'] = max(0, transport.get_write_buffer_size())
+                        except (AttributeError, OSError, RuntimeError): pass
+        return result
+
     def release(self):
         if self in self.route.slots:
+            self.phase = 'closed'
+            if self.route.diagnostic_closed is not None:
+                try: self.route.diagnostic_closed(self.diagnostic())
+                except Exception: pass  # Telemetry cannot interfere with releasing a slot.
+            self.streams = None
             self.route.slots.remove(self)
             self.route.session_budget.used -= 1
             self.route.session_budget.memory_used -= self.cost
@@ -744,6 +818,7 @@ class UpstreamUDP(asyncio.DatagramProtocol):
         if not self.route.closed and self.route.transport.get_write_buffer_size() < 262144:
             self.route.transport.sendto(data, self.client)
             self.route.received += len(data)
+            if self.slot: self.slot.received += len(data)
             self.route.packet_received()
         elif not self.route.closed:
             self.route.failure('udp_buffer_full', dropped=True)
@@ -755,6 +830,8 @@ class UpstreamUDP(asyncio.DatagramProtocol):
 class RelayRoute(asyncio.DatagramProtocol):
     def __init__(self, config, listen_host='0.0.0.0', limits=None, session_budget=None, buffer_budget=None):
         self.config, self.listen_host = config, listen_host
+        self.diagnostic_ref = secrets.token_hex(16)
+        self.diagnostic_closed = None
         self.limits = limits or {}
         self.session_budget = session_budget or SessionBudget(65536)
         self.slots = set()
@@ -880,12 +957,16 @@ class RelayRoute(asyncio.DatagramProtocol):
         upstream = None
         pumps = []
         phase = 'tcp_connect'
+        slot.phase = 'connecting'
+        slot.streams = (reader, writer, None, None)
         try:
             if self.config.get('auth'):
+                slot.phase = 'authenticating'
                 try:
                     await writer.start_tls(self.tls_context, ssl_handshake_timeout=5)
                     await connect_request(reader, writer, self.config)
                     slot.authenticated()
+                    slot.phase = 'connecting'
                 except (SecurityError, OSError, asyncio.TimeoutError, ConnectionError):
                     self.authentication_rejections += 1
                     return
@@ -893,6 +974,8 @@ class RelayRoute(asyncio.DatagramProtocol):
                 self.backoff_rejections += 1
                 return
             incoming, upstream = await self.connect_upstream()
+            slot.streams = (reader, writer, incoming, upstream)
+            slot.phase = 'transferring'
             self.writers.add(upstream)
             phase = 'tcp_transfer'
             if self.config.get('auth'):
@@ -924,10 +1007,12 @@ class RelayRoute(asyncio.DatagramProtocol):
                     except asyncio.TimeoutError:
                         raise WriteTimeout() from None
                     if direction == 'sent':
+                        slot.sent += len(data)
                         self.sent += len(data)
                         self.last_sent_at = int(time.time())
                         self.tcp_waiting.setdefault(task, time.monotonic())
                     else:
+                        slot.received += len(data)
                         self.received += len(data)
                         self.last_received_at = int(time.time())
                         self.tcp_waiting.pop(task, None)
@@ -987,6 +1072,7 @@ class RelayRoute(asyncio.DatagramProtocol):
             if session.transport.get_write_buffer_size() < 262144:
                 session.transport.sendto(data)
                 self.sent += len(data)
+                if session.slot: session.slot.sent += len(data)
                 self.sent_packets += 1
                 self.last_sent_at = int(time.time())
                 if session.awaiting_since is None: session.awaiting_since = time.monotonic()
@@ -1021,10 +1107,12 @@ class RelayRoute(asyncio.DatagramProtocol):
                 session.transport.close()
                 return
             self.sessions[client] = session
+            slot.phase = 'transferring'
             retained = True
             for data in self.pending[client]:
                 session.transport.sendto(data)
                 self.sent += len(data)
+                slot.sent += len(data)
                 self.sent_packets += 1
                 self.last_sent_at = int(time.time())
                 if session.awaiting_since is None: session.awaiting_since = time.monotonic()
@@ -1076,6 +1164,8 @@ class RelayRoute(asyncio.DatagramProtocol):
                 'sessions': len(self.slots), 'errors': self.errors,
                 'target_verified': False,
                 'diagnostics': {'sent_packets': self.sent_packets, 'received_packets': self.received_packets,
+                    'route_ref': self.diagnostic_ref,
+                    'session_refs': sorted(slot.reference for slot in self.slots)[:16],
                     'interval': self.recent.snapshot(), 'statistics_since': self.statistics_since,
                     'tcp_idle_closes': self.idle_closes, 'authentication_rejections': self.authentication_rejections,
                     'upstream_backoff_seconds': max(0, int(self.connect_retry_at-time.monotonic()+.999)),
@@ -1441,6 +1531,10 @@ class Agent:
 
     def make_route(self, config):
         route = RelayRoute(config, self.listen_host, self.limits, self.session_budget, self.buffer_budget)
+        # Reuse existing high-entropy controller authentication material, domain-separated.
+        # Only an opaque reference is written to diagnostics; the key never is.
+        route.diagnostic_ref = route_reference(bytes.fromhex(self.settings()['token_sha256']), config)
+        route.diagnostic_closed = self.diagnostics.closed
         if config.get('auth'):
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.minimum_version = ssl.TLSVersion.TLSv1_2
