@@ -164,7 +164,7 @@ async def connect_request(reader, writer, config):
         raise SecurityError('TCP ingress authentication or destination rejected') from None
 
 
-VERSION = '1.6.6'
+VERSION = '1.6.7'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -192,7 +192,8 @@ SESSION_NUMBERS = {'age_seconds', 'sent_bytes', 'received_bytes', 'reserved_byte
 for _side in ('client', 'upstream'):
     SESSION_NUMBERS.update(_side+'_'+name for name in ('tls_incoming_bytes', 'tls_outgoing_bytes',
         'tls_backlog_bytes', 'tls_backlog_items', 'tls_read_buffer_bytes', 'tls_state', 'tls_app_state',
-        'tls_reading_paused', 'tls_writing_paused', 'transport_read_paused', 'transport_closing'))
+        'tls_reading_paused', 'tls_writing_paused', 'transport_read_paused', 'transport_closing',
+        'read_error_code', 'read_error_traceback_frames'))
 SESSION_PHASES = {'admitted', 'authenticating', 'connecting', 'transferring', 'closed'}
 
 
@@ -838,6 +839,16 @@ class SessionSlot:
             for name, stream in (('client', reader), ('upstream', incoming)):
                 if stream is not None:
                     result[name+'_read_buffer_bytes'] = len(getattr(stream, '_buffer', b''))
+                    error_method = getattr(stream, 'exception', None)
+                    if callable(error_method):
+                        error = error_method()
+                        result[name+'_read_error_code'] = (0 if error is None else 1 if isinstance(error,TimeoutError)
+                            else 2 if isinstance(error,ConnectionError) else 3 if isinstance(error,OSError) else 4)
+                        trace = error.__traceback__ if error is not None else None
+                        depth = 0
+                        while trace is not None and depth < 64:
+                            depth += 1; trace = trace.tb_next
+                        result[name+'_read_error_traceback_frames'] = depth
             for name, stream in (('client', writer), ('upstream', upstream)):
                 if stream is not None:
                     transport = getattr(stream, 'transport', None)
@@ -1215,6 +1226,12 @@ class RelayRoute(asyncio.DatagramProtocol):
                     try:
                         data = await asyncio.wait_for(source.read(65536), remaining)
                     except asyncio.TimeoutError:
+                        # A transport may cache TimeoutError (e.g. TLS shutdown).
+                        # It is terminal, unlike our wait_for inactivity deadline.
+                        # Retrying would re-raise the same exception and retain an
+                        # ever-growing traceback/Task chain until the idle limit.
+                        if source.exception() is not None:
+                            raise
                         if time.monotonic() - last_activity >= self.limits.get('tcp_idle_seconds', TCP_IDLE_TIMEOUT):
                             raise IdleClose() from None
                         continue  # The opposite direction is still transferring.

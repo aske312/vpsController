@@ -73,4 +73,24 @@ block counts. If traced bytes stay flat, examine callback/task counts and TLS
 BIO/backlog samples; persistent unexplained anonymous RSS calls for isolated
 native allocation profiling. Opaque route/session bindings identify observed
 forwarding activity, not a proven physical client or the cause of an allocation.
-Use the exact installed 1.6.6 source to resolve recorded line numbers.
+Use the exact installed version's source to resolve recorded line numbers.
+
+## Terminal stream failures (1.6.7)
+
+A cached reader error is terminal even if it is a `TimeoutError`. It must not
+be confused with the relay's own inactivity deadline: retrying the same failed
+reader can retain an unbounded exception traceback and associated task frames.
+The pump now propagates cached failures to the existing session cleanup path;
+it cancels both pumps, closes both writers and releases the session budget.
+Ordinary one-way activity and TCP half-close behavior remain covered by tests.
+
+Session samples include `client_read_error_code` / `upstream_read_error_code`:
+0 none, 1 TimeoutError, 2 ConnectionError, 3 other OSError, 4 other failure.
+`*_read_error_traceback_frames` counts at most 64 frames; 64 means at least 64.
+No exception message or frame locals are recorded. These fields are also
+captured when a failed session is released, before its stream references clear.
+
+Release CI requires stream regressions on Python 3.11 and 3.12, including a
+real TLS shutdown timeout with an unresponsive peer and injected terminal
+errors in both directions. The regression guard caps repeated failed reads,
+so an unfixed version fails the test without exhausting the CI runner.

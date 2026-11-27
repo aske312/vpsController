@@ -135,6 +135,37 @@ class IngressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await asyncio.wait_for(reader.read(), 2), b'fixture-close')
         writer.close(); await writer.wait_closed()
 
+    async def test_unresponsive_tls_peer_shutdown_timeout_does_not_retry_failed_reader(self):
+        reader, writer, response = await self.request(self.password)
+        self.assertIn(b' 200 ',response)
+        closed=asyncio.Event();observations=[]
+        def released(row):
+            observations.append(row);closed.set()
+        self.route.diagnostic_closed=released
+        slot=next(iter(self.route.slots));source,server_writer,_,_=slot.streams
+        original_read=source.read;rereads=[]
+        async def bounded_read(size):
+            rereads.append(True)
+            if len(rereads)>4:raise OSError('Regression guard: repeated TLS failed read')
+            return await original_read(size)
+        source.read=bounded_read
+        # Real close_notify timeout, accelerated only for this synthetic session.
+        server_writer.transport._ssl_protocol._ssl_shutdown_timeout=.05
+        writer.transport._ssl_protocol._transport.pause_reading()
+        try:
+            writer.write(b'fixture-close');await writer.drain()
+            await asyncio.wait_for(closed.wait(),3)
+            self.assertIsInstance(source.exception(),TimeoutError)
+            self.assertLessEqual(len(rereads),1)
+            self.assertEqual(self.route.error_counts,{'tcp_transfer_timeout':1})
+            self.assertEqual(self.route.idle_closes,0)
+            self.assertEqual(len(observations),1)
+            self.assertEqual(observations[0]['client_read_error_code'],1)
+            self.assertLess(observations[0]['client_read_error_traceback_frames'],64)
+            self.assertFalse(self.route.slots);self.assertFalse(self.route.tasks);self.assertFalse(self.route.writers)
+            self.assertEqual((self.route.session_budget.used,self.route.session_budget.memory_used),(0,0))
+        finally:writer.transport.abort()
+
     async def test_denied_api_source_is_closed_before_tls_and_never_gets_plaintext_reply(self):
         (self.root/'config.json').write_text(json.dumps({'own_ips': ['8.8.8.8']}))
         agent = relay.Agent(self.root, self.root, '127.0.0.1')

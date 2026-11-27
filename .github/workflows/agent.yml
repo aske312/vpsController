@@ -8,6 +8,23 @@ on:
 permissions:
   contents: read
 jobs:
+  stream-regressions:
+    name: Stream regressions (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Check terminal errors, idle activity and half-close
+        run: |
+          python tests/relay_agent_test.py AgentTests.test_cached_stream_errors_are_terminal_in_both_directions_and_free_resources AgentTests.test_route_shutdown_cancels_idle_pumps_and_releases_the_shared_budget AgentTests.test_one_way_tcp_stream_outlives_idle_timeout_in_both_directions AgentTests.test_truly_idle_tcp_session_is_still_closed AgentTests.test_real_tcp_roundtrip_supports_half_close_and_counters
+          python tests/relay_security_test.py
+          python tests/relay_diagnostics_test.py
   verify:
     runs-on: ubuntu-24.04
     steps:
@@ -39,7 +56,7 @@ jobs:
         run: sudo python3 tests/relay_systemd_smoke.py
   release:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/agent' || github.ref == 'refs/heads/test-agent')
-    needs: verify
+    needs: [verify, stream-regressions]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

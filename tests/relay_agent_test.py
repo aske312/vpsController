@@ -600,6 +600,81 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await route.close(); origin.close(); await origin.wait_closed()
 
+    async def test_cached_stream_errors_are_terminal_in_both_directions_and_free_resources(self):
+        for side in (0, 2):  # client reader and upstream reader
+            for error_type in (TimeoutError, ConnectionResetError, BrokenPipeError):
+                with self.subTest(side=side, error=error_type.__name__):
+                    async def echo(reader, writer):
+                        try:
+                            while data := await reader.read(65536):
+                                writer.write(data); await writer.drain()
+                        except OSError: pass
+                        finally: writer.close()
+                    origin = await asyncio.start_server(echo, '127.0.0.1', 0)
+                    route = relay.RelayRoute({**self.body, 'listen_port':0, 'target_ip':'127.0.0.1',
+                        'target_port':origin.sockets[0].getsockname()[1]}, '127.0.0.1')
+                    closed = asyncio.Event(); observations = []
+                    def released(row):
+                        observations.append(row); closed.set()
+                    route.diagnostic_closed = released
+                    await route.start(); writer = None
+                    try:
+                        reader, writer = await asyncio.open_connection('127.0.0.1',route.server.sockets[0].getsockname()[1])
+                        writer.write(b'healthy'); await writer.drain()
+                        self.assertEqual(await asyncio.wait_for(reader.readexactly(7),2),b'healthy')
+                        slot = next(iter(route.slots)); source = slot.streams[side]
+                        original_read = source.read; rereads = []
+                        async def bounded_read(size):
+                            rereads.append(True)
+                            # Stop the unfixed spin before it can exhaust the test runner.
+                            if len(rereads)>4: raise OSError('Regression guard: repeated failed read')
+                            return await original_read(size)
+                        source.read = bounded_read
+                        failure = error_type('synthetic terminal stream error')
+                        source.set_exception(failure)
+                        await asyncio.wait_for(closed.wait(),2)
+                        self.assertLessEqual(len(rereads),1)
+                        kind = 'tcp_transfer_timeout' if isinstance(failure,TimeoutError) else 'tcp_transfer_error'
+                        self.assertEqual(route.error_counts,{kind:1})
+                        self.assertEqual(route.idle_closes,0)
+                        self.assertEqual(len(observations),1)
+                        prefix='client' if side==0 else 'upstream'
+                        self.assertEqual(observations[0][prefix+'_read_error_code'],1 if isinstance(failure,TimeoutError) else 2)
+                        self.assertLess(observations[0][prefix+'_read_error_traceback_frames'],64)
+                        self.assertFalse(route.slots); self.assertFalse(route.tasks); self.assertFalse(route.writers)
+                        self.assertEqual((route.session_budget.used,route.session_budget.memory_used),(0,0))
+                        depth=0; trace=failure.__traceback__
+                        while trace is not None: depth+=1; trace=trace.tb_next
+                        self.assertLess(depth,100)
+                    finally:
+                        if writer: writer.close()
+                        await route.close(); origin.close(); await origin.wait_closed()
+
+    async def test_route_shutdown_cancels_idle_pumps_and_releases_the_shared_budget(self):
+        async def echo(reader,writer):
+            try:
+                while data:=await reader.read(65536):writer.write(data);await writer.drain()
+            except OSError:pass
+            finally:writer.close()
+        origin=await asyncio.start_server(echo,'127.0.0.1',0)
+        route=relay.RelayRoute({**self.body,'listen_port':0,'target_ip':'127.0.0.1',
+            'target_port':origin.sockets[0].getsockname()[1]},'127.0.0.1')
+        await route.start();writer=None
+        try:
+            reader,writer=await asyncio.open_connection('127.0.0.1',route.server.sockets[0].getsockname()[1])
+            writer.write(b'healthy');await writer.drain()
+            self.assertEqual(await asyncio.wait_for(reader.readexactly(7),2),b'healthy')
+            self.assertEqual(route.session_budget.used,1)
+            await asyncio.wait_for(route.close(),2)
+            self.assertFalse(route.slots);self.assertFalse(route.tasks);self.assertFalse(route.writers)
+            self.assertFalse(route.tcp_waiting)
+            self.assertEqual((route.session_budget.used,route.session_budget.memory_used),(0,0))
+            self.assertEqual(route.error_counts,{})
+            self.assertEqual(route.idle_closes,0)
+        finally:
+            if writer:writer.close()
+            await route.close();origin.close();await origin.wait_closed()
+
     async def test_udp_receive_budget_rejects_excess_sessions_and_releases_on_close(self):
         route = relay.RelayRoute({**self.body, 'transport': 'udp', 'target_ip': '127.0.0.1'}, '127.0.0.1')
         route.buffer_budget = relay.UDPReceiveBudget(128 * 1024)
