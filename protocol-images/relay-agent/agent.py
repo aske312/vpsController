@@ -1382,14 +1382,17 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.closed = True
         if self.server:
             self.server.close()
-            await self.server.wait_closed()
         if self.transport: self.transport.abort()
         sessions = list(self.sessions.values())
         for session in sessions: session.transport.abort()
-        for writer in self.writers: writer.close()
+        # Explicit route retirement already cancels its streams. Abort transports
+        # before waiting: newer asyncio servers also wait for accepted clients,
+        # and a silent TLS peer must not hold retirement for close_notify.
+        for writer in list(self.writers): writer.transport.abort()
         tasks = list(self.tasks)
         for task in tasks: task.cancel()
         if tasks: await asyncio.gather(*tasks, return_exceptions=True)
+        if self.server: await self.server.wait_closed()
         closed = [getattr(item, 'closed_future', None) for item in (self, *sessions)]
         if any(closed): await asyncio.gather(*(future for future in closed if future is not None))
         self.sessions.clear()

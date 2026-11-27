@@ -83,6 +83,10 @@ reader can retain an unbounded exception traceback and associated task frames.
 The pump now propagates cached failures to the existing session cleanup path;
 it cancels both pumps, closes both writers and releases the session budget.
 Ordinary one-way activity and TCP half-close behavior remain covered by tests.
+Explicit route retirement stops accepting, aborts client/upstream transports
+and cancels workers before awaiting server closure. This avoids the Python
+3.12 server waiting on its own still-open clients and prevents a silent TLS
+peer from extending retirement through the close_notify timeout.
 
 Session samples include `client_read_error_code` / `upstream_read_error_code`:
 0 none, 1 TimeoutError, 2 ConnectionError, 3 other OSError, 4 other failure.

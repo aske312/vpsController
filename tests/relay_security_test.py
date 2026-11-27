@@ -166,6 +166,18 @@ class IngressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((self.route.session_budget.used,self.route.session_budget.memory_used),(0,0))
         finally:writer.transport.abort()
 
+    async def test_route_retirement_does_not_wait_for_unresponsive_tls_peer(self):
+        reader,writer,response=await self.request(self.password)
+        self.assertIn(b' 200 ',response)
+        try:
+            writer.write(b'healthy');await writer.drain()
+            self.assertEqual(await asyncio.wait_for(reader.readexactly(7),2),b'healthy')
+            writer.transport._ssl_protocol._transport.pause_reading()
+            await asyncio.wait_for(self.route.close(),2)
+            self.assertFalse(self.route.slots);self.assertFalse(self.route.tasks);self.assertFalse(self.route.writers)
+            self.assertEqual((self.route.session_budget.used,self.route.session_budget.memory_used),(0,0))
+        finally:writer.transport.abort()
+
     async def test_denied_api_source_is_closed_before_tls_and_never_gets_plaintext_reply(self):
         (self.root/'config.json').write_text(json.dumps({'own_ips': ['8.8.8.8']}))
         agent = relay.Agent(self.root, self.root, '127.0.0.1')
