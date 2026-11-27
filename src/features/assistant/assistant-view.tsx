@@ -689,7 +689,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         </select></label>}
     </SettingsDialog>}
     {panel !== "chat" && <>
-      <section className={`mcpHero noderaHero ${panel !== "settings" ? "isTelegram" : ""}`}>
+      <section className={`mcpHero noderaHero ${panel !== "settings" ? "isTelegram" : ""} ${panel === "campaigns" ? "isCampaigns" : ""}`}>
         <div className="noderaHeroContent">
           <div className="mcpIdentity">
             <ProtocolIcon protocol={panel !== "settings" ? "nodera-bot" : "nodera"}/>

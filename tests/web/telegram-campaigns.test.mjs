@@ -48,8 +48,13 @@ test('editing a multi-question survey stays local and tracks unsaved changes',as
     button(view.render(),'Добавить вопрос').props.onClick();
     const kinds=nodes(view.render()).filter(node=>node.type==='select' && node.props.value==='choice');
     assert.equal(kinds.length,2); kinds[1].props.onChange({target:{value:'text'}});
+    const questions=nodes(view.render()).filter(node=>node.type==='details' && node.props.className==='campaignQuestion');
+    assert.deepEqual(questions.map(node=>node.props.open),[false,true]);
     assert.equal(nodes(view.render()).filter(node=>node.type==='select' && node.props.value==='text').length,1);
     assert.equal(view.writes.length,0); assert.equal(view.dirty.at(-1),true);
+    let revealed=false;
+    nodes(view.render()).find(node=>node.type==='form').props.onInvalidCapture({target:{closest:selector=>{assert.equal(selector,'details');return {setAttribute:key=>{assert.equal(key,'open');revealed=true;}};}}});
+    assert.equal(revealed,true);
     view.props.active=false; assert.equal(view.render().props.hidden,true);
     view.props.active=true; assert.equal(field(view.render(),'Название').props.value,'Плановые работы');
   } finally {view.close();}

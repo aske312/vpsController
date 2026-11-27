@@ -113,7 +113,7 @@ export function TelegramCampaigns({ request, active, blocked, onDirtyChange, onU
   const chosenCount = overview?.recipients.filter(item => item.eligible && (editor?.audience.mode === "all" || editor?.audience.mode === "subscribers" && item.subscriber || selectedIds.has(item.telegram_id))).length ?? 0;
 
   return <section className="campaignWorkspace" hidden={!active} aria-label="Рассылки владельца">
-    <div className="campaignToolbar"><div><h2>Связь с пользователями</h2><p>Уведомления, голосования и анкеты в личных сообщениях Telegram.</p></div>
+    <div className="campaignToolbar"><span className="campaignAudienceCount">{overview ? `${overview.recipients.filter(item => item.eligible).length} получателей · Telegram` : "Telegram"}</span>
       <button type="button" className="primaryButton" disabled={locked || Boolean(editor)} onClick={() => begin()}><ChatIcon name="plus"/>Создать рассылку</button></div>
     {!overview && !error && <p role="status">Загружаем рассылки…</p>}
     {overview && !overview.ready && <div className="campaignSetup"><strong>Подготовьте Telegram-бота</strong><p>Для отправки и сбора ответов включите NoderaBot и обновите Nodera. Черновики можно создавать сейчас.</p>
@@ -124,33 +124,34 @@ export function TelegramCampaigns({ request, active, blocked, onDirtyChange, onU
         {overview?.items.length === 0 && <p>Пока нет рассылок. Создайте уведомление или задайте пользователям вопрос.</p>}
         {overview?.items.map(item => <button type="button" key={item.id} className="campaignHistoryItem" aria-pressed={selection === item.id}
           disabled={locked || Boolean(editor)} onClick={() => { setSelection(item.id); setDetail(undefined); setOffset(0); }}>
-          <span className="campaignKind">{kindNames[item.kind]}</span><strong>{item.title}</strong>
-          <span>{stateNames[item.state]} · {date(item.created_at)}</span><small>{item.state === "draft" ? "Ещё не отправлялась" : `Получателей: ${item.recipient_count} · Ответили: ${item.respondents}`}</small></button>)}
+          <strong>{item.title}</strong><span>{kindNames[item.kind]} · {stateNames[item.state]}</span>
+          <small>{date(item.created_at)}{item.state !== "draft" && ` · ${item.respondents}/${item.recipient_count} ответили`}</small></button>)}
       </aside>
       <div className="campaignMain">
-        {editor ? <form className="campaignEditor" onSubmit={event => { event.preventDefault(); void perform(async () => { await saveDraft(); notify.success("Черновик сохранён"); }); }}>
-          <div className="campaignSectionHeading"><h3>{editor.revision ? "Редактирование черновика" : "Новая рассылка"}</h3><span>Только владелец панели</span></div>
+        {editor ? <form className="campaignEditor" onInvalidCapture={event => { (event.target as HTMLElement).closest("details")?.setAttribute("open", ""); }} onSubmit={event => { event.preventDefault(); void perform(async () => { await saveDraft(); notify.success("Черновик сохранён"); }); }}>
+          <div className="campaignSectionHeading"><h3>{editor.revision ? "Черновик" : "Новая рассылка"}</h3><span>{editor.revision ? "Сохранён" : "Не отправлена"}</span></div>
           <fieldset disabled={locked}>
-            <label>Формат<select value={editor.kind} onChange={event => changeKind(event.target.value as Draft["kind"])}>{Object.entries(kindNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
-            <label>Название<input required maxLength={120} value={editor.title} placeholder="Например, плановые работы или качество подключения" onChange={event => setEditor({ ...editor, title: event.target.value })}/></label>
-            <label>{editor.kind === "message" ? "Текст уведомления" : "Вступление"}<textarea rows={5} required={editor.kind === "message"} maxLength={3000} value={editor.text}
+            <div className="campaignFormRow"><label>Формат<select value={editor.kind} onChange={event => changeKind(event.target.value as Draft["kind"])}>{Object.entries(kindNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
+            <label>Название<input required maxLength={120} value={editor.title} placeholder="Например, плановые работы" onChange={event => setEditor({ ...editor, title: event.target.value })}/></label></div>
+            <label>{editor.kind === "message" ? "Текст уведомления" : "Вступление"}<textarea rows={3} required={editor.kind === "message"} maxLength={3000} value={editor.text}
               placeholder={editor.kind === "message" ? "Что пользователям нужно знать?" : "Расскажите, зачем нужен опрос и сколько времени он займёт."} onChange={event => setEditor({ ...editor, text: event.target.value })}/></label>
-            <div className="campaignSectionHeading"><h4>Получатели</h4><span>{chosenCount} доступно для отправки</span></div>
+            <div className="campaignSectionHeading"><h4>Получатели</h4><span>{chosenCount} доступно</span></div>
             <label>Аудитория<select value={editor.audience.mode} onChange={event => setEditor({ ...editor, audience: { mode: event.target.value as Audience["mode"], ids: [] } })}>
               <option value="all">Все пользователи бота</option><option value="subscribers">С привязанной подпиской</option><option value="selected">Выбранные пользователи</option></select></label>
-            <p>Сообщение получат только пользователи, которые уже запускали этого бота и не отключили рассылки. Заблокированные пользователи исключаются.</p>
+            <details className="campaignHelp"><summary>Кто получит рассылку</summary><p>Только пользователи, которые запускали этого бота и не отключили рассылки. Заблокированные исключаются.</p></details>
             {editor.audience.mode === "selected" && <div className="campaignRecipients"><label>Поиск получателя<input value={search} onChange={event => setSearch(event.target.value)} placeholder="Имя или Telegram ID"/></label>
               <div className="campaignRecipientList">{visibleRecipients.slice(0,100).map(item => <label key={item.telegram_id}><input type="checkbox" disabled={!item.eligible} checked={selectedIds.has(item.telegram_id)}
                 onChange={event => setEditor({ ...editor, audience: { mode: "selected", ids: event.target.checked ? [...editor.audience.ids, item.telegram_id] : editor.audience.ids.filter(id => id !== item.telegram_id) } })}/>
                 <span>{item.name}<small>{item.telegram_id}{!item.eligible && ` · ${excludedNames[item.excluded_reason]}`}</small></span></label>)}</div>{visibleRecipients.length>100 && <small>Показаны первые 100 пользователей. Уточните поиск, чтобы найти остальных.</small>}</div>}
             {editor.kind !== "message" && <><div className="campaignSectionHeading"><h4>Вопросы</h4><span>Ответы видны владельцу панели</span></div>
-              {editor.questions.map((question, index) => <div className="campaignQuestion" key={index}>
+              {editor.questions.map((question, index) => <details className="campaignQuestion" key={index} open={index === editor.questions.length - 1}>
+                <summary>Вопрос {index + 1}<span>{question.text || (question.kind === "text" ? "Свободный текст" : "Выбор вариантов")}</span></summary><div className="campaignQuestionFields">
                 <div className="campaignSectionHeading"><strong>Вопрос {index + 1}</strong>{editor.kind === "survey" && editor.questions.length > 1 && <button type="button" className="ghostButton" onClick={() => setEditor({ ...editor, questions: editor.questions.filter((_, i) => i !== index) })}>Удалить вопрос</button>}</div>
                 {editor.kind === "survey" && <label>Тип ответа<select value={question.kind} onChange={event => questionPatch(index, { kind: event.target.value as Question["kind"], options: event.target.value === "text" ? [] : ["", ""], multiple: false })}><option value="choice">Выбор вариантов</option><option value="text">Свободный текст</option></select></label>}
                 <label>Текст вопроса<textarea required rows={2} maxLength={300} value={question.text} onChange={event => questionPatch(index, { text: event.target.value })}/></label>
                 {question.kind === "choice" && <><label>Варианты ответа, каждый с новой строки<textarea required rows={4} value={question.options.join("\n")} placeholder={"Да\nНет"} onChange={event => questionPatch(index, { options: event.target.value.split("\n") })}/><small>От 2 до 10 вариантов, до 100 символов каждый.</small></label>
                   <label className="campaignCheck"><input type="checkbox" checked={question.multiple} onChange={event => questionPatch(index, { multiple: event.target.checked })}/>Можно выбрать несколько вариантов</label></>}
-              </div>)}
+              </div></details>)}
               {editor.kind === "survey" && <button type="button" className="ghostButton" disabled={editor.questions.length >= 10} onClick={() => setEditor({ ...editor, questions: [...editor.questions, newQuestion()] })}><ChatIcon name="plus"/>Добавить вопрос</button>}
               <p>Вопросы анкеты приходят по одному. Ответы сохраняются отдельно от переписки с AI.</p></>}
           </fieldset>
@@ -170,11 +171,11 @@ export function TelegramCampaigns({ request, active, blocked, onDirtyChange, onU
           {detail.unconfirmed_closes > 0 && <p role="status">Закрытие {detail.unconfirmed_closes} голосований ожидается или не подтверждено Telegram.</p>}
           {detail.questions.map((question, index) => <section className="campaignResult" key={index}><h4>{index + 1}. {question.text}</h4><p>Ответов: {detail.results[index]?.answered ?? 0}{question.multiple ? " · Можно выбрать несколько вариантов" : ""}</p>
             {question.options.map((option, optionIndex) => <div className="campaignVote" key={optionIndex}><span>{option}</span><strong>{detail.results[index]?.counts[optionIndex] ?? 0}</strong><progress max={Math.max(1, detail.results[index]?.answered ?? 0)} value={detail.results[index]?.counts[optionIndex] ?? 0} aria-label={option}/></div>)}</section>)}
-          {Boolean(detail.answer_total) && <section className="campaignAnswers"><h4>Ответы пользователей</h4><p>Ответы видны только владельцу панели.</p>
+          {Boolean(detail.answer_total) && <details className="campaignAnswerDetails"><summary>Ответы пользователей · {detail.answer_total}</summary><div className="campaignAnswers"><p>Ответы видны только владельцу панели.</p>
             {detail.answers?.map(answer => <div className="campaignAnswer" key={`${answer.telegram_id}:${answer.step}`}><strong>{names.get(answer.telegram_id) || answer.telegram_id}</strong><small>{date(answer.at)} · Вопрос {answer.step + 1}</small>
               <p>{Array.isArray(answer.answer) ? answer.answer.map(option => detail.questions[answer.step]?.options[option]).join(", ") : answer.answer}</p></div>)}
             <div className="campaignActions"><button type="button" className="ghostButton" disabled={locked || offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Назад</button>
-              <span>{offset + 1}–{Math.min(offset + 50, detail.answer_total)} из {detail.answer_total}</span><button type="button" className="ghostButton" disabled={locked || offset + 50 >= detail.answer_total} onClick={() => setOffset(offset + 50)}>Далее</button></div></section>}
+              <span>{offset + 1}–{Math.min(offset + 50, detail.answer_total)} из {detail.answer_total}</span><button type="button" className="ghostButton" disabled={locked || offset + 50 >= detail.answer_total} onClick={() => setOffset(offset + 50)}>Далее</button></div></div></details>}
           {detail.deliveries && detail.deliveries.length > 0 && <details><summary>Неотправленные сообщения и исключённые получатели</summary><div className="campaignFailures">{detail.deliveries.map(item => <p key={`${item.recipient}:${item.step}`}>{names.get(item.recipient) || item.recipient} · {item.step < 0 ? "Вступление" : `Вопрос ${item.step + 1}`} · {deliveryNames[item.state] || item.state}</p>)}</div></details>}
         </article> : <div className="campaignEmpty"><ChatIcon name="telegram"/><h3>Расскажите о важном или спросите мнение</h3><p>Выберите рассылку слева или создайте новую. Перед отправкой вы увидите текст и точное число получателей.</p></div>}
       </div>

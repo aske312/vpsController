@@ -24,6 +24,21 @@ def question(kind='choice'):
     return {'kind':kind,'text':'Как работает подключение?','options':['Хорошо','Плохо'] if kind=='choice' else [],'multiple':False}
 
 
+class CampaignReadinessTests(unittest.TestCase):
+    def test_real_runtime_version_check_and_owner_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);env=types.SimpleNamespace(DATA_DIR=root)
+            settings={'bot_token':'123456:synthetic','modules':{'nodera-bot':True},'accounts':[]}
+            with patch.object(control,'read',return_value=settings),patch.object(control,'runtime_directory',return_value=root),patch.object(control,'runtime_ready',return_value=True):
+                for version,expected in [('1.25.8',False),('1.25.9',True),('1.26.0',True),('invalid',False)]:
+                    with self.subTest(version=version):
+                        (root/'version').write_text(version)
+                        self.assertIs(campaigns.ready(settings),expected)
+                        self.assertIs(campaigns.overview(env)['ready'],expected)
+                (root/'version').unlink()
+                self.assertFalse(campaigns.ready(settings))
+
+
 class CampaignTests(unittest.TestCase):
     def setUp(self):
         self.root=Path(self.enterContext(tempfile.TemporaryDirectory()))

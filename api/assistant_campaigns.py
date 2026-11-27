@@ -183,7 +183,7 @@ def scope(settings):
 def ready(settings):
     return bool(settings.get('bot_token') and settings.get('modules',{}).get('nodera-bot')
                 and control.runtime_ready('nodera-bot')
-                and control.version_at_least(control.runtime_directory('nodera-bot')/'version',MIN_BOT_VERSION))
+                and control.version_at_least(control.runtime_directory('nodera-bot')/'version',tuple(map(int,MIN_BOT_VERSION.split('.')))))
 
 
 def require_ready(settings):
