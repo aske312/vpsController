@@ -145,7 +145,7 @@ class IngressTests(unittest.IsolatedAsyncioTestCase):
         slot=next(iter(self.route.slots));source,server_writer,_,_=slot.streams
         original_read=source.read;rereads=[]
         async def bounded_read(size):
-            rereads.append(True)
+            if source.exception() is not None:rereads.append(True)
             if len(rereads)>4:raise OSError('Regression guard: repeated TLS failed read')
             return await original_read(size)
         source.read=bounded_read

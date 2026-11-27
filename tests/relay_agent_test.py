@@ -625,7 +625,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                         slot = next(iter(route.slots)); source = slot.streams[side]
                         original_read = source.read; rereads = []
                         async def bounded_read(size):
-                            rereads.append(True)
+                            if source.exception() is not None: rereads.append(True)
                             # Stop the unfixed spin before it can exhaust the test runner.
                             if len(rereads)>4: raise OSError('Regression guard: repeated failed read')
                             return await original_read(size)
