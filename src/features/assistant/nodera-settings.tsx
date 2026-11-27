@@ -13,6 +13,7 @@ export const panels = [
   { id: "chat", label: "Чат", icon: "chat" },
   { id: "settings", label: "Настройки AI", icon: "gear" },
   { id: "users", label: "Доступ", icon: "users" },
+  { id: "campaigns", label: "Рассылки", icon: "telegram" },
 ] as const;
 export type Panel = typeof panels[number]["id"];
 type AccountDraft = Draft["accounts"][number];
@@ -21,7 +22,7 @@ type ProviderCheck = ProviderObservation & { text: string; failed?: boolean; che
 type BotContact = { telegram_id: number; username: string; name: string; seen_at: number; profile_name?: string; blocked?: boolean; last_name?: string; language_code?: string; is_premium?: boolean | null; bio?: string; birthdate?: { day: number; month: number; year?: number | null } | null };
 type Props = {
   apiConnection?: ProviderConnection;
-  panel: Exclude<Panel, "chat">;
+  panel: Exclude<Panel, "chat" | "campaigns">;
   request: ReturnType<typeof createApiClient>;
   status: McpStatus;
   draft: Draft;

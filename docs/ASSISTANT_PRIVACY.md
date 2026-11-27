@@ -1,5 +1,30 @@
 # Assistant privacy and behavior
 
+Owner-authored Telegram announcements, polls and multi-question surveys are
+managed in the panel's **Рассылки** section. Authoring, audience preview, launch,
+results and deletion require panel authentication; bot transport credentials
+and AI tools cannot launch campaigns. Only users of this panel's bot who have
+previously contacted it are eligible. Blocked users and users who disabled
+campaigns through `/notifications off` are excluded. `/notifications on` enables
+future campaigns again.
+
+Survey introductions disclose that the panel owner can read responses. Answers
+are stored separately from AI conversations and are never added to model context
+or chat history. Campaign definitions and individual answers are encrypted with
+the API's storage key in `assistant/campaigns/campaigns.sqlite3`; recipient IDs,
+delivery states and aggregate vote counts remain operational metadata. Keep this
+database and `.privacy-key` together in protected backups. The owner can close
+campaigns and delete their stored results; Telegram copies remain with Telegram.
+
+Launching freezes the previewed audience. Delivery survives API restarts, obeys
+Telegram rate-limit replies and checks blocking/opt-out again before each send.
+An interrupted or ambiguous send is shown as unknown and is not automatically
+repeated. This avoids duplicate announcements but can leave an individual survey
+unfinished. Native votes allow changing or retracting a choice. Free-text answers
+must reply to the corresponding question; editing that answer updates it.
+NoderaBot 1.25.9 or newer is required; update the Nodera runtime bundle separately
+from the application.
+
 Panel authentication grants access to the panel's own chat, not to any Telegram
 user's identity. Panel routes reject `telegram_id` for chat, memory, requests,
 streams, traces, commands and confirmations. NoderaBot authenticates its current

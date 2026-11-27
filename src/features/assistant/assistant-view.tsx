@@ -23,6 +23,7 @@ import { changed, chatModels, makeDraft, settingsPayload, type Draft, type McpSt
 import { ProviderMonitor, initialProviderConnection, providerStatusText, type ProviderConnection } from "./provider-connection";
 import { queueProviderCatalog } from "./provider-details";
 import { NoderaSettings, SettingsDialog, panels, type Panel } from "./nodera-settings";
+import { TelegramCampaigns } from "./telegram-campaigns";
 
 type Client = ReturnType<typeof createApiClient>;
 type Props = {
@@ -50,6 +51,7 @@ function failedChatTurn(cause: unknown): Partial<Turn> {
 
 export function AssistantView({ active, onOpenChat, request, refreshKey, busy, onDirtyChange, confirmAction, admitOperation, onOperation }: Props) {
   const [panel, setPanel] = useState<Panel>('chat');
+  const [campaignDirty, setCampaignDirty] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState(0);
   const [hasPendingChat, setHasPendingChat] = useState(false);
@@ -185,7 +187,7 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
     sessionWriter.current?.schedule({ model, provider: sessionProvider, streaming, conversation_id: conversationId, prompt, turns });
   }, [request, sessionReady, sessionProvider, actor, model, streaming, conversationId, prompt, turns, status]);
   useEffect(() => { client.current = request; }, [request]);
-  useEffect(() => { dirtyRef.current = dirty; if (active) onDirtyChange(dirty); }, [dirty, active, onDirtyChange]);
+  useEffect(() => { dirtyRef.current = dirty; if (active) onDirtyChange(dirty || campaignDirty); }, [dirty, campaignDirty, active, onDirtyChange]);
   useEffect(() => () => { version.current += 1; onDirtyChange(false); }, [onDirtyChange]);
   const load = useCallback(async () => {
     if (writing.current) return;
@@ -687,11 +689,11 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         </select></label>}
     </SettingsDialog>}
     {panel !== "chat" && <>
-      <section className={`mcpHero noderaHero ${panel === "users" ? "isTelegram" : ""}`}>
+      <section className={`mcpHero noderaHero ${panel !== "settings" ? "isTelegram" : ""}`}>
         <div className="noderaHeroContent">
           <div className="mcpIdentity">
-            <ProtocolIcon protocol={panel === "users" ? "nodera-bot" : "nodera"}/>
-            <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1><p className="noderaHeroDescription">{panel === "users" ? "Кто общается с ассистентом и какие действия ему доступны." : "Подключения AI, модель по умолчанию и инструменты ассистента."}</p></div>
+            <ProtocolIcon protocol={panel !== "settings" ? "nodera-bot" : "nodera"}/>
+            <div><span className="eyebrow">NODERA</span><h1>{panels.find(item => item.id === panel)?.label}</h1><p className="noderaHeroDescription">{panel === "campaigns" ? "Оповещения и обратная связь с пользователями вашего Telegram-бота." : panel === "users" ? "Кто общается с ассистентом и какие действия ему доступны." : "Подключения AI, модель по умолчанию и инструменты ассистента."}</p></div>
 
           </div>
           <dl className="noderaHeroFacts">
@@ -719,9 +721,11 @@ export function AssistantView({ active, onOpenChat, request, refreshKey, busy, o
         </div>
       </section>
       {active && conflict && <NotificationNotice id="nodera:conflict" title="Настройки Nodera" message="Настройки изменились на сервере. Отмените правки и повторите." action={{ label: "Отменить правки", disabled: settingsBlocked, run: discardSettings }} />}
-      <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
+      {panel !== "campaigns" && <NoderaSettings apiConnection={apiConnection} panel={panel} request={request} status={status} draft={draft} patch={patch}
         blocked={editingBlocked} dirty={dirty} refreshKey={refreshKey} actor={actor} actorSelect={actorSelect} checks={checks} check={check}
-        working={working}/>
+        working={working}/>}
     </>}
+    <TelegramCampaigns request={request} active={active && panel === "campaigns"} blocked={editingBlocked || dirty}
+      onDirtyChange={setCampaignDirty} onUpdate={updateAgent}/>
   </div>;
 }

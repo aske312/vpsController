@@ -1,0 +1,33 @@
+.campaignWorkspace { display:grid; gap:16px; min-width:0; }
+.campaignToolbar,.campaignSectionHeading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.campaignWorkspace h2,.campaignWorkspace h3,.campaignWorkspace h4 { margin:0; color:var(--text); }
+.campaignWorkspace h2 { font-size:17px; }.campaignWorkspace h3 { font-size:15px; }.campaignWorkspace h4 { font-size:13px; }
+.campaignToolbar>div,.campaignSectionHeading>div { display:grid; gap:5px; }
+.campaignSectionHeading>span { font-size:11px; color:var(--muted); }
+.campaignColumns { display:grid; grid-template-columns:minmax(190px,260px) minmax(0,1fr); gap:14px; align-items:start; }
+.campaignHistory,.campaignMain { min-width:0; }.campaignHistory { display:grid; gap:8px; }
+.campaignHistory h3 { display:flex; justify-content:space-between; padding:4px; }.campaignHistory h3 span { color:var(--muted); }
+.campaignHistoryItem { display:grid; gap:5px; width:100%; text-align:left; padding:13px; border:1px solid var(--line); border-radius:10px; color:var(--text); background:var(--panel); cursor:pointer; overflow-wrap:anywhere; }
+.campaignHistoryItem[aria-pressed=true] { border-color:var(--cyan); background:color-mix(in srgb,var(--cyan) 7%,var(--panel)); }
+.campaignHistoryItem>span:not(.campaignKind) { color:var(--muted); font-size:10px; }
+.campaignKind { color:var(--cyan); font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+.campaignEditor,.campaignDetail,.campaignEmpty { display:grid; gap:18px; padding:20px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
+.campaignEditor fieldset { display:grid; gap:15px; min-width:0; margin:0; padding:0; border:0; }
+.campaignQuestion { display:grid; gap:12px; padding:15px; border:1px solid var(--line); border-radius:9px; background:var(--panel-inset); min-width:0; }
+.campaignActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }.campaignActions>span { color:var(--muted); font-size:11px; }
+.campaignCheck { display:flex!important; align-items:center; gap:8px!important; }
+.campaignSetup,.campaignDeliveryNotice { display:grid; gap:9px; padding:15px; border:1px solid var(--line); border-radius:10px; background:var(--panel-inset); }
+.campaignSetup>button { justify-self:start; }
+.campaignRecipients { display:grid; gap:10px; }.campaignRecipientList { display:grid; gap:7px; max-height:240px; overflow:auto; padding:4px; }
+.campaignRecipientList>label { display:flex!important; align-items:center; gap:9px!important; padding:7px; }.campaignRecipientList>label>span { display:grid; gap:3px; }
+.campaignMetrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:9px; }.campaignMetrics>div { display:grid; gap:4px; padding:12px; border-radius:8px; background:var(--panel-inset); }
+.campaignMetrics strong { font-size:21px; font-weight:600; }.campaignMetrics span { color:var(--muted); font-size:10px; }
+.campaignMessage,.campaignAnswer p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.campaignResult { display:grid; gap:9px; padding-top:15px; border-top:1px solid var(--line); }
+.campaignVote { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 10px; }.campaignVote span { overflow-wrap:anywhere; }.campaignVote progress { width:100%; height:7px; accent-color:var(--cyan); grid-column:1/-1; }
+.campaignAnswers,.campaignPreview { display:grid; gap:14px; }.campaignAnswer { display:grid; gap:5px; padding:12px; border:1px solid var(--line); border-radius:9px; }.campaignAnswer small { display:block; }
+.campaignPreview ul { display:grid; gap:5px; margin:0; padding-left:20px; }.campaignEmpty { min-height:230px; align-content:center; justify-items:start; }
+.campaignEmpty svg { width:32px; height:32px; color:var(--cyan); }.campaignFailures { display:grid; gap:7px; padding-top:12px; }
+.campaignWorkspace button:disabled { cursor:default; opacity:.55; }
+@container (max-width:760px) { .campaignColumns { grid-template-columns:1fr; }.campaignHistory { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }.campaignHistory h3,.campaignHistory>p { grid-column:1/-1; }.campaignToolbar { align-items:start; flex-direction:column; }.campaignSectionHeading { align-items:start; flex-wrap:wrap; } }
+@media (max-width:500px) { .campaignEditor,.campaignDetail,.campaignEmpty { padding:14px; }.campaignQuestion { padding:11px; }.campaignMetrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }

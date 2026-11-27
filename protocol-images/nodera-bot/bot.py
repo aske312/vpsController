@@ -76,7 +76,7 @@ def telegram_chunks(text):
         chunks.append(current + ''.join('</' + name + '>' for name, _ in reversed(stack)))
     return chunks
 
-PUBLIC_COMMANDS = [('start', 'Начать знакомство'), ('myprofile', 'Мой профиль Nodera'), ('setup', 'Заполнить профиль'), ('id', 'Мой Telegram ID')]
+PUBLIC_COMMANDS = [('start', 'Начать знакомство'), ('myprofile', 'Мой профиль Nodera'), ('setup', 'Заполнить профиль'), ('id', 'Мой Telegram ID'), ('notifications', 'Уведомления владельца')]
 MEMBER_COMMANDS = [('menu', 'Открыть меню'), ('help', 'Справка')] + PUBLIC_COMMANDS
 SUBSCRIPTION_COMMANDS = MEMBER_COMMANDS + [('subscription', 'Моя подписка'),
     ('devices', 'Устройства подписки'), ('connect', 'Как подключиться')]
@@ -948,6 +948,50 @@ def bot_state_directory(base, token):
     return directory
 
 
+async def campaign_update(settings, update):
+    """Survey input bypasses AI/history and is bound to a private recipient."""
+    vote=update.get('poll_answer')
+    callback=update.get('callback_query') or {}
+    message=callback.get('message') or update.get('message') or update.get('edited_message') or {}
+    sender=(vote or {}).get('user') if vote else callback.get('from') or message.get('from')
+    if not isinstance(sender,dict) or type(sender.get('id'))is not int or sender['id']<=0 or sender.get('is_bot'):
+        return bool(vote)
+    actor=sender['id'];payload=None
+    if vote:
+        payload={'kind':'poll','update_id':update['update_id'],'poll_id':vote.get('poll_id',''),'option_ids':vote.get('option_ids',[])}
+    elif message.get('chat',{}).get('type')=='private' and message.get('chat',{}).get('id')==actor:
+        text=message.get('text','')
+        if callback.get('data') in ('notices:on','notices:off'):
+            if str(message.get('from',{}).get('id'))!=settings['bot_token'].split(':')[0]:return True
+            payload={'kind':'preference','update_id':update['update_id'],'enabled':callback['data']=='notices:on'}
+            try:await bot_api(settings,'answerCallbackQuery',callback_query_id=callback['id'])
+            except (TelegramAPIError,httpx.TransportError):pass
+        elif not callback and not update.get('edited_message') and re.fullmatch(r'/notifications(?:@\w+)?(?:\s+(?:on|off))?',text.strip(),re.IGNORECASE):
+            mode=text.strip().split()[1:]
+            payload={'kind':'preference','update_id':update['update_id'],'enabled':None if not mode else mode[0].lower()=='on'}
+        elif not callback and message.get('reply_to_message'):
+            parent=message['reply_to_message']
+            if str(parent.get('from',{}).get('id'))==settings['bot_token'].split(':')[0]:
+                payload={'kind':'reply','update_id':update['update_id'],'reply_to':parent.get('message_id',0),'text':text,
+                    'message_id':message.get('message_id',0),'edited':bool(update.get('edited_message'))}
+    if payload is None:return False
+    try:await identify(settings,sender)
+    except ContactBlocked:return True
+    async with httpx.AsyncClient(timeout=15,trust_env=False) as client:
+        try:
+            response=await client.post('http://127.0.0.1:8000/api/assistant/bot-campaigns',
+                headers={'Authorization':'Bearer '+settings['control_token'],'X-MCP-Actor':str(actor)},json=payload)
+        except httpx.TransportError:raise DeliveryPending() from None
+    if response.status_code==403:return True
+    if response.status_code in (401,429) or response.status_code>=500:raise DeliveryPending()
+    if response.status_code!=200:return True
+    result=response.json()
+    if not result.get('handled'):return False
+    if result.get('text'):
+        await bot_api(settings,'sendMessage',chat_id=actor,text=result['text'])
+    return True
+
+
 async def bot(settings):
     # Polling and deliveries share a pool, with separate connections for concurrent
     # requests. The client closes only after the dispatcher has stopped.
@@ -1183,8 +1227,9 @@ async def run_bot(settings):
     try:
         while True:
             try:
-                updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'edited_message', 'callback_query'])
+                updates = await bot_api(settings, 'getUpdates', offset=offset, timeout=25, allowed_updates=['message', 'edited_message', 'callback_query', 'poll_answer'])
                 for update in updates:
+                    if await campaign_update(settings,update):continue
                     callback = update.get('callback_query')
                     message = callback.get('message', {}) if callback else update.get('message', update.get('edited_message', {}))
                     sender = callback.get('from', {}) if callback else message.get('from', {})

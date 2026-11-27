@@ -52,6 +52,7 @@ import assistant_jobs
 import assistant_privacy
 import assistant_personalization
 import assistant_contacts
+import assistant_campaigns
 import assistant_commands
 import assistant_chat_commands
 import assistant_bot_history
@@ -137,6 +138,7 @@ async def lifespan(_: FastAPI):
     component_health_task = None
     owner_alert_task = None
     access_notice_task = None
+    campaign_task = None
     chat_queue_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
@@ -150,10 +152,16 @@ async def lifespan(_: FastAPI):
         owner_alert_task = asyncio.create_task(telegram_alerts.monitor(sys.modules[__name__]))
         import assistant_access_notifications
         access_notice_task = asyncio.create_task(assistant_access_notifications.monitor(sys.modules[__name__]))
+        import assistant_campaign_delivery
+        campaign_task = asyncio.create_task(assistant_campaign_delivery.monitor(sys.modules[__name__]))
         chat_queue_task = asyncio.create_task(assistant_jobs.monitor(sys.modules[__name__]))
     try:
         yield
     finally:
+        if campaign_task is not None:
+            campaign_task.cancel()
+            try: await campaign_task
+            except asyncio.CancelledError: pass
         if access_notice_task is not None:
             access_notice_task.cancel()
             try: await access_notice_task
@@ -737,6 +745,49 @@ def nodera_user_lookup(payload: assistant_contacts.Lookup, _: None = Depends(req
 @app.get('/api/assistant/bot-users')
 def nodera_bot_users(_: None = Depends(require_token)) -> dict:
     return {'items': assistant_contacts.list_recent(sys.modules[__name__])}
+
+
+# The authenticated panel is the installation owner. These routes are never
+# registered as AI tools or granted by Telegram administrator permissions.
+@app.get('/api/assistant/campaigns')
+def campaign_list(_: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.overview(sys.modules[__name__])
+
+
+@app.post('/api/assistant/campaigns')
+def campaign_save(payload: assistant_campaigns.Draft, _: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.save(sys.modules[__name__], payload)
+
+
+@app.get('/api/assistant/campaigns/{identity}')
+def campaign_detail(identity: str, offset: int = Query(default=0, ge=0, le=100000), _: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.detail(sys.modules[__name__], identity, offset)
+
+
+@app.post('/api/assistant/campaigns/{identity}/preview')
+def campaign_preview(identity: str, payload: assistant_campaigns.Revision, _: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.preview(sys.modules[__name__], identity, payload)
+
+
+@app.post('/api/assistant/campaigns/{identity}/send')
+def campaign_send(identity: str, payload: assistant_campaigns.Launch, _: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.launch(sys.modules[__name__], identity, payload)
+
+
+@app.post('/api/assistant/campaigns/{identity}/close')
+def campaign_close(identity: str, _: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.close(sys.modules[__name__], identity)
+
+
+@app.delete('/api/assistant/campaigns/{identity}')
+def campaign_delete(identity: str, _: None = Depends(require_token)) -> dict:
+    return assistant_campaigns.remove(sys.modules[__name__], identity)
+
+
+@app.post('/api/assistant/bot-campaigns')
+def campaign_event(payload: assistant_campaigns.Event, settings: dict = Depends(require_nodera_bot_transport),
+                   actor: str = Header(default='', alias='X-MCP-Actor')) -> dict:
+    return assistant_campaigns.receive(sys.modules[__name__], settings, actor, payload)
 
 
 @app.get('/api/assistant/usage')
