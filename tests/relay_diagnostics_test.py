@@ -218,7 +218,7 @@ class ReportingTests(unittest.IsolatedAsyncioTestCase):
             sample=lambda children:{'rss_bytes':rss[0],'rss_peak_bytes':rss[0]}
             log=relay.DiagnosticLog(folder,clock=lambda:1764000000+now[0])
             reporter=relay.RelayDiagnostics(folder,clock=lambda:now[0],sample=sample,log=log)
-            def rows():return [json.loads(line) for p in log.folder.iterdir() for line in p.read_text().splitlines()]
+            def rows():return [json.loads(line) for p in log.folder.glob('relay-*.jsonl*') for line in p.read_text().splitlines()]
             reporter.tick(agent);self.assertEqual([r['event'] for r in rows()],['snapshot'])
             for _ in range(1000):budget.reject('live_memory')
             now[0]=5;rss[0]+=70*1048576;reporter.tick(agent)
@@ -235,6 +235,114 @@ class ReportingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(next(r['reclaim_before_bytes'] for r in rows() if r['event']=='memory_reclaimed'),0)
             now[0]=60;reporter.tick(agent)
             self.assertEqual(sum(r['event']=='snapshot' for r in rows()),2)
+
+
+class ForensicTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_retained_allocation_is_attributed_to_code_without_contents(self):
+        profiler=relay.MemoryForensics()
+        profiler.start()
+        namespace={}
+        # A real allocation attributed to a runtime code location, with no local dump.
+        exec(compile('def allocate():\n return bytearray(b"sensitive-payload" * 100000)\n',str(ROOT/'protocol-images/relay-agent/agent.py'),'exec'),namespace)
+        retained=namespace['allocate']()
+        try:
+            metrics={'rss_bytes':40*1048576,'host_available_bytes':512*1048576}
+            detail=profiler.collect(metrics,[])
+            sites=detail['heap_sites']
+            self.assertTrue(any(site['size_bytes']>=len(retained) and {'file':'agent.py','line':2} in site['frames'] for site in sites))
+            self.assertGreater(metrics['python_traced_bytes'],len(retained))
+            self.assertNotIn('sensitive-payload',json.dumps(detail))
+            self.assertEqual(detail['heap_skip_reason'],0)
+        finally: relay.tracemalloc.stop()
+
+    async def test_low_headroom_and_trace_cap_skip_allocating_snapshots_and_restart_later(self):
+        now=[0.0];profiler=relay.MemoryForensics(clock=lambda:now[0])
+        profiler.start()
+        try:
+            with patch.object(relay.tracemalloc,'take_snapshot',side_effect=AssertionError('unsafe snapshot')):
+                detail=profiler.collect({'rss_bytes':100,'host_available_bytes':1024},[])
+            self.assertEqual(detail['heap_skip_reason'],1)
+            now[0]=5
+            with patch.object(relay.tracemalloc,'get_tracemalloc_memory',return_value=profiler.TRACE_LIMIT+1):
+                detail=profiler.collect({'rss_bytes':100,'host_available_bytes':512*1048576},[])
+            self.assertEqual(detail['trace_state'],2)
+            self.assertFalse(relay.tracemalloc.is_tracing())
+            now[0]=306
+            detail=profiler.collect({'rss_bytes':100,'host_available_bytes':512*1048576},[])
+            self.assertTrue(relay.tracemalloc.is_tracing())
+            self.assertEqual(detail['trace_state'],1)
+        finally: relay.tracemalloc.stop()
+
+    async def test_stuck_task_and_scheduled_callbacks_are_bounded_and_correlated(self):
+        event=asyncio.Event()
+        namespace={'event':event}
+        exec(compile('async def stuck():\n await event.wait()\ndef callback():\n pass\n',str(ROOT/'protocol-images/relay-agent/agent.py'),'exec'),namespace)
+        task=asyncio.create_task(namespace['stuck'](),name='secret-task-name')
+        handles=[asyncio.get_running_loop().call_later(300,namespace['callback']) for _ in range(500)]
+        route=relay.RelayRoute({'transport':'tcp'});route.diagnostic_ref='a'*32
+        slot=route.admit();slot.tasks=(task,)
+        try:
+            await asyncio.sleep(0)
+            metrics={'rss_bytes':40*1048576}
+            detail=relay.MemoryForensics().collect(metrics,[route])
+            self.assertGreaterEqual(metrics['loop_scheduled_handles'],500)
+            self.assertTrue(any(row['count']>=500 for row in detail['scheduled_callbacks']))
+            self.assertTrue(any({'file':'agent.py','line':2} in row['frames'] and
+                                {'route_ref':'a'*32,'session_ref':slot.reference} in row['sessions'] for row in detail['tasks']))
+            self.assertLessEqual(len(detail['tasks']),16)
+            self.assertNotIn('secret-task-name',json.dumps(detail))
+        finally:
+            for handle in handles:handle.cancel()
+            task.cancel();await asyncio.gather(task,return_exceptions=True)
+            slot.release();self.assertIsNone(slot.tasks)
+
+    async def test_tls_bio_and_backlog_are_observed_without_copying_payload(self):
+        route=relay.RelayRoute({'transport':'tcp'});slot=route.admit()
+        protocol=SimpleNamespace(_incoming=SimpleNamespace(pending=123),_outgoing=SimpleNamespace(pending=456),
+                                 _write_buffer_size=789,_write_backlog=[b'secret']*4)
+        transport=SimpleNamespace(_ssl_protocol=protocol,_paused=True,is_closing=lambda:False,get_write_buffer_size=lambda:0)
+        slot.streams=(None,SimpleNamespace(transport=transport),None,None)
+        try:
+            sample=slot.diagnostic()
+            self.assertEqual(sample['client_tls_incoming_bytes'],123)
+            self.assertEqual(sample['client_tls_outgoing_bytes'],456)
+            self.assertEqual(sample['client_tls_backlog_bytes'],789)
+            self.assertEqual(sample['client_tls_backlog_items'],4)
+            self.assertEqual(sample['client_transport_read_paused'],1)
+            self.assertNotIn('secret',json.dumps(sample))
+        finally:slot.release()
+
+    async def test_nested_allowlist_and_separate_rotation_preserve_resource_logs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            normal=relay.DiagnosticLog(folder,max_bytes=2048)
+            detail_log=relay.ForensicLog(folder,max_bytes=2048)
+            normal.write('snapshot',{'rss_bytes':123})
+            original=next(normal.folder.glob('relay-*')).read_bytes()
+            detail={'password':'secret','heap_sites':[{'frames':[{'file':'/private/secret.py','line':1,'locals':'secret'},
+                    {'file':'agent.py','line':222}], 'size_bytes':999,'payload':'secret'}]*100,
+                    'tasks':[{'frames':[],'count':1,'sessions':[{'route_ref':'secret','session_ref':'secret'}]}]}
+            for _ in range(20):self.assertTrue(detail_log.write('memory_detail',{},detail=detail))
+            self.assertEqual(next(normal.folder.glob('relay-*')).read_bytes(),original)
+            files=list(normal.folder.glob('memory-*'))
+            self.assertLessEqual(len(files),2)
+            for file in files:
+                self.assertLessEqual(file.stat().st_size,2048)
+                raw=file.read_text();self.assertNotIn('secret',raw);self.assertNotIn('/private/',raw)
+            detail_log.clock=lambda:datetime(2099,1,1,tzinfo=timezone.utc).timestamp()
+            detail_log.prune()
+            self.assertFalse(list(normal.folder.glob('memory-*')))
+            self.assertEqual(next(normal.folder.glob('relay-*')).read_bytes(),original)
+
+    async def test_heap_detail_failure_still_records_resource_snapshot(self):
+        with tempfile.TemporaryDirectory() as folder:
+            budget=relay.SessionBudget(10,pressure=relay.MemoryPressure(lambda:None))
+            agent=SimpleNamespace(session_budget=budget,buffer_budget=relay.UDPReceiveBudget(1048576),routes={},
+                                  http_connections=0,private_transport=SimpleNamespace(processes={}))
+            reporter=relay.RelayDiagnostics(folder,sample=lambda _: {'rss_bytes':123})
+            with patch.object(reporter.forensics,'collect',side_effect=MemoryError):reporter.tick(agent)
+            rows=[json.loads(line) for p in reporter.log.folder.glob('relay-*') for line in p.read_text().splitlines()]
+            self.assertEqual(rows[0]['event'],'snapshot')
+            self.assertEqual(reporter.log.failures,1)
 
 
 if __name__=='__main__':unittest.main()

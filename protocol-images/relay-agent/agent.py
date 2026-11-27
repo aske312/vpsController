@@ -16,6 +16,11 @@ import ssl
 import tempfile
 import time
 import stat
+import sys
+import gc
+import heapq
+import itertools
+import tracemalloc
 from datetime import datetime, timedelta, timezone
 from addresses import read_inventory, dual_stack_available, fresh_checks, read_json
 import struct
@@ -159,7 +164,7 @@ async def connect_request(reader, writer, config):
         raise SecurityError('TCP ingress authentication or destination rejected') from None
 
 
-VERSION = '1.6.5'
+VERSION = '1.6.6'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -184,7 +189,148 @@ def route_reference(key, config):
 SESSION_NUMBERS = {'age_seconds', 'sent_bytes', 'received_bytes', 'reserved_bytes',
                    'client_read_buffer_bytes', 'upstream_read_buffer_bytes',
                    'client_write_buffer_bytes', 'upstream_write_buffer_bytes'}
+for _side in ('client', 'upstream'):
+    SESSION_NUMBERS.update(_side+'_'+name for name in ('tls_incoming_bytes', 'tls_outgoing_bytes',
+        'tls_backlog_bytes', 'tls_backlog_items', 'tls_read_buffer_bytes', 'tls_state', 'tls_app_state',
+        'tls_reading_paused', 'tls_writing_paused', 'transport_read_paused', 'transport_closing'))
 SESSION_PHASES = {'admitted', 'authenticating', 'connecting', 'transferring', 'closed'}
+
+
+def code_location(filename, line):
+    """Code metadata only. Never serialize source text, locals, task names or repr."""
+    filename = str(filename).replace('\\', '/')
+    own = str(Path(__file__)).replace('\\', '/')
+    stdlib = str(Path(os.__file__).parent).replace('\\', '/')+'/'
+    if filename.rsplit('/',1)[0] == own.rsplit('/',1)[0] and filename.rsplit('/',1)[-1] in ('agent.py','addresses.py'):
+        name = filename.rsplit('/',1)[-1]
+    elif filename.startswith(stdlib):
+        name = 'python/'+filename[len(stdlib):]
+        if not re.fullmatch(r'python/[A-Za-z0-9_./-]{1,100}\.py', name) or '..' in name: return None
+    else: return None
+    return {'file': name, 'line': line} if type(line) is int and line > 0 else None
+
+
+def await_locations(coroutine):
+    frames = []
+    for _ in range(8):
+        frame = getattr(coroutine, 'cr_frame', None) or getattr(coroutine, 'gi_frame', None)
+        if frame is not None:
+            location = code_location(frame.f_code.co_filename, frame.f_lineno)
+            if location: frames.append(location)
+        coroutine = getattr(coroutine, 'cr_await', None) or getattr(coroutine, 'gi_yieldfrom', None)
+        if coroutine is None: break
+    return frames
+
+
+class MemoryForensics:
+    """Bounded summaries; tracing is started only by the serving process."""
+    TRACE_LIMIT = 16*1048576
+    MIN_AVAILABLE = 96*1048576
+
+    def __init__(self, *, clock=time.monotonic):
+        self.clock = clock
+        self.last_detail = self.last_heap = None
+        self.previous_rss = None
+        self.previous_sites = {}
+        self.previous_overhead = 0
+        self.restart_at = 0
+        self.trace_state = 0  # 0 unavailable, 1 tracing, 2 overhead cap, 3 low headroom
+
+    def start(self):
+        try:
+            if not tracemalloc.is_tracing(): tracemalloc.start(4)
+            self.trace_state = 1
+        except (RuntimeError, MemoryError): self.trace_state = 0
+
+    def collect(self, metrics, routes):
+        now = self.clock()
+        available = metrics.get('host_available_bytes')
+        low = type(available) is int and available < self.MIN_AVAILABLE
+        overhead = tracemalloc.get_tracemalloc_memory() if tracemalloc.is_tracing() else 0
+        if tracemalloc.is_tracing() and overhead > self.TRACE_LIMIT:
+            tracemalloc.stop()
+            self.previous_sites.clear()
+            self.trace_state = 2
+            self.restart_at = now+300
+        elif not tracemalloc.is_tracing() and self.trace_state == 2 and now >= self.restart_at and not low:
+            self.start()
+        traced, peak = tracemalloc.get_traced_memory() if tracemalloc.is_tracing() else (0, 0)
+        metrics.update(python_traced_bytes=traced, python_traced_peak_bytes=peak,
+                       python_trace_overhead_bytes=overhead, python_trace_state=self.trace_state,
+                       python_allocated_blocks=sys.getallocatedblocks(),
+                       loop_ready_handles=len(getattr(asyncio.get_running_loop(), '_ready', ())),
+                       loop_scheduled_handles=len(getattr(asyncio.get_running_loop(), '_scheduled', ())))
+        rss = metrics.get('rss_bytes')
+        growth = (type(rss) is int and self.previous_rss is not None and rss-self.previous_rss >= 16*1048576
+                  or overhead-self.previous_overhead >= 1048576)
+        if self.last_detail is not None and now-self.last_detail < (5 if growth or low else 300): return None
+        self.last_detail = now
+        self.previous_rss = rss
+        self.previous_overhead = overhead
+        detail = {'trace_state': self.trace_state, 'heap_skip_reason': 0, 'heap_sites': [],
+                  'tasks': [], 'ready_callbacks': [], 'scheduled_callbacks': [],
+                  'gc_counts': list(gc.get_count()), 'gc_collections': [s['collections'] for s in gc.get_stats()]}
+        # Never take an allocating snapshot once the host is close to OOM.
+        if low: detail['heap_skip_reason'] = 1
+        elif not tracemalloc.is_tracing(): detail['heap_skip_reason'] = 2
+        elif self.last_heap is None or now-self.last_heap >= (15 if growth else 60):
+            started = self.clock()
+            snapshot = tracemalloc.take_snapshot()
+            stats = snapshot.statistics('traceback')
+            top = heapq.nlargest(16, stats, key=lambda s:s.size)
+            sites = {}
+            for item in top:
+                frames = [loc for frame in item.traceback if (loc := code_location(frame.filename, frame.lineno))]
+                if not frames: continue
+                key = tuple((f['file'], f['line']) for f in frames)
+                previous = self.previous_sites.get(key)
+                detail['heap_sites'].append({'frames': frames[-4:], 'size_bytes': item.size, 'blocks': item.count,
+                    'previous_size_bytes': previous, 'size_delta_bytes': item.size-previous if previous is not None else None})
+                sites[key] = item.size
+            self.previous_sites = sites
+            self.last_heap = now
+            detail['heap_duration_ms'] = max(0, int((self.clock()-started)*1000))
+            del top, stats, snapshot
+        else: detail['heap_skip_reason'] = 3
+        associations = {}
+        for route in routes:
+            for slot in route.slots:
+                for task in slot.tasks or ():
+                    associations[task] = (route.diagnostic_ref, slot.reference)
+                    if len(associations) >= 4096: break
+                if len(associations) >= 4096: break
+            if len(associations) >= 4096: break
+        groups = {}
+        tasks = asyncio.all_tasks()
+        for task in itertools.islice(iter(tasks), 4096):
+            frames = await_locations(task.get_coro())
+            key = tuple((f['file'], f['line']) for f in frames)
+            # Group uncorrelated tasks; preserve a bounded sample of opaque bindings.
+            if key not in groups and len(groups) >= 64: continue
+            row = groups.setdefault(key, {'frames':frames, 'count':0, 'sessions':[]})
+            row['count'] += 1
+            if task in associations and len(row['sessions']) < 16:
+                route_ref, session_ref = associations[task]
+                ref = {'route_ref':route_ref, 'session_ref':session_ref}
+                if ref not in row['sessions']: row['sessions'].append(ref)
+        detail['tasks'] = heapq.nlargest(16, groups.values(), key=lambda row:row['count'])
+        detail['tasks_scanned'] = min(len(tasks), 4096)
+        detail['tasks_total'] = len(tasks)
+        loop = asyncio.get_running_loop()
+        for attribute, field in (('_ready', 'ready_callbacks'), ('_scheduled', 'scheduled_callbacks')):
+            counts = {}
+            handles = getattr(loop, attribute, ())
+            for handle in itertools.islice(iter(handles), 4096):
+                callback = getattr(handle, '_callback', None)
+                code = getattr(callback, '__code__', None)
+                loc = code_location(code.co_filename, code.co_firstlineno) if code is not None else None
+                key = (loc['file'], loc['line']) if loc else ('unknown', 0)
+                if key not in counts and len(counts) >= 64: continue
+                counts[key] = counts.get(key, 0)+1
+            detail[field] = [{'frames':[{'file':file, 'line':line}] if file!='unknown' else [], 'count':count}
+                             for (file,line),count in heapq.nlargest(16, counts.items(), key=lambda row:row[1])]
+            detail[field+'_scanned'] = min(len(handles),4096)
+        return detail
 
 
 def private_sessions(rows):
@@ -200,10 +346,38 @@ def private_sessions(rows):
     return result
 
 
+def private_memory_detail(value):
+    """Second allowlist at the disk boundary, including all nested structures."""
+    def numbers(row, keys):
+        return {k:v for k,v in row.items() if k in keys and (v is None or type(v) is int and abs(v) <= 2**53-1)}
+    def frames(rows):
+        result = []
+        for row in rows[:8]:
+            name, line = row.get('file'), row.get('line')
+            if (isinstance(name,str) and (name in ('agent.py','addresses.py') or re.fullmatch(r'python/[A-Za-z0-9_./-]{1,100}\.py',name))
+                    and '..' not in name and type(line) is int and 0 < line < 1000000):
+                result.append({'file':name,'line':line})
+        return result
+    result = numbers(value, {'trace_state','heap_skip_reason','heap_duration_ms','tasks_scanned','tasks_total',
+                             'ready_callbacks_scanned','scheduled_callbacks_scanned'})
+    for key in ('gc_counts','gc_collections'):
+        result[key] = [v for v in value.get(key,[])[:3] if type(v) is int and 0 <= v <= 2**53-1]
+    for key in ('heap_sites','tasks','ready_callbacks','scheduled_callbacks'):
+        result[key] = []
+        for row in value.get(key,[])[:16]:
+            entry = {'frames':frames(row.get('frames',[])), **numbers(row, {'size_bytes','blocks','previous_size_bytes','size_delta_bytes','count'})}
+            if key=='tasks':
+                entry['sessions'] = [{k:ref[k] for k in ('route_ref','session_ref')}
+                    for ref in row.get('sessions',[])[:16] if all(isinstance(ref.get(k),str) and re.fullmatch(r'[0-9a-f]{32}',ref[k]) for k in ('route_ref','session_ref'))]
+            result[key].append(entry)
+    return result
+
+
 class DiagnosticLog:
     """Private daily JSONL: two 4 MiB segments/day, at most seven UTC dates."""
     MAX_BYTES = 4 * 1024 * 1024
-    EVENTS = {'snapshot', 'memory_growth', 'memory_recovery', 'memory_pressure', 'memory_reclaimed', 'admission_rejected'}
+    PREFIX = 'relay-'
+    EVENTS = {'snapshot', 'memory_growth', 'memory_recovery', 'memory_pressure', 'memory_reclaimed', 'admission_rejected', 'memory_detail'}
     REASONS = {'route_sessions', 'shared_sessions', 'live_memory', 'memory_budget', 'udp_memory_budget', 'udp_live_memory'}
     METRICS = {'pid', 'rss_bytes', 'rss_peak_bytes', 'threads', 'fd_count', 'child_count', 'child_rss_bytes',
                'child_rss_peak_bytes', 'host_total_bytes', 'host_available_bytes', 'cgroup_current_bytes',
@@ -212,7 +386,11 @@ class DiagnosticLog:
                'session_memory_bytes', 'udp_buffer_bytes', 'udp_buffer_limit_bytes', 'headroom_bytes',
                'reclaims', 'reclaim_before_bytes', 'reclaim_after_bytes', 'reclaim_rss_before_bytes',
                'reclaim_rss_after_bytes', 'host_udp_receive_errors', 'host_udp_send_errors',
-               'host_udp_in_errors', 'log_write_failures'}
+               'host_udp_in_errors', 'log_write_failures', 'python_traced_bytes', 'python_traced_peak_bytes',
+               'python_trace_overhead_bytes', 'python_trace_state', 'python_allocated_blocks',
+               'loop_ready_handles', 'loop_scheduled_handles', 'rss_anon_bytes', 'rss_file_bytes',
+               'private_dirty_bytes', 'anonymous_bytes', 'swap_bytes', 'event_loop_lag_ms',
+               'python_version_hex', 'openssl_version_number'}
 
     def __init__(self, state_dir, *, clock=time.time, max_bytes=None):
         self.folder = Path(state_dir) / 'diagnostics'
@@ -227,7 +405,7 @@ class DiagnosticLog:
         today = datetime.fromtimestamp(self.clock(), timezone.utc).date()
         cutoff = today - timedelta(days=6)
         for path in self.folder.iterdir():
-            match = re.fullmatch(r'relay-(\d{4}-\d\d-\d\d)\.jsonl(?:\.1)?', path.name)
+            match = re.fullmatch(re.escape(self.PREFIX)+r'(\d{4}-\d\d-\d\d)\.jsonl(?:\.1)?', path.name)
             if not match: continue
             try: day = datetime.strptime(match[1], '%Y-%m-%d').date()
             except ValueError: continue
@@ -238,7 +416,7 @@ class DiagnosticLog:
             except FileNotFoundError: pass
         self.last_cleanup = self.clock()
 
-    def write(self, event, metrics, rejections=None, sessions=None):
+    def write(self, event, metrics, rejections=None, sessions=None, detail=None):
         if event not in self.EVENTS: return False
         now = self.clock()
         day = datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d')
@@ -248,6 +426,8 @@ class DiagnosticLog:
                   **values, **({'rejections': counts} if counts else {})}
         if sessions is not None:
             record.update(sessions=private_sessions(sessions), session_sample_limit=16)
+        if detail is not None:
+            record['detail'] = private_memory_detail(detail)
         data = (json.dumps(record, separators=(',', ':'), allow_nan=False) + '\n').encode()
         if len(data) > self.max_bytes: return False
         try:
@@ -255,7 +435,7 @@ class DiagnosticLog:
             self.folder.mkdir(parents=True, mode=0o700, exist_ok=True)
             if self.last_cleanup is None or now-self.last_cleanup >= 60 or datetime.fromtimestamp(self.last_cleanup, timezone.utc).strftime('%Y-%m-%d') != day:
                 self.prune()
-            path = self.folder / ('relay-' + day + '.jsonl')
+            path = self.folder / (self.PREFIX + day + '.jsonl')
             if path.is_symlink(): raise OSError('Unsafe diagnostics file')
             if path.exists() and path.stat().st_size + len(data) > self.max_bytes:
                 path.replace(path.with_name(path.name + '.1'))
@@ -274,6 +454,11 @@ class DiagnosticLog:
             return False
 
 
+class ForensicLog(DiagnosticLog):
+    """Independent rotation prevents detailed records from evicting resource history."""
+    PREFIX = 'memory-'
+
+
 def diagnostic_memory(child_pids=(), proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
     """Numeric process/cgroup metrics only; no argv, environment or traffic."""
     def status(path):
@@ -281,12 +466,20 @@ def diagnostic_memory(child_pids=(), proc=Path('/proc'), cgroups=Path('/sys/fs/c
         try:
             for line in path.read_text().splitlines():
                 key, _, value = line.partition(':')
-                if key in ('VmRSS', 'VmHWM', 'Threads'):
+                if key in ('VmRSS', 'VmHWM', 'Threads', 'RssAnon', 'RssFile'):
                     result[key] = int(value.split()[0]) * (1 if key == 'Threads' else 1024)
         except (OSError, ValueError): pass
         return result
     own = status(proc/'self/status')
-    result = {'pid': os.getpid(), 'rss_bytes': own.get('VmRSS'), 'rss_peak_bytes': own.get('VmHWM'), 'threads': own.get('Threads')}
+    result = {'pid': os.getpid(), 'rss_bytes': own.get('VmRSS'), 'rss_peak_bytes': own.get('VmHWM'), 'threads': own.get('Threads'),
+              'python_version_hex': sys.hexversion, 'openssl_version_number':ssl.OPENSSL_VERSION_NUMBER}
+    result.update(rss_anon_bytes=own.get('RssAnon'), rss_file_bytes=own.get('RssFile'))
+    try:
+        for line in (proc/'self/smaps_rollup').read_text().splitlines():
+            key, _, value = line.partition(':')
+            target = {'Private_Dirty':'private_dirty_bytes','Anonymous':'anonymous_bytes','Swap':'swap_bytes'}.get(key)
+            if target: result[target] = int(value.split()[0])*1024
+    except (OSError, ValueError): pass
     try: result['fd_count'] = sum(1 for _ in (proc/'self/fd').iterdir())
     except OSError: pass
     children = [status(proc/str(pid)/'status') for pid in child_pids if type(pid) is int and pid > 0]
@@ -326,6 +519,7 @@ class RelayDiagnostics:
     def __init__(self, state_dir, *, clock=time.monotonic, sample=diagnostic_memory, log=None):
         self.clock, self.sample = clock, sample
         self.log = log if log is not None else DiagnosticLog(state_dir)
+        self.forensic_log = ForensicLog(state_dir)
         self.sampled_at = self.snapshot_at = None
         self.last_events, self.rejections = {}, {}
         self.previous_memory = {}
@@ -333,12 +527,16 @@ class RelayDiagnostics:
         self.metrics = {}
         self.pressured = False
         self.closed_sessions = deque(maxlen=16)
+        self.forensics = MemoryForensics(clock=clock)
+        self.expected_tick = None
 
     def closed(self, row):
         self.closed_sessions.append(row)
 
     def tick(self, agent):
         now = self.clock()
+        lag = max(0, int((now-self.expected_tick)*1000)) if self.expected_tick is not None else 0
+        self.expected_tick = now+1
         if self.sampled_at is not None and now-self.sampled_at < 5: return
         self.sampled_at = now
         budget = agent.session_budget
@@ -359,7 +557,12 @@ class RelayDiagnostics:
                             reclaims=budget.pressure.reclaims, reclaim_before_bytes=budget.pressure.reclaim_before,
                             reclaim_after_bytes=budget.pressure.reclaim_after,
                             reclaim_rss_before_bytes=budget.pressure.reclaim_rss_before,
-                            reclaim_rss_after_bytes=budget.pressure.reclaim_rss_after, log_write_failures=self.log.failures)
+                            reclaim_rss_after_bytes=budget.pressure.reclaim_rss_after, log_write_failures=self.log.failures+self.forensic_log.failures,
+                            event_loop_lag_ms=lag)
+        # Keep the existing resource log alive even if heap inspection fails.
+        detail = None
+        try: detail = self.forensics.collect(self.metrics, routes)
+        except Exception: self.log.failures += 1
         events = []
         if self.snapshot_at is None or now-self.snapshot_at >= 60:
             events.append('snapshot'); self.snapshot_at = now
@@ -375,7 +578,7 @@ class RelayDiagnostics:
         if budget.pressure.reclaims != self.previous_reclaims:
             events.append('memory_reclaimed'); self.previous_reclaims = budget.pressure.reclaims
         if self.rejections: events.append('admission_rejected')
-        if not events: return
+        if not events and detail is None: return
         # Keep the largest observed buffers, bounded independently of connection count.
         import heapq
         active = heapq.nlargest(16, (slot.diagnostic() for route in routes for slot in route.slots),
@@ -383,6 +586,9 @@ class RelayDiagnostics:
         closed = list(self.closed_sessions)
         sampled = (active + closed)[:16] if len(active) < 16 else active
         wrote = False
+        if detail is not None:
+            self.forensic_log.write('memory_detail', self.metrics, sessions=sampled, detail=detail)
+            self.metrics['log_write_failures'] = self.log.failures+self.forensic_log.failures
         for event in events:
             if now-self.last_events.get(event, -float('inf')) < (60 if event=='memory_reclaimed' else 15): continue
             if self.log.write(event, self.metrics, self.rejections if event=='admission_rejected' else None, sessions=sampled):
@@ -613,6 +819,7 @@ class SessionSlot:
         self.phase = 'admitted'
         self.sent = self.received = 0
         self.streams = None
+        self.tasks = None
         # Kernel UDP receives are accounted separately, by their actual size.
         # TCP must leave room for both directions' readers, pumps and writers.
         self.cost = route.session_cost()
@@ -637,6 +844,22 @@ class SessionSlot:
                     if transport is not None:
                         try: result[name+'_write_buffer_bytes'] = max(0, transport.get_write_buffer_size())
                         except (AttributeError, OSError, RuntimeError): pass
+                        result[name+'_transport_closing'] = int(transport.is_closing()) if hasattr(transport,'is_closing') else 0
+                        result[name+'_transport_read_paused'] = int(getattr(transport,'_paused',False))
+                        protocol = getattr(transport, '_ssl_protocol', None)
+                        if protocol is not None:
+                            for field in ('incoming','outgoing'):
+                                bio = getattr(protocol,'_'+field,None)
+                                if bio is not None: result[name+'_tls_'+field+'_bytes'] = bio.pending
+                            result[name+'_tls_backlog_bytes'] = max(0,getattr(protocol,'_write_buffer_size',0))
+                            result[name+'_tls_backlog_items'] = len(getattr(protocol,'_write_backlog',()))
+                            result[name+'_tls_read_buffer_bytes'] = len(getattr(protocol,'_ssl_buffer',b''))
+                            for source, field in (('_state','tls_state'),('_app_state','tls_app_state')):
+                                value = getattr(getattr(protocol,source,None),'value',None)
+                                if type(value) is int: result[name+'_'+field] = max(0,value)
+                            for source, field in (('_ssl_reading_paused','tls_reading_paused'),('_ssl_writing_paused','tls_writing_paused')):
+                                value = getattr(protocol,source,None)
+                                if type(value) is bool: result[name+'_'+field] = int(value)
         return result
 
     def release(self):
@@ -646,6 +869,7 @@ class SessionSlot:
                 try: self.route.diagnostic_closed(self.diagnostic())
                 except Exception: pass  # Telemetry cannot interfere with releasing a slot.
             self.streams = None
+            self.tasks = None
             self.route.slots.remove(self)
             self.route.session_budget.used -= 1
             self.route.session_budget.memory_used -= self.cost
@@ -1018,6 +1242,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                         self.tcp_waiting.pop(task, None)
 
             pumps = [asyncio.create_task(pump(reader, upstream, 'sent')), asyncio.create_task(pump(incoming, writer, 'received'))]
+            slot.tasks = (task, *pumps)
             # Preserve half-close: a client can finish its request before the response.
             await asyncio.gather(*pumps)
         except IdleClose:
@@ -1802,6 +2027,7 @@ class Agent:
             await asyncio.sleep(1)
 
     async def serve(self):
+        self.diagnostics.forensics.start()
         await self.restore()
         await self.private_transport.restore()
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -1837,5 +2063,7 @@ class Agent:
 if __name__ == '__main__':
     import sys
     if '--version' in sys.argv: print(VERSION)
-    elif '--prune-diagnostics' in sys.argv: DiagnosticLog(STATE_DIR).prune()
+    elif '--prune-diagnostics' in sys.argv:
+        DiagnosticLog(STATE_DIR).prune()
+        ForensicLog(STATE_DIR).prune()
     else: asyncio.run(Agent().serve())
